@@ -96,13 +96,13 @@ public:
                   [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2040,0x20d4,a,data,n,output);},
                   [this](unsigned i,void* data,uint32_t n,bool output){return dsp_fifo(ApuDspKind::Gp,i,data,n,output);},
                   [this](const std::string& why){device_fault(why);},
-                  [this]{return gp_program_write();},
-                  [this]{return gp_mix_publication();}),
+                  [this]{return gp_program_write(true);},
+                  [this]{return gp_mix_publication(false,true);}),
           ep_dma_([this](uint32_t a){return ep_word(a);},
                   [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2048,0x20dc,a,data,n,output);},
                   [this](unsigned i,void* data,uint32_t n,bool output){return dsp_fifo(ApuDspKind::Ep,i,data,n,output);},
                   [this](const std::string& why){device_fault(why);},
-                  [this]{return ep_program_write();},{},ApuDspKind::Ep) {}
+                  [this]{return ep_program_write(true);},{},ApuDspKind::Ep) {}
     McpxApu(const McpxApu&)=delete;
     McpxApu& operator=(const McpxApu&)=delete;
 
@@ -211,13 +211,26 @@ public:
         return !faulted_ && ep_dma_.write(address,value);
     }
     uint64_t ep_dma_nodes()const{return ep_dma_.nodes();}
+    bool dsp_dma_pending(ApuDspKind kind)const{return kind==ApuDspKind::Gp?gp_dma_.work_pending():ep_dma_.work_pending();}
+    bool dsp_work_active()const{return gp_dma_working_ || ep_dma_working_;}
+    bool service_dsp_dma(ApuDspKind kind,uint32_t quanta=1) {
+        if(faulted_)return false;
+        if(dsp_work_active()){device_fault("reentrant DSP DMA device work");return false;}
+        bool& working=kind==ApuDspKind::Gp?gp_dma_working_:ep_dma_working_;
+        working=true;
+        const bool done=kind==ApuDspKind::Gp?gp_dma_.service(quanta):ep_dma_.service(quanta);
+        working=false;return done && !faulted_;
+    }
     uint64_t ep_program_revision()const{return ep_program_revision_;}
     bool bind_ep_program_owner(void* owner,ApuDspDma::ProgramWrite guard) {
         if(!owner || !guard || ep_program_owner_)return false;
         ep_program_owner_=owner;ep_program_guard_=std::move(guard);return true;
     }
     void unbind_ep_program_owner(void* owner) {
-        if(ep_program_owner_==owner){ep_program_owner_=nullptr;ep_program_guard_={};}
+        if(ep_program_owner_==owner){
+            if(ep_dma_.work_pending() && !faulted_)device_fault("EP CPU owner removed with pending DMA");
+            ep_program_owner_=nullptr;ep_program_guard_={};
+        }
     }
     bool gp_read(uint32_t address,uint32_t& value) {
         if(faulted_ || !gp_dma_.read(address,value))return false;
@@ -244,7 +257,10 @@ public:
         gp_program_owner_=owner;gp_program_guard_=std::move(guard);return true;
     }
     void unbind_gp_program_owner(void* owner) {
-        if(gp_program_owner_==owner){gp_program_owner_=nullptr;gp_program_guard_={};}
+        if(gp_program_owner_==owner){
+            if(gp_dma_.work_pending() && !faulted_)device_fault("GP CPU owner removed with pending DMA");
+            gp_program_owner_=nullptr;gp_program_guard_={};
+        }
     }
     // Frame flags are vendor polled events, distinct from core IPR/vector state.
     // A successful real VP transaction owns MIX until that CPU actually yields.
@@ -469,15 +485,20 @@ private:
         return false;
     }
     ApuSsl ssl_;
-    bool gp_program_write() {
+    bool gp_program_write(bool dma=false) {
+        if(faulted_)return false;
+        if(dsp_work_active() && !dma){device_fault("GP executable host publication during DMA work");return false;}
         if(gp_program_guard_ && !gp_program_guard_())return false;
         ++gp_program_revision_;return true;
     }
-    bool ep_program_write() {
+    bool ep_program_write(bool dma=false) {
+        if(faulted_)return false;
+        if(dsp_work_active() && !dma){device_fault("EP executable host publication during DMA work");return false;}
         if(ep_program_guard_ && !ep_program_guard_())return false;
         ++ep_program_revision_;return true;
     }
-    bool gp_mix_publication(bool voice_processor=false) {
+    bool gp_mix_publication(bool voice_processor=false,bool dma=false) {
+        if(dsp_work_active() && !dma){device_fault("GP MIX publication overlaps DMA device work");return false;}
         if(!gp_mix_lease_ && (!gp_mix_admitting_ || (voice_processor && !processing_quantum_)))return true;
         device_fault("GP MIX publication overlaps an outstanding frame");return false;
     }
@@ -509,7 +530,7 @@ private:
             if(entry>reg32(maximum) || descriptor>UINT32_MAX-3 ||
                !read_u32(static_cast<uint32_t>(descriptor),page) || (page&4095))return false;
             const uint32_t n=bytes<(4096-offset)?bytes:4096-offset;
-            if(output?!write_mem(page+offset,next,n):!read_mem(page+offset,next,n))return false;
+            if((output?!write_mem(page+offset,next,n):!read_mem(page+offset,next,n)) || faulted_)return false;
             next+=n;linear+=n;bytes-=n;
         }
         return true;
@@ -907,6 +928,7 @@ private:
     void* ep_program_owner_=nullptr;
     ApuDspDma::ProgramWrite ep_program_guard_;
     ApuDspDma ep_dma_;
+    bool gp_dma_working_=false,ep_dma_working_=false;
     int sub_logged_ = 0;
 };
 

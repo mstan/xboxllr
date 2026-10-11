@@ -63,12 +63,30 @@ struct Floor {
     static void fault(void*,const char* message,uint32_t address) {
         std::fprintf(stderr,"%s: %06x\n",message,address);std::exit(2);
     }
+    void run(uint32_t cycles) {
+        // This bounded graph fixture owns explicit device work just like the
+        // maintained processor. Passive peripheral reads cannot finish DMA.
+        CHECK(xlle_dsp_core_add_budget(core,cycles));
+        for(;;) {
+            uint32_t pc,power,sp;xlle_dsp_core_result(core,&pc,&power,&sp);
+            if(power || xlle_dsp_core_budget(core)<=0)break;
+            CHECK(xlle_dsp_core_step_budget(core));
+            CHECK(apu.service_dsp_dma(xlle::ApuDspKind::Gp));
+        }
+        // STOP halts the CPU, not the separately owned DMA engine. Finish only
+        // real admitted work, with a finite bound; never write idle/status.
+        unsigned quanta=0;
+        while(apu.dsp_dma_pending(xlle::ApuDspKind::Gp)) {
+            CHECK(++quanta<=4096);
+            CHECK(apu.service_dsp_dma(xlle::ApuDspKind::Gp));
+        }
+    }
     void process(const uint32_t* mix,uint32_t* output) {
         // The existing bounded GP graph shell seeds direct bins, then executes
         // real effects. Original boot/framework/output-FIFO work stays open.
         for(unsigned i=0;i<1024;++i)*apu.gp_word(0x1400+i)=mix[i]&0xffffff;
         for(unsigned i=0;i<192;++i)*apu.gp_word(0xc00+i)=mix[i]&0xffffff;
-        xlle_dsp_core_begin(core,0);xlle_dsp_core_run(core,1000000);
+        xlle_dsp_core_begin(core,0);run(1000000);
         uint32_t pc,power,sp;xlle_dsp_core_result(core,&pc,&power,&sp);
         CHECK(pc==2 && power==2 && !sp && error.empty());
         for(unsigned i=0;i<192;++i)output[i]=*apu.gp_word(0xc00+i);
@@ -96,7 +114,7 @@ static void authored_dma_program() {
             }
         }
         *floor.apu.gp_word(0x80)=0x123456;*floor.apu.gp_word(0x81)=0xabcdef;
-        xlle_dsp_core_begin(floor.core,0);xlle_dsp_core_run(floor.core,10000);
+        xlle_dsp_core_begin(floor.core,0);floor.run(10000);
         uint32_t pc,power,sp;xlle_dsp_core_result(floor.core,&pc,&power,&sp);
         CHECK(pc==11 && power==2 && !sp && floor.error.empty());
         CHECK(floor.apu.gp_dma_nodes()==2);

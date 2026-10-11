@@ -6,9 +6,13 @@
 #include <utility>
 
 namespace xlle {
-ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind)
-    :apu_(apu),kind_(kind),fault_(std::move(fault)) {
+ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuDmaDispatchPolicy policy)
+    :apu_(apu),kind_(kind),policy_(policy),fault_(std::move(fault)) {
     if(apu_.faulted()){fail("GP owner requires an available APU");return;}
+    if(!policy_.retired_instructions_per_quantum || policy_.retired_instructions_per_quantum>4096)
+        {fail("invalid GP nominal DMA dispatch policy");return;}
+    if(apu_.dsp_work_active() || apu_.dsp_dma_pending(kind_))
+        {fail("GP CPU owner requires idle DMA ownership");return;}
     core_=kind_==ApuDspKind::Gp?
         xlle_dsp_core_create(apu_.gp_word(0x2800),apu_.gp_word(0),apu_.gp_word(0x1800),apu_.gp_word(0x1400),this,read,write,core_fault):
         xlle_dsp_core_create_ep(apu_.ep_word(0x2800),apu_.ep_word(0),apu_.ep_word(0x1800),this,read,write,core_fault);
@@ -49,15 +53,16 @@ bool ApuDspProcessor::permit_program_write() {
 bool ApuDspProcessor::reset_cpu() {
     if(phase_==ApuGpPhase::Failed)return false;
     if(apu_.faulted())return fail("GP CPU reset on a faulted APU");
-    if(executing_)return fail("reentrant GP CPU reset");
+    if(executing_ || working_ || apu_.dsp_work_active())return fail("reentrant GP CPU reset");
+    if(apu_.dsp_dma_pending(kind_))return fail("GP CPU reset with pending DMA remains unqualified");
     if(kind_==ApuDspKind::Gp && apu_.gp_frame_outstanding())return fail("GP CPU reset with an outstanding frame remains unqualified");
     xlle_dsp_core_reset(core_);
-    initializing_=false;phase_=ApuGpPhase::Held;
+    initializing_=false;retired_work_instructions_=0;phase_=ApuGpPhase::Held;
     return true;
 }
 bool ApuDspProcessor::bootstrap_from_scratch() {
     if(phase_==ApuGpPhase::Failed)return false;
-    if(phase_!=ApuGpPhase::Held || executing_)return fail("GP bootstrap requires a held CPU");
+    if(phase_!=ApuGpPhase::Held || executing_ || working_ || apu_.dsp_work_active())return fail("GP bootstrap requires a held CPU");
     std::array<uint8_t,8192> raw;
     if(!(kind_==ApuDspKind::Gp?apu_.gp_scratch(0,raw.data(),uint32_t(raw.size()),false):
                               apu_.ep_scratch(0,raw.data(),uint32_t(raw.size()),false)))
@@ -71,26 +76,53 @@ bool ApuDspProcessor::bootstrap_from_scratch() {
     ++bootstraps_;initializing_=true;phase_=ApuGpPhase::Ready;
     return true;
 }
-bool ApuDspProcessor::run(uint32_t cycles,ApuGpRun& result) {
-    result={};
-    if(phase_==ApuGpPhase::Failed)return false;
-    if(apu_.faulted())return fail("GP run on a faulted APU");
-    if(executing_ || (phase_!=ApuGpPhase::Ready && phase_!=ApuGpPhase::Running))
-        return fail("GP run requires a bootstrapped running CPU");
-    if(!cycles || cycles>INT_MAX)return fail("invalid GP cycle budget");
+void ApuDspProcessor::invalidate_publication() {
     const auto revision=kind_==ApuDspKind::Gp?apu_.gp_program_revision():apu_.ep_program_revision();
     if(program_revision_!=revision) {
         xlle_dsp_core_invalidate_program(core_);
         program_revision_=revision;
     }
-    executing_=true;
-    xlle_dsp_core_run(core_,cycles);
-    executing_=false;
+}
+bool ApuDspProcessor::dispatch_work() {
+    if(!apu_.dsp_dma_pending(kind_)){retired_work_instructions_=0;return true;}
+    if(++retired_work_instructions_<policy_.retired_instructions_per_quantum)return true;
+    retired_work_instructions_=0;working_=true;
+    const bool done=apu_.service_dsp_dma(kind_);
+    working_=false;
+    if(!done || phase_==ApuGpPhase::Failed || apu_.faulted())return fail("GP queued DMA work failed");
+    // P can be published here: the real instruction/callback has returned and
+    // its registers/PC/stack have spilled. Resume that CPU at its actual PC.
+    invalidate_publication();return true;
+}
+bool ApuDspProcessor::run(uint32_t cycles,ApuGpRun& result) {
+    result={};
+    if(phase_==ApuGpPhase::Failed)return false;
+    if(apu_.faulted())return fail("GP run on a faulted APU");
+    if(executing_ || working_ || apu_.dsp_work_active() ||
+       (phase_!=ApuGpPhase::Ready && phase_!=ApuGpPhase::Running))
+        return fail("GP run requires a bootstrapped running CPU");
+    if(!cycles || cycles>INT_MAX)return fail("invalid GP cycle budget");
+    invalidate_publication();
+    if(!xlle_dsp_core_add_budget(core_,cycles))return fail("GP CPU cycle budget overflow");
+    for(;;) {
+        if(phase_==ApuGpPhase::Failed || apu_.faulted())return fail("GP CPU/device work failed");
+        uint32_t pc,power,sp;xlle_dsp_core_result(core_,&pc,&power,&sp);
+        if(xlle_dsp_core_halted(core_) || power!=0 || xlle_dsp_core_budget(core_)<=0)break;
+        // Ordinary MOVE may write a peripheral through an effective address.
+        // The pinned block escape ABI only covers selected peripheral opcodes;
+        // its single-instruction entry supplies the boundary for every form.
+        // This correctness owner is absent from the default fast HLE path.
+        executing_=true;const bool stepped=xlle_dsp_core_step_budget(core_);executing_=false;
+        if(!stepped)return fail("GP actual instruction budget accounting failed");
+        if(phase_==ApuGpPhase::Failed || apu_.faulted())return fail("GP CPU/device work failed");
+        if(!dispatch_work())return false;
+    }
     xlle_dsp_core_result(core_,&result.pc,&result.power,&result.sp);
     if(result.power!=0 && result.power!=2)return fail("unqualified GP power state");
     result.cycles=xlle_dsp_core_cycles(core_);
     if(xlle_dsp_core_halted(core_)) {
         if(result.power!=0)return fail("GP vendor yield cannot replace a CPU power transition");
+        if(apu_.dsp_dma_pending(kind_))return fail("GP vendor yield with pending DMA remains unqualified");
         result.unused_cycles=xlle_dsp_core_discard_unused_budget(core_);
         if(kind_==ApuDspKind::Gp && !apu_.gp_yield_frame(this))return fail("GP frame yield failed");
         initializing_=false;result.yielded=true;phase_=ApuGpPhase::Yielded;
@@ -103,7 +135,7 @@ bool ApuDspProcessor::start_gp_frame(ApuVoiceQuantum& result) {
     if(kind_!=ApuDspKind::Gp)return fail("EP frame admission/cadence remains unqualified");
     if(phase_==ApuGpPhase::Failed)return false;
     if(apu_.faulted())return fail("GP frame start on a faulted APU");
-    if(executing_ || phase_!=ApuGpPhase::Yielded || !xlle_dsp_core_halted(core_))
+    if(executing_ || working_ || apu_.dsp_work_active() || phase_!=ApuGpPhase::Yielded || !xlle_dsp_core_halted(core_))
         return fail("GP frame start requires an actually yielded CPU");
     executing_=true;
     const bool published=apu_.gp_process_frame(this,result);

@@ -53,7 +53,8 @@ def check(image, processor, output):
                   scope='Unchanged DB/EB/0126/005C helpers move actual scratch controls, '
                         'parameters and samples through real SGE/input/output and consume actual EOL.',
                   limits='Isolated authored callers; unknown B0..B3 setup/producer remains '
-                         'guarded. No in-run P publication, bit9 reload, linear offset writeback, '
+                         'guarded. Reentrant host P publication during actual DMA work remains '
+                         'guarded; no bit9 reload, linear offset writeback, '
                          'full graph/boot, hardware reset/cadence or EP/output qualification.')
     (output/'original-gp-linear-reference.aot-private.json').write_text(
         json.dumps(record, indent=2)+'\n', newline='\n')

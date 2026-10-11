@@ -1303,6 +1303,71 @@ The initial new FIFO-boundary fixture requested one PCM16 word, violating the
 existing even-word extent guard. Its failure log and source identities are
 retained; the fixture now uses two words without relaxing production behavior.
 
+## Queued DMA completion and dynamic executable ownership (.113.8)
+
+START now owns a real queued GP/EP job and asserts RUNNING before transfer.
+One device-work quantum captures and validates a descriptor; the next performs
+its actual scratch/FIFO transfer and bank/node publication. Only successful
+end-of-list work clears RUNNING and posts EOL. EOL acknowledgement is separate
+from idle state. Status reads are passive; there is no read counter, constant
+zero completion or helper-specific PC shortcut. Explicit STOP cancels the
+unfinished staged job without publishing it, and FREEZE holds real work.
+Already completed preceding list nodes and real output prefixes remain visible
+on later failure. Failed input staging publishes neither its destination nor
+its node, and failures are terminal.
+
+The sole DSP CPU owner supplies serialized actual instruction boundaries. Its
+injectable `ApuDmaDispatchPolicy` defaults to one real work quantum per retired
+instruction while a job is pending; representative checks also use spacing
+two and four. A caller without a CPU supplies explicit bounded device-work
+quanta. This is a nominal fair admission/copy policy, not an assertion of
+MCPX bus frequency, silicon phase or natural STOPPED bit5. The pinned core's
+single-instruction ABI provides the boundary for ordinary effective-address
+MOVE as well as MOVEP. Its block escape callback only covers selected opcode
+forms, so block execution cannot provide this general boundary. The maintained
+wrapper charges the actual consumed cycles against the same core budget,
+retains negative debt, and discards only unused positive budget on real yield.
+No alternate CPU, scheduler, stack, PC or sample graph is introduced.
+
+Supported input DMA can now publish P after the actual instruction/callback
+has returned. Its existing program epoch invalidates the sole core's warm
+instruction cache before execution continues at the actual PC. Host executable
+publication or nested CPU/device work from a transport callback stays guarded.
+CPU reset and owner removal cannot silently discard pending jobs. Failed P
+staging preserves the complete bank and epoch and stops before the following
+consumer/STOP. These rules do not admit unknown descriptor bit9, original
+dynamic directory semantics or full original executable boot.
+
+The representative batch runs unchanged original EP helpers `2D5` (START and
+RUNNING observation), `2DA` (real EOL/error check and acknowledgement) and `2D0`
+(RUNNING-to-idle wait). An authored caller supplies known-bit jobs. Actual GP
+and EP CPUs load changed executable blocks through physical scratch, execute
+them using genuine CALL/RET, then publish exact PCM16 consumer bytes through
+their own real output FIFOs. Eighteen repeated loads/consumers cover three
+lifetimes per hardware instance, dispatch spacing one/two/four, already warm
+translated code, page/ring crossings, exact caller RAM/CUR and 4096 passive
+reads between transfers. The earlier real VP/GP/scratch/EP waveform chain,
+frame lease and original B2/bit9 guards are checked in the coherent batch.
+
+The [DSP observations](https://xboxdevwiki.net/DSP) establish the incomplete
+register/descriptor contract and end-of-list event; original helpers establish
+the software-required transitions. Pinned xemu's read-count completion is
+explicitly uncertain and is not adopted. No GPL implementation body is copied.
+Exact silicon work rate/phase and natural STOPPED bit5 can remain isolated
+precision questions because genuine transfer/idle/event producers now exist.
+B0..B3, original bit9/configuration, full bootstrap/graph, hardware reset,
+EP frame admission/cadence and AC97 output remain guarded or open. The default
+fast HLE constructs no DSP owner and gains no instruction or DMA-dispatch work.
+
+Private source-bound evidence is in
+`build/blinx/audio-dma-lifecycle-20261010/qualified-batch.aot-private.json` and
+`original-dma-lifecycle-reference.aot-private.json`. The preceding read-only
+audit and all .113.4 through .113.7 proof remain frozen at their original source
+identities. Initial build/fixture/debt-boundary failures are retained. This
+closes the bounded job/completion/publication dependency; the broader audio
+gate and original output qualification remain open. No playback, title run or
+physical Xbox operation is part of this batch.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

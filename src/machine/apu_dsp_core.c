@@ -3,6 +3,7 @@
 #include "apu_dsp_core.h"
 #include "dsp56300.h"
 #include <stdlib.h>
+#include <limits.h>
 struct XlleDspCore {
     Dsp56300Jit* dsp;
     void* opaque;
@@ -51,6 +52,24 @@ void xlle_dsp_core_begin(XlleDspCore* core,uint32_t pc) {
     state.pc=pc;state.power_state=0;state.halt_requested=false;dsp56300_set_state(core->dsp,&state);
 }
 void xlle_dsp_core_run(XlleDspCore* core,uint32_t cycles){dsp56300_run(core->dsp,cycles);}
+int xlle_dsp_core_add_budget(XlleDspCore* core,uint32_t cycles) {
+    Dsp56300State state;dsp56300_get_state(core->dsp,&state);
+    const int64_t next=(int64_t)state.cycle_budget+cycles;
+    if(next>INT_MAX)return 0;
+    state.cycle_budget=(int32_t)next;dsp56300_set_state(core->dsp,&state);return 1;
+}
+int xlle_dsp_core_step_budget(XlleDspCore* core) {
+    const uint32_t before=dsp56300_cycle_count(core->dsp);
+    dsp56300_step(core->dsp);
+    Dsp56300State state;dsp56300_get_state(core->dsp,&state);
+    const uint32_t consumed=state.cycle_count-before;
+    const int64_t next=(int64_t)state.cycle_budget-consumed;
+    if(!consumed || consumed>INT_MAX || next<INT_MIN)return 0;
+    state.cycle_budget=(int32_t)next;dsp56300_set_state(core->dsp,&state);return 1;
+}
+int32_t xlle_dsp_core_budget(XlleDspCore* core) {
+    Dsp56300State state;dsp56300_get_state(core->dsp,&state);return state.cycle_budget;
+}
 void xlle_dsp_core_result(XlleDspCore* core,uint32_t* pc,uint32_t* power,uint32_t* sp) {
     Dsp56300State state;dsp56300_get_state(core->dsp,&state);
     *pc=state.pc;*power=state.power_state;*sp=state.registers[DSP56300_REG_SP];

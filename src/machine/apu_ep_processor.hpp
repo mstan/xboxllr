@@ -7,6 +7,6 @@ using ApuEpPhase=ApuGpPhase;
 using ApuEpRun=ApuGpRun;
 class ApuEpProcessor final:public ApuDspProcessor {
 public:
-    ApuEpProcessor(McpxApu& apu,FaultFn fault):ApuDspProcessor(apu,std::move(fault),ApuDspKind::Ep){}
+    ApuEpProcessor(McpxApu& apu,FaultFn fault,ApuDmaDispatchPolicy policy={}):ApuDspProcessor(apu,std::move(fault),ApuDspKind::Ep,policy){}
 };
 } // namespace xlle

@@ -4,8 +4,10 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 #include "machine/apu_dsp_layout.hpp"
 
 namespace xlle {
@@ -38,42 +40,70 @@ public:
             if(value&~0x80u)return fail("unqualified GP interrupt acknowledgement");
             interrupts_&=~value;return true;
         case 0xffffd4:
+            if(servicing_ || active_)return fail("GP DMA pointer publication overlaps active work");
             if(value&~0x7fffu)return fail("invalid GP DMA node pointer");
             next_=value;return true;
         case 0xffffd5:
+            if(servicing_ || active_)return fail("GP DMA start publication overlaps active work");
             if(value&~0x3fffu)return fail("invalid GP DMA start pointer");
             start_=value;return true;
         case 0xffffd7:
+            if(servicing_ || active_)return fail("GP DMA configuration overlaps active work");
             if(value)return fail("unqualified GP DMA configuration");
             return true;
         case 0xffffd6:
+            if(servicing_)return fail("reentrant GP DMA action during device work");
             switch(value) {
-            case 1:control_=(control_&8)|16;return run();
-            case 2:control_=(control_&8)|32;return true;
+            case 1:
+                if(active_)return fail("GP DMA START overlaps active work");
+                control_=(control_&8)|16;active_=true;list_nodes_=0;return true;
+            case 2:control_=(control_&8)|32;active_=false;job_.reset();return true;
             case 3:control_|=8;return true;
-            case 4:control_&=~8u;return run();
+            case 4:control_&=~8u;return true;
             default:return fail("unqualified GP DMA action");
             }
         default:return fail("unqualified GP peripheral write");
         }
     }
     uint64_t nodes()const{return nodes_;}
+    bool work_pending()const{return active_;}
+    // Real work quanta, never register reads: admit the descriptor, then copy
+    // and publish it. The DSP owner supplies serialized instruction boundaries;
+    // a caller without a CPU supplies explicit device work. Silicon phase/rate
+    // is separate from this nominal fair dispatch policy.
+    bool service(uint32_t quanta=1) {
+        if(failed_)return false;
+        if(servicing_)return fail("reentrant GP DMA device work");
+        if(quanta>4096)return fail("GP DMA work quantum budget exceeded");
+        servicing_=true;
+        for(uint32_t i=0;i<quanta && active_ && !(control_&8) && !failed_;++i)
+            if(!(job_?transfer():admit()))break;
+        servicing_=false;return !failed_;
+    }
 private:
+    struct Job {
+        uint32_t node[7]{};
+        uint32_t* fields[7]{};
+        std::vector<uint32_t*> words;
+        bool end=false,linear=false,circular=false,output=false;
+        uint32_t format=0,buffer=0,count=0;
+    };
     uint32_t bank_end(uint32_t address)const{return apu_dsp_bank_end(kind_,address);}
     bool fail(const char* why){
         failed_=true;std::string reason(why);
         if(kind_==ApuDspKind::Ep)for(size_t at=0;(at=reason.find("GP",at))!=std::string::npos;at+=2)reason.replace(at,2,"EP");
         fault_(reason);return false;
     }
-    bool run() {
-        if(!(control_&16) || (control_&8))return true;
-        for(unsigned limit=0;!(next_&0x4000);++limit) {
-            if(limit==1024)return fail("GP DMA list exceeded node budget");
+    bool admit() {
+            if(list_nodes_==1024)return fail("GP DMA list exceeded node budget");
+            job_=std::make_unique<Job>();
+            auto& job=*job_;
+            if(next_&0x4000){job.end=true;return true;}
             // Original DB/EB linear builders own exactly five words. The
             // following words may already be another descriptor; circular
             // base/size fields are not part of a buffer15 transfer.
             if(next_+2>bank_end(next_))return fail("GP DMA descriptor crosses memory bank");
-            uint32_t node[7]{};uint32_t* fields[7]{};
+            auto& node=job.node;auto& fields=job.fields;
             for(unsigned i=0;i<2;++i) {
                 fields[i]=word_(next_+i);
                 if(!fields[i])return fail("GP DMA descriptor outside memory banks");
@@ -81,6 +111,7 @@ private:
             }
             const uint32_t format=(node[1]>>10)&7,buffer=(node[1]>>5)&15;
             const bool linear=buffer==15,circular=buffer==14;
+            job.linear=linear;job.circular=circular;job.buffer=buffer;job.format=format;
             const unsigned field_count=circular?7:(linear?5:4);
             if(next_+field_count>bank_end(next_))return fail("GP DMA descriptor crosses memory bank");
             for(unsigned i=2;i<field_count;++i) {
@@ -90,6 +121,7 @@ private:
             }
             const uint32_t count=node[2];
             const bool output=(node[1]&2)!=0;
+            job.output=output;job.count=count;
             // Noninterleaved unit-stride scratch and FIFO transport. Linear
             // offset writeback is not reached by the original builders and
             // lacks independent evidence; keep it guarded rather than apply
@@ -103,7 +135,7 @@ private:
                (format!=1 && format!=2 && format!=6) || !count || count>4096 ||
                (format==1 && (count&1)))
                 return fail("unqualified GP DMA descriptor format/extent");
-            uint32_t* words[4096];
+            job.words.resize(count);auto& words=job.words;
             if(uint64_t(node[3])+count>bank_end(node[3]))return fail("GP DMA samples cross memory bank");
             for(unsigned i=0;i<count;++i) {
                 words[i]=word_(node[3]+i);
@@ -114,8 +146,16 @@ private:
             if(kind_==ApuDspKind::Gp && !output && node[3]<0x1800 && uint64_t(node[3])+count>0x1400 &&
                mix_write_ && !mix_write_())
                 return fail("GP MIX DMA publication was rejected");
+            if(circular && node[4]>=node[6]+1)return fail("unqualified GP DMA initial circular offset");
+            return true;
+    }
+    bool transfer() {
+            auto& job=*job_;
+            if(job.end){finish();return true;}
+            const auto& node=job.node;const auto& fields=job.fields;const auto& words=job.words;
+            const bool output=job.output,linear=job.linear,circular=job.circular;
+            const uint32_t count=job.count,format=job.format,buffer=job.buffer;
             const uint32_t size=node[6]+1,width=format==1?2:4;uint32_t offset=node[4];
-            if(circular && offset>=size)return fail("unqualified GP DMA initial circular offset");
             std::array<uint8_t,4096*4> packed{};
             for(unsigned i=0;i<count;++i) {
                 uint32_t sample=output?(*words[i]&0xffffff):0;
@@ -145,16 +185,22 @@ private:
             }
             // FIFO addressing is owned by PAPU CUR, not descriptor words 4..6.
             if(circular && (node[1]&16))*fields[4]=offset;
-            next_=node[0];++nodes_;
-        }
-        // End-of-list follows actual copies. Status reads never finish work or
-        // stop an armed engine; STOP and interrupt acknowledgement are explicit.
-        interrupts_|=0x80;return true;
+            next_=node[0];++nodes_;++list_nodes_;job_.reset();
+            if(next_&0x4000)finish();
+            return true;
+    }
+    void finish() {
+        // Natural idle follows the actual last publication. STOPPED bit5 is
+        // owned by explicit STOP; its silicon state at natural EOL is not
+        // established by the original consumer. EOL acknowledgement is separate.
+        active_=false;control_&=~16u;interrupts_|=0x80;job_.reset();
     }
     Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;ProgramWrite program_write_;MixWrite mix_write_;
     const ApuDspKind kind_;
     uint32_t next_=0,start_=0,control_=32,interrupts_=0;
-    uint64_t nodes_=0;bool failed_=false;
+    uint64_t nodes_=0;uint32_t list_nodes_=0;
+    bool failed_=false,active_=false,servicing_=false;
+    std::unique_ptr<Job> job_;
 };
 using ApuGpDma=ApuDspDma; // Source compatibility for the qualified GP interface.
 } // namespace xlle

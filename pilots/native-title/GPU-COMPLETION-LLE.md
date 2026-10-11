@@ -1603,3 +1603,46 @@ PE32 resolver also preserve both prior FE payloads byte-for-byte (888/968 bytes)
 Raw evidence and source/payload hashes remain private on G. `.111` and startup
 stay open; no guessed commit rule is added, HLE rendering performance is
 unchanged, and the service-family count stays **4/9**.
+
+## Original-thread GPU bus and device work - 2026-10-10
+
+The actual original scheduling CPU now calls the same maintained NV2A MMIO
+owner as compiled accesses. The earlier AV-only adapter restriction existed
+because the CPU held a nonrecursive transport lock while GPU bus DMA attempted
+to acquire it again. A same-thread, callback-scoped borrow now permits only
+synchronous RAM transfers through the existing full extent/PFN/PTE/protection
+and pin checks. Other host threads still acquire the lock. Retained USB leases,
+recursive original services/IRQ/VM/CPU execution, and binding changes inside
+device work are rejected before mutation. No original CPU reentry is permitted.
+
+A sole idle-bound device-work callback samples the existing external monotonic
+GPU clock between actual CPU slices. MMIO uses the same clock/device owner;
+register reads do not invent time. Existing nominal display precision and
+unqualified AV/mode/register behavior retain their guards. Remove the work
+callback before destroying the GPU. This route is compiled only into the LLE
+renderer; the default performant HLE receives no additional device execution.
+
+Three actual original CPU/GPU lifetimes create real original contiguous PFNs,
+program PBUS/PRAMIN/PFIFO, hold and release PGRAPH, and observe genuine semaphore
+DMA through the same RAM owner. Nine original threads retain exact complete
+caller RAM, original thread/handle baselines and cleanup. Negative controls
+reject cross-page read-only writes before their first byte, retained USB leases,
+CPU reentry and active-owner replacement. Stale DMA after original free fails.
+The console clock remains alive across replacement GPU lifetimes.
+
+Five focused GPU checks pass in0.453s. The coherent CPU/GPU/DMA integration
+passes **74/74 in15.406s**. Its fresh optional DMA lifecycle and existing GP graph
+checks also validate the independently qualified19-entry APU batch. One muted
+original startup after that pass runs7.828s, passes FD001804 and actual installed
+HDD verification, then guards **HalGetInterruptVector44**. Full original startup,
+composed rendering/callbacks and the larger family remain open; the burndown is
+still **4/9**. No physical console operation or attract/playback run occurred.
+
+Private evidence: `gpu-thread-cpu-focused-final-20261010.aot-private.json`,
+`gpu-audio-integration-qualified-20261010.aot-private.json`, and
+`gpu-audio-final-title-startup-20261010.aot-private.json`. The maintained GPU DLL
+stays `9fdec5189881eabf77d00a52a8442ee57f5f2fe8199d7c22335594ee28cedf95`.
+The rejected second console-clock initialization, missing-target configuration,
+and old synchronous-DMA GP fixture failures remain preserved; no failed result
+is counted as a pass. The earlier7.922s startup is a dependency observation;
+the final source/binary-bound startup is the7.828s result above.

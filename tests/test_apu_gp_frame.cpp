@@ -113,7 +113,7 @@ static void overlap_guards() {
         const auto bank=std::vector<uint32_t>(f.apu.gp_word(0x1400),f.apu.gp_word(0x1400)+1024);
         if(mode==0){xlle::ApuVoiceQuantum blocked;CHECK(!f.apu.process_2d_quantum(blocked) && !blocked.published && !blocked.sequence);}
         if(mode==1)f.reg(0x35000,0x123456);
-        if(mode==2){const uint32_t d[]={0x4000,0x59c0,1,0x1400,0,0x2ffd,3};for(unsigned i=0;i<7;++i)*f.apu.gp_word(0x20+i)=d[i];CHECK(f.apu.gp_write(0xffffd4,0x20));CHECK(!f.apu.gp_write(0xffffd6,1));}
+        if(mode==2){const uint32_t d[]={0x4000,0x59c0,1,0x1400,0,0x2ffd,3};for(unsigned i=0;i<7;++i)*f.apu.gp_word(0x20+i)=d[i];CHECK(f.apu.gp_write(0xffffd4,0x20));CHECK(f.apu.gp_write(0xffffd6,1) && !f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));}
         CHECK(f.apu_error.find("MIX publication overlaps")!=std::string::npos);
         CHECK(f.ram==ram && f.source_reads==reads && f.apu.voice_mix_quanta()==seq && !f.apu.gp_dma_nodes());
         CHECK(std::equal(bank.begin(),bank.end(),f.apu.gp_word(0x1400)));
@@ -181,9 +181,11 @@ static void debt_and_selected_eol() {
     CHECK(gp.run(1,r) && r.yielded && r.cycles==3 && !r.unused_cycles && r.pc==2);
     xlle::ApuVoiceQuantum q;start(gp,q);
     for(unsigned i=0;i<2;++i){CHECK(gp.run(1,r) && !r.yielded && r.pc==2 && r.cycles==3 && f.events()==2);}
-    CHECK(gp.run(1,r) && r.yielded && r.cycles==9 && !r.unused_cycles && !f.events() && !f.apu.gp_frame_outstanding());
+    CHECK(gp.run(1,r) && !r.yielded && r.pc==4 && r.cycles==6 && !f.events() && f.apu.gp_frame_outstanding());
+    for(unsigned i=0;i<2;++i){CHECK(gp.run(1,r) && !r.yielded && r.pc==4 && r.cycles==6 && f.apu.gp_frame_outstanding());}
+    CHECK(gp.run(1,r) && r.yielded && r.pc==6 && r.cycles==9 && !r.unused_cycles && !f.events() && !f.apu.gp_frame_outstanding());
     Fixture selected;selected.boot(frame_program());selected.output_descriptor();xlle::ApuGpProcessor owner(selected.apu,[&](const std::string& s){selected.fault(s);});CHECK(owner.bootstrap_from_scratch());CHECK(owner.run(100,r) && r.yielded);
-    CHECK(selected.apu.gp_write(0xffffd4,0x20) && selected.apu.gp_write(0xffffd6,1) && selected.events()==0x80);
+    CHECK(selected.apu.gp_write(0xffffd4,0x20) && selected.apu.gp_write(0xffffd6,1) && selected.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096) && selected.events()==0x80);
     start(owner,q);CHECK(selected.events()==0x82);CHECK(selected.apu.gp_write(0xffffc5,0x80) && selected.events()==2 && selected.apu.gp_frame_outstanding());
     CHECK(owner.run(1000,r) && r.yielded && selected.events()==0x80 && !selected.apu.gp_frame_outstanding());
 }
@@ -205,7 +207,7 @@ static void original_helpers(const char* path) {
     CHECK(f.apu_error.empty() && f.owner_error.empty());
     // Separate successful lifetime leaves simultaneous real DMA EOL intact.
     Fixture yes;yes.boot(p);xlle::ApuGpProcessor owner(yes.apu,[&](const std::string& s){yes.fault(s);});CHECK(owner.bootstrap_from_scratch());CHECK(owner.run(20000,r) && r.yielded);yes.output_descriptor();
-    CHECK(yes.apu.gp_write(0xffffd4,0x20) && yes.apu.gp_write(0xffffd6,4) && yes.apu.gp_write(0xffffd6,1));CHECK(yes.events()==0x80);
+    CHECK(yes.apu.gp_write(0xffffd4,0x20) && yes.apu.gp_write(0xffffd6,4) && yes.apu.gp_write(0xffffd6,1) && yes.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));CHECK(yes.events()==0x80);
     start(owner,q);CHECK(yes.events()==0x82);CHECK(owner.run(100,r) && r.yielded && r.pc==0x70e && !r.sp);
     CHECK(yes.events()==0x80 && !yes.apu.gp_frame_outstanding());
     // The sentinel after the yield has not run: PC remains at the actual JMP.

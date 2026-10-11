@@ -36,7 +36,7 @@ struct Fixture {
         const uint32_t fields[]={0x4000,0x4000|(format<<10)|(index<<5)|16|(output?2u:0u),count,0x1880,0xabcdef,0xffffff,0};
         for(unsigned i=0;i<7;++i)word(0x20+i)=fields[i];
     }
-    bool go(){CHECK(apu.gp_write(0xffffd4,0x20));return apu.gp_write(0xffffd6,1);}
+    bool go(){CHECK(apu.gp_write(0xffffd4,0x20));return apu.gp_write(0xffffd6,1) && apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096);}
 };
 int main() {
     unsigned cases=0;
@@ -72,7 +72,7 @@ int main() {
             if(other!=index || other_output!=output)CHECK(!f.reg(f.registers(other,other_output)+8));
         CHECK(f.word(0x24)==0xabcdef && f.word(0x25)==0xffffff && !f.word(0x26));
         uint32_t status;
-        for(unsigned i=0;i<8;++i)CHECK(f.apu.gp_read(0xffffd6,status) && status==16);
+        for(unsigned i=0;i<8;++i)CHECK(f.apu.gp_read(0xffffd6,status) && status==0);
         CHECK(f.apu.gp_read(0xffffc5,status) && status==0x80);
         CHECK(f.reg(f.registers(index,output)+8)==final && f.ram==expected);
         ++cases;

@@ -1719,6 +1719,20 @@ and character outputs. No original instruction body or packed character table
 is copied. Desktop Windows RTL is used only as an independent comparison in the
 private observation tool, rather than as the native implementation dependency.
 
+The same-thread original CPU/GPU bus adapter, device-work callback and scoped
+RAM/reentry/teardown fixtures are authored here. They connect the already
+credited maintained NV2A, Unicorn and original-kernel reference owners; no
+external implementation or original driver instructions are copied.
+
+The queued GP/EP DMA lifecycle, actual instruction-budget bridge, serialized
+executable publication and dynamic consumer fixtures are authored here. The
+credited pinned MIT DSP core supplies its actual single-instruction ABI.
+XboxDevWiki descriptor/register observations and unchanged private original
+EP START/EOL/idle helpers establish factual boundaries; no firmware bytes or
+GPL implementation body are incorporated. Silicon dispatch precision remains
+explicitly isolated. The bounded pilot graph fixture drives actual device work
+rather than inferring completion from passive reads.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

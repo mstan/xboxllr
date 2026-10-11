@@ -19,12 +19,14 @@ struct Fixture {
     uint32_t fail_read=UINT32_MAX;
     unsigned boot_reads=0;
     bool guard_exit=false;
+    bool unsafe_host_publication=false;
     std::vector<uint32_t> guarded_p;
     xlle::McpxApu apu{[this](const std::string& why){apu_error=why;}};
     Fixture() {
         apu.set_mem_access(
             [this](uint32_t a,void* out,size_t n){
                 if(a==fail_read || uint64_t(a)+n>ram.size())return false;
+                if(unsafe_host_publication && a>=0x60000)apu.mmio_write(0xfe83a020,4,0x654321);
                 if(n==4096 && (a==0x60000 || a==0x64000 || a==0x74000 || a==0x78000))++boot_reads;
                 std::memcpy(out,ram.data()+a,n);return true;
             },
@@ -172,7 +174,7 @@ static void external_program_publication() {
     // Real input DMA between run calls publishes another executable word.
     f.scratch_word(0x2ffd,0x2468ac);f.descriptor(0x280b,1,0x4000|(6<<10)|(14<<5));
     const uint64_t dma_revision=f.apu.gp_program_revision();
-    CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1));
+    CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1) && f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
     CHECK(f.apu.gp_program_revision()==dma_revision+1 && f.apu.gp_dma_nodes()==1);
     reach_pc(16);CHECK(*f.apu.gp_word(0x100)==0x2468ac);
     // Explicit CPU reset clears the actual CPU register state and preserves
@@ -233,7 +235,7 @@ static void cpu_publication_guard(bool bit9) {
     xlle::ApuGpProcessor owner(f.apu,[&](const std::string& why){f.owner_fault(why);});
     CHECK(owner.bootstrap_from_scratch());f.scratch_word(0x2ffd,0x123456);
     f.descriptor(bit9?0x100:0x2800,1,bit9?0x004bd0:0x4000|(6<<10)|(14<<5));
-    f.guarded_p.assign(f.apu.gp_word(0x2800),f.apu.gp_word(0x2800)+4096);f.guard_exit=true;
+    f.guarded_p.assign(f.apu.gp_word(0x2800),f.apu.gp_word(0x2800)+4096);f.guard_exit=true;f.unsafe_host_publication=!bit9;
     xlle::ApuGpRun result;owner.run(1000,result);CHECK(false);
 }
 static void original_boot_boundary(const char* path) {

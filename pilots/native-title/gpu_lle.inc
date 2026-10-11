@@ -23,6 +23,7 @@ static struct {
     int (*scanout)(void*,uint8_t*,uint32_t,uint32_t*,uint32_t*);
     uint64_t origin,field_count;
 } gpu_lle;
+static const char *gpu_lle_sample(void);
 
 static int gpu_lle_dma(uint32_t pa,void *buffer,size_t bytes,int write)
 {
@@ -76,18 +77,17 @@ static const char *gpu_lle_port(uint16_t port,int size,int write,uint32_t *value
 static const char *gpu_lle_kernel_mmio(uint32_t address,unsigned size,int write,uint32_t *value)
 {
     if(!gpu_lle.device)return "kernel NV2A access before GPU initialization";
-    // AV register access cannot start FIFO/DMA under the kernel transport
-    // lock. Broader kernel-driven GPU engines need a reentrant bus contract.
-    if(!((address>=0xfd600000u && (uint64_t)address+size<=0xfd700000u) ||
-         (address>=0xfd0c0000u && (uint64_t)address+size<=0xfd0c1000u)))
-        return "kernel NV2A MMIO outside qualified AV engines";
+    /* The outer original CPU retains its lock. The bus permits synchronous,
+     * fully validated RAM borrowing; it never executes another original CPU.
+     * Register admission/errors remain the maintained NV2A owner's decision. */
+    const char *error=gpu_lle_sample();if(error)return error;
     if(write)gpu_lle.write(gpu_lle.device,address,size,*value);
     else *value=gpu_lle.read(gpu_lle.device,address,size);
     return gpu_lle.error(gpu_lle.device);
 }
-static void gpu_lle_tick(void)
+static const char *gpu_lle_sample(void)
 {
-    if(!gpu_lle.device)return;
+    if(!gpu_lle.device)return "GPU device work without owned instance";
     uint64_t elapsed=dispatch_monotonic()-gpu_lle.origin;
     /* Same bounded nominal 60-Hz field clock as the qualified display floor.
      * Reading a register never advances time. Slow rendering is permitted. */
@@ -101,8 +101,12 @@ static void gpu_lle_tick(void)
         gpu_lle.field_count=field;gpu_lle.field(gpu_lle.device,(int)(field&1));
         gpu_lle.frame(gpu_lle.device,field);
     }
-    const char *error=gpu_lle.error(gpu_lle.device);
-    if(error)stop(error,0xfd000000u);
+    return gpu_lle.error(gpu_lle.device);
+}
+static void gpu_lle_tick(void)
+{
+    if(!gpu_lle.device)return;
+    const char *error=gpu_lle_sample();if(error)stop(error,0xfd000000u);
 }
 static void gpu_lle_open(void)
 {
@@ -150,5 +154,6 @@ static void gpu_lle_open(void)
     pilot_io_device_port_bind(0xc000,0xc00f,gpu_lle_port);
     error=pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,gpu_lle_kernel_mmio);
     if(error)stop(error,0xfd000000u);
+    error=pilot_io_device_work_bind(gpu_lle_sample);if(error)stop(error,0xfd000000u);
     fprintf(stderr,"[GPU LLE] original XDK renderer; maintained NV2A; shared original RAM/PIC/ISR\n");
 }

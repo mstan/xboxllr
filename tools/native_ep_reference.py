@@ -67,7 +67,7 @@ def check(image, processor, output):
                         '02E1 transfer/control helper on the distinct EP CPU/banks.',
                   limits='Original B2 timer configuration and descriptor bit9 stay guarded. '
                          'The helper caller is authored; dynamic code/table blocks are not '
-                         'substituted. Original DMA running/completion lifecycle, resets, '
+                         'substituted. Full original DMA/configuration chain, resets, '
                          'EP frame admission/cadence, AC97 and full graph/output remain open.')
     report = output/'original-ep-reference.aot-private.json'
     report.write_text(json.dumps(record, indent=2)+'\n', newline='\n')

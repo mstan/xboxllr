@@ -15,6 +15,7 @@ struct Fixture {
     std::string apu_error,owner_error;
     uint32_t fail_read=UINT32_MAX,fail_write=UINT32_MAX;
     bool exit_guard=false;std::string expected_guard;
+    bool unsafe_host_publication=false;
     std::vector<uint32_t> saved_p,saved_gp;
     std::vector<uint8_t> saved_ram;
     uint32_t saved_cursor=0;
@@ -22,6 +23,7 @@ struct Fixture {
     Fixture() {
         apu.set_mem_access([this](uint32_t a,void* out,size_t n){
             if(a==fail_read || uint64_t(a)+n>ram.size())return false;
+            if(unsafe_host_publication && a>=0x60000)apu.mmio_write(0xfe85a020,4,0x654321);
             std::memcpy(out,ram.data()+a,n);return true;
         },[this](uint32_t a,const void* in,size_t n){
             if(a==fail_write || uint64_t(a)+n>ram.size())return false;
@@ -110,7 +112,7 @@ static void executable_publication_and_yield() {
     auto revision=f.apu.ep_program_revision();f.reg(0x5a000+11*4,0x654321);
     CHECK(f.apu.ep_program_revision()==revision+1);reach(16);CHECK(*f.apu.ep_word(0x100)==0x654321);reach(8);
     f.scratch(0xd000,0x2ffd,0x2468ac);f.descriptor(true,0x20,0x4000,0x59e0,1,0x280b,0x2ffd);
-    revision=f.apu.ep_program_revision();CHECK(f.apu.ep_write(0xffffd4,0x20) && f.apu.ep_write(0xffffd6,1));
+    revision=f.apu.ep_program_revision();CHECK(f.apu.ep_write(0xffffd4,0x20) && f.apu.ep_write(0xffffd6,1) && f.apu.service_dsp_dma(xlle::ApuDspKind::Ep,4096));
     CHECK(f.apu.ep_program_revision()==revision+1 && f.apu.ep_dma_nodes()==1);reach(16);CHECK(*f.apu.ep_word(0x100)==0x2468ac);
     CHECK(f.apu.gp_program_revision()==gp_revision && !*f.apu.gp_word(0x100));
 
@@ -188,7 +190,7 @@ static void contexts_and_failures() {
         fault.descriptor(true,0x20,0x4000,output?0x4402:0x59e0,4,0x200,0x2ffd);
         if(output)fault.fail_write=fault.physical(0xe000,0);else fault.fail_read=fault.physical(0xd000,0x3000);
         const auto before=std::vector<uint32_t>(fault.apu.ep_word(0x200),fault.apu.ep_word(0x200)+4);
-        CHECK(fault.apu.ep_write(0xffffd4,0x20) && !fault.apu.ep_write(0xffffd6,1));
+        CHECK(fault.apu.ep_write(0xffffd4,0x20) && fault.apu.ep_write(0xffffd6,1) && !fault.apu.service_dsp_dma(xlle::ApuDspKind::Ep,4096));
         CHECK(!fault.apu.ep_dma_nodes() && std::equal(before.begin(),before.end(),fault.apu.ep_word(0x200)));
         CHECK(!fault.apu.ep_write(0xffffd6,1) && fault.apu.faulted());
         if(output)CHECK(fault.ram[fault.physical(0xe000,0x1ffd)]==0x34 && fault.apu.RegFileMmio::mmio_read(0xfe80402c,4)==0x1ffd);
@@ -197,7 +199,7 @@ static void contexts_and_failures() {
     // adjacent unowned words must not be fetched as circular metadata.
     Fixture edge;*edge.apu.ep_word(0x200)=0x123456;*edge.apu.ep_word(0x201)=0x654321;
     edge.descriptor(true,0xbfc,0x4000,0x4402,2,0x200);
-    CHECK(edge.apu.ep_write(0xffffd4,0xbfc) && edge.apu.ep_write(0xffffd6,1) && edge.apu.ep_dma_nodes()==1);
+    CHECK(edge.apu.ep_write(0xffffd4,0xbfc) && edge.apu.ep_write(0xffffd6,1) && edge.apu.service_dsp_dma(xlle::ApuDspKind::Ep,4096) && edge.apu.ep_dma_nodes()==1);
     CHECK(edge.ram[edge.physical(0xe000,0x1ffd)]==0x34 && edge.ram[edge.physical(0xe000,0x1ffe)]==0x12 &&
           edge.ram[edge.physical(0xe000,0x1fff)]==0x43 && edge.ram[edge.physical(0xe000,0)]==0x65);
     // Partial/unknown EP apertures remain explicit, including EPRST and MIX.
@@ -215,9 +217,9 @@ static void cpu_guard(const std::string& mode,const char* path) {
         const uint32_t caller[]={0x308000,0x61f400,0xc00,0x64f400,0x1a2,0x382000,0x3d0100,0x0bf080,0x276,0x0bf080,0x2e1,0x87};
         std::copy(std::begin(caller),std::end(caller),p.begin()+0x700);f.expected_guard="unqualified EP DMA descriptor format";
     } else if(mode=="bank") {p={0x65f400,0xbfc,0x021594,0x87};f.expected_guard="unmapped DSP read";}
-    else {p={0x08f494,0x20,0x08f496,1,0x87};f.expected_guard="EP executable DMA/host writes during execution";}
+    else {p={0x08f494,0x20,0x08f496,1,0x87};f.expected_guard="EP executable host publication during DMA work";}
     f.boot(true,p);xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
-    if(mode=="program")f.descriptor(true,0x20,0x4000,0x59e0,1,0x2800,0x2ffd);
+    if(mode=="program"){f.descriptor(true,0x20,0x4000,0x59e0,1,0x2800,0x2ffd);f.unsafe_host_publication=true;}
     if(mode!="--original-bit9" && mode!="--original-entry")f.saved_p.assign(f.apu.ep_word(0x2800),f.apu.ep_word(0x2800)+4096);
     f.saved_gp.assign(f.apu.gp_word(0x1400),f.apu.gp_word(0x1400)+1024);f.saved_ram=f.ram;f.saved_cursor=f.apu.mmio_read(0xfe80402c,4);f.exit_guard=true;
     xlle::ApuEpRun r;ep.run(10000,r);CHECK(false);

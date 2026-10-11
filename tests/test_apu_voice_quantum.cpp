@@ -129,7 +129,7 @@ static void mixed_waveforms_and_dma() {
         f.reg(0x2040,0xc000);f.reg(0x20d4,1);
         const uint32_t descriptor[]={0x4000,0x4000|(6<<10)|(14<<5)|16|2,32,0x1400,0,4093,127};
         for(unsigned i=0;i<7;++i)*f.apu.gp_word(0x20+i)=descriptor[i];
-        CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1));
+        CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1) && f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
         for(unsigned n=0;n<32;++n)for(unsigned b=0;b<4;++b) {
             const unsigned linear=4093+n*4+b,physical=(linear<4096?0x60000:0x64000)+(linear&4095);
             const uint8_t expected=b==3?0:uint8_t(*f.apu.gp_word(0x1400+n)>>(b*8));

@@ -23,7 +23,7 @@ struct Fixture {
         const uint32_t n[]={next,0x4000|(format<<10)|(14<<5)|16|(output?2u:0u),count,src,offset,base,size-1};
         for(unsigned i=0;i<7;++i)word(at+i)=n[i];
     }
-    void go(unsigned node){CHECK(apu.gp_write(0xffffd4,node));CHECK(apu.gp_write(0xffffd6,1));}
+    void go(unsigned node){CHECK(apu.gp_write(0xffffd4,node));CHECK(apu.gp_write(0xffffd6,1));CHECK(apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));}
 };
 int main() {
     // Published hardware byte examples, independent of native/xemu packing.
@@ -34,7 +34,7 @@ int main() {
         const uint8_t lsb[]={0x56,0x34,0x12,0,0xef,0xcd,0xab,0};
         for(unsigned i=0;i<8;++i)CHECK(f.scratch(4093+(6+i)%11)==(format==2?msb:lsb)[i]);
         CHECK(f.word(0x24)==3 && f.apu.gp_dma_nodes()==1);
-        uint32_t value;for(unsigned i=0;i<8;++i)CHECK(f.apu.gp_read(0xffffd6,value) && value==16);
+        uint32_t value;for(unsigned i=0;i<8;++i)CHECK(f.apu.gp_read(0xffffd6,value) && value==0);
         CHECK(f.apu.gp_read(0xffffc5,value) && value==0x80);
         CHECK(f.apu.gp_write(0xffffc5,0x80));CHECK(f.apu.gp_read(0xffffc5,value) && !value);
         CHECK(f.apu.gp_write(0xffffd6,2));CHECK(f.apu.gp_read(0xffffd6,value) && value==32);
@@ -52,7 +52,7 @@ int main() {
         f.go(0x20);CHECK(!f.apu.gp_dma_nodes() && f.ram==before);
         uint32_t value;CHECK(f.apu.gp_read(0xffffd6,value) && value==24);
         CHECK(f.apu.gp_read(0xffffc5,value) && !value);
-        CHECK(f.apu.gp_write(0xffffd6,4));CHECK(f.word(0x1880)==0x123456 && f.apu.gp_dma_nodes()==2);
+        CHECK(f.apu.gp_write(0xffffd6,4) && f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));CHECK(f.word(0x1880)==0x123456 && f.apu.gp_dma_nodes()==2);
     }
     // Host-visible GP apertures and DSP storage refer to the same 24-bit words.
     for(unsigned a:{0u,0xfffu,0x1400u,0x17ffu,0x1800u,0x1fffu,0x2800u,0x37ffu}) {
@@ -73,7 +73,7 @@ int main() {
         if(kind==7){const uint32_t bad=0x10000;std::memcpy(f.ram.data()+0x1000,&bad,4);}
         if(kind==8)f.apu.mmio_write(0xfe8020d4,4,0); // first word straddles absent next page
         const auto before=f.ram;
-        CHECK(f.apu.gp_write(0xffffd4,0x20));CHECK(!f.apu.gp_write(0xffffd6,1));
+        CHECK(f.apu.gp_write(0xffffd4,0x20));CHECK(f.apu.gp_write(0xffffd6,1) && !f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
         CHECK(!f.error.empty() && !f.apu.gp_dma_nodes());
         if(kind!=8)CHECK(f.ram==before); // a later page fault may follow real partial bytes
     }

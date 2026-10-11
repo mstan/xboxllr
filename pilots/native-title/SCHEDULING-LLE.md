@@ -1222,3 +1222,22 @@ bound; that failure is preserved, and the unchanged original call returns under
 an explicit four-million bound. No failed call is counted as passing. ROM and
 EEPROM input hashes remain unchanged. No physical Xbox operation, playback or
 attract rerun was performed.
+
+### Original CPU/GPU device ownership - 2026-10-10
+
+The maintained GPU is now connected to actual original-thread MMIO and its
+external clock. Synchronous device callbacks borrow the existing locked RAM
+owner on that same host thread, retaining full original publication/protection
+checks and rejecting recursive original CPU/services. Three GPU lifetimes and
+nine actual threads establish held/released semaphore DMA, complete RAM
+preservation, guard ordering and original cleanup. See
+[the composed bus contract](GPU-COMPLETION-LLE.md#original-thread-gpu-bus-and-device-work---2026-10-10).
+
+The coherent CPU/GPU/DMA batch passes **74/74 in15.406s**. Fresh muted original
+Blinx startup passes the prior FD001804 read and next guards
+**HalGetInterruptVector44**, with installed HDD identity still verified. The
+7.828s observation uses the exact qualified binary and leaves ROM/EEPROM input
+bytes unchanged. Required interrupt/service and full GPU/audio/title integration
+remain open. The family count stays **4/9**; the queue now has **26 safe precision
+questions**, including the isolated DMA rate/phase policy AUDIO-D07. Default HLE
+performance remains unaffected by the original CPU/device-work route.

@@ -6,8 +6,8 @@ Original scheduling has bounded no-peer idle-clock and integer compute
 checkpoints. Its LLE thread bodies now execute original bytes on that same CPU,
 retaining flags and full FP state across original IRQs, waits and switches.
 Normal-priority child creation, explicit termination and recursive critical
-sections now use that original route; the latest combined CPU batch passes68
-checks. Original settings use the shared EEPROM owner and original HAL/cache.
+sections now use that original route; the latest combined CPU/GPU and DMA
+batch passes74 checks. Original settings use the shared EEPROM owner and original HAL/cache.
 The default HLE corrects settings types/error ordering/cache behavior and uses
 an authored, deterministic Xbox error mapper instead of the host Windows table.
 Original-thread VM calls share the existing original page-publication owner,
@@ -23,9 +23,11 @@ Actual HDD identity verification succeeds. Original counted-string construction
 and ANSI comparison now execute on real threads; default HLE uses observed Xbox
 length wrapping and byte folding instead of desktop RTL behavior. Eighteen
 initializer cases and three comparison lifetimes pass, each with808 equality
-and256 uppercase cases. Startup next reaches the unconnected GPU readFD001804.
+and256 uppercase cases. The original CPU now shares the maintained GPU MMIO,
+clock and synchronous validated DMA owner. Startup passes FD001804 and next
+guards HalGetInterruptVector44 after7.828s.
 Whole title scheduling remains unqualified. See
-[the CPU route and remaining integration](SCHEDULING-LLE.md#counted-string-construction-and-comparison---2026-10-10).
+[the CPU route and remaining integration](SCHEDULING-LLE.md#original-cpugpu-device-ownership---2026-10-10).
 
 The independent GP owner now carries actual selected events, callback-safe
 yield/resume and a real VP MIX lease. Fifteen focused APU checks and two fresh
@@ -36,12 +38,16 @@ optional pilot check. Unchanged builders and control/parameter helpers execute
 15 real SGE transfers across three lifetimes; five-word descriptor ownership,
 failure prefixes and existing P/MIX guards are retained. B0..B3 identity and
 production remain unresolved requirements. Full GP graph/output remains
-required. The distinct EP foundation now passes18 focused checks and two fresh
-optional pilot checks. Thirty actual VP/GP scratch-to-EP/FIFO packets retain
+required. The distinct GP/EP foundation now passes19 focused checks, with
+its optional lifecycle and existing GP graph checks also passing in the fresh
+74-entry integration batch. Thirty actual VP/GP scratch-to-EP/FIFO packets retain
 exact caller RAM, separate banks/CPU/program ownership and GP MIX leases across
 three lifetimes and EP replacements. Original EP boot and descriptor bit9 remain
-guarded; genuine DMA completion, frame admission/cadence and AC97 consumption
-are still required. The default HLE gains no DSP work.
+guarded. Genuine queued DMA now completes and permits serialized known-bit P
+publication;18 actual GP/EP consumers and unchanged original EP idle helpers
+pass without a STOP shortcut. Exact DMA rate/phase is isolated in AUDIO-D07;
+original dynamic directories/full graph, frame admission/cadence and AC97
+consumption are still required. The default HLE gains no DSP work.
 
 Original ROM reads additionally require the owned256KiB flash input, configured
 with `-DPILOT_IO_DEVICE_ROM=F:/Projects/xboxlle/machine/flash-dump-ff000000.bin`.

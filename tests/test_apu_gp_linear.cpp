@@ -20,6 +20,7 @@ struct Fixture {
         apu.set_mem_access([this](uint32_t a,void* out,size_t n){
             if(a==fail_read || uint64_t(a)+n>ram.size())return false;
             if(a>=0x10000)++scratch_reads;
+            if(expected_program_guard && a>=0x10000)apu.mmio_write(0xfe83a020,4,0x654321);
             std::memcpy(out,ram.data()+a,n);return true;
         },[this](uint32_t a,const void* in,size_t n){
             if(a==fail_write || uint64_t(a)+n>ram.size())return false;
@@ -35,7 +36,7 @@ struct Fixture {
     void fault(const std::string& s) {
         owner_error=s;
         if(expected_program_guard) {
-            CHECK(s.find("executable DMA/host writes during execution")!=std::string::npos);
+            CHECK(apu_error.find("executable host publication during DMA work")!=std::string::npos);
             CHECK(!apu.gp_dma_nodes() && std::equal(saved_p.begin(),saved_p.end(),apu.gp_word(0x2800)));
             std::fprintf(stderr,"expected linear executable guard before P/node publication: %s\n",s.c_str());std::exit(2);
         }
@@ -54,7 +55,7 @@ struct Fixture {
     }
     void boot(const std::vector<uint32_t>& p){CHECK(p.size()<=2048);for(unsigned i=0;i<2048;++i)scratch(i*4,i<p.size()?p[i]:0x87);}
     uint32_t events(){uint32_t v;CHECK(apu.gp_read(0xffffc5,v));return v;}
-    void go(unsigned at){CHECK(apu.gp_write(0xffffd4,at));CHECK(apu.gp_write(0xffffd6,1));}
+    void go(unsigned at){CHECK(apu.gp_write(0xffffd4,at));CHECK(apu.gp_write(0xffffd6,1));CHECK(apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));}
 };
 static void mixed_transport() {
     for(unsigned life=0;life<3;++life) {
@@ -74,7 +75,7 @@ static void mixed_transport() {
                 (a>=f.physical(0x3000) && a<f.physical(0x3000)+21);
             if(!transferred)CHECK(f.ram[a]==before[a]);
         }
-        uint32_t v;for(unsigned i=0;i<8;++i)CHECK(f.apu.gp_read(0xffffd6,v) && v==16);
+        uint32_t v;for(unsigned i=0;i<8;++i)CHECK(f.apu.gp_read(0xffffd6,v) && v==0);
         CHECK(f.apu.gp_write(0xffffc5,0x80) && !f.events());
         // Five fields fit at the bank boundary; inaccessible words5/6 have no
         // role in a linear transfer. Host input into P publishes its real epoch.
@@ -95,7 +96,7 @@ static void publication_failures() {
         if(output)f.fail_write=f.physical(0x3000);else f.fail_read=f.physical(0x3000);
         const auto bank=std::vector<uint32_t>(f.apu.gp_word(0x80),f.apu.gp_word(0x80)+6);
         f.node(0x20,0x4000,output?0x59e2:0x59e0,6,0x80,0x2ffd);
-        CHECK(f.apu.gp_write(0xffffd4,0x20));CHECK(!f.apu.gp_write(0xffffd6,1));
+        CHECK(f.apu.gp_write(0xffffd4,0x20));CHECK(f.apu.gp_write(0xffffd6,1) && !f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
         CHECK(f.apu.faulted() && !f.apu.gp_dma_nodes() && f.word(0x24)==0x2ffd);
         CHECK(std::equal(bank.begin(),bank.end(),f.apu.gp_word(0x80)));
         // A real output prefix may persist; a staged input prefix does not
@@ -108,7 +109,7 @@ static void publication_failures() {
         if(mode==1)f.word(0x21)|=0x200; // unknown bit9
         if(mode==2)f.word(0x24)=0x10000; // beyond actual SGE owner
         if(mode==3){f.word(0xffc)=0x4000;f.word(0xffd)=0x59e2;f.word(0xffe)=1;f.word(0xfff)=0x80;}
-        const auto ram=f.ram;CHECK(f.apu.gp_write(0xffffd4,mode==3?0xffc:0x20));CHECK(!f.apu.gp_write(0xffffd6,1));
+        const auto ram=f.ram;CHECK(f.apu.gp_write(0xffffd4,mode==3?0xffc:0x20));CHECK(f.apu.gp_write(0xffffd6,1) && !f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
         CHECK(f.ram==ram && !f.apu.gp_dma_nodes() && f.apu.faulted());
     }
     Fixture lease;lease.boot({0x08f484,1,0x08f485,2,0x08f484,1});
@@ -116,7 +117,7 @@ static void publication_failures() {
     xlle::ApuGpRun run;CHECK(owner.run(100,run) && run.yielded);xlle::ApuVoiceQuantum q;CHECK(owner.start_frame(q) && q.published);
     lease.node(0x20,0x4000,0x59e0,6,0x1400,0x2ffd);
     const auto reads=lease.scratch_reads;const auto ram=lease.ram;const auto mix=std::vector<uint32_t>(lease.apu.gp_word(0x1400),lease.apu.gp_word(0x1400)+1024);
-    CHECK(lease.apu.gp_write(0xffffd4,0x20) && !lease.apu.gp_write(0xffffd6,1));
+    CHECK(lease.apu.gp_write(0xffffd4,0x20) && lease.apu.gp_write(0xffffd6,1) && !lease.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
     CHECK(lease.apu_error.find("MIX publication overlaps")!=std::string::npos && lease.scratch_reads==reads && lease.ram==ram);
     CHECK(std::equal(mix.begin(),mix.end(),lease.apu.gp_word(0x1400)) && !lease.apu.gp_dma_nodes());
 }

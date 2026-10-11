@@ -20,6 +20,10 @@ void xlle_dsp_core_reset(XlleDspCore* core);
 void xlle_dsp_core_invalidate_program(XlleDspCore* core);
 void xlle_dsp_core_begin(XlleDspCore* core,uint32_t pc);
 void xlle_dsp_core_run(XlleDspCore* core,uint32_t cycles);
+// Serialized device-work boundaries use the same actual CPU budget/registers.
+int xlle_dsp_core_add_budget(XlleDspCore* core,uint32_t cycles);
+int xlle_dsp_core_step_budget(XlleDspCore* core);
+int32_t xlle_dsp_core_budget(XlleDspCore* core);
 void xlle_dsp_core_result(XlleDspCore* core,uint32_t* pc,uint32_t* power,uint32_t* sp);
 /* Vendor frame yield is a callback-safe halt request, separate from STOP.
  * Discard only unspent positive budget between runs; preserve instruction

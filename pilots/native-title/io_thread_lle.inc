@@ -227,6 +227,7 @@ const char *pilot_io_device_thread_initial_flags(uint32_t *flags)
 }
 const char *pilot_io_device_thread_execute(uint32_t entry,uint32_t regs[8])
 {
+    if(device_bus_borrow)return "device LLE original CPU reentry from device work";
     struct OriginalThread *thread=native_thread_worker;
     if(!thread || !regs)return "original CPU execution outside admitted thread";
     if(thread->cpu_used || entry<0x10000u || entry>=0x80000000u ||

@@ -98,9 +98,17 @@ typedef const char *(*PilotIoPort)(uint16_t port,int size,int write,uint32_t *va
 void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback);
 /* Device-owned MMIO, shared with compiled guest accesses. Bind after the
  * kernel transport is initialized. Callback runs with its lock held and must
- * not reenter this transport. Passing NULL removes the owned mapping. */
+ * not execute original CPU services recursively. Synchronous bootstrap,
+ * contiguous and pinned RAM DMA may borrow this callback's existing ownership;
+ * every existing extent/PTE/protection/pin check still applies. Passing NULL
+ * removes the owned mapping. */
 typedef const char *(*PilotIoMmio)(uint32_t address,unsigned size,int write,uint32_t *value);
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback);
+/* One device owner samples its external clock between original CPU slices.
+ * Runs under the same synchronous RAM borrow as MMIO; no CPU reentry. Remove
+ * this callback before destroying the device, while the transport is idle. */
+typedef const char *(*PilotIoDeviceWork)(void);
+const char *pilot_io_device_work_bind(PilotIoDeviceWork callback);
 unsigned pilot_io_device_irql(void);
 void pilot_io_device_set_if(int enabled);
 const char *pilot_io_device_irq(unsigned char *guest,int *delivered);

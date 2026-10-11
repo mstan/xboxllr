@@ -6,6 +6,7 @@
 const char *pilot_io_device_vm(unsigned ordinal,unsigned char *guest,
     const uint32_t inputs[5],uint32_t outputs[7],uint32_t *status)
 {
+    if(device_bus_borrow)return "device LLE VM CPU reentry from device work";
     AcquireSRWLockExclusive(&lock);
     if(!guest_memory)initialize(guest);
     if(!failure && (guest_memory!=guest || execution_depth))failure="memory LLE invalid caller context";
