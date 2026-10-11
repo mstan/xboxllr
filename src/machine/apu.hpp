@@ -30,7 +30,7 @@
 namespace xlle {
 
 struct ApuRateState;
-class ApuGpProcessor;
+class ApuDspProcessor;
 struct ApuEnvelopeStep {
     bool running=false;
     float amplitude=0,filter=0;
@@ -94,10 +94,15 @@ public:
         : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)),
           gp_dma_([this](uint32_t a){return gp_word(a);},
                   [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2040,0x20d4,a,data,n,output);},
-                  [this](unsigned i,void* data,uint32_t n,bool output){return gp_fifo(i,data,n,output);},
+                  [this](unsigned i,void* data,uint32_t n,bool output){return dsp_fifo(ApuDspKind::Gp,i,data,n,output);},
                   [this](const std::string& why){device_fault(why);},
                   [this]{return gp_program_write();},
-                  [this]{return gp_mix_publication();}) {}
+                  [this]{return gp_mix_publication();}),
+          ep_dma_([this](uint32_t a){return ep_word(a);},
+                  [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2048,0x20dc,a,data,n,output);},
+                  [this](unsigned i,void* data,uint32_t n,bool output){return dsp_fifo(ApuDspKind::Ep,i,data,n,output);},
+                  [this](const std::string& why){device_fault(why);},
+                  [this]{return ep_program_write();},{},ApuDspKind::Ep) {}
     McpxApu(const McpxApu&)=delete;
     McpxApu& operator=(const McpxApu&)=delete;
 
@@ -192,6 +197,28 @@ public:
            (address>=0x2800 && address<0x3800))return gp_words_.data()+address;
         return nullptr;
     }
+    // EP retains its own smaller X/Y banks and P. Storage is allocated only
+    // for an explicit EP access/owner; the fast native path constructs no CPU.
+    uint32_t* ep_word(uint32_t address) {
+        if(!apu_dsp_bank_end(ApuDspKind::Ep,address))return nullptr;
+        if(!ep_words_)ep_words_=std::make_unique<std::array<uint32_t,0x3800>>();
+        return ep_words_->data()+address;
+    }
+    bool ep_read(uint32_t address,uint32_t& value) {
+        return !faulted_ && ep_dma_.read(address,value);
+    }
+    bool ep_write(uint32_t address,uint32_t value) {
+        return !faulted_ && ep_dma_.write(address,value);
+    }
+    uint64_t ep_dma_nodes()const{return ep_dma_.nodes();}
+    uint64_t ep_program_revision()const{return ep_program_revision_;}
+    bool bind_ep_program_owner(void* owner,ApuDspDma::ProgramWrite guard) {
+        if(!owner || !guard || ep_program_owner_)return false;
+        ep_program_owner_=owner;ep_program_guard_=std::move(guard);return true;
+    }
+    void unbind_ep_program_owner(void* owner) {
+        if(ep_program_owner_==owner){ep_program_owner_=nullptr;ep_program_guard_={};}
+    }
     bool gp_read(uint32_t address,uint32_t& value) {
         if(faulted_ || !gp_dma_.read(address,value))return false;
         if(address==0xffffc5 && gp_frame_pending_)value|=2;
@@ -222,7 +249,7 @@ public:
     // Frame flags are vendor polled events, distinct from core IPR/vector state.
     // A successful real VP transaction owns MIX until that CPU actually yields.
 private:
-    friend class ApuGpProcessor;
+    friend class ApuDspProcessor;
     bool bind_gp_frame_owner(void* owner,std::function<bool()> startup_clear) {
         if(!owner || owner!=gp_program_owner_ || !startup_clear || gp_frame_owner_)return false;
         gp_frame_owner_=owner;gp_startup_clear_=std::move(startup_clear);return true;
@@ -271,6 +298,14 @@ public:
         }
         return true;
     }
+    bool ep_scratch(uint32_t address,void* data,uint32_t bytes,bool output) {
+        if(faulted_)return false;
+        if((bytes && !data) || (reg32(0x2048)&7) ||
+           !gp_sge(0x2048,0x20dc,address,data,bytes,output)) {
+            device_fault("EP owned scratch transfer failed");return false;
+        }
+        return true;
+    }
 
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
@@ -278,6 +313,11 @@ public:
         if(off>=0x30000 && off<0x40000) {
             uint32_t* word=gp_host_word(off,size);
             if(!word){device_fault("unqualified GP host read");return 0;}
+            return *word&0xffffff;
+        }
+        if(off>=0x50000 && off<0x60000) {
+            uint32_t* word=ep_host_word(off,size);
+            if(!word){device_fault("unqualified EP host read");return 0;}
             return *word&0xffffff;
         }
         if (off == kXgscnt)
@@ -315,6 +355,14 @@ public:
                 device_fault("GP executable host publication was rejected");return;
             }
             if(off>=0x35000 && off<0x36000 && !gp_mix_publication())return;
+            *word=value&0xffffff;return;
+        }
+        if(off>=0x50000 && off<0x60000) {
+            uint32_t* word=ep_host_word(off,size);
+            if(!word){device_fault("unqualified EP host write/reset");return;}
+            if(off>=0x5a000 && off<0x5e000 && !ep_program_write()) {
+                device_fault("EP executable host publication was rejected");return;
+            }
             *word=value&0xffffff;return;
         }
         if (off == kIsts && size == 4) {
@@ -425,6 +473,10 @@ private:
         if(gp_program_guard_ && !gp_program_guard_())return false;
         ++gp_program_revision_;return true;
     }
+    bool ep_program_write() {
+        if(ep_program_guard_ && !ep_program_guard_())return false;
+        ++ep_program_revision_;return true;
+    }
     bool gp_mix_publication(bool voice_processor=false) {
         if(!gp_mix_lease_ && (!gp_mix_admitting_ || (voice_processor && !processing_quantum_)))return true;
         device_fault("GP MIX publication overlaps an outstanding frame");return false;
@@ -438,6 +490,13 @@ private:
         offset-=0x30000;
         if(offset<0x4000 || (offset>=0x5000 && offset<0x8000) ||
            (offset>=0xa000 && offset<0xe000))return gp_word(offset/4);
+        return nullptr;
+    }
+    uint32_t* ep_host_word(uint32_t offset,int size) {
+        if(size!=4 || (offset&3))return nullptr;
+        offset-=0x50000;
+        if(offset<0x3000 || (offset>=0x6000 && offset<0x6400) ||
+           (offset>=0xa000 && offset<0xe000))return ep_word(offset/4);
         return nullptr;
     }
     bool gp_sge(uint32_t table,uint32_t maximum,uint32_t linear,void* data,uint32_t bytes,bool output) {
@@ -455,9 +514,9 @@ private:
         }
         return true;
     }
-    bool gp_fifo(unsigned index,void* data,uint32_t bytes,bool output) {
+    bool dsp_fifo(ApuDspKind kind,unsigned index,void* data,uint32_t bytes,bool output) {
         if(index>=(output?4u:2u))return false;
-        const uint32_t registers=(output?0x3024:0x3064)+index*16;
+        const uint32_t registers=(kind==ApuDspKind::Gp?0x3000:0x4000)+(output?0x24:0x64)+index*16;
         const uint32_t base=reg32(registers),end=reg32(registers+4);
         uint32_t cursor=reg32(registers+8);
         // Bounded low-24-bit address fields; BASE alignment is still uncertain
@@ -469,7 +528,7 @@ private:
         auto* next=static_cast<uint8_t*>(data);
         while(bytes) {
             const uint32_t n=bytes<(end-cursor)?bytes:end-cursor;
-            if(!gp_sge(0x2044,0x20d8,cursor,next,n,output))return false;
+            if(!gp_sge(kind==ApuDspKind::Gp?0x2044:0x204c,kind==ApuDspKind::Gp?0x20d8:0x20e0,cursor,next,n,output))return false;
             next+=n;bytes-=n;cursor+=n;
             if(cursor==end)cursor=base;
         }
@@ -843,6 +902,11 @@ private:
     std::function<bool()> gp_startup_clear_;
     bool gp_mix_lease_=false,gp_frame_pending_=false,gp_mix_admitting_=false;
     ApuGpDma gp_dma_;
+    std::unique_ptr<std::array<uint32_t,0x3800>> ep_words_;
+    uint64_t ep_program_revision_=0;
+    void* ep_program_owner_=nullptr;
+    ApuDspDma::ProgramWrite ep_program_guard_;
+    ApuDspDma ep_dma_;
     int sub_logged_ = 0;
 };
 

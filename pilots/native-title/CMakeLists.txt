@@ -144,6 +144,13 @@ if(PILOT_AUDIO_BACKEND STREQUAL "XAUDIO2_DSP")
   add_executable(pilot_gp_linear_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_gp_linear.cpp")
   target_link_libraries(pilot_gp_linear_test PRIVATE xlle_apu_gp_processor)
   add_test(NAME pilot_gp_linear_contract COMMAND pilot_gp_linear_test)
+  add_executable(pilot_ep_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_ep.cpp")
+  target_link_libraries(pilot_ep_test PRIVATE xlle_apu_gp_processor)
+  add_test(NAME pilot_ep_contract COMMAND pilot_ep_test)
+  add_test(NAME pilot_ep_guards COMMAND "${CMAKE_COMMAND}"
+    "-DPROGRAM=$<TARGET_FILE:pilot_ep_test>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/apu_ep_guards.cmake")
+  set_tests_properties(pilot_ep_contract pilot_ep_guards PROPERTIES TIMEOUT 20)
   set_tests_properties(pilot_gp_linear_contract PROPERTIES TIMEOUT 20)
   add_executable(pilot_gp_lle_test audio_gp_lle_test.cpp)
   target_include_directories(pilot_gp_lle_test PRIVATE "${PILOT_DSP_SOURCE}/crates/emu-ffi/include")

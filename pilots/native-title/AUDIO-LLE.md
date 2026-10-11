@@ -1236,6 +1236,73 @@ remain bound to their original sources. Full boot/graph, in-run P/bit9 reload,
 hardware reset/cadence, timer production and EP/output remain open. This adds
 no work to the default fast HLE path and closes no broader audio-family gate.
 
+## Distinct EP processor and physical output foundation (.113.7)
+
+The maintained APU now owns separate EP X/Y/P banks, EPSADDR/EPSMAXSGE scratch
+transport and EPFADDR/EPFMAXSGE FIFO transport. The fixed EP profile has
+3072 X words, 256 Y words and 4096 P words, with no GP MIX alias. EP host
+apertures expose only those banks; holes, unsupported widths and EPRST remain
+guarded. EP bank storage is lazy, and an explicit `ApuEpProcessor` selects its
+own CPU, program-publication epoch and cache owner. The existing GP interface
+and its actual VP/MIX lease remain intact. Both processors use one maintained
+DMA implementation and the same pinned MIT DSP core, with a fixed hardware
+instance selecting banks and physical tables. There is no second persistent
+sample graph or direct-speaker path.
+
+The representative authored chain admits a real VP quantum, has actual GP
+instructions publish planar samples through physical scratch pages, and has
+actual EP instructions consume those pages into its own X bank, form stereo
+pairs and publish PCM16 bytes through its real output FIFO. Independent caller
+RAM expectations check every output byte and every untouched byte. The chain
+covers 30 packets across three APU lifetimes, simultaneous GP/EP owners, an EP
+CPU replacement, source/output page remapping, a page-crossing scratch packet
+and the original-size output ring's wrap. Nominal source-rate waveform checks
+retain the existing tolerance; transport bytes and cursors are exact. Failed
+input staging does not publish its bank/node; a later output-page failure may
+leave its real prefix while retaining CUR/node ownership and terminal failure.
+No EP host access, reset or yield can borrow/release the GP frame lease.
+
+The original driver provides independent ownership evidence. Original
+`17B999` configures separate EP output rings of `2000` and `4000` bytes. Original
+`17CD84` stages an 800-byte EP prefix and a 1532-byte helper block at P:`180`.
+The unchanged entry executes on the actual EP CPU and stops at B2 configuration.
+An authored caller executes unchanged original `276` and `2E1`, builds its
+five-word linear descriptor in P and stops before sample/node/output publication
+because the original control sets unknown bit9. Original `288` selects linear
+output, `29A` constructs a four-word noninterleaved FIFO descriptor, and `2B1`
+constructs interleaved FIFO output; these observations do not admit their
+unknown bit9 semantics. The maintained owner now fetches four FIFO fields,
+five linear fields or seven circular fields, according to the actual object.
+
+The [XboxDevWiki DSP observations](https://xboxdevwiki.net/DSP) establish the
+distinct bank sizes and shared descriptor structure; the [APU description](https://xboxdevwiki.net/APU)
+explains physical scratch communication and the separate audio-codec consumer.
+Pinned xemu register locations and original driver accesses identify the EP
+tables and apertures. Its GP-sized EP memory map, monitor speaker/silence
+replacement and guessed EP cadence are not adopted. No GPL implementation
+body is copied. The existing prepared MIT core/library and source samplerate
+cache are reused without rebuilding a preserved reference DLL.
+
+This qualifies a bounded physical producer/consumer foundation. It does not
+qualify original EP firmware boot/graph/output: dynamic original P/table
+loading, B0..B3, bit9 executable reload, hardware EPRST/bootstrap, EP frame
+admission/cadence and AC97 consumption remain open. The original helper's
+later RUNNING-to-idle wait also needs genuine DMA lifecycle ownership; status
+reads never manufacture progress. Supported authored programs explicitly
+STOP between transfers and do not replace that original completion contract.
+Fine silicon phase/precision questions can remain deferred after each genuine
+producer exists. The default fast HLE constructs neither DSP CPU nor EP banks
+and gains no processing work. No playback, title run or physical console
+operation is part of this batch; the broader audio gate remains open.
+
+Private evidence is retained in
+`build/blinx/audio-ep-foundation-20261010/qualified-batch.aot-private.json` and
+`original-ep-reference.aot-private.json`. Original bytes stay private. Earlier
+.113.4/.113.5/.113.6 evidence remains frozen at its original source identities.
+The initial new FIFO-boundary fixture requested one PCM16 word, violating the
+existing even-word extent guard. Its failure log and source identities are
+retained; the fixture now uses two words without relaxing production behavior.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

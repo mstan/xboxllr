@@ -16,17 +16,32 @@ static void unmapped_write(void* opaque,uint32_t address,uint32_t value) {
 }
 #define BUFFER(a,b,c) {a,b,DSP56300_REGION_BUFFER,{.buffer={c,0}}}
 #define GUARD(a,b) {a,b,DSP56300_REGION_CALLBACK,{.callback={core,unmapped_read,unmapped_write}}}
-XlleDspCore* xlle_dsp_core_create(uint32_t* p,uint32_t* x,uint32_t* y,uint32_t* mix,
+static XlleDspCore* create_instance(int gp,uint32_t* p,uint32_t* x,uint32_t* y,uint32_t* mix,
     void* opaque,XlleDspRead read,XlleDspWrite write,XlleDspFault fault) {
-    if(!p || !x || !y || !mix || !read || !write || !fault)return NULL;
+    if(!p || !x || !y || (gp && !mix) || !read || !write || !fault)return NULL;
     XlleDspCore* core=calloc(1,sizeof(*core));if(!core)return NULL;
     core->opaque=opaque;core->fault=fault;
     Dsp56300MemoryRegion pr[]={BUFFER(0,4096,p),GUARD(4096,0x1000000)};
     Dsp56300MemoryRegion xr[]={BUFFER(0,4096,x),GUARD(4096,0x1400),BUFFER(0x1400,0x1800,mix),
         {0x1800,0x1000000,DSP56300_REGION_CALLBACK,{.callback={opaque,read,write}}}};
     Dsp56300MemoryRegion yr[]={BUFFER(0,2048,y),GUARD(2048,0x1000000)};
-    Dsp56300CreateInfo info={.memory_map={xr,4,yr,2,pr,2}};
+    if(!gp) {
+        xr[0]=(Dsp56300MemoryRegion)BUFFER(0,3072,x);
+        xr[1]=(Dsp56300MemoryRegion)GUARD(3072,0xffff80);
+        xr[2]=(Dsp56300MemoryRegion){0xffff80,0x1000000,DSP56300_REGION_CALLBACK,{.callback={opaque,read,write}}};
+        yr[0]=(Dsp56300MemoryRegion)BUFFER(0,256,y);
+        yr[1]=(Dsp56300MemoryRegion)GUARD(256,0x1000000);
+    }
+    Dsp56300CreateInfo info={.memory_map={xr,gp?4:3,yr,2,pr,2}};
     core->dsp=dsp56300_create(&info);if(!core->dsp){free(core);return NULL;}return core;
+}
+XlleDspCore* xlle_dsp_core_create(uint32_t* p,uint32_t* x,uint32_t* y,uint32_t* mix,
+    void* opaque,XlleDspRead read,XlleDspWrite write,XlleDspFault fault) {
+    return create_instance(1,p,x,y,mix,opaque,read,write,fault);
+}
+XlleDspCore* xlle_dsp_core_create_ep(uint32_t* p,uint32_t* x,uint32_t* y,
+    void* opaque,XlleDspRead read,XlleDspWrite write,XlleDspFault fault) {
+    return create_instance(0,p,x,y,NULL,opaque,read,write,fault);
 }
 void xlle_dsp_core_destroy(XlleDspCore* core){if(core){dsp56300_destroy(core->dsp);free(core);}}
 void xlle_dsp_core_reset(XlleDspCore* core){dsp56300_reset(core->dsp);}

@@ -1,8 +1,9 @@
-// Explicit GP CPU and mapped-bootstrap owner. No GPRST MMIO, silicon cadence,
-// retail direct-speaker framework, FIFO completion or EP output is supplied.
+// Explicit GP/EP CPU and mapped-bootstrap ownership. Hardware reset/cadence,
+// original graph/output and the audio-codec consumer remain separate contracts.
 #pragma once
 #include "machine/apu.hpp"
 #include "machine/apu_dsp_core.h"
+#include <utility>
 
 namespace xlle {
 enum class ApuGpPhase { Held,Ready,Running,Yielded,Stopped,Failed };
@@ -14,28 +15,28 @@ struct ApuGpRun {
     uint32_t cycles=0,unused_cycles=0;
 };
 
-class ApuGpProcessor {
+// Common lifetime/cache/run owner with a fixed hardware instance. Public
+// wrappers select GP or EP explicitly; only GP exposes real VP frame admission.
+class ApuDspProcessor {
 public:
     // APU banks and callback storage must outlive this sole CPU owner. All
     // owner/MMIO/DMA entry points are serialized by the caller. External P
-    // publication uses host MMIO or GP DMA; raw bank pointers are retained
+    // publication uses host MMIO or that DSP's DMA; raw bank pointers are retained
     // by the core/owner, not a second external executable-write path.
-    ApuGpProcessor(McpxApu& apu,FaultFn fault);
-    ~ApuGpProcessor();
-    ApuGpProcessor(const ApuGpProcessor&)=delete;
-    ApuGpProcessor& operator=(const ApuGpProcessor&)=delete;
+    ApuDspProcessor(const ApuDspProcessor&)=delete;
+    ApuDspProcessor& operator=(const ApuDspProcessor&)=delete;
     bool reset_cpu();
     // Fixed mapped profile from the pinned reference: 2048 little-endian
     // DWORDs from scratch offset0 become P[0..2047], masked to24 bits. This
     // profile remains distinct from an observed MCPX hardware bootstrap.
     bool bootstrap_from_scratch();
     bool run(uint32_t cycles,ApuGpRun& result);
-    // Caller supplies cadence, not event contents: process the actual VP and
-    // resume only after its complete bank publication. A disabled/idle quantum
-    // remains yielded and posts nothing. MIX stays leased until actual yield.
-    bool start_frame(ApuVoiceQuantum& result);
     ApuGpPhase phase()const{return phase_;}
     uint64_t bootstraps()const{return bootstraps_;}
+protected:
+    ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind);
+    ~ApuDspProcessor();
+    bool start_gp_frame(ApuVoiceQuantum& result);
 private:
     bool fail(const char* why);
     bool permit_program_write();
@@ -43,10 +44,19 @@ private:
     static void write(void* opaque,uint32_t address,uint32_t value);
     static void core_fault(void* opaque,const char* why,uint32_t address);
     McpxApu& apu_;
+    const ApuDspKind kind_;
     FaultFn fault_;
     XlleDspCore* core_=nullptr;
     ApuGpPhase phase_=ApuGpPhase::Held;
     uint64_t bootstraps_=0,runs_=0,program_revision_=0;
     bool executing_=false,bound_=false,frame_bound_=false,initializing_=false;
+};
+class ApuGpProcessor final:public ApuDspProcessor {
+public:
+    ApuGpProcessor(McpxApu& apu,FaultFn fault):ApuDspProcessor(apu,std::move(fault),ApuDspKind::Gp){}
+    // Caller supplies cadence, not event contents: process the actual VP and
+    // resume only after its complete bank publication. A disabled/idle quantum
+    // remains yielded and posts nothing. MIX stays leased until actual yield.
+    bool start_frame(ApuVoiceQuantum& result){return start_gp_frame(result);}
 };
 } // namespace xlle

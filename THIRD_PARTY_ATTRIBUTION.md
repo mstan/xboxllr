@@ -1703,6 +1703,15 @@ facts; no original helper body is committed. Actual file/VM/close operations
 reuse the already credited original-kernel, Unicorn and device reference floor.
 The read-only launch observation executes unchanged private owned code.
 
+
+The common fixed-instance GP/EP bank, CPU, DMA and physical output ownership
+adapters and coherent producer/consumer fixtures are authored here. XboxDevWiki
+DSP/APU observations supply bank sizes and physical communication facts. The
+already pinned xemu register locations and unchanged private driver accesses
+are factual references only; no GPL implementation body, donor GP-sized EP map,
+monitor-speaker substitute or guessed cadence is adopted. The credited pinned
+MIT DSP core/library and samplerate cache remain the implementation dependencies.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

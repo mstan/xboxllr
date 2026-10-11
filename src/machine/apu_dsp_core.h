@@ -11,6 +11,9 @@ typedef void (*XlleDspWrite)(void*,uint32_t,uint32_t);
 typedef void (*XlleDspFault)(void*,const char*,uint32_t);
 XlleDspCore* xlle_dsp_core_create(uint32_t* p,uint32_t* x,uint32_t* y,uint32_t* mix,
     void* opaque,XlleDspRead read,XlleDspWrite write,XlleDspFault fault);
+/* EP has3072 X words,256 Y words,4096 P words and no MIX alias. */
+XlleDspCore* xlle_dsp_core_create_ep(uint32_t* p,uint32_t* x,uint32_t* y,
+    void* opaque,XlleDspRead read,XlleDspWrite write,XlleDspFault fault);
 void xlle_dsp_core_destroy(XlleDspCore* core);
 /* CPU state/cache boundaries; neither resets the caller's memory/peripherals. */
 void xlle_dsp_core_reset(XlleDspCore* core);

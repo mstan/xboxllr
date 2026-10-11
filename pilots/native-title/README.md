@@ -32,7 +32,12 @@ optional pilot check. Unchanged builders and control/parameter helpers execute
 15 real SGE transfers across three lifetimes; five-word descriptor ownership,
 failure prefixes and existing P/MIX guards are retained. B0..B3 identity and
 production remain unresolved requirements. Full GP graph/output remains
-required. The default HLE gains no DSP work.
+required. The distinct EP foundation now passes18 focused checks and two fresh
+optional pilot checks. Thirty actual VP/GP scratch-to-EP/FIFO packets retain
+exact caller RAM, separate banks/CPU/program ownership and GP MIX leases across
+three lifetimes and EP replacements. Original EP boot and descriptor bit9 remain
+guarded; genuine DMA completion, frame admission/cadence and AC97 consumption
+are still required. The default HLE gains no DSP work.
 
 Original ROM reads additionally require the owned256KiB flash input, configured
 with `-DPILOT_IO_DEVICE_ROM=F:/Projects/xboxlle/machine/flash-dump-ff000000.bin`.

@@ -6,9 +6,10 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include "machine/apu_dsp_layout.hpp"
 
 namespace xlle {
-class ApuGpDma {
+class ApuDspDma {
 public:
     using Word=std::function<uint32_t*(uint32_t)>;
     using Bytes=std::function<bool(uint32_t,void*,uint32_t,bool)>;
@@ -16,9 +17,9 @@ public:
     using Fault=std::function<void(const std::string&)>;
     using ProgramWrite=std::function<bool()>;
     using MixWrite=std::function<bool()>;
-    ApuGpDma(Word word,Bytes bytes,Fifo fifo,Fault fault,ProgramWrite program_write={},MixWrite mix_write={})
+    ApuDspDma(Word word,Bytes bytes,Fifo fifo,Fault fault,ProgramWrite program_write={},MixWrite mix_write={},ApuDspKind kind=ApuDspKind::Gp)
         :word_(std::move(word)),bytes_(std::move(bytes)),fifo_(std::move(fifo)),
-         fault_(std::move(fault)),program_write_(std::move(program_write)),mix_write_(std::move(mix_write)){}
+         fault_(std::move(fault)),program_write_(std::move(program_write)),mix_write_(std::move(mix_write)),kind_(kind){}
     bool read(uint32_t address,uint32_t& value) {
         if(failed_)return false;
         switch(address) {
@@ -58,13 +59,12 @@ public:
     }
     uint64_t nodes()const{return nodes_;}
 private:
-    static uint32_t bank_end(uint32_t address) {
-        if(address<0x1800)return 0x1800;
-        if(address<0x2000)return 0x2000;
-        if(address>=0x2800 && address<0x3800)return 0x3800;
-        return 0;
+    uint32_t bank_end(uint32_t address)const{return apu_dsp_bank_end(kind_,address);}
+    bool fail(const char* why){
+        failed_=true;std::string reason(why);
+        if(kind_==ApuDspKind::Ep)for(size_t at=0;(at=reason.find("GP",at))!=std::string::npos;at+=2)reason.replace(at,2,"EP");
+        fault_(reason);return false;
     }
-    bool fail(const char* why){failed_=true;fault_(why);return false;}
     bool run() {
         if(!(control_&16) || (control_&8))return true;
         for(unsigned limit=0;!(next_&0x4000);++limit) {
@@ -81,7 +81,7 @@ private:
             }
             const uint32_t format=(node[1]>>10)&7,buffer=(node[1]>>5)&15;
             const bool linear=buffer==15,circular=buffer==14;
-            const unsigned field_count=linear?5:7;
+            const unsigned field_count=circular?7:(linear?5:4);
             if(next_+field_count>bank_end(next_))return fail("GP DMA descriptor crosses memory bank");
             for(unsigned i=2;i<field_count;++i) {
                 fields[i]=word_(next_+i);
@@ -111,7 +111,7 @@ private:
             }
             // The VP/host/input-DMA bank publisher cannot take a GP frame's
             // leased MIX. Check before any physical input or FIFO cursor work.
-            if(!output && node[3]<0x1800 && uint64_t(node[3])+count>0x1400 &&
+            if(kind_==ApuDspKind::Gp && !output && node[3]<0x1800 && uint64_t(node[3])+count>0x1400 &&
                mix_write_ && !mix_write_())
                 return fail("GP MIX DMA publication was rejected");
             const uint32_t size=node[6]+1,width=format==1?2:4;uint32_t offset=node[4];
@@ -152,7 +152,9 @@ private:
         interrupts_|=0x80;return true;
     }
     Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;ProgramWrite program_write_;MixWrite mix_write_;
+    const ApuDspKind kind_;
     uint32_t next_=0,start_=0,control_=32,interrupts_=0;
     uint64_t nodes_=0;bool failed_=false;
 };
+using ApuGpDma=ApuDspDma; // Source compatibility for the qualified GP interface.
 } // namespace xlle
