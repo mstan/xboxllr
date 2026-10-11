@@ -3532,6 +3532,22 @@ bool Nv2a::execute_draw_spans(DrawJob& job) {
 }
 
 bool Nv2a::submit_vertex_batch() {
+    // An incomplete triangle/strip/fan cannot reach a fragment or sampler.
+    // Still fetch and transform its vertices below: shader/state effects and
+    // invalid memory are not waived by the absence of raster primitives.
+    // Keep the host renderer's existing admission boundary unchanged.
+#if XLLE_RENDERER_HLE
+    constexpr bool no_raster_primitives = false;
+#else
+    const bool one_vertex_source =
+        unsigned(!vertex_indices_.empty()) + unsigned(!inline_vertices_.empty()) +
+        unsigned(!immediate_vertices_.empty()) == 1;
+    const size_t pending_vertices = !vertex_indices_.empty() ? vertex_indices_.size()
+                                 : !inline_vertices_.empty() ? inline_vertices_.size()
+                                                            : immediate_vertices_.size();
+    const bool no_raster_primitives = one_vertex_source && pending_vertices < 3 &&
+                                     primitive_mode_ >= 5 && primitive_mode_ <= 7;
+#endif
     // Preserve the original software handler's control writes and ordering,
     // but never silently draw using an unimplemented enabled noise mode.
     // This conservative boundary covers every raster/backend path before
@@ -3540,7 +3556,7 @@ bool Nv2a::submit_vertex_batch() {
         if(dxt1_noise_control_[0]!=dxt1_noise_control_[1]) {
             fault_("NV2A DXT1 noise control banks disagree");return false;
         }
-        if(dxt1_noise_control_[0]) {
+        if(dxt1_noise_control_[0] && !no_raster_primitives) {
             fault_("NV2A DXT1 noise pixel behavior remains unqualified");return false;
         }
     }
@@ -4570,7 +4586,9 @@ bool Nv2a::submit_vertex_batch() {
         if (perf::g_enabled) t.emplace(perf::g_ns_raster, perf::g_calls_raster);
         // Stage (d): inline, immediately, at the latch point. Stage (e) publishes
         // the job to a ring and a worker calls this same function.
-        raster_ok = execute_draw_job(job, raster_executed);
+        // Retire the same owned transform buffer without sampler setup,
+        // fragment work, deferred publication, or successful-raster telemetry.
+        raster_ok = no_raster_primitives || execute_draw_job(job, raster_executed);
     }
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
     if (!raster_ok)

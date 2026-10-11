@@ -84,15 +84,20 @@ struct Fixture {
         emit(0x1d90, color); emit(0x1d98, 63u<<16); emit(0x1d9c, 63u<<16);
         emit(0x1d94, 0xf0);
     }
-    void draw(unsigned route, uint32_t packed=0, uint32_t clear_color=0xff102030) {
+    void draw(unsigned route, uint32_t packed=0, uint32_t clear_color=0xff102030,
+              unsigned count=3, uint32_t primitive=5) {
         clear(clear_color); emit(0x17c8, 1); emit(0x17cc, 1);
-        put(report+12, 0xffffffff); emit(0x17fc, 5);
-        if (route==0) emit(0x1810, 1 | (2u<<24)); // DRAW_ARRAYS, first=1
-        else if (route==1) { emit(0x1800, 0x00020001); emit(0x1808, 3); }
-        else if (route==2) for (unsigned i=1; i<=3; ++i) {
+        put(report+12, 0xffffffff); emit(0x17fc, primitive);
+        if (route==0) emit(0x1810, 1 | ((count-1u)<<24)); // DRAW_ARRAYS, first=1
+        else if (route==1) {
+            unsigned i=1;
+            for (; i<count; i+=2) emit(0x1800, i | ((i+1u)<<16));
+            if (i<=count) emit(0x1808, i);
+        }
+        else if (route==2) for (unsigned i=1; i<=count; ++i) {
             for (unsigned lane=0; lane<4; ++lane) emit(0x1818, get(positions+i*16+lane*4));
             emit(0x1818, packed); // INLINE_ARRAY: position float4 + packed color
-        } else for (unsigned i=1; i<=3; ++i) {
+        } else for (unsigned i=1; i<=count; ++i) {
             for (unsigned lane=0; lane<3; ++lane) emit(0x1518+lane*4, get(positions+i*16+lane*4));
             emit(0x194c, packed); // SET_VERTEX_DATA4UB remains RGBA, regardless of array format.
             emit(0x1524, bits(1));
@@ -178,6 +183,67 @@ static void noise_control_boundary() {
             CHECK(f.get(Fixture::report+12)==0xffffffff);
         }
     }
+}
+
+static void noise_empty_assembly() {
+    // A triangle needs three vertices before there can be any fragment or
+    // texture sampling. This does not assume a scope or an algorithm for noise.
+    for (unsigned route=0; route<4; ++route) {
+        Fixture f((route&1)!=0);
+        f.emit(0x176c,0x440); // diffuse array/inline UB_D3D
+        f.clear(); f.kick();
+        const std::vector<uint8_t> color(f.ram.begin()+Fixture::frame,
+                                       f.ram.begin()+Fixture::frame+64*64*4);
+        const std::vector<uint8_t> depth(f.ram.begin()+0x18000,
+                                       f.ram.begin()+0x18000+64*64*4);
+        for (uint32_t address : {0xe00050u,0xdf0008u}) {
+            f.write(0x400750,address); f.write(0x400754,1);
+        }
+        for (unsigned count : {1u,2u}) {
+            ++cases;
+            const uint32_t primitive=5+(route+count)%3; // triangles, strip, fan
+            f.draw(route,0x7f563412,0xff102030,count,primitive);
+            if (!f.fault.empty()) std::printf("empty noise fault: %s\n",f.fault.c_str());
+            CHECK(f.fault.empty());
+            CHECK(f.gpu->last_transformed_batch().size()==count);
+            CHECK(!f.gpu->generic_combiner_attempted_batches());
+            CHECK(!f.gpu->generic_combiner_executed_batches());
+            CHECK(!f.gpu->generic_combiner_writes());
+            CHECK(f.gpu->seam_jobs_not_executed()==count);
+            CHECK(!f.gpu->seam_jobs_threadable() && !f.gpu->draw_jobs_inline());
+            CHECK(std::equal(color.begin(),color.end(),f.ram.begin()+Fixture::frame));
+            CHECK(std::equal(depth.begin(),depth.end(),f.ram.begin()+0x18000));
+            CHECK(f.get(Fixture::report+12)==0 && f.get(Fixture::report+8)==0);
+            CHECK(f.gpu->mmio_read(xlle::Nv2a::kBase+0x800044,4)==f.cursor);
+            for (uint32_t address : {0xe00050u,0xdf0008u}) {
+                f.write(0x400750,address);
+                CHECK(f.gpu->mmio_read(xlle::Nv2a::kBase+0x400754,4)==1);
+            }
+        }
+        // Completed BEGIN/END must retire its vertices: one following genuine
+        // triangle still hits the original guard, without publishing a report.
+        f.draw(route,0x7f563412,0xff102030,3,6);
+        CHECK(f.fault=="NV2A DXT1 noise pixel behavior remains unqualified");
+        CHECK(f.get(Fixture::report+12)==0xffffffff);
+        CHECK(std::equal(color.begin(),color.end(),f.ram.begin()+Fixture::frame));
+        CHECK(std::equal(depth.begin(),depth.end(),f.ram.begin()+0x18000));
+        CHECK(!f.gpu->generic_combiner_attempted_batches());
+    }
+    // Zero assembled primitives do not waive bank agreement or vertex fetch.
+    Fixture mismatch(false);
+    mismatch.write(0x400750,0xe00050); mismatch.write(0x400754,1);
+    mismatch.draw(0,0,0xff102030,1,6);
+    CHECK(mismatch.fault=="NV2A DXT1 noise control banks disagree");
+    CHECK(mismatch.get(Fixture::report+12)==0xffffffff);
+    Fixture invalid(true);
+    for (uint32_t address : {0xe00050u,0xdf0008u}) {
+        invalid.write(0x400750,address); invalid.write(0x400754,1);
+    }
+    invalid.emit(0x1720,uint32_t(invalid.ram.size()));
+    invalid.draw(0,0,0xff102030,1,7);
+    CHECK(!invalid.fault.empty() && invalid.fault.find("noise")==std::string::npos);
+    CHECK(invalid.get(Fixture::report+12)==0xffffffff);
+    CHECK(!invalid.gpu->generic_combiner_attempted_batches());
 }
 
 static void fog_program(Fixture& f, unsigned mask, bool varying=false) {
@@ -919,7 +985,7 @@ static void generic_quads() {
 
 int main() {
     packed_formats(); surface_reuse(); immediate_control();
-    noise_control_boundary();
+    noise_control_boundary(); noise_empty_assembly();
     programmable_fog();
     texture_mips();
     texture_packed_formats();
