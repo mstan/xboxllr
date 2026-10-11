@@ -205,7 +205,14 @@ static void scheduler_configure(void)
 {
     const char *value=getenv("XLLE_PILOT_GUEST_SCHEDULER");
     if(value && strcmp(value,"0") && strcmp(value,"1"))stop("invalid guest scheduler selection",0);
-    scheduler_enabled=value && !strcmp(value,"1");
+#ifdef PILOT_SCHEDULING_LLE
+    scheduler_enabled=0; /* The original kernel is the sole CPU owner. */
+#else
+    /* Movie workers depend on guest readiness/priority ordering. The
+     * qualified scheduler is required for normal native title execution;
+     * explicit0 remains a diagnostic comparison, not the default route. */
+    scheduler_enabled=!value || !strcmp(value,"1");
+#endif
     if(scheduler_enabled)fprintf(stderr,"[SCHEDULER] bounded single-CPU priority scheduler; no timeout overrides\n");
 }
 #ifdef PILOT_USB_LLE

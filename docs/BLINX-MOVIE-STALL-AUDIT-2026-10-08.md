@@ -193,3 +193,55 @@ audio tail difference persists in both scheduler configurations.
 was reviewed to distinguish the independent decoder comparison from the native
 PCM service contract. No FFmpeg decoder implementation was imported. Its
 comparison output alone does not prove the original Xbox decoder's exact tail.
+
+## Current default HLE opening acceptance - 2026-10-11
+
+The native priority/readiness scheduler is now the default when
+`XLLE_PILOT_GUEST_SCHEDULER` is unset. Explicit0 remains a diagnostic comparison;
+the selected original-kernel scheduling build disables the native scheduler so
+the actual kernel retains sole CPU ownership. The maintained scheduler body,
+original movie decoder, queue sizes and timeout rules are unchanged. Earlier
+working movie runs explicitly selected1; an unset current native v61 observation
+still stopped after Microsoft. The correction is required default behavior,
+not an elective setting.
+
+The fresh immutable muted v62 observation runs193.875s, ending at the harness
+deadline after reaching Microsoft, Artoon, op01, h_title02a and gameplay. It
+has no terminal guard/fault. One opening completes normally: its distinctive
+reference frame2263 appears in36 real presents with luma RMSE0.09449; the real
+op01 voice consumes3,332,197 frames/75.560s, stops, and is destroyed at96.894s.
+The next title movie opens at97.399s. Reference terminal PTS is absent and remains
+null; actual frame content, voice lifecycle and transition support completion
+without inventing an encoded EOS timestamp.
+
+All36,347 ingress records are complete; every recorded submission equals its
+prior caller-owned ring bytes, with zero mismatched/unknown bytes or overflow.
+The opening voice retains7,560 submissions/13,335,840 bytes at44.1kHz. Current
+149.96s PCM capture is finite, and fresh fixed-offset output versus nominally
+resampled current caller PCM has full75.6s RMSE0.008011/0.007947 and correlation
+0.999434/0.999491. Quiet74s windows have RMSE about0.0000193/0.0000196. These
+are current mixer-output comparisons, not inherited metrics from the earlier GP
+scratch packing. There is no per-window realignment or assumed exact independent
+ADX decoder identity. Representative source pictures reach the actual final
+frame;850 separated nonflat A/V matches have median28.1ms, p9542.3ms and
+max74.1ms error within the captured mixer/present clocks. Physical monitor/
+speaker latency and exact scanout are outside that observation.
+
+Private final proof is
+`movie-default-v62-analysis-20261011/qualified-offline-opening-final.aot-private.json`
+(SHA256 `1749136daaa56722319f92e4dc5cfa7db819a4401091dc0c3292aaa25819d58b`).
+It verifies25 run artifacts and104 frozen snapshots across52-input pre/post
+source manifests. Those manifests differ solely in thread_scheduler.inc.
+The earlier v61 audit captured current source after the concurrent default edit;
+it is not relabeled as pre-edit native compiler provenance. Its unchanged
+negative runtime artifacts remain valid, while complete prior native build
+identity is explicitly limited. The old original-LLE executable is not used as
+the old native executable. The first parser failure and corrected missing-PTS
+handling are retained.
+
+This qualifies one current default-native opening and normal title transition.
+Whole movies/A-V remains open for current interruption/menu/reentry, more than
+one complete opening lifetime and composed-original-LLE startup/pacing. The
+minimal source-bound acceptance plan is retained under `.73.1`; no further
+human still/ear review or playback run is needed to establish this bounded case.
+No physical Xbox operation or audible playback occurred.
