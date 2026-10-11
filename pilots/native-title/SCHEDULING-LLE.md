@@ -534,9 +534,29 @@ built and passed. Neither old failure is relabelled as qualification of this
 generation. After Marvel Rivals exited, fresh graphics/native-audio follow-up
 passed both entries on four cores at Normal priority. The representative muted
 title run then stopped after 144.062s and five captures at HRESULT `0x087a0001`
-(`DXGI_STATUS_OCCLUDED`). The hidden-window presentation guard currently rejects
+(`DXGI_STATUS_OCCLUDED`). The old hidden-window presentation guard rejected
 that documented nonfailure status. Preserve this stopped run; it does not count
 as a completed 190s regression. No scheduling/audio stop or fault was logged.
 Evidence is `services-foundation-fresh-followup-20261010.aot-private.json` and
 `services-foundation-attract-20261010/run.aot-private.json` under `build/blinx/`.
-Whole-family original scheduling remains open.
+Commit `e366831` corrects host HRESULT handling while retaining actual GPU
+checkpoint/display retirement. Its single muted follow-up reaches **190.172s
+/18 captures**, delivers all five replay rows and logs no stop/audio-stop/fault.
+Representative captures show Demo gameplay, interruption/title return and the
+next Demo loading; second-Demo gameplay is not captured in this bounded run.
+The harness terminates a live process. Final evidence is
+`build/blinx/services-foundation-qualified-followup-20261010.aot-private.json`
+(`b7c1614398218be06bc4627618e60779c84d614f2971d5e6cbd2d2412f9d21ff`).
+The bounded lifetime and initial-FP tasks are validated; whole-family original
+scheduling remains open.
+
+The next clock batch must preserve one original-engine owner and the existing
+native C continuation. A compute checkpoint needs the actual guest PC, all GPRs
+and materialized EFLAGS; service-entry `2|IF` cannot substitute for that state.
+Expose the maintained PIT's next IRQ deadline and service the actual original
+idle/IRQ0/context-switch path. Kernel4983's idle loop is STI/NOP/NOP/CLI, not HLT.
+The pilot's current IF-only block hook also lacks the maintained engine's real
+STI inhibition query. Its stock Unicorn 2.1.4 package and the CPU floor's 2.1.1
+engine require a reviewed source/library binding before sharing private state.
+These are required software integration gaps, not new hardware requirements or
+safely deferred precision questions.

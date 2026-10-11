@@ -925,6 +925,13 @@ alongside the fresh shader follow-up (2/2). Evidence is
 `build/blinx/services-foundation-fresh-followup-20261010.aot-private.json`.
 The separate muted title regression stopped at the host hidden-window
 `DXGI_STATUS_OCCLUDED` guard after 144.062s; it is not a completed title pass.
+After the host presentation correction, the single muted default-title
+follow-up reaches **190.172s /18 captures**, with all replay rows and no
+stop/audio-stop/fault. It covers Demo gameplay, interruption/title return and
+next Demo loading. Final evidence is
+`build/blinx/services-foundation-qualified-followup-20261010.aot-private.json`.
+This validates the bounded shared-runtime regression and closes the nominal
+envelope task; it does not execute a whole-title original DirectSound/APU route.
 The current 9/9 APU result covers the changed CPU stages, not whole-title audio.
 Actual filters/scaling, SSL/GP/EP ownership/output and original DirectSound/title
 selection remain active implementation gaps. Existing HLE audio stays on its

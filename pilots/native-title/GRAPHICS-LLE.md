@@ -3117,3 +3117,38 @@ and DLL generation; this new core source does not inherit that numerical proof.
 Both immediate foundation findings are addressed. Four additional safely
 deferred questions (GFX-D11-D14) are appended to the maintained queue with
 evidence and triggers. Full graphics acceptance remains open at **4/9** families.
+
+## Desktop occlusion preserves guest presentation - 2026-10-10
+
+The representative muted default-title run on `c9c87b7` stopped after144.062s
+because the desktop window returned `0x087a0001`. Microsoft defines this as
+[DXGI_STATUS_OCCLUDED](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-status),
+a nonfailure indicating invisible window content. The donor submits its scene
+resolve before returning desktop Present status. The old `hr!=0` guard wrongly
+made that desktop state fatal to the guest.
+
+Commit `e366831` rejects negative HRESULTs while preserving nonfailure progress.
+Guest swaps still wait for the actual GPU checkpoint and modeled display path;
+desktop visibility never becomes a completion signal. No routine readback,
+extra cache work or opt-in correctness setting is added. Device-removed/reset
+errors remain fatal with their actual HRESULT.
+
+The new fixture changes only the desktop return status after real rendering and
+Swap. It reproduces the old occlusion stop, then passes actual guest ABI,
+paced/immediate retirement, front/back image separation and subsequent-frame
+pixels over three device lifetimes. Separate negative device-error invocations
+reach their exact guards. Existing graphics scheduler and allocation-alias
+completion checks also pass. The first new visual fixture used the desktop
+color-clear bit at the Xbox boundary; preserve its failed attempt, then use the
+correct Xbox mask `0xf0`. No production color behavior changed for that correction.
+
+The single muted default-title follow-up reaches **190.172s /18 captures**, all
+five replayed controller states and no stop/audio-stop/fault. Captures show Demo
+gameplay, interruption/title return and next Demo loading. Second-Demo gameplay,
+natural termination, exact desktop cadence and complete LLE title graphics are
+not claimed. The original stopped attempt remains preserved.
+Final private evidence is
+`build/blinx/services-foundation-qualified-followup-20261010.aot-private.json`
+(`b7c1614398218be06bc4627618e60779c84d614f2971d5e6cbd2d2412f9d21ff`),
+with focused checks in `presentation-occlusion-batch-v2-20261010.aot-private.json`.
+The bounded host fix is complete; full graphics acceptance remains open at4/9.
