@@ -42,6 +42,8 @@ static void test_thread_lle_body(void);
 static void test_thread_wait_body(void);
 static void test_thread_timeout_body(void);
 static void test_thread_idle_clock_body(void);
+static void test_idle_interrupt_callback(void);
+static void test_idle_dpc_callback(void);
 static void test_thread_compute_body(void);
 static void test_thread_cpu_body(void);
 static void test_thread_cpu_peer(void);
@@ -77,6 +79,8 @@ recomp_func_t recomp_lookup(uint32_t va) {
 #ifdef PILOT_EVENT_TIMER_LLE
     if(va==0x12480)return test_timer_lle_dpc;
     if(va==0x12500)return test_thread_lle_body;
+    if(va==0x12520)return test_idle_interrupt_callback;
+    if(va==0x12560)return test_idle_dpc_callback;
     if(va==0x12540)return test_thread_wait_body;
     if(va==0x125c0)return test_thread_timeout_body;
     if(va==0x126c0)return test_thread_idle_clock_body;
@@ -134,6 +138,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_string_cpu_contract_test.inc"
 #include "thread_string_compare_cpu_contract_test.inc"
 #include "thread_device_cpu_contract_test.inc"
+#include "idle_interrupt_stack_contract_test.inc"
 #include "rtc_contract_test.inc"
 #include "smbus_contract_test.inc"
 #include "settings_lle_contract_test.inc"
@@ -613,6 +618,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-device-pin-guard-lle")) {test_thread_device_cpu_lle(1);return 0;}
 #ifdef PILOT_SCHEDULING_LLE
         if (!strcmp(argv[1],"callback-kernel-guard-lle")) {test_callback_kernel_guard_lle();return 0;}
+        if (!strcmp(argv[1],"idle-isr-stack-lle")) {test_idle_interrupt_stack_lle(0);return 0;}
+        if (!strcmp(argv[1],"idle-isr-stack-guard-lle")) {test_idle_interrupt_stack_lle(1);return 0;}
 #endif
         if (!strcmp(argv[1],"rtc-cmos-lle")) { test_rtc_cmos_lle(); return 0; }
         if (!strcmp(argv[1],"smbus-smc-lle")) { test_smbus_smc_lle(); return 0; }

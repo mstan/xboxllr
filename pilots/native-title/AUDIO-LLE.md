@@ -1497,3 +1497,62 @@ admission/cadence, codec gain/mute/underrun output and full title audio remain
 open. Existing fast HLE selection and preserved reference libraries are intact.
 
 Private proof: `build/blinx/audio-ac97-output-20261011/qualified-batch.aot-private.json`.
+
+## Original composed GP/EP startup and shared input transport (2026-10-11)
+
+Bounded issue: `beads-xbox.1.113.13`. The new authored reference tool executes
+the unchanged original resource allocator, GP setup `17B870`, EP setup
+`17B999` (including the actual `17CD84/17CBD4` producer), and original
+destructors over explicitly owned offline kernel RAM. Three lifetimes select
+original-encoded caller format inputs 0/1/2, use different actual physical
+layouts, and release every allocated page/pool/private-heap object. The small
+settings input is a borrowed authored caller fixture, not a qualified original
+settings-object constructor/refcount lifetime. FE capacity reuses the existing
+synchronous maintained `0x80` floor. Reset/core-control MMIO writes are recorded
+only; they do not reset or start the production DSP owner.
+
+Actual GP and EP scratch/FIFO SG tables and defined control/context bytes feed
+the maintained APU directly. Both mapped bootstraps preserve all 4,096 loaded
+P words and all twelve undefined directory slots exactly, including their real
+caller-stack residue. The actual GP and EP CPUs independently reach and stop at
+`FFFFB2=FFFFFF`. Revoked allocation ownership rejects EP bootstrap before P
+publication and remains terminal. No timer/configuration/wake behavior is
+supplied to make the boot continue.
+
+A separate composed transport context executes the unchanged GP prefix only
+until its actual PC reaches `23`, immediately before B2. A normal bounded CPU
+budget provides that boundary; no yield is resumed or event posted. The original
+`9E` producer has then built six real circular `59D2` descriptors with the
+original MIX source order. An explicitly authored helper caller of unchanged
+`126` publishes eight distinct diagnostic MIX packets through those descriptors.
+Each lifetime completes 48 actual DMA nodes and delivers exactly 1,536 DWORDs
+into the three original EP scratch tail pages. Independent Python payload bytes
+match the captured physical RAM exactly; inactive ring halves and every byte
+outside those six published extents remain unchanged. These inputs characterize
+transport; they are not original VP/frame/cadence qualification.
+
+The actual mapping distinguishes two owners: GP scratch `8000..AFFF` aliases
+EP scratch `10000..12FFF` for the six channel rings, while GP scratch `B000`
+aliases a separate original driver status/control allocation. Original EP
+dispatcher `180` selector seven chooses channel three at scratch word `4600`,
+and unchanged `276/2E1` emits the real five-word
+`41A2,5BE0,100,200,11800` input descriptor. It remains guarded at bit nine
+before copying or publishing EP input; actual PC `2D7`/SP4 and the produced
+physical bytes are preserved. C5 acknowledgement, CA context, D5/D4 EOL seed,
+B0..B3, real initial/frame wake and full boot/output remain one unmet startup
+contract. The earlier `.113.9`/`.113.11` unknowns are not resolved by this proof.
+
+Private proof: `build/blinx/audio-original-startup-20261011/qualified-batch.aot-private.json`.
+Fifteen expected contexts cover the three composed setup lifetimes. Three exact
+6,144-byte shared-input captures, old failed fixture logs and source snapshots
+are retained privately. Maintained APU/DSP sources and the preserved prior
+libraries are unchanged. No new copied donor implementation, dependency,
+hardware operation, title run, playback or fast-HLE change is introduced.
+
+Next required dependency: establish the MCPX B2/B0/B1 configuration contract
+and genuine B3 elapsed producer, then resolve the coherent EP startup context
+and bit-nine input behavior with independently supported semantics. A nominal
+ready-buffer owner can use these actual physical publication extents and the
+existing sole CPU per DSP; it must not wake EP merely because the observer
+finished eight helper calls. Existing hardware mapping failures still require
+fresh owned/verified probe RAM before any later bounded DMA experiment.

@@ -72,6 +72,7 @@ static uint32_t interrupt_objects[16],pending_callback;
 static PilotIoIsr isr_callback,dpc_callback;
 static int pending_dpc;
 static uint32_t dpc_stack_top;
+static struct {uint32_t object,base,top;int published;} idle_stack;
 static struct {uint16_t first,last;PilotIoPort callback;} device_ports[8];
 static PilotIoMmio device_mmio;
 static PilotIoDeviceWork device_work;
@@ -448,6 +449,20 @@ static void initialize(unsigned char *guest)
     }
     for(unsigned i=0;i<32;++i)sprintf(hex+i*2,"%02x",hash[i]);
     if(strcmp(hex,PILOT_IO_DEVICE_SNAPSHOT_SHA)){failure="device LLE unreviewed RAM capture";return;}
+    /* Capture the actual static idle owner before any original scheduling.
+     * Its stack boundaries are not page aligned; never manufacture a new
+     * aligned stack or assume the managed/DPC stack guard layout applies. */
+    idle_stack.object=kernel_word(0x8003da6cu);
+    if(idle_stack.object<0x80010000u || idle_stack.object>=0x80080000u) {
+        failure="device LLE invalid captured idle owner";return;
+    }
+    idle_stack.top=kernel_word(idle_stack.object+0x1c);
+    idle_stack.base=kernel_word(idle_stack.object+0x20);
+    if(failure)return;
+    if(idle_stack.base<0x80010000u || idle_stack.top>0x80080000u ||
+       (uint64_t)idle_stack.base+0x3000u!=idle_stack.top) {
+        failure="device LLE invalid captured idle stack";return;
+    }
 #ifdef PILOT_IO_DEVICE_ROM
     file=fopen(PILOT_IO_DEVICE_ROM,"rb");
     if(!file){failure="device LLE owned ROM image missing";return;}
@@ -662,6 +677,40 @@ static void retire_owner(uint32_t object)
         release_publication(i);if(failure)return;
     }
 }
+/* Publish only the actual captured idle stack when callback spills escape
+ * Unicorn into compiled code. Whole pages retain their real PTE/PFN backing;
+ * the unaligned ends remain caller bounds, not fabricated guard pages. */
+static void publish_idle_callback_stack(uint32_t sp,unsigned frame_bytes)
+{
+    if(kernel_word(0x8003da64u)!=idle_stack.object) {
+        if(!guest_page(sp&~4095u))failure="device LLE ISR stack has no published owner";
+        return;
+    }
+    if(kernel_word(0x8003da6cu)!=idle_stack.object ||
+       kernel_word(idle_stack.object+0x1c)!=idle_stack.top ||
+       kernel_word(idle_stack.object+0x20)!=idle_stack.base ||
+       sp<idle_stack.base || (uint64_t)sp+frame_bytes>idle_stack.top) {
+        failure="device LLE idle callback stack owner or bounds changed";return;
+    }
+    if(failure || idle_stack.published)return;
+    uint32_t end=(idle_stack.top+4095u)&~4095u;
+    unsigned pages=(end-(idle_stack.base&~4095u))/4096;
+    if(published_count+pages>MAX_PUBLISHED || owner_count==MAX_PUBLISHED) {
+        failure="device LLE idle stack publication capacity";return;
+    }
+    for(uint32_t va=idle_stack.base&~4095u;va<end;va+=4096) {
+        uint32_t pa,pde=ram_word(0xf000u+(va>>22)*4),pte=0;
+        if(pde&1)pte=(pde&128)?pde:ram_word((pde&0xfffff000u)+((va>>12)&1023)*4);
+        if((pde&3)!=3 || (pte&3)!=3 || !physical(va,&pa) ||
+           guest_page(va) || shared_pages[pa/4096]) {
+            failure="device LLE idle stack mapping or publication collision";return;
+        }
+    }
+    publish_range(idle_stack.base,idle_stack.top-idle_stack.base);if(failure)return;
+    idle_stack.published=1;
+    fprintf(stderr,"[ORIGINAL IDLE CALLBACK STACK] kind=%s thread=%08x bounds=%08x..%08x pages=%u frame=%08x\n",
+        frame_bytes==20?"DPC":"ISR",idle_stack.object,idle_stack.base,idle_stack.top,pages,sp);
+}
 #include "io_thread_transport_lle.inc"
 static void pump_original_clock(void)
 {
@@ -752,7 +801,16 @@ static void run_original(uint32_t entry,size_t instruction_limit)
         struct OriginalThread *thread=pending_thread;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],regs+i));
         IO_UC(uc_mem_read(cpu,regs[4],&return_pc,4));
-        if(is_dpc) {
+        int idle_dpc=is_dpc && kernel_word(0x8003da64u)==idle_stack.object &&
+            regs[4]>=idle_stack.base && (uint64_t)regs[4]+20<=idle_stack.top;
+        if(idle_dpc) {
+            publish_idle_callback_stack(regs[4],20);
+            static unsigned idle_dpc_frames;
+            if(!failure && idle_dpc_frames++<4)
+                fprintf(stderr,"[ORIGINAL IDLE DPC FRAME] stack=%08x return=%08x entry=%08x\n",regs[4],return_pc,routine);
+        }
+        if(failure)return;
+        if(is_dpc && !idle_dpc) {
             uint32_t top=kernel_word(0x8003da98u),unused;
             /* The captured original DPC stack is three resident pages with
              * guard pages on both sides. Keep the original VA/PTE identity,
@@ -761,10 +819,13 @@ static void run_original(uint32_t entry,size_t instruction_limit)
                regs[4]<top-0x3000u || regs[4]>top-20 ||
                physical(top,&unused) || physical(top-0x4000u,&unused) ||
                (dpc_stack_top && dpc_stack_top!=top)) {
+                fprintf(stderr,"[ORIGINAL DPC STACK GUARD] top=%08x frame=%08x return=%08x current=%08x idle=%08x\n",
+                    top,regs[4],return_pc,kernel_word(0x8003da64u),idle_stack.object);
                 failure="device LLE unqualified original DPC stack";return;
             }
             if(!dpc_stack_top){publish_range(top-0x3000u,0x3000u);if(failure)return;dpc_stack_top=top;}
         }
+        if(!is_dpc && !thread) {publish_idle_callback_stack(regs[4],12);if(failure)return;}
         if(thread) {
             uint32_t top=kernel_word(thread->object+0x1c),base=kernel_word(thread->object+0x20);
             uint32_t tls=kernel_word(thread->object+0x28),unused;

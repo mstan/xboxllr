@@ -1329,3 +1329,36 @@ was established; that production guard remains, and only the corrected caller
 generation counts. Source/binary-bound reports are
 `thread-av-corrected-qualified-20261011.aot-private.json` and
 `thread-av-title-startup-20261011.aot-private.json`. ROM/EEPROM are unchanged.
+
+### Original idle interrupt and DPC stack - 2026-10-11
+
+The captured original idle KTHREAD owns an unaligned 12-KiB stack. Compiled
+interrupt and queued DPC callbacks now publish its four real backing pages
+through the existing PTE/PFN owner instead of assuming a managed-thread or
+separate DPC-stack layout. Live idle identity and exact bounds are checked
+before callback entry. All pages must be writable, resident and free of another
+publication owner. Kernel and native locals share actual bytes; no frame is
+relocated, fabricated, or completed by a host scheduler. This is kernel-session
+ownership and adds no work to the default HLE path.
+
+An independent authored device IRQ arrives during a genuine original 500-ms
+wait after the original scheduler selects idle. Its real ISR queues a real DPC;
+both callbacks spill local bytes and call the original AV query through shared
+backing. Actual IRQL, caller arguments, canaries, timeout and disconnect/thread/
+event cleanup are checked. Changed idle bounds stop before publication, callback
+or caller completion. The focused six-check batch passes in1.094s, and the final
+coherent **82/82 checks pass in16.406s**, bound to51 sources and ten binaries.
+
+One muted original title startup runs8.000s through GPU ISR13B210 and queued
+DPC13BBC0 on the real idle stack, returning to the unchanged kernel dispatcher
+at8001E461. It reaches the previously established missing encoder EN_REG_RD
+startup-state guard. Real original AV initialization and full title integration
+remain required; family count remains4/9 with26 safe precision deferrals.
+Earlier fixture failures and the ISR-only title observation that exposed idle
+DPC routing remain separate private evidence. No physical console, playback or
+attract rerun occurred; ROM/EEPROM input hashes are unchanged.
+
+Private final reports: `idle-callback-final-qualified-20261011.aot-private.json`
+and `idle-callback-title-startup-20261011.aot-private.json`. The dedicated
+callback executable selects original scheduling/files; mixed-target checks
+retain their declared native scheduling scope.

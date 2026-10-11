@@ -1714,3 +1714,26 @@ operation, playback or attract rerun was introduced. Default HLE is unchanged.
 Private reports: `thread-av-corrected-qualified-20261011.aot-private.json` and
 `thread-av-title-startup-20261011.aot-private.json`, with exact source/binary
 identities and unchanged ROM/EEPROM inputs. Family count remains4/9.
+
+## Original idle callback stack - 2026-10-11
+
+Actual GPU ISR13B210 and its queued DPC13BBC0 now share the original idle
+KTHREAD stack when the original kernel executes callbacks there. Its unaligned
+12-KiB extent maps four real PTE/PFN pages through existing ownership; live
+identity/bounds and publication collisions guard before callback entry. A real
+original idle IRQ/queued-DPC fixture proves shared local-byte writes, AV query
+returns, IRQL/arguments, actual timeout and original cleanup; a changed-bounds
+control retains an unpublished stack and incomplete caller.
+
+The coherent82/82 checks pass in16.406s. The exact qualified executable runs
+one muted original startup for8.000s, crosses both original idle stack guards,
+and reaches the existing missing encoder EN_REG_RD startup-state guard. That
+state still requires real original AV initialization; the passing fixture's
+programming is not transplanted into the title. Full startup/rendering and parent
+qualification remain open at4/9. Default HLE and the prior GPU DLL identity are
+unchanged. No physical Xbox, playback or repeated attract run occurred.
+
+Private reports: `idle-callback-final-qualified-20261011.aot-private.json` and
+`idle-callback-title-startup-20261011.aot-private.json`, including51 source and
+ten binary identities and unchanged ROM/EEPROM inputs. Earlier ISR-only startup
+and corrected authored-fixture failures remain preserved separately.
