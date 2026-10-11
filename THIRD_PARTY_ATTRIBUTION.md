@@ -1773,3 +1773,14 @@ Actual PCM bytes pass through the existing shared RAM/APU/DSP owner before
 completion. Authored coherent transport stimuli do not qualify original
 DSP startup/frame admission, codec gain/mute or full title output. Existing
 resampler/DSP attribution and dependency pins remain.
+
+## FP register transport and original DSP control observations (2026-10-11)
+
+The authored FP register owner uses the existing credited envytools
+`nv3_pramdac.xml` and Linuxv6.12 Nouveau `nvreg.h` for offsets/control fields,
+and a bounded private Xbox observation for the tested field's write bank.
+No external implementation body is copied. Activation, cold reset and timing
+origin are separate requirements. The authored original DSP control tool reuses
+the already credited original-kernel/Unicorn allocation reference and pinned
+MIT DSP core. Diagnostic retired-cycle samples are not an admitted MCPX timer;
+no original driver or firmware bytes are incorporated into committed source.

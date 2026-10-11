@@ -35,8 +35,15 @@ original AV initialization, startup and rendering remain open. Maintained AC97 c
 real shared PCM bytes before completion; frozen3/3 output checks and top-level
 2/2 wiring checks pass. Original GP/EP setup, scratch transport and destructors
 pass15/15 contexts over three physical layouts;144 actual GP DMA nodes publish
-4,608 exact diagnostic DWORDs into EP scratch. Original DSP startup/frame and
-bit-nine input admission remain open.
+4,608 exact diagnostic DWORDs into EP scratch. Original FE/SE control and composed VP/GP observation additionally pass12
+contexts in2.161s: nine real GP frames,72 nodes and7,488 exact output DWORDs,
+using an explicitly diagnostic retired-cycle source. Original DSP timer/boot,
+EP wake/output and bit-nine input admission remain open. A new physical
+seven-store FP observation establishes the tested programmed write bank with
+verified restoration; maintained register/MMIO/scanout checks pass3/3. Alternate
+read provenance and activation remain separate required contracts. The preceding
+82-check/8.000s startup retains its prior renderer identity; no new attract or
+playback run follows from these component checks.
 Whole title scheduling remains unqualified. See
 [the CPU route and remaining integration](SCHEDULING-LLE.md#original-cpugpu-device-ownership---2026-10-10).
 

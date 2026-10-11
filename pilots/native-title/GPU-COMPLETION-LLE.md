@@ -1737,3 +1737,53 @@ Private reports: `idle-callback-final-qualified-20261011.aot-private.json` and
 `idle-callback-title-startup-20261011.aot-private.json`, including51 source and
 ten binary identities and unchanged ROM/EEPROM inputs. Earlier ISR-only startup
 and corrected authored-fixture failures remain preserved separately.
+
+## Programmed FP register ownership - 2026-10-11
+
+`beads-xbox.1.109.6` now has a distinct, successful physical write-bank
+observation and a maintained register owner. The fixed probe performs seven
+benign DWORD stores, only to HVALID_START and READ_PROG, in the existing nxdk
+mode. Writing HVALID_START1 with READ_PROG clear returns alternate0/programmed1;
+restoring programmed0 leaves alternate0. Success verifies both windows0,
+original control10100111 and unchanged AV phase11. No AV request, mode/clock/
+sync/total/enable, APU, boot or storage write occurs. The484-byte payload completes
+in0.391s. The prepared probe suite passed115 checks with one optional DSP checker
+skipped; five focused checks execute the actual compiled payload against four
+independent bank policies, both phases and every failed-read position. Failures
+stop before another hardware operation, without retry or automatic restoration.
+The [fixed probe plan](https://github.com/mstan/xboxlle-probe/blob/feat/av-handshake-probe-20261009/docs/FP-WRITE-BANK.md)
+records the exact bounded operation; raw replies and console identity stay private.
+
+`Nv2aFpRegisters` owns the fourteen reached timing words and control. Guest
+writes reach programmed storage independently of the read selector; reads
+select programmed or an independently supplied alternate view. Unknown control,
+unknown programmed words, absent alternate provenance and unsupported access
+sizes remain guarded. An explicit board capture may supply the alternate view;
+AV acknowledgment and guest writes never fabricate it. The physical observation
+establishes the tested field/mode's write bank, not that the alternate view is
+active video or that acknowledgment activates any bank. Register offsets and
+control field facts use the existing envytools/Nouveau primary definitions;
+no implementation bodies are copied.
+
+Actual GPU MMIO shares this owner with existing nominal scanout geometry.
+Three component lifetimes cover all fourteen distinct programmed/alternate
+words, selector-independent writes, retained writes, invalid captures and fresh
+unknown state. Three actual GPU lifetimes replay the measured seven-store
+sequence; fresh-owner and byte-access controls retain guards and geometry.
+The focused bank, scanout and tile-command tests pass3/3 in0.50s. A failed test
+expectation that forgot an earlier programmed write is retained with its exact
+source, executable and log; the correction changes only the expectation.
+No pixel/shader pipeline, per-pixel work or default HLE path changes.
+
+Private evidence: `fp-write-bank-20261011/observed.aot-private.json` and
+`transport-corrected-qualified.aot-private.json`. The new reference DLL is
+3aff89e6; the prior9fdec518 DLL is retained separately with a verified identity.
+The preceding82-check/8.000s startup and prior pixel evidence keep their original
+renderer generation; they are not recertified by this component check. No new
+title, attract or audio playback run occurred.
+
+Original AV initialization, FD6806A0 transaction/activation, encoder startup,
+coherent rendering and full title integration remain required. The independently
+established digital timing component supplies no missing activation event or
+cold reset state. This batch does not change the4/9 qualification count or the26
+explicit precision deferrals.

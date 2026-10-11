@@ -989,12 +989,18 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             return (value >> ((bo & 3u) * 8)) &
                    (size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1));
         }
-        switch (bo & ~3u) {
-            case 0x600: return pramdac_general_control_;
-            case 0x800: return pramdac_fp_vdisplay_end_;
-            case 0x820: return pramdac_fp_hdisplay_end_;
-            default: break;
+        if(Nv2aFpRegisters::handles(reg)) {
+            if(size!=4 || (bo&3)){fault_("NV2A FP register read size/alignment");return 0;}
+            // Retain the prior nominal geometry profile until a real control
+            // write selects the explicit FP bank transport. No new reset or
+            // active-bank knowledge is inferred by this compatibility read.
+            if(!fp_registers_.control_known() && (reg==0x800 || reg==0x820))
+                return fp_registers_.programmed_extent(reg==0x820);
+            uint32_t value=0;
+            if(!fp_registers_.read(reg,value)){fault_(fp_registers_.error());return 0;}
+            return value;
         }
+        if(reg==0x600)return pramdac_general_control_;
     } else if (blk->off == 0x001000) {  // PBUS
         switch (bo) {
             // Bounded xemu board profile. nxdk identifies bit 8 as ROM_VERSION;
@@ -1332,15 +1338,14 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         }
     }
     if (blk->off == 0x680000) {
+        if(Nv2aFpRegisters::handles(bo&~3u)) {
+            if(size!=4 || (bo&3)){fault_("NV2A FP register write size/alignment");return;}
+            if(!fp_registers_.write(bo,value))fault_(fp_registers_.error());
+            return;
+        }
         switch (bo) {
             case 0x600:
                 pramdac_general_control_ = value;
-                return;
-            case 0x800:
-                pramdac_fp_vdisplay_end_ = value;
-                return;
-            case 0x820:
-                pramdac_fp_hdisplay_end_ = value;
                 return;
             default:
                 break;
@@ -18438,8 +18443,8 @@ Nv2a::ScanoutInfo Nv2a::scanout_info() const {
         (static_cast<uint32_t>(crtc_regs_[0x19] & 0xe0u) << 3) |
         (static_cast<uint32_t>(crtc_regs_[0x25] & 0x20u) << 6);
     info.pitch = pitch_units << 3;
-    info.width = pramdac_fp_hdisplay_end_ + 1;
-    info.height = pramdac_fp_vdisplay_end_ + 1;
+    info.width = fp_registers_.programmed_extent(true) + 1;
+    info.height = fp_registers_.programmed_extent(false) + 1;
     const uint32_t depth = crtc_regs_[0x28] & 3u;
     if (depth == 2)
         info.bits_per_pixel = 16;

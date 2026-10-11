@@ -1556,3 +1556,66 @@ ready-buffer owner can use these actual physical publication extents and the
 existing sole CPU per DSP; it must not wake EP merely because the observer
 finished eight helper calls. Existing hardware mapping failures still require
 fresh owned/verified probe RAM before any later bounded DMA experiment.
+
+## Original CPU controls and composed GP wake observation - 2026-10-11
+
+`beads-xbox.1.113.14` adds `tools/native_dsp_control_reference.py` and a private
+composed observer. No maintained APU/DSP processing behavior changes. Actual
+original x86 `17BC43` and `17BC9E` run their unchanged RMW/IRQL scopes and caller
+ABI: selector 1 clears the FE method-mode bits and selects SE XCNTMODE 8;
+selector 0 supplies genuine FE HALTED and SE OFF states. Unrelated caller bits
+are retained. Owned driver allocation/directory/source identity and original
+destructors come from the previous composed producer, with a separately owned
+diagnostic PCM loan rather than an invented original wave-buffer constructor.
+
+The private observer keeps one actual GP CPU over the maintained banks/RAM/DMA
+and calls the existing frame transactions through their owner friendship. It
+is explicitly separate from the production `ApuDspProcessor`. Original
+B2/B0/B1 writes are recorded as unresolved inputs; B3 reads take that CPU's
+actual retired-cycle count as an explicitly diagnostic sample. Neither is a
+runtime timer admission, a measured MCPX frequency or whole boot qualification.
+The original core/configuration guards remain unchanged.
+
+The unchanged GP startup reaches its real C4 yield. Actual VP publication
+then acquires the MIX lease and posts the event before that same CPU resumes
+at P2B, with its original stack/PC. Original P160/P162 polls and acknowledges
+the event; the acknowledgement retains the lease. Each original default frame
+performs eight actual queued descriptor completions: one six-word context
+load, six circular channel stores and one 640-word status/debug store. Actual
+P29 yield releases the lease. The real driver context at scratch 800 is zero,
+so this observes the original default branch, not dynamic effects or code load.
+
+Three original layouts/settings, each with three genuine VP/GP frames, yield
+72 completed nodes and 7488 exact transported DWORDs. Varying owned PCM and
+distinct channel attenuation make ordering and duplication errors observable.
+An independent Python byte oracle compares physical captures with the actual
+published planar bank: channel order 0/2/1/4/5/3 reaches the existing three-page
+EP scratch alias, and channels 11..30 reach the separate GP status allocation.
+All physical RAM outside the precise output and voice-cursor extents remains
+unchanged. Existing nominal VP/resampler evidence is reused; this batch does
+not add another ideal precision claim.
+
+Actual original FE HALTED and SE OFF control calls cause no VP publication,
+frame event, DSP progress or source read. A genuine source-read failure leaves
+MIX unpublished, posts no event and does not resume GP; failed reentry fetches
+nothing. All three original driver lifetimes clean up their real allocations,
+and the diagnostic loan is released separately. The private proof covers
+12 expected contexts. Its initial error-message fixture assumption is retained
+with the failing source/executable/log; no original or production bytes were
+changed to satisfy it.
+
+Counter identity/configuration is still unresolved. The cached DSP56362 map
+does not match these MCPX X aliases. NXP's [primary EFCOP note APR39](https://www.nxp.com/docs/en/application-note/APR39.pdf)
+explicitly places its B0..B8 registers in Y I/O space, and the [original xqemu
+investigator](https://github.com/xqemu/xqemu/issues/240) still leaves the MCPX
+timer operation/configuration unknown. The private
+counter/context plan first considers a read-only batch only if already-running
+GP firmware can be verified exactly. The last known probe context holds GP at 0,
+so it cannot supply new samples. Otherwise an independently owned bootstrap
+calibration must resolve the earlier SG-address readback failure before any
+counter program. No failed store/load is retried by this batch.
+
+B0..B3, silicon phase/rate/epoch, hardware reset/cadence, coherent EP
+C5/CA/D5 startup, bit9, real EP wake and whole original output remain open.
+The demonstrated GP producer/transport/lease route can be reused once its
+instrumentation contract is established; it does not manufacture EP readiness.

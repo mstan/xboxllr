@@ -34,6 +34,7 @@
 #include "machine/io_device.hpp"   // FaultFn
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a_renderer.hpp"
+#include "machine/nv2a_fp_registers.hpp"
 #include "machine/nv2a_generic_vertex_scratch.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
@@ -153,6 +154,12 @@ public:
 
     // Observability: called for every access that hit an unmodelled register (returned the
     // xemu default). `write` mirrors MemEvent semantics. Lets a run summarize its NV2A debt.
+    // Independently captured board read view; never inferred from guest
+    // programming or acknowledgment. No active timing/phase is established.
+    bool capture_fp_read_view(const Nv2aFpRegisters::Words& words) {
+        if(fp_registers_.capture_alternate(words))return true;
+        fault_(fp_registers_.error());return false;
+    }
     void on_unmodeled(std::function<void(bool write, uint32_t addr, uint32_t rel,
                                          const char* block, uint32_t value)> cb) {
         unmodeled_cb_ = std::move(cb);
@@ -3844,8 +3851,7 @@ private:
     bool sequencer_clock_programmed_ = false;
     uint32_t pcrtc_start_ = 0;
     uint32_t pramdac_general_control_ = 0;
-    uint32_t pramdac_fp_vdisplay_end_ = 0;
-    uint32_t pramdac_fp_hdisplay_end_ = 0;
+    Nv2aFpRegisters fp_registers_;
     uint64_t scanout_writes_ = 0;
     uint64_t scanout_nonzero_writes_ = 0;
     uint32_t last_nonzero_scanout_start_ = 0;
