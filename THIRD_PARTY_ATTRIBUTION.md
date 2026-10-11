@@ -1688,6 +1688,12 @@ The original-thread contiguous publication, original-policy query and shared
 GPU/USB DMA ownership adapters are authored here over the existing private
 kernel/Unicorn/device floor. The fixtures use authored x86 callers and real
 device packets, with no imported allocator/driver bodies or original bytes.
+The subsequent linear GP buffer15 transport and original-helper fixtures are
+authored here. XboxDevWiki's limited DSP descriptor observations inform field
+layout; unchanged private builders independently establish the five-field
+ownership and executed transfer behavior. Primary xqemu issue discussions and
+the Motorola manual document uncertainty about B0..B3; no GPL implementation
+body is copied or unobserved timer producer inferred.
 
 ## Theseus behavioral reference
 

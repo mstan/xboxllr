@@ -69,20 +69,36 @@ private:
         if(!(control_&16) || (control_&8))return true;
         for(unsigned limit=0;!(next_&0x4000);++limit) {
             if(limit==1024)return fail("GP DMA list exceeded node budget");
-            if(next_+7>bank_end(next_))return fail("GP DMA descriptor crosses memory bank");
-            uint32_t node[7];uint32_t* fields[7];
-            for(unsigned i=0;i<7;++i) {
+            // Original DB/EB linear builders own exactly five words. The
+            // following words may already be another descriptor; circular
+            // base/size fields are not part of a buffer15 transfer.
+            if(next_+2>bank_end(next_))return fail("GP DMA descriptor crosses memory bank");
+            uint32_t node[7]{};uint32_t* fields[7]{};
+            for(unsigned i=0;i<2;++i) {
                 fields[i]=word_(next_+i);
                 if(!fields[i])return fail("GP DMA descriptor outside memory banks");
                 node[i]=*fields[i]&0xffffff;
             }
-            const uint32_t format=(node[1]>>10)&7,count=node[2],buffer=(node[1]>>5)&15;
+            const uint32_t format=(node[1]>>10)&7,buffer=(node[1]>>5)&15;
+            const bool linear=buffer==15,circular=buffer==14;
+            const unsigned field_count=linear?5:7;
+            if(next_+field_count>bank_end(next_))return fail("GP DMA descriptor crosses memory bank");
+            for(unsigned i=2;i<field_count;++i) {
+                fields[i]=word_(next_+i);
+                if(!fields[i])return fail("GP DMA descriptor outside memory banks");
+                node[i]=*fields[i]&0xffffff;
+            }
+            const uint32_t count=node[2];
             const bool output=(node[1]&2)!=0;
-            // Noninterleaved unit-stride scratch and FIFO transport. Output
-            // FIFOs 0..3 and input FIFOs 0..1 have independent cursor owners.
+            // Noninterleaved unit-stride scratch and FIFO transport. Linear
+            // offset writeback is not reached by the original builders and
+            // lacks independent evidence; keep it guarded rather than apply
+            // the circular cursor rule. Output FIFOs 0..3 and input FIFOs
+            // 0..1 have independent cursor owners.
             // Unsupported input FIFO 2/3 is guarded, never silently completed.
-            const bool scratch=buffer==14;
+            const bool scratch=linear || circular;
             if((node[0]&~0x7fffu) || (node[1]&0x220d) ||
+               (linear && (node[1]&16)) ||
                (!scratch && buffer>=(output?4u:2u)) || (node[1]>>14)!=1 ||
                (format!=1 && format!=2 && format!=6) || !count || count>4096 ||
                (format==1 && (count&1)))
@@ -99,7 +115,7 @@ private:
                mix_write_ && !mix_write_())
                 return fail("GP MIX DMA publication was rejected");
             const uint32_t size=node[6]+1,width=format==1?2:4;uint32_t offset=node[4];
-            if(scratch && offset>=size)return fail("unqualified GP DMA initial circular offset");
+            if(circular && offset>=size)return fail("unqualified GP DMA initial circular offset");
             std::array<uint8_t,4096*4> packed{};
             for(unsigned i=0;i<count;++i) {
                 uint32_t sample=output?(*words[i]&0xffffff):0;
@@ -108,7 +124,9 @@ private:
                 for(unsigned b=0;b<width;++b)packed[i*width+b]=uint8_t(sample>>(b*8));
             }
             const unsigned length=count*width;
-            if(scratch) {
+            if(linear) {
+                if(!bytes_(offset,packed.data(),length,output))return fail("GP linear scratch DMA failed");
+            } else if(circular) {
                 for(unsigned at=0;at<length;) {
                     const unsigned n=(size-offset)<(length-at)?size-offset:length-at;
                     if(!bytes_(node[5]+offset,packed.data()+at,n,output))return fail("GP scratch DMA failed");
@@ -126,7 +144,7 @@ private:
                 *words[i]=format==1?sample<<8:(format==2?sample>>8:sample&0xffffff);
             }
             // FIFO addressing is owned by PAPU CUR, not descriptor words 4..6.
-            if(scratch && (node[1]&16))*fields[4]=offset;
+            if(circular && (node[1]&16))*fields[4]=offset;
             next_=node[0];++nodes_;
         }
         // End-of-list follows actual copies. Status reads never finish work or

@@ -1112,3 +1112,15 @@ startup at178 and all earlier fixture/build failures retain their identities.
 The default HLE algorithms are unchanged; no Xbox operation, playback or attract
 rerun occurred. The nine-family goal remains active at **4/9**, with **25 safe
 deferrals**; wider service/callback/GPU/audio integration remains required.
+
+The next startup guard is verified as **HalReturnToFirmware49**, rather than
+another ordinary import to enable. A diagnostic-only guard observes actual
+return PC000F28D1 and routine2 (quick reboot). The original EBP frame's caller
+is000F2A13, with arguments0/0/1/4D530013/D0049134. Unchanged private launch
+helpers and generated import names corroborate this path; its launch reason
+remains under investigation. The installed-media selection currently replaces
+a complete helper in generated native code; its application to the actual
+original CPU route must be checked before implementing firmware transition.
+No reset is executed and no RET is supplied. The final observation is in
+`firmware-caller-title-startup-20261010.aot-private.json`, with unchanged input
+ROM/EEPROM files. Earlier62-entry qualification keeps its source identity.

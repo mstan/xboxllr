@@ -1175,6 +1175,67 @@ existing legal trap configuration; production guards were not relaxed. The
 default native HLE path gains no DSP work, playback or title runs. No physical
 console operations or preserved reference-DLL rebuilds are part of this batch.
 
+## Linear GP scratch and original parameter transport (.113.6)
+
+Buffer15 now moves actual linear scratch bytes through GPSADDR/GPSMAXSGE and
+the existing guest SGE callbacks. Word4 supplies the absolute scratch offset;
+circular-only base/size words5/6 are ignored. The original DB/EB builders
+initialize exactly five words. Fetching seven fields would read another
+descriptor or unrelated metadata, and would reject a valid five-word object
+at a bank boundary. The maintained owner fetches only the linear object's
+fields. Linked transfers, input staging, sample-bank publication, executable
+publication and EOL use the existing real transport and ownership rules.
+
+Representative checks use reversed, nonadjacent physical pages, adjacent
+five-word descriptors, X/Y/P destinations, PCM16 and both PCM24 lanes. They
+cover real page-crossing bytes, ignored circular fields, a descriptor ending
+at the X-bank boundary, preserved offsets and real P publication epochs.
+A failed input page does not publish its staged bank or node; actual output
+prefix bytes may remain after a later page failure. The owner stays failed.
+Leased MIX input is rejected before scratch reads, and unknown bit9, linear
+offset writeback and in-run executable publication remain guarded.
+
+Unchanged original DB, EB, 0126 and 005C instructions execute under authored
+callers. Across three lifetimes, **15 actual DMA transfers** import real
+control and parameter words, clear the consumed parameter request, write its
+real scratch acknowledgement, and move Y samples to real output bytes.
+Original entry1B..1D selects `49E2`, format2 PCM24 MSB packing, after EB creates
+format6 PCM24 LSB. PCM16 is a separate format1 contract; `49E2` does not select
+PCM16. These helpers consume actual EOL and STOP/FREEZE/START status; polling
+reads never advance a counter or manufacture completion. Authored callers
+isolate those functions and do not qualify the full original entry or graph.
+
+The remaining B0..B3 setup is explicitly unresolved. The unchanged prefix
+writes B2=FFFFFF, B0=1 and B1=1, then reads B3 into profiling snapshots/deltas.
+Its threshold branches both reach the same yield. This identifies a software
+consumer, but does not establish register identity, enable/reset rules, clock
+rate, epoch or wrap. The [primary investigator's issue240](https://github.com/xqemu/xqemu/issues/240)
+explicitly leaves timer operation/configuration unknown. The [original trace
+in issue151](https://github.com/xqemu/xqemu/issues/151) confirms the reached
+control path, but its frequency estimate is not silicon evidence. The official
+[DSP56362 manual](https://www.nxp.com/docs/en/user-guide/DSP56362UM.pdf) assigns
+different functions/reserved slots to those addresses; its peripheral map
+cannot establish MCPX vendor semantics. Pinned xemu returns zero for B3 and
+does not implement the three configuration writes. That is not a producer.
+The earlier “clock configuration” boundary names a suspected function, not a
+qualified register identity. B0..B3 remain guarded without guessed latches,
+zero values or read-count progress. Existing actual CPU elapsed diagnostics
+and the injectable APU sample clock are preserved; neither is substituted for
+this unowned peripheral. Precise phase/rate can be deferred only after its
+genuine producer and configuration contract exist.
+
+The linear layout follows the [XboxDevWiki DSP descriptor observations](https://xboxdevwiki.net/DSP),
+which also state their limited hardware coverage. Original builder ownership
+and original control/sample transfers independently check the reached use.
+No GPL implementation body is copied. Private evidence is in
+`build/blinx/audio-gp-linear-20261010/qualified-batch.aot-private.json` and
+`original-gp-linear-reference.aot-private.json`. The first fixture failure
+used format2 while expecting PCM16; its log is retained and the fixture was
+corrected without relaxing production behavior. Earlier .113.4/.113.5 reports
+remain bound to their original sources. Full boot/graph, in-run P/bit9 reload,
+hardware reset/cadence, timer production and EP/output remain open. This adds
+no work to the default fast HLE path and closes no broader audio-family gate.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

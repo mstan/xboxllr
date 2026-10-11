@@ -26,7 +26,12 @@ The independent GP owner now carries actual selected events, callback-safe
 yield/resume and a real VP MIX lease. Fifteen focused APU checks and two fresh
 optional pilot frame checks pass. Unchanged original helper calls pass; whole
 firmware bootstrap stops at its next guarded timer setup, FFFFB2=FFFFFF.
-Full GP graph/output remains required. The default HLE gains no DSP work.
+Linear buffer15 scratch additionally passes16 focused checks and a fresh
+optional pilot check. Unchanged builders and control/parameter helpers execute
+15 real SGE transfers across three lifetimes; five-word descriptor ownership,
+failure prefixes and existing P/MIX guards are retained. B0..B3 identity and
+production remain unresolved requirements. Full GP graph/output remains
+required. The default HLE gains no DSP work.
 
 Original ROM reads additionally require the owned256KiB flash input, configured
 with `-DPILOT_IO_DEVICE_ROM=F:/Projects/xboxlle/machine/flash-dump-ff000000.bin`.

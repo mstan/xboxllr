@@ -23,6 +23,20 @@ static unsigned thread_service_arguments(unsigned ordinal)
     case 196:case 200:case 207:case 255:return 10;
     default:
         fprintf(stderr,"[THREAD LLE SERVICE GUARD] ordinal=%u thread=%08x\n",ordinal,kernel_word(0x8003da64u));
+        if(ordinal==49) {
+            /* Observe the guarded nonreturning request; do not execute a
+             * reset, replace it with RET, or mutate the caller's frame. */
+            uint32_t sp=0,frame[2]={0},bp=0,parent[7]={0};
+            if(uc_reg_read(cpu,UC_X86_REG_ESP,&sp)==UC_ERR_OK &&
+               uc_mem_read(cpu,sp,frame,sizeof(frame))==UC_ERR_OK)
+                fprintf(stderr,"[THREAD FIRMWARE REQUEST] caller=%08x routine=%u stack=%08x\n",frame[0],frame[1],sp);
+            struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
+            if(thread && uc_reg_read(cpu,UC_X86_REG_EBP,&bp)==UC_ERR_OK &&
+               bp>=thread->stack && (uint64_t)bp+sizeof(parent)<=(uint64_t)thread->stack+thread->stack_bytes &&
+               uc_mem_read(cpu,bp,parent,sizeof(parent))==UC_ERR_OK)
+                fprintf(stderr,"[THREAD FIRMWARE CALLER] caller=%08x args=%08x/%08x/%08x/%08x/%08x\n",
+                    parent[1],parent[2],parent[3],parent[4],parent[5],parent[6]);
+        }
         failure="thread LLE service family requires continuation integration";return 0;
     }
 }
