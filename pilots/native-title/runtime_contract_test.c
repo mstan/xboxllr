@@ -145,6 +145,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_child_cpu_contract_test.inc"
 #include "thread_critical_cpu_contract_test.inc"
 #include "thread_vm_cpu_contract_test.inc"
+#include "thread_vm_alias_contract_test.inc"
 #include "thread_files_cpu_contract_test.inc"
 #include "thread_contiguous_cpu_contract_test.inc"
 #include "thread_component_cpu_contract_test.inc"
@@ -154,6 +155,9 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_component_physical_owner_contract_test.inc"
 #include "thread_component_long_owner_contract_test.inc"
 #include "thread_component_wait_contract_test.inc"
+#if defined(PILOT_FILES_LLE) && defined(PILOT_SCHEDULING_LLE)
+#include "thread_sections_cpu_contract_test.inc"
+#endif
 #include "thread_string_cpu_contract_test.inc"
 #include "thread_string_compare_cpu_contract_test.inc"
 #include "thread_device_cpu_contract_test.inc"
@@ -181,6 +185,7 @@ static int test_write_faults(uint32_t va)
 #endif
 }
 #include "sections_contract_test.inc"
+#include "sections_readonly_contract_test.inc"
 #ifdef PILOT_INPUT_NATIVE
 #include "input_contract_test.inc"
 #endif
@@ -519,6 +524,12 @@ int main(int argc,char **argv)
      * that loader input in the original allocator before any dynamic calls. */
     uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
     if(argc==2 && !strcmp(argv[1],"sections"))fixture_image_size=0x16000;
+    if(argc==3 && (!strcmp(argv[1],"sections-readonly") || !strcmp(argv[1],"thread-component-sections-lle") || !strcmp(argv[1],"thread-component-sections-pinned-lle"))) {
+        FILE *input=fopen(argv[2],"rb");uint32_t header[2];CHECK(input);
+        CHECK(!fseek(input,0x108,SEEK_SET) && fread(header,4,2,input)==2);fclose(input);
+        CHECK(header[1]>header[0] && header[1]<0x60000000);
+        fixture_image_size=(header[1]+4095)&~4095u;
+    }
 #if defined(PILOT_AUDIO_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
     if(argc>=2 && !strncmp(argv[1],"audio-component-",16)) {
         uint32_t end=0x20000;
@@ -682,6 +693,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"cache")) { test_cache(); return 0; }
         if (!strcmp(argv[1],"file-cache")) { test_file_cache(); return 0; }
         if (!strcmp(argv[1],"sections")) { test_sections(); return 0; }
+        if (!strcmp(argv[1],"sections-readonly")) { CHECK(argc==3);test_sections_readonly(argv[2]);return 0; }
+        if (!strcmp(argv[1],"sections-readonly-recommit")) { CHECK(argc==2);test_sections_readonly_recommit();return 0; }
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }
         if (!strcmp(argv[1],"memory-statistics")) { test_memory_statistics(); return 0; }
         if (!strcmp(argv[1],"timers")) { test_timers(); return 0; }
@@ -709,8 +722,15 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-cpu-lle")) { test_thread_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-child-cpu-lle")) { test_thread_child_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-cpu-lle")) { test_thread_vm_cpu_lle(); return 0; }
+        if (!strcmp(argv[1],"thread-vm-alias-cpu-lle")) { test_thread_vm_alias_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-pinned-release-lle")) { test_thread_vm_pinned_release_lle(); return 0; }
         if (!strcmp(argv[1],"thread-files-cpu-lle")) { CHECK(argc==3);test_thread_files_cpu_lle(argv[2]);return 0; }
+#if defined(PILOT_FILES_LLE) && defined(PILOT_SCHEDULING_LLE)
+        if (!strcmp(argv[1],"thread-component-sections-lle") || !strcmp(argv[1],"thread-component-sections-pinned-lle")) {
+            CHECK(argc==3);section_test_pinned=!strcmp(argv[1],"thread-component-sections-pinned-lle");
+            test_thread_sections_cpu_lle(argv[2]);return 0;
+        }
+#endif
         if (!strcmp(argv[1],"thread-contiguous-cpu-lle")) { test_thread_contiguous_cpu_lle(0);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-borrowed-free-lle")) { test_thread_contiguous_cpu_lle(1);return 0; }
         if(!strncmp(argv[1],"thread-component-wait-",22)) {

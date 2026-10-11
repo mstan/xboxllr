@@ -113,19 +113,32 @@ static void vm_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t st
     if(ordinal==184 || ordinal==204) {
         /* Each page policy comes from original NtQueryVirtualMemory. A
          * successful recommit is not assumed to overwrite existing policy. */
-        for(uint64_t page=base;!failure && page<(uint64_t)base+bytes;page+=4096) {
-            if(publication_slot((uint32_t)page)==published_count)continue;
+        uint64_t end=(uint64_t)base+bytes;
+        for(uint64_t page=base;!failure && page<end;) {
+            if(publication_slot((uint32_t)page)==published_count){page+=4096;continue;}
             uint32_t result=0,info[7];
             vm_original_query((uint32_t)page,info,&result);if(failure)return;
             if(result){failure="memory LLE query after successful mutation failed";return;}
+            uint64_t region_end=(uint64_t)info[0]+info[3];
+            if(info[0]>page || (info[0]&4095) || !info[3] || (info[3]&4095) ||
+               region_end<=page || region_end>0x100000000ull) {
+                failure="memory LLE invalid queried protection extent";return;
+            }
             DWORD protect=info[5],previous;
             if(info[4]!=MEM_COMMIT || (protect!=PAGE_NOACCESS && protect!=PAGE_READONLY &&
                protect!=PAGE_READWRITE && protect!=PAGE_EXECUTE && protect!=PAGE_EXECUTE_READ &&
                protect!=PAGE_EXECUTE_READWRITE)) {
                 failure="memory LLE unsupported committed-page policy";return;
             }
-            if(!VirtualProtect(guest_memory+page,4096,protect,&previous)) {
-                failure="memory LLE host PTE protection publication failed";return;
+            /* Original217 already returns a whole contiguous policy run.
+             * Reuse that actual extent rather than rescanning the same VAD
+             * once per page; retain the existing published-page owner check. */
+            uint64_t limit=region_end<end?region_end:end;
+            for(;page<limit;page+=4096) {
+                if(publication_slot((uint32_t)page)==published_count)continue;
+                if(!VirtualProtect(guest_memory+page,4096,protect,&previous)) {
+                    failure="memory LLE host PTE protection publication failed";return;
+                }
             }
         }
     }

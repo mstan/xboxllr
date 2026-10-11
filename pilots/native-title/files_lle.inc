@@ -37,6 +37,10 @@ static void files_lle_start(void)
     args[1]=files_string(FILES_SLOT+0x500,PILOT_FILES_TITLE_ROOT);
     status=files_call(67,args);if(status)stop("original installed-drive mount failed",status);
     fprintf(stderr,"[FILES LLE MOUNT] D: -> %s\n",PILOT_FILES_TITLE_ROOT);
+#ifdef PILOT_SCHEDULING_LLE
+    char image_file[1200];snprintf(image_file,sizeof(image_file),"%s\\default.xbe",PILOT_FILES_TITLE_ROOT);
+    error=pilot_io_device_sections(memory,image_file);if(error)stop(error,327);
+#endif
 }
 static uint32_t files_verify(const char *expected)
 {

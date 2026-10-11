@@ -10,6 +10,7 @@ static struct OriginalThread {
     uint32_t native_regs[8],call_regs[8],call_args[10],return_pc,call_return,call_flags;
     unsigned call_ordinal,call_arguments,request;
     struct VmCallerAccess vm_access;
+    struct SectionCallerAccess section_access;
     struct DeviceCallerAccess device_access;
     int in_kernel,in_checkpoint,in_cpu,cpu_used,terminate,cpu_exit_request;
     uint32_t cpu_entry,cpu_return;

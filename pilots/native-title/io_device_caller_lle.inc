@@ -12,6 +12,7 @@ static void device_caller_prepare(unsigned ordinal,const uint32_t *args,struct D
         if(!bytes || (uint64_t)start+bytes>0x100000000ull) {
             failure="device LLE invalid page service range";return;
         }
+        if(ordinal==175 && !args[2]) {section_pin_prepare(start,bytes);if(failure)return;}
         if(ordinal==175 && (start<0x80000000u || start>=0xd0000000u)) {
             unsigned empty=MAX_PUBLISHED;
             for(unsigned i=0;i<MAX_PUBLISHED;++i) {

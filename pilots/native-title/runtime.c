@@ -1118,6 +1118,12 @@ int main(int argc,char **argv)
     if (argc==5) storage_mount(argv[4]);
     fsc_ensure();
 #endif
+#ifdef PILOT_SCHEDULING_LLE
+    scheduling_lle_finalize_imports();
+#endif
+    /* Selected data imports are finalized after the original mount setup.
+     * Protect preloads only after every loader-owned import write is complete. */
+    sections_finalize_preloads();
 #ifdef PILOT_MEDIA_INSTALLED
     fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
 #else

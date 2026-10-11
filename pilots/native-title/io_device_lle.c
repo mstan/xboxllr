@@ -26,7 +26,8 @@
 #define ROM_BYTES (256u*1024)
 #define SCRATCH PILOT_IO_BRIDGE_BASE
 #define RETURN_PC (SCRATCH+0x9000u)
-#define MAX_PAGES 4096
+#define INITIAL_MAPPED_PAGES 256u
+#define X86_VIRTUAL_PAGES (1u<<20)
 #define MAX_PUBLISHED (RAM_BYTES/4096)
 static SRWLOCK lock=SRWLOCK_INIT;
 static uc_engine *cpu;
@@ -34,7 +35,9 @@ static unsigned char *ram,*guest_memory;
 static unsigned char *rom;
 static unsigned char *shared_pages[RAM_BYTES/4096];
 static const char *failure;
-static struct {uint32_t va,pa;unsigned char *backing;} mapped[MAX_PAGES];
+struct IoMappedPage {uint32_t va,pa;unsigned char *backing;};
+static struct IoMappedPage *mapped;
+static unsigned mapped_capacity;
 static struct {uint32_t va,pa,pins;} published[MAX_PUBLISHED];
 static unsigned mapped_count,published_count;
 /* Exact indices into the owned publication ledger. Device allocations add
@@ -59,10 +62,14 @@ static uint32_t image_start,image_bytes;
 /* Admission window supplied only by a successful original VM commit. It does
  * not fabricate translations: publish_range still walks the actual PTEs. */
 static uint32_t vm_publication_base,vm_publication_bytes;
+/* Only an actual section-loader RET admits new image bytes from original RAM.
+ * Initial resident image/stack publication continues to retain native bytes. */
+static uint32_t section_publication_base,section_publication_bytes;
 /* A host-access lease belongs to one outstanding original VM call, not a VAD
  * or another allocator. Original-thread calls may have independent leases. */
 struct VmAccessPage {uint32_t va;DWORD protection;};
 struct VmCallerAccess {struct VmAccessPage *pages;unsigned count;int active;};
+struct SectionCallerAccess {uint32_t base,bytes;int active;};
 struct DeviceCallerAccess {unsigned pin_slot;int retire;};
 static void device_caller_prepare(unsigned ordinal,const uint32_t *args,struct DeviceCallerAccess *access);
 static void device_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t result,struct DeviceCallerAccess *access);
@@ -71,6 +78,13 @@ static void vm_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t st
 static void storage_caller_prepare(unsigned ordinal,const uint32_t *args);
 static void contiguous_caller_prepare(unsigned ordinal,const uint32_t *args);
 static void contiguous_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t result);
+static int section_original_page(uint32_t page);
+static void section_pin_prepare(uint32_t base,uint32_t bytes);
+static void section_caller_prepare(unsigned ordinal,const uint32_t *args,struct SectionCallerAccess *access);
+static void section_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t status,struct SectionCallerAccess *access);
+static int section_boot_admit(uc_engine *engine,uint32_t address);
+static void section_boot_prepare(uint32_t *entry);
+static int pending_section_boot;
 static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
@@ -186,7 +200,7 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
     uint32_t page=(uint32_t)address&~4095u,pa;
     unsigned char *backing;uint32_t protection=UC_PROT_ALL;
     unsigned publication=publication_slot(page);
-    if(publication==published_count && (page<0x80000000u || (page>=0xe0000000u && page<0xe4000000u) ||
+    if(publication==published_count && !section_original_page(page) && (page<0x80000000u || (page>=0xe0000000u && page<0xe4000000u) ||
        (page>=PILOT_KERNEL_DATA_BASE && page<PILOT_KERNEL_DATA_BASE+PILOT_KERNEL_DATA_BYTES))) {
         if(!guest_page(page)) {
             uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
@@ -211,11 +225,24 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
             backing=rom+((pa-0xff000000u)&(ROM_BYTES-1));protection=UC_PROT_READ;
         } else backing=physical_backing(pa);
     }
-    if(mapped_count==MAX_PAGES){failure="device LLE mapping capacity";return false;}
-    mapped[mapped_count].va=page;mapped[mapped_count].pa=pa;
-    mapped[mapped_count++].backing=backing;
+    if(mapped_count==mapped_capacity) {
+        /* This cache records admitted virtual aliases, not physical ownership.
+         * A valid title can use more aliases than the old4096-page fixture cap.
+         * Bound growth by the x86 page count; original PTE/owner checks above
+         * still decide whether any requested alias exists and is admissible. */
+        unsigned capacity=mapped_capacity?mapped_capacity*2:INITIAL_MAPPED_PAGES;
+        if(capacity>X86_VIRTUAL_PAGES || capacity<=mapped_capacity) {
+            failure="device LLE virtual alias capacity";return false;
+        }
+        void *grown=mapped?HeapReAlloc(GetProcessHeap(),0,mapped,(SIZE_T)capacity*sizeof(*mapped)):
+                          HeapAlloc(GetProcessHeap(),0,(SIZE_T)capacity*sizeof(*mapped));
+        if(!grown){failure="device LLE virtual alias cache allocation failed";return false;}
+        mapped=grown;mapped_capacity=capacity;
+        fprintf(stderr,"[IO ALIAS CACHE] capacity=%u admitted=%u\n",capacity,mapped_count);
+    }
     uc_err error=uc_mem_map_ptr(engine,page,4096,protection,backing);
     if(error){failure=uc_strerror(error);return false;}
+    mapped[mapped_count++]=(struct IoMappedPage){page,pa,backing};
     return true;
 }
 static void forbidden(uc_engine *engine,const char *reason)
@@ -441,6 +468,7 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
 #endif
     if(thread_cpu_admit(engine,(uint32_t)address))return;
     if(thread_cpu_import_fault(engine,address))return;
+    if(section_boot_admit(engine,(uint32_t)address))return;
     if(address>=0x80010000u && address<0x80080000u)return;
     for(unsigned i=0;i<16;++i)if(interrupt_objects[i]) {
         uint32_t object=interrupt_objects[i],routine=0;
@@ -685,6 +713,8 @@ static int caller_owned(uint32_t object,uint32_t bytes)
 static void publish_range(uint32_t object,uint32_t bytes)
 {
     int image=caller_owned(object,bytes);
+    int section=section_publication_bytes && object>=section_publication_base &&
+        (uint64_t)object+bytes<=(uint64_t)section_publication_base+section_publication_bytes;
     int vm=vm_publication_bytes && object>=vm_publication_base &&
            (uint64_t)object+bytes<=(uint64_t)vm_publication_base+vm_publication_bytes;
     if(!(image || vm || (object>=0xd0000000u && (uint64_t)object+bytes<=0xd4000000ull) ||
@@ -706,13 +736,13 @@ static void publish_range(uint32_t object,uint32_t bytes)
                     va,pa,other?published[other-1].va:0,actual);
             failure="device LLE duplicate physical publication";return;
         }
-        if(image) {
+        if(image && !section) {
             if(!guest_page(va)){failure="device LLE caller page is not resident";return;}
         } else if(guest_page(va)){failure="device LLE allocation collides with native memory";return;}
         else if(!VirtualAlloc(guest_memory+va,4096,MEM_COMMIT,PAGE_READWRITE)) {
             failure="device LLE publication allocation failed";return;
         }
-        if(!image)memcpy(guest_memory+va,ram+pa,4096);
+        if(!image || section)memcpy(guest_memory+va,ram+pa,4096);
         shared_pages[pa/4096]=guest_memory+va;
         published[published_count].va=va;published[published_count].pins=0;published[published_count].pa=pa;
         publication_by_va[va/4096]=(uint16_t)(published_count+1);
@@ -823,6 +853,7 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
         }
         pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;pending_component=NULL;
         pending_cpu_service=NULL;pending_cpu_birth=NULL;
+        pending_section_boot=0;
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
 #endif
@@ -847,6 +878,10 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
             if(!uc_reg_read(cpu,UC_X86_REG_EIP,&pc))
                 fprintf(stderr,"[ORIGINAL CPU ERROR] pc=%08x error=%s\n",pc,uc_strerror(error));
             failure=uc_strerror(error);return;
+        }
+        if(pending_section_boot) {
+            section_boot_prepare(&entry);if(failure)return;
+            continue;
         }
         if(pending_cpu_birth) {
             thread_cpu_birth_prepare(pending_cpu_birth,&entry);if(failure)return;
@@ -989,7 +1024,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     if(ordinal!=1 && ordinal!=2 && ordinal!=3 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=45 && ordinal!=46 && ordinal!=47 && ordinal!=50 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=165 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
-       ordinal!=98 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=138 && ordinal!=145 && ordinal!=151 &&
+       ordinal!=98 && ordinal!=99 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=138 && ordinal!=145 && ordinal!=151 &&
        ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
        && ordinal!=24 && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
@@ -1010,7 +1045,7 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
     if(failure)return;
     unsigned count=(ordinal==3 || ordinal==46 || ordinal==65)?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:(ordinal==2 || ordinal==45 || ordinal==50 || ordinal==204)?4:
-                   (ordinal==107 || ordinal==108 || ordinal==119 || ordinal==145 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
+                   (ordinal==99 || ordinal==107 || ordinal==108 || ordinal==119 || ordinal==145 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==168 || ordinal==217)?2:
                    (ordinal==1 || ordinal==103 || ordinal==121 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
 #ifdef PILOT_FILES_LLE
@@ -1162,6 +1197,16 @@ const char *pilot_io_device_thread_component_bind_abi(uint32_t entry,uint32_t by
         }
     }
     ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_alias_cache_info(unsigned *count,unsigned *capacity)
+{
+    if(device_bus_borrow)return "device LLE alias observation during device work";
+    if(!count || !capacity)return "device LLE invalid alias observation buffers";
+    AcquireSRWLockShared(&lock);
+    const char *error=failure;
+    if(!error && (!cpu || execution_depth))error="device LLE alias observation outside idle transport";
+    if(!error){*count=mapped_count;*capacity=mapped_capacity;}
+    ReleaseSRWLockShared(&lock);return error;
 }
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context)
 {
@@ -1775,3 +1820,4 @@ done:
     if(acquired)ReleaseSRWLockExclusive(&lock);return valid;
 }
 #include "io_memory_lle.inc"
+#include "io_sections_lle.inc"

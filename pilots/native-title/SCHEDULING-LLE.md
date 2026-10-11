@@ -1998,3 +1998,137 @@ superseded source generations remain excluded from qualification evidence.
 Set the private `PILOT_AUDIO_EFFECTS_IMAGE` CMake input to the reached `dsp.bin`
 to register the original CPU lifecycle check; the production admission is not
 controlled by this qualification input.
+
+### Original section loader image ownership - 2026-10-11
+
+The captured kernel has an empty XeImageFileName export326 and no current title
+header. Launch now binds the current resident immutable descriptor table and a
+retained installed filename before actual original CPU327/328 admission. The
+original loader owns its RTL lock/critical region, file open/read/close,
+reference and shared-boundary counters, VM commit/decommit, bytes, zero-fill
+and readonly policy. This route does not call native section_change or share
+its independently maintained reference ledger. Descriptor membership and
+immutability are bridge admission rules; the original APIs do not promise an
+invalid-descriptor status or reject reference overflow themselves.
+
+New cold image pages remain original RAM until the actual loader RET. Their
+publication requires current original PTE/PFN ownership and copies those RAM
+bytes into the common CPU/DMA backing. Already published shared pages retain
+their one backing and neighboring payload. Initial native image publication
+still retains the loader's supplied resident bytes. Counted host access leases
+cover overlapping original loader calls; completed original NtQueryVirtualMemory
+regions supply the final policy. Queries preserve the complete original CPU
+context. Execute flags are not guessed from a Windows allocation request.
+
+All unload requests reject pinned pages before execution, independently of a
+pre-lock reference count. Active unload leases also reject newly admitted pins.
+This fixes a review-discovered race where two callers admitted at reference2
+could later perform a final decommit. Unsupported pointer and lifetime cases
+stop before original mutation instead of manufacturing an NTSTATUS.
+
+The coherent selected-scheduling fixture runs twelve lifetimes on four actual
+installed XBE sections: MDLPL, MDLR5, MAP53 and the readonly $$XTIMAGE interior.
+It checks actual file bytes and zero tails, retained mutable bytes at reference2,
+non-final unload, cold reload, both boundary counters, original query policy,
+GPR/ESP/x87/XMM and all nine memory/thread/handle baselines. A separate immutable
+raw program composes adjacent MDLR5/MAP53 loading, retains the shared payload
+when one section unloads, then retires the last owner. A terminal pin fixture
+checks rejection at reference2 without counter/reference/byte mutation.
+
+The earlier v46 batch passes80/80 in42.11s, with three maintained GPU checks in
+1.04s. Earlier failures were fixture assumptions about execute policy, a native
+wrapper counter and rewriting host code at an already translated raw CPU
+address; they remain excluded. The private proof is
+`original-display-pulse-20261011/qualified-sections-v46.aot-private.json`
+(SHA256 `5acc2a9422f1147d2e79ad46854e29055c390ddc00852a7579a1d35bdfa31c03`),
+50 frozen sources, five program/library snapshots and20 artifact identities.
+The independent15-routine/2043-byte source audit is
+`original-section-loader-audit-20261011/qualified-static-sections.aot-private.json`
+(SHA256 `acb5783edf0be63e3dedb53c648bc664e75b52c04becd4614f43a24c0d092fd2`).
+
+Actual v46 title integration does not yet pass: after109.063s without timeout,
+the real MDLPL/MDLEN requests both return C0000033 with reference0, followed by
+an unloaded-section read at AB0320 from original2E808. Four presents remain
+loading-screen evidence. The failure is retained in `diagnosed-title-v46.aot-private.json`
+(SHA256 `53029a534280c60aefabbde8532ce7b75aaae40401989df9ead5a337408dbfc7`).
+The current filename failure is now causally resolved. A bounded actual-write
+witness found the captured boot worker constructing an obsolete image filename,
+then clearing it through genuine RtlFreeAnsiString during failed launch cleanup.
+Early suspension prevented the necessary original optical-device producer and
+caused the separately retained v53 XapiFatalLaunch. The installed-title bootstrap
+now waits until original I/O initialization finishes and the captured worker
+reaches its first whole image-loader call. The exact16-byte original call frame,
+27-byte optical filename,1193-byte original loader body, passive IRQL/IF and
+52-byte stack floor bound that handoff. An immutable state-preserving adapter
+calls genuine KeSetEvent145; the actual priority31 waiter resumes, then genuine
+NtSuspendThread231 and finite delay99 dispatch the worker's original suspend APC.
+State5/reason5/count1 and its bounded real KWAIT/semaphore prove suspension before
+actual ExAllocatePoolWithTag15 publishes the retained installed filename.
+The parked worker, existing handle4, separate reference and event remain explicit
+kernel-session owners. General retail boot/relaunch and teardown are outside
+this private installed-title bootstrap; no original instruction body is patched.
+
+The v55 generation passes80/80 combined checks in39.344s and three rebuilt GPU
+checks in0.344s, with no skipped checks. Its muted title succeeds actual327 for
+MDLPL10604 and MDLEN10834 with status0/reference1, then advances resource creation
+until the interpreter's fixed4096-page mapping-cache limit at227.641s. This is
+not attract completion or scheduling closure. The private handoff proof is
+`original-display-pulse-20261011/qualified-handoff-v55.aot-private.json`
+(SHA256 `2bcbce2b6efef59e77721c92f6b4459f663934493261d73514624b65a26a30e2`),
+50 frozen sources, five program/library snapshots and28 artifact identities.
+The independent14-body/3325-byte I/O producer/event/caller review is
+`boot-io-handoff-audit-20261011-v55/qualified-static-io-handoff.aot-private.json`
+(SHA256 `773e2d1e86841ef1c8c74117669e6308d123886d77a6b61f874614c396f8a642`).
+The first simultaneous GPU runner was rejected by the shared HDD ownership lock;
+the exclusive repetition passed and the rejected attempt remains excluded.
+The subsequent v60 generation qualifies growable alias bookkeeping and the
+default HLE readonly/recommit section policy. The alias cache begins at256 and
+doubles to the bounded x86 virtual-page count; existing actual PTE/PFN/RAM/ROM
+and publication owners still admit mappings. Successful mapping precedes
+cache-count publication. The vector does not own physical pages and no pointer
+into it escapes. A raw320-page CPU allocation/write/read/release program checks
+growth beyond256, exact contents, first/last retirement, retained capacity and
+all nine memory/thread/handle baselines over three reusable lifetimes. Earlier
+4352-page fixtures exceeded instruction bounds or timed out; they are excluded
+and their sole timeout cause is not established.
+
+The original83-byte helper at8003285C supplies readonly boundary semantics:
+flags10/20 include the head/tail; an aligned head still skips a page when10 is
+clear. Original EXECUTE_READ returns canonical READONLY2 from original217.
+Preload policy applies after every owned import write. Cold commits explicitly
+restore canonical READWRITE before copying, including already committed shared
+pages; the new section then applies its own readonly policy. Restoring stale
+readonly boundary policy would be incorrect. Actual XBE preload and DOLBY/
+XTIMAGE load/unload/reload checks, plus independent authored overlapping
+recommit checks, exercise both native and MEMORY_LLE routes. Original negative
+commit after host admission remains a terminal guard before bytes/references
+are published; successful-path parity does not establish a guest error return.
+Original217's reviewed whole516-byte body also permits reusing its returned
+homogeneous policy extent instead of rewalking the same VAD per page, retaining
+each published-page owner check and preserving the full original CPU context.
+
+The current component proof has83 accepted unique cases:82 combined passes in
+50.30s, then an unchanged focused graphics-ABI pass in2.65s. The initial exact
+host-handle assertion410->412 remains retained; its cause is not proved and no
+production/assertion change masks it. Three rebuilt/exclusive NV2A bus checks
+pass in2.70s; three current native scheduler/readonly/recommit checks pass in
+2.08s. Private qualification is
+`original-display-pulse-20261011/qualified-components-v60.aot-private.json`
+(SHA256 `dc5aabe6890b895942046802514ef69eaad5f7a40e2e93999a83a31bc7aa6946`),
+52 selected and52 native source bindings, five selected executable/library
+snapshots,25 artifacts and six independent static audits. The current integration
+review is `final-section-alias-review-20261011-v60/qualified-static-integration-review.aot-private.json`
+(SHA256 `fac9cdffba9f71c0f3c7fb410cda1168675d47e20d432a975e665928c87e1823`).
+
+Actual immutable muted title v60 succeeds MDLPL/MDLEN original327 with status0/
+reference1, grows capacity to8192 at4096 admitted aliases, creates97 shaders and
+seven present captures, then reaches its602.610s observation limit with no
+terminal STOP. Loading frames do not establish attract completion. A read-only
+host-stack sample shows graphics in pure1320F0 vblank with real233 outstanding;
+main waits in real159 and audio in real231. These live samples are diagnostic,
+not an atomic original-thread/clock snapshot or a proved cause. The bounded
+section-loader/default HLE policy work is complete; composed scheduling and
+attract still require actual progress. The actual manifest is
+`original-display-pulse-20261011/title-startup-v60.aot-private.json`.
+Movies remain open,4/9 families and26 timing/precision deferrals unchanged.
+No physical Xbox operation or audible playback occurred.

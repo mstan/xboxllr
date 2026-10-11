@@ -2,11 +2,12 @@
  * nxdk supplies the API contract; Cxbx is an external behavioral reference for
  * boundary counters and preserving shared pages. No donor loader body is used.
  * Each page has an ownership count, independent of boundary-counter aliases. */
-struct PilotSection { uint32_t address,size,raw,bytes,head,tail,refs; };
+struct PilotSection { uint32_t address,size,raw,bytes,head,tail,refs,flags; };
 static struct PilotSection *sections;
 static uint16_t *section_pages;
 static uint32_t section_page_base,section_page_count;
 static SRWLOCK section_lock=SRWLOCK_INIT;
+static int section_preloads_finalized;
 
 static void section_counter(uint32_t va,int delta)
 {
@@ -18,6 +19,71 @@ static void section_span(const struct PilotSection *s,uint32_t *first,uint32_t *
     *first=(s->address-section_page_base)/4096;
     *end=(uint32_t)(((uint64_t)s->address+s->size-section_page_base+4095)/4096);
     if (*end>section_page_count) stop("section outside owned image pages",s->address);
+}
+static void section_readonly(const struct PilotSection *s)
+{
+    /* The original 8003285C helper includes the head/tail page only when
+     * flags 10/20 are set. An aligned head still skips one page when 10 is
+     * clear. Xbox has no NX: original EXECUTE_READ becomes READONLY in 217. */
+    if(s->flags&1)return;
+    uint32_t start=s->flags&0x10?s->address:(s->address+4096)&~4095u;
+    uint32_t end=s->flags&0x20?s->address+s->size:(s->address+s->size)&~4095u;
+    if(end<=start)return;
+    uint32_t low=start&~4095u,bytes=((end+4095)&~4095u)-low,status;
+#ifdef PILOT_MEMORY_LLE
+    uint32_t inputs[]={start,end-start,0,PAGE_EXECUTE_READ,0},outputs[7]={0};
+    const char *error=pilot_io_device_vm(204,memory,inputs,outputs,&status);
+    if(error)stop(error,204);
+    if(!status && (outputs[0]!=low || outputs[1]!=bytes))
+        stop("original section protection changed owned range",start);
+#else
+    PVOID host=memory+start;SIZE_T span=end-start;ULONG previous;
+    status=(uint32_t)vm_native_protect(GetCurrentProcess(),&host,&span,PAGE_READONLY,&previous);
+    if(!status && (host!=memory+low || span!=bytes))
+        stop("native section protection changed owned range",start);
+#endif
+    if(status)stop("owned section readonly protection failed",status);
+}
+static void sections_finalize_preloads(void)
+{
+    /* Imports and all preload bytes must already be copied, and MEMORY_LLE
+     * residency published. Keep this separate from bookkeeping initialization
+     * so authored CPU fixtures can prepare their own mutable scratch first. */
+    if(!sections || section_preloads_finalized)stop("invalid section preload finalization",0);
+    vm_ensure();AcquireSRWLockExclusive(&section_lock);AcquireSRWLockExclusive(&vm_lock);
+    for(unsigned i=0;i<section_count;++i)if(sections[i].flags&2)section_readonly(&sections[i]);
+    section_preloads_finalized=1;
+    ReleaseSRWLockExclusive(&vm_lock);ReleaseSRWLockExclusive(&section_lock);
+}
+static uint32_t section_commit(uint32_t base,uint32_t bytes)
+{
+    PVOID host=memory+base;SIZE_T span=bytes;
+    uint32_t status=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,PAGE_READWRITE);
+    if(status)return status;
+    if(host!=memory+base || span!=bytes)stop("section commitment changed owned range",base);
+    /* Original cold COMMIT/EXECUTE_READWRITE also changes already committed
+     * pages to canonical READWRITE. Let its real 184 return/publication own
+     * that transition before copying; restoring old readonly boundary policy
+     * here would be incorrect when the new section excludes that boundary. */
+#ifdef PILOT_MEMORY_LLE
+    uint32_t inputs[]={base,bytes,MEM_COMMIT,PAGE_EXECUTE_READWRITE,0},outputs[7]={0};
+    const char *error=pilot_io_device_vm(184,memory,inputs,outputs,&status);
+    if(error)stop(error,184);
+    if(status) {
+        /* The host commitment is preparation, not a successful guest load.
+         * Retain the terminal session without copying/publishing section refs
+         * if the original owner rejects it; never run over unowned new pages. */
+        fprintf(stderr,"[SECTION ORIGINAL COMMIT GUARD] base=%08x bytes=%u status=%08x\n",base,bytes,status);
+        stop("original section commit failed after host admission",status);
+    }
+    if(outputs[0]!=base || outputs[1]!=bytes)stop("original section commit changed owned range",base);
+#else
+    ULONG previous;
+    status=(uint32_t)vm_native_protect(GetCurrentProcess(),&host,&span,PAGE_READWRITE,&previous);
+    if(status)stop("native section recommit protection failed",status);
+    if(host!=memory+base || span!=bytes)stop("native section recommit changed owned range",base);
+#endif
+    return 0;
 }
 static void sections_initialize(void)
 {
@@ -33,7 +99,7 @@ static void sections_initialize(void)
     for (unsigned i=0;i<section_count;++i) {
         size_t off=section_table-image_base+i*56;
         struct PilotSection *s=&sections[i];
-        *s=(struct PilotSection){file32(off+4),file32(off+8),file32(off+12),file32(off+16),file32(off+28),file32(off+32),0};
+        *s=(struct PilotSection){file32(off+4),file32(off+8),file32(off+12),file32(off+16),file32(off+28),file32(off+32),0,file32(off)};
         if (!s->size || s->address<image_base+header_bytes || (uint64_t)s->address+s->size>image_end ||
             s->bytes>s->size || (uint64_t)s->raw+s->bytes>image_size) stop("invalid section payload/range",i);
         for (unsigned j=0;j<i;++j) if ((uint64_t)s->address+s->size>sections[j].address &&
@@ -74,15 +140,11 @@ static uint32_t section_change(uint32_t descriptor,int load)
             uint64_t additional=bytes-vm_committed(base,bytes);
             if (vm_committed(0,0x100000000ull)+vm_service_bytes+additional>64ull*1024*1024) status=VM_NOMEM;
             else {
-                PVOID host=memory+base; SIZE_T span=bytes;
-                status=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,PAGE_READWRITE);
+                status=section_commit(base,bytes);
                 if (!status) {
                     memcpy(memory+s->address,image_bytes+s->raw,s->bytes);
                     memset(memory+s->address+s->bytes,0,s->size-s->bytes);
-#ifdef PILOT_MEMORY_LLE
-                    const char *error=pilot_io_device_resident(base,bytes);
-                    if(error)stop(error,base);
-#endif
+                    section_readonly(s);
                     for (uint32_t page=first;page<end;++page) ++section_pages[page];
                     section_counter(s->head,1); section_counter(s->tail,1);
                     s->refs=1; MEM32(descriptor+24)=1;

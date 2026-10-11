@@ -31,10 +31,19 @@ static void scheduling_lle_bootstrap(void)
      * actual PsTerminateSystemThread after unwinding this native C frame. */
     original_thread_exit.status=0;longjmp(original_thread_exit.target,1);
 }
+static void scheduling_lle_finalize_imports(void)
+{
+    uint32_t type=0;const char *error=pilot_io_device_thread_type(&type);
+    if(error)stop(error,259);
+    for(size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i)
+        if(pilot_imports[i].ordinal==259)MEM32(pilot_imports[i].address)=type;
+}
 static void scheduling_lle_run(void)
 {
     const char *clock_error=pilot_io_device_clock_start();
     if(clock_error)stop(clock_error,0);
+    clock_error=pilot_io_device_sections_start();
+    if(clock_error)stop(clock_error,327);
 #if defined(PILOT_D3D_NATIVE) && !defined(PILOT_DISPLAY_LLE)
     clock_error=graphics_original_clock_bind();
     if(clock_error)stop(clock_error,0);
@@ -45,10 +54,7 @@ static void scheduling_lle_run(void)
         if(end<first || (uint64_t)end-first+zero>0xd000)stop("original bootstrap TLS size",directory);
         tls_size=(((end-first)+zero+15)&~15u)+4;
     }
-    uint32_t type=0;const char *error=pilot_io_device_thread_type(&type);
-    if(error)stop(error,259);
-    for(size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i)
-        if(pilot_imports[i].ordinal==259)MEM32(pilot_imports[i].address)=type;
+    const char *error=NULL;
     uint32_t out=PILOT_IO_BRIDGE_BASE+0x1800u;
     uint32_t create[]={out,0,file32(0x130),tls_size,out+4,PILOT_ENTRY,directory,0,0,PILOT_IO_BOOTSTRAP_ENTRY};
     uint32_t status=files_call(255,create);

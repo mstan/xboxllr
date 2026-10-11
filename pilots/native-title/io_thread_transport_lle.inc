@@ -12,7 +12,7 @@ static unsigned thread_service_arguments(unsigned ordinal)
     case 1:case 35:case 36:case 121:case 125:case 129:case 160:case 161:case 250:return 0;
     case 97:case 128:case 137:case 138:case 186:case 187:case 256:case 258:
     case 4:case 14:case 17:case 23:case 37:case 68:case 69:case 98:case 100:case 165:case 171:case 173:case 179:case 180:
-    case 124:case 151:case 181:case 277:case 291:case 294:case 301:case 316:return 1;
+    case 124:case 151:case 181:case 277:case 291:case 294:case 301:case 316:case 327:case 328:return 1;
     case 67:case 113:case 143:case 144:case 148:case 198:case 203:case 209:case 217:case 224:case 225:case 231:
     case 15:case 44:case 47:case 168:case 289:case 290:return 2;
     case 99:case 107:case 108:case 119:case 145:case 178:case 182:case 199:case 215:case 233:case 246:
@@ -78,6 +78,7 @@ static void thread_service_prepare(struct OriginalThread *thread,uint32_t *entry
     storage_caller_prepare(thread->call_ordinal,thread->call_args);if(failure)return;
     device_caller_prepare(thread->call_ordinal,thread->call_args,&thread->device_access);if(failure)return;
     vm_caller_prepare(thread->call_ordinal,thread->call_args,&thread->vm_access);if(failure)return;
+    section_caller_prepare(thread->call_ordinal,thread->call_args,&thread->section_access);if(failure)return;
     thread->call_arguments=count;thread->call_return=return_pc;
     thread->call_flags=thread->in_component?thread->component_flags:2u|(caller_if?0x200u:0);
     thread->in_kernel=1;
@@ -100,6 +101,8 @@ static void thread_service_complete(struct OriginalThread *thread)
      * query preserves this complete CPU context and uses a separate frame. */
     device_caller_complete(thread->call_ordinal,thread->call_args,regs[0],&thread->device_access);if(failure)return;
     vm_caller_complete(thread->call_ordinal,thread->call_args,regs[0],&thread->vm_access);
+    if(failure)return;
+    section_caller_complete(thread->call_ordinal,thread->call_args,regs[0],&thread->section_access);
     check_publications(0);if(failure)return;
     if(thread->call_ordinal==187 && (int32_t)regs[0]>=0)thread_note_close(thread->call_args[0]);
     thread->in_kernel=0;memcpy(thread->call_regs,regs,sizeof(regs));
@@ -127,6 +130,7 @@ static void thread_cpu_service_prepare(struct OriginalThread *thread,uint32_t *e
     storage_caller_prepare(thread->call_ordinal,thread->call_args);if(failure)return;
     device_caller_prepare(thread->call_ordinal,thread->call_args,&thread->device_access);if(failure)return;
     vm_caller_prepare(thread->call_ordinal,thread->call_args,&thread->vm_access);if(failure)return;
+    section_caller_prepare(thread->call_ordinal,thread->call_args,&thread->section_access);if(failure)return;
     for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],thread->call_regs+i));
     thread->call_arguments=count;thread->call_return=return_pc;thread->call_flags=flags;
     check_publications(1);if(failure)return;

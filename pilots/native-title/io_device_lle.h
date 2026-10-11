@@ -98,6 +98,8 @@ const char *pilot_io_device_thread_completion(int *terminated,uint32_t *status);
  * engine owner between execution slices. The provider must not reenter this
  * transport or complete kernel waits. NULL unbinds; bind only while idle. */
 typedef const char *(*PilotIoClock)(void *context,uint64_t *ticks);
+/* Read-only interpreter cache occupancy/capacity; no page or owner mutation. */
+const char *pilot_io_device_alias_cache_info(unsigned *count,unsigned *capacity);
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context);
 /* Query the actual sole engine's bound clock; a programmed PIT alone does
  * not establish a producer for finite original waits. No guest execution. */
@@ -106,6 +108,9 @@ int pilot_io_device_clock_bound(void);
  * on the same engine and bind monotonic input time. Requires initialized idle
  * transport, an unprogrammed PIT and no pending device interrupt. */
 const char *pilot_io_device_clock_start(void);
+/* Activate the registered installed title after genuine captured-launch
+ * suspension and original clock dispatch, before creating its bootstrap. */
+const char *pilot_io_device_sections_start(void);
 /* Publish the original thread-type data and observe managed live threads.
  * Neither operation changes readiness, priority or completion state. */
 const char *pilot_io_device_thread_type(uint32_t *address);
@@ -145,6 +150,10 @@ const char *pilot_io_device_irq(unsigned char *guest,int *delivered);
 /* Loader-owned image VA: real kernel reservation, on-demand original physical
  * backing for resident pages, and DMA permitted only while originally pinned. */
 const char *pilot_io_device_image(unsigned char *guest,uint32_t base,uint32_t bytes);
+/* Bind the current immutable XBE descriptor table and a retained installed
+ * filename before actual original CPU XeLoadSection/XeUnloadSection calls.
+ * This supplies launch ownership, never section bytes or completion results. */
+const char *pilot_io_device_sections(unsigned char *guest,const char *image_file);
 /* Register a resident runtime-owned guest stack. The original VM reserves its
  * address range; only resident owned pages can acquire original PFNs/pins.
  * Release only after native execution and all caller references retire. */
