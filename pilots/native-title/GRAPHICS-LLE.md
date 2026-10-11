@@ -6,6 +6,37 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Exclusive GPU diagnostic bootstrap foundation - 2026-10-11
+
+Probe commit `64261e252be24f9e20ae366c8c03dd67be44941d` builds a separate actual
+diagnostic XBE with explicit bootstrap/capture exports. The unchanged resident
+agent performs its ordinary startup; neither diagnostic export runs
+automatically. The actual pinned SDK initializer uses a real exclusive IRQ,
+bounded foreground device service and verified, pinned, retained allocations.
+Its compiled memory accesses pass through a closed ownership/effect policy.
+An ISR readback failure stops subsequent hardware and kernel operations,
+including interleavings during connection, a command store and allocation.
+
+Four groups and **25 target-linked execution cases** pass. The probe repository
+suite runs153 checks, with three existing optional DSP-checker skips; all
+executed checks pass. The nominal SDK prefix creates its real event, retains
+four validated allocations and completes four checked stores, then stops
+**before FD001830=0**, status14. No ROM-control store/readback or original
+readiness producer has occurred. Capture therefore refuses, status26.
+PCI ROM control, reset/clock/instance ownership and downstream tile/PIO/FIFO/
+scanout behavior remain required. A linked image does not qualify bootstrap
+or physical pixels; `.116.2.1` and its parent remain open.
+
+Root verified all five committed source bindings, current/failed report hashes
+and **99 nested artifact identities** (69 compiled and30 model). Private proof:
+`build/blinx/noise-exclusive-bootstrap-20261011/qualified-exclusive-bootstrap.aot-private.json`,
+SHA-256 `1f2761a7d750fd1d652cdb814b24eed74ce316a0062db47108438560ef4cc0cc`.
+The [probe plan](https://github.com/mstan/xboxlle-probe/blob/64261e252be24f9e20ae366c8c03dd67be44941d/docs/NOISE-GPU-BOOTSTRAP.md)
+records actual ownership, stop conditions and the SDK source/attribution.
+No console request, deployment, title/audio run or HLE change occurred.
+The previous console stop still requires confirmed recovery; **4/9** and the
+**26 precision deferrals** remain unchanged.
+
 ## Paired noise capture transport and RDI correction - 2026-10-11
 
 The separate probe branch now contains a compiled post-bootstrap capture module

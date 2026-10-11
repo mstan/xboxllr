@@ -59,6 +59,14 @@ startup, the complete diagnostic XBE and physical packet/M2M/tile observations
 still required. No enabled pixel algorithm or graphics closure is claimed.
 See the [current capture boundary](../pilots/native-title/GRAPHICS-LLE.md#paired-noise-capture-transport-and-rdi-correction---2026-10-11).
 
+A separate linked GPU diagnostic now establishes real exclusive IRQ/resource
+ownership and finite foreground service. Its25 target-linked cases pass; root
+verifies99 nested artifact identities. The actual SDK prefix stops before
+unsupported FD001830=0 after four checked stores, so capture/full bootstrap
+remain open. The worker continues coherent ROM-control/reset/clock/instance
+review. No hardware, title/audio or HLE change;4/9 and26 deferrals remain.
+See the [diagnostic foundation](../pilots/native-title/GRAPHICS-LLE.md#exclusive-gpu-diagnostic-bootstrap-foundation---2026-10-11).
+
 The observed idle FE fence now executes through Blinx's original helper and
 actual kernel-owned RAM. Nine original fences complete, including publication
 while control remains 1; three withheld-service cases prove that helper return
