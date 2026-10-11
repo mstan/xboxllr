@@ -43,6 +43,14 @@ Blinx regression per coherent batch. Retain explicit outcomes for each contract;
 a bundled pass does not close an unimplemented service. Reuse captured evidence
 and avoid repeating whole attract runs for documentation or test-only changes.
 
+Incomplete triangle batches now retain vertex processing and retire without
+raster work even with enabled noise. The focused vertex/color fixture passes
+1,852 draw cases; complete primitives remain guarded. The rebuilt shared GPU
+also passes128 original noise setters/40 service returns across eight lifetimes.
+Actual enabled pixels remain unimplemented; the preserved draw2 and eight mip
+inputs define the next paired observation. No title/audio run or HLE change.
+See the [bounded route](../pilots/native-title/GRAPHICS-LLE.md#enabled-noise-with-no-assembled-primitives---2026-10-11).
+
 The FE fence guard now covers direct device reads and every overlapping byte
 lane in its control/address/data DWORDs. Nine focused APU checks pass, including
 96 direct read/write cases with unchanged register/RAM/IRQ state and sticky

@@ -3152,3 +3152,37 @@ Final private evidence is
 (`b7c1614398218be06bc4627618e60779c84d614f2971d5e6cbd2d2412f9d21ff`),
 with focused checks in `presentation-occlusion-batch-v2-20261010.aot-private.json`.
 The bounded host fix is complete; full graphics acceptance remains open at4/9.
+
+## Enabled noise with no assembled primitives - 2026-10-11
+
+An incomplete triangle, triangle strip or triangle fan with one or two vertices
+cannot produce a fragment. The maintained LLE route now admits that case with
+enabled noise while preserving bank agreement, vertex fetch/transform and the
+actual BEGIN/END owner retirement. It publishes no raster job or surface write.
+Complete primitives remain guarded, including non-DXT1 inputs; this does not
+infer the noise algorithm or its sampling scope. HLE's existing guard is unchanged,
+and the CPU-renderer fixture is selected only by the maintained LLE build.
+
+Four device lifetimes cover eight empty submissions across array, indexed,
+inline and immediate routes. Color/depth remain unchanged, the completed query
+contains zero samples, the real FIFO cursor retires, and a subsequent complete
+triangle still stops before visibility completion. Bank mismatch and invalid
+vertex ownership remain errors. The focused vertex/color fixture passes1,852
+draw cases in0.42s;25 pre-fix failed checks are retained. Source commit70668d1
+and the exact source, support archives, executable and logs are recorded in
+`build/blinx/dxt1-noise-owner-audit-20261011/qualified-no-primitive.aot-private.json`.
+
+The rebuilt shared reference DLL also passes128 original setter calls and40
+complete graphics-service returns across eight lifetimes, retaining the original
+software-method delivery and separate bank readback. Its exact generation is
+preserved as `audio-fe-overlap-20261011/paired-qualified-gpu.dll`; the existing
+original control runner supplies the output and log alongside it. No title,
+attract, audio playback or physical console operation occurred.
+
+Actual enabled draw2 and all eight mip inputs are frozen in
+`dxt1-noise-owner-audit-20261011/enabled-draw-2-case.aot-private.json`. Existing
+hardware images lack a causal paired noise-off/on observation with matching
+complete inputs and build provenance. They do not supply the missing algorithm.
+The next observation must bind both control words and actual owned pixel bytes
+to identical source inputs. Enabled pixels, original startup/full output and
+`.116.2` remain open; the family count stays4/9 with26 safe precision deferrals.
