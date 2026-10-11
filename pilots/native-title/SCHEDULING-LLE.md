@@ -5,6 +5,54 @@ explicitly deferred real-console-dependent work on 2026-10-09; this family
 proceeds independently of GPU startup `.109` / hardware observation `.111`.
 The total remains four qualified families and five open.
 
+## Original graphics gate, constructor and USB DMA lock ownership - 2026-10-11
+
+Whole graphics components now acquire an owned **28-byte original RTL critical
+section**, using original277/294, before taking native graphics or VM locks.
+Original291 initializes storage allocated by the normal original pool owner
+before CPU admission. Native recursion and compiled ISR/DPC graphics entry remain
+guarded before host locks. The default native scheduling path excludes this gate.
+
+Three composed contention lifetimes use **six actual original CPU owners**.
+A higher-priority contender wakes the holder, then blocks in original277 before
+trying the host graphics lock. The holder retains native ownership across real
+original services, completes protection/query/release, releases every host lock
+and then transfers original ownership. **30 actual VM services**, live flags/FP/
+ESP, original thread cleanup and each authored handle's invalidation pass.
+The first blocked interval permits the captured file worker's previously traced
+single handle retirement; later lifetimes restore the exact settled count.
+The initial cleanup and mixed-fixture counter assertions remain failed evidence;
+the dedicated path uses production raw-CPU workers, not the mixed test callback.
+
+CreateDevice is now admitted through the typed original CPU boundary. Three
+constructor lifetimes create the actual native device and its four original VM
+allocations, query the real published states and use host fixture teardown.
+That teardown does not qualify original Reset/Release. Callbacks, display pulses,
+vertical-blank/fence waits and asynchronous lifetimes remain explicitly guarded.
+
+Selected original-memory USB DMA now consults the original contiguous/pinned
+page owner **before native vm_lock**, without falling back to native allocation
+records on rejection. Actual PTE/PFN, complete range, protection, pin and retained
+USB lease checks stay with that owner. Controller reset releases its original
+lease without the native VM lock. The native-memory branch is unchanged.
+A pre-fix run blocks until an independent lock holder expires and fails in5.125s.
+The corrected fixture completes three allocator lifetimes with that lock still
+held: cross-page/pinned byte transfers, atomic rejection, actual HCCA writes,
+reset/release, stale rejection and reuse. A separate borrowed-free check stops
+before original bytes/pages change. Existing OHCI, IRQ/clock and DMA guards pass.
+
+The coherent generation passes **28/28 checks in7.58s**, with zero skips.
+Private proof freezes64 identities:
+`build/blinx/graphics-gate-20261011/qualified.aot-private.json`, SHA-256
+`1ca6273da9091c32329711238518aeca259b126ca2cfac8f895d37c8becb8064`.
+One invisible, muted actual title startup runs **7.875s**, creates the640x480
+native device and then stops at ordinal15: `thread LLE continuation handoff
+requires its real guest-call frame`. The reached native resource pool call still
+needs the existing component15/23/17 transport and ledger lifetime. That required
+integration is next; it is not a new precision deferral. No physical Xbox or
+attract/audio playback run occurred; immutable inputs remain unchanged.
+**4/9 families** and **26 agreed precision deferrals** remain.
+
 ## Typed original-CPU graphics components and VM service ownership - 2026-10-11
 
 Original scheduling now connects reviewed whole HLE D3D entries to the sole

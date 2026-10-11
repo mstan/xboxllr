@@ -117,7 +117,11 @@ static void test_usb_lle(void)
     CHECK((MEM32(buffer+0x84)&~15u)==pa+0x130);
     CHECK(MEM8(response)==18 && MEM8(response+1)==1);
     CHECK(MEM16(response+8)==0x045e && MEM16(response+10)==0x0289);
+#ifdef PILOT_MEMORY_LLE
+    CHECK(physical_find(buffer,bytes)->borrowers==0); /* Original owner retains the USB lease. */
+#else
     CHECK(physical_find(buffer,bytes)->borrowers==1);
+#endif
     /* Original service calls must see/preserve the DMA-updated caller bytes. */
     call_kernel(173,&buffer,1);CHECK(g_eax==pa && MEM8(response)==18);
     usb_test_write(8,1); // hardware reset releases retained schedules/ownership

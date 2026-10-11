@@ -554,11 +554,9 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
     unsigned index;for(index=0;index<PILOT_D3D_COUNT && pilot_d3d_calls[index].address!=entry;++index){}
     if(index==PILOT_D3D_COUNT || !pilot_io_device_thread_component_active())
         return "unbound original CPU native graphics entry";
-    /* Creation/teardown and resource services still call direct memory
-     * transport while holding native ownership locks. Their original-stack
-     * service and lock lifetime must be connected before mutation. */
-    if(index==PILOT_D3D_Direct3D_CreateDevice || index==PILOT_D3D_D3DDevice_Reset ||
-       index==PILOT_D3D_D3DDevice_Release)
+    /* Reset/teardown retain outstanding asynchronous resource lifetimes;
+     * constructor admission does not establish those contracts. */
+    if(index==PILOT_D3D_D3DDevice_Reset || index==PILOT_D3D_D3DDevice_Release)
         return "original scheduling native graphics memory ownership requires integration";
     /* These native paths still use a generated guest callback/native pulse
      * dispatcher. Stop before queueing work against the original scheduler. */
@@ -569,6 +567,10 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
     if(index==PILOT_D3D_D3DDevice_Swap)
         return "original scheduling native graphics display pulse requires integration";
 #endif
+    if(index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank || index==PILOT_D3D_D3DDevice_BlockOnFence)
+        return "original scheduling native graphics wait ownership requires integration";
+    const char *error=graphics_original_enter();
+    if(error)return error;
     uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
@@ -577,10 +579,21 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
     memcpy(regs,returned,sizeof(returned));
     g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
     g_esp=saved[4];g_ebp=saved[5];g_esi=saved[6];g_edi=saved[7];
-    return NULL;
+    return graphics_original_leave();
 }
 static void native_graphics_components_bind(void)
 {
+    if(graphics_original_gate)stop("original graphics components already bound",graphics_original_gate);
+    /* Before original CPU admission there are no component contenders or host
+     * renderer locks. The normal original pool owner publishes this real RTL
+     * object's storage; initialization is VOID, not an EAX success status. */
+    graphics_original_gate=pool_allocate(28,0x4c786647u);
+    if(!graphics_original_gate)stop("original graphics gate allocation failed",28);
+    uint32_t ignored=0;
+    const char *gate_error=pilot_io_device_lle(291,memory,&graphics_original_gate,&ignored);
+    if(gate_error)stop(gate_error,291);
+    if(MEM32(graphics_original_gate+16)!=UINT32_MAX || MEM32(graphics_original_gate+20) ||
+       MEM32(graphics_original_gate+24))stop("original graphics gate initialization differs",graphics_original_gate);
     for(unsigned index=0;index<PILOT_D3D_COUNT;++index) {
         const char *error=pilot_io_device_thread_component_bind_abi(pilot_d3d_calls[index].address,
             pilot_d3d_calls[index].bytes,pilot_d3d_calls[index].sha256,

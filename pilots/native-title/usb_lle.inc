@@ -196,6 +196,15 @@ static void usb_clock_start(void)
 static int usb_dma_transfer(uint32_t pa,void *buffer,size_t bytes,int write)
 {
     if(!bytes || (uint64_t)pa+bytes>64u*1024*1024)return 0;
+#ifdef PILOT_MEMORY_LLE
+    /* The original allocator/publication owner decides before native VM
+     * bookkeeping. A native component may hold vm_lock across its actual
+     * original service while a compiled OHCI callback consumes these pages. */
+    if(!buffer)return 0;
+    int result=pilot_io_device_contiguous_dma(pa,buffer,(uint32_t)bytes,write,PILOT_IO_DMA_USB);
+    if(!result)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
+    return result;
+#else
     AcquireSRWLockExclusive(&vm_lock);
     struct PhysicalAllocation *allocation=physical_find(pa|0x80000000u,(uint32_t)bytes);
     int result=0;
@@ -216,11 +225,17 @@ done:
         if(!result)result=pilot_io_device_pinned_dma(pa,buffer,(uint32_t)bytes,write);
     }
     return result;
+#endif
 }
 static int usb_dma_read(uint32_t pa,void *out,size_t size){return usb_dma_transfer(pa,out,size,0);}
 static int usb_dma_write(uint32_t pa,const void *in,size_t size){return usb_dma_transfer(pa,(void*)in,size,1);}
 static void usb_dma_release(void)
 {
+#ifdef PILOT_MEMORY_LLE
+    /* The real controller reset releases this owner's retained schedules;
+     * native vm_lock and its separate allocation records are not consulted. */
+    pilot_io_device_dma_release(PILOT_IO_DMA_USB);
+#else
     AcquireSRWLockExclusive(&vm_lock);
     for(unsigned i=0;i<256;++i)if(usb_dma_leases[i]) {
         if(!physical_allocations[i].bytes || !physical_allocations[i].borrowers)
@@ -229,6 +244,7 @@ static void usb_dma_release(void)
     }
     ReleaseSRWLockExclusive(&vm_lock);
     pilot_io_device_dma_release(PILOT_IO_DMA_USB);
+#endif
 }
 static BOOL CALLBACK usb_start(PINIT_ONCE once,void *parameter,void **context)
 {

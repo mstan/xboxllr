@@ -9,8 +9,8 @@ const char *pilot_io_device_vm(unsigned ordinal,unsigned char *guest,
     if(device_bus_borrow)return "device LLE VM CPU reentry from device work";
     if(!guest || !inputs || !outputs || !status)return "memory LLE invalid caller buffers";
     if(pilot_io_device_thread_component_active()) {
-        /* The controller owns the sole CPU/device lock while this selected
-         * component runs on its original thread's native worker. Request a
+        /* The controller retains the sole CPU context and releases its device
+         * lock while this component runs on its original native worker. Request a
          * real kernel CALL/RET using that thread's stack, never direct execute
          * or the shared scratch frame. Existing service prepare/complete owns
          * the original VM access, publication and protection postconditions. */

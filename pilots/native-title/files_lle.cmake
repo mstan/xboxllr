@@ -75,8 +75,9 @@ if(PILOT_FILES STREQUAL "LLE")
     pilot_add_test(NAME pilot_idle_isr_stack_lle COMMAND pilot_callback_kernel_lle_test idle-isr-stack-lle)
     pilot_add_test(NAME pilot_idle_isr_stack_guard_lle COMMAND pilot_callback_kernel_lle_test idle-isr-stack-guard-lle)
     set_tests_properties(pilot_idle_isr_stack_lle pilot_idle_isr_stack_guard_lle PROPERTIES TIMEOUT 30)
-    if(EXISTS "${PILOT_FILES_COMPARISON}" AND EXISTS "${PILOT_GENERATED}/pilot_d3d_bindings.h")
-      foreach(graphics_case cpu memory-guard callback-guard pulse-guard)
+    if(PILOT_RENDERER STREQUAL "D3D11" AND EXISTS "${PILOT_FILES_COMPARISON}"
+       AND EXISTS "${PILOT_GENERATED}/pilot_d3d_bindings.h")
+      foreach(graphics_case cpu memory-guard callback-guard pulse-guard constructor gate)
         pilot_add_test(NAME "pilot_graphics_component_${graphics_case}_lle" COMMAND pilot_callback_kernel_lle_test
           "graphics-component-${graphics_case}-lle" "${PILOT_FILES_COMPARISON}")
         set_tests_properties("pilot_graphics_component_${graphics_case}_lle" PROPERTIES TIMEOUT 30)

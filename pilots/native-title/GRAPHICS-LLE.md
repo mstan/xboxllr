@@ -6,6 +6,23 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Original-thread native constructor and lock handoffs - 2026-10-11
+
+The native graphics replacement now uses an actual original RTL critical-section
+owner before host graphics/VM locks. Three contended lifetimes prove real original
+block/wake transfer across30 VM services; three original CPU constructor lifetimes
+create the actual native device and its original allocations. Selected original
+USB DMA also avoids the native VM lock before validating real page/pin/lease
+ownership. The combined28-check generation passes in7.58s.
+
+One muted7.875s title startup now creates the640x480 device, then reaches the
+required native pool transport boundary at ordinal15. Pool allocation/query/free,
+original callbacks/pulses/waits and asynchronous teardown remain required. Host
+fixture teardown does not qualify original Release. The separate maintained LLE
+GPU initializer, enabled-noise pixels and graphics route remain open. See the
+[current composition and evidence](SCHEDULING-LLE.md#original-graphics-gate-constructor-and-usb-dma-lock-ownership---2026-10-11).
+The default native scheduling path excludes the gate; **4/9** and26 deferrals remain.
+
 ## Original-CPU native graphics boundary - 2026-10-11
 
 Original scheduling now binds129 reviewed D3D entry bodies to whole existing

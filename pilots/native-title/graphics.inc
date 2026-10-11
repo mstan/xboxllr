@@ -5,6 +5,34 @@
 #include "pilot_d3d_bindings.h"
 #include "graphics_profile.inc"
 static SRWLOCK graphics_lock=SRWLOCK_INIT;
+#ifdef PILOT_SCHEDULING_LLE
+/* Participating whole components acquire the real original recursive RTL
+ * object before any renderer/VM host lock. A preempting graphics thread can
+ * then block in the original kernel, leaving its native worker lock-free. */
+static uint32_t graphics_original_gate;
+static RECOMP_TLS unsigned graphics_original_gate_depth,graphics_original_dispatch_depth;
+static const char *graphics_original_enter(void)
+{
+    if(!graphics_original_gate || !pilot_io_device_thread_component_active() || graphics_original_gate_depth)
+        return "original graphics gate outside a nonrecursive component";
+    uint32_t ignored=0;
+    const char *error=pilot_io_device_thread_component_call(277,&graphics_original_gate,&ignored);
+    if(error)return error;
+    if(MEM32(graphics_original_gate+20)!=1 ||
+       MEM32(graphics_original_gate+24)!=MEM32(0x8003da64u))
+        return "original graphics gate lost its actual thread owner";
+    graphics_original_gate_depth=1;return NULL;
+}
+static const char *graphics_original_leave(void)
+{
+    if(graphics_original_gate_depth!=1 || graphics_original_dispatch_depth)
+        return "original graphics gate release before native dispatch completion";
+    uint32_t ignored=0;
+    const char *error=pilot_io_device_thread_component_call(294,&graphics_original_gate,&ignored);
+    if(!error)graphics_original_gate_depth=0;
+    return error;
+}
+#endif
 static int graphics_active;
 #include "graphics_diagnostics.inc"
 static uint32_t graphics_parameters[17];
@@ -390,7 +418,11 @@ void pilot_d3d_dispatch(unsigned entry);
 #ifdef PILOT_DISPLAY_QUALIFICATION
 #include "display_qualification.inc"
 #endif
+#ifdef PILOT_SCHEDULING_LLE
+static void graphics_original_dispatch(unsigned entry)
+#else
 void pilot_d3d_dispatch(unsigned entry)
+#endif
 {
 #ifdef PILOT_SCHEDULING_LLE
     /* Generated ISR/DPC bodies bypass the raw CPU's component admission.
@@ -465,3 +497,14 @@ void pilot_d3d_dispatch(unsigned entry)
 #endif
     PILOT_THREAD_CHECKPOINT();
 }
+#ifdef PILOT_SCHEDULING_LLE
+void pilot_d3d_dispatch(unsigned entry)
+{
+    if(graphics_original_dispatch_depth ||
+       (pilot_io_device_thread_component_active() && graphics_original_gate_depth!=1))
+        stop("original graphics dispatch lacks nonrecursive gate ownership",entry);
+    graphics_original_dispatch_depth=1;
+    graphics_original_dispatch(entry);
+    graphics_original_dispatch_depth=0;
+}
+#endif

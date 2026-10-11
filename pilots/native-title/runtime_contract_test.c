@@ -168,6 +168,7 @@ static int test_write_faults(uint32_t va)
 #endif
 #ifdef PILOT_USB_LLE
 #include "usb_contract_test.inc"
+#include "usb_original_dma_contract_test.inc"
 #include "usb_irq_contract_test.inc"
 #endif
 #include "physical_memory_contract_test.inc"
@@ -460,6 +461,7 @@ static void test_timers(void)
 #include "graphics_contract_test.inc"
 #if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
 #include "thread_graphics_component_contract_test.inc"
+#include "thread_graphics_gate_contract_test.inc"
 #endif
 #endif
 
@@ -506,10 +508,13 @@ int main(int argc,char **argv)
     if (argc>1) {
 #if defined(PILOT_D3D_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
         if(!strncmp(argv[1],"graphics-component-",19)) {
-            CHECK(argc==3);int kind=!strcmp(argv[1],"graphics-component-cpu-lle")?0:
+            CHECK(argc==3);
+            if(!strcmp(argv[1],"graphics-component-gate-lle")) {test_thread_graphics_gate_lle(argv[2]);return 0;}
+            int kind=!strcmp(argv[1],"graphics-component-cpu-lle")?0:
                 !strcmp(argv[1],"graphics-component-memory-guard-lle")?1:
                 !strcmp(argv[1],"graphics-component-callback-guard-lle")?2:
-                !strcmp(argv[1],"graphics-component-pulse-guard-lle")?3:-1;
+                !strcmp(argv[1],"graphics-component-pulse-guard-lle")?3:
+                !strcmp(argv[1],"graphics-component-constructor-lle")?4:-1;
             CHECK(kind>=0);test_thread_graphics_component_lle(argv[2],kind);return 0;
         }
 #endif
@@ -528,6 +533,11 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"usb-irq")) { test_usb_irq(); return 0; }
         if (!strcmp(argv[1],"usb-irq-clock")) { test_usb_irq_clock(); return 0; }
         if (!strcmp(argv[1],"usb-lle")) { test_usb_lle(); return 0; }
+#ifdef PILOT_MEMORY_LLE
+        if (!strcmp(argv[1],"usb-original-dma-lock-lle") || !strcmp(argv[1],"usb-original-dma-borrowed-free-lle")) {
+            test_usb_original_dma_lock_lle(!strcmp(argv[1],"usb-original-dma-borrowed-free-lle"));return 0;
+        }
+#endif
         if (!strcmp(argv[1],"usb-dma-release")) {
             install_fault_handler();uint32_t bytes=4096;call_kernel(165,&bytes,1);
             uint32_t base=g_eax;CHECK(base);uint32_t pa=base&0x03ffffffu,value;
