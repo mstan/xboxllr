@@ -1674,6 +1674,10 @@ explicit guarded peripheral boundary; that stop is not a full boot/output pass.
 The shared original-thread VM publication adapter and fixtures are also authored
 here, using the existing private kernel/capture and Unicorn references. No
 original VAD/allocator/query routine body or new external implementation is copied.
+The shared file-buffer preparation and original CPU file fixtures are authored
+here over the already credited private FATX/IDE/PIC/VM floor. They reuse its
+existing factual signature/metadata/error contract and independently supplied
+owned file bytes, without importing original driver bodies into source.
 
 ## Theseus behavioral reference
 

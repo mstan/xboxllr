@@ -9,14 +9,17 @@ static unsigned thread_service_arguments(unsigned ordinal)
     /* Original scheduling/dispatcher operations. Other families must connect
      * their publication/lifetime postconditions before using this boundary. */
     switch(ordinal) {
-    case 121:case 125:case 250:return 0;
+    case 35:case 36:case 121:case 125:case 250:return 0;
     case 97:case 128:case 137:case 186:case 187:case 256:case 258:
-    case 277:case 291:case 294:case 301:return 1;
-    case 113:case 148:case 217:case 224:case 225:case 231:return 2;
-    case 107:case 108:case 119:case 199:case 233:case 246:return 3;
+    case 37:case 69:case 277:case 291:case 294:case 301:return 1;
+    case 67:case 113:case 148:case 198:case 203:case 209:case 217:case 224:case 225:case 231:return 2;
+    case 107:case 108:case 119:case 199:case 215:case 233:case 246:return 3;
     case 149:case 189:case 204:case 234:return 4;
-    case 24:case 150:case 159:case 184:case 254:return 5;
-    case 255:return 10;
+    case 24:case 150:case 159:case 184:case 211:case 218:case 226:case 254:return 5;
+    case 202:return 6;
+    case 219:case 236:return 8;
+    case 190:return 9;
+    case 196:case 200:case 207:case 255:return 10;
     default:
         fprintf(stderr,"[THREAD LLE SERVICE GUARD] ordinal=%u thread=%08x\n",ordinal,kernel_word(0x8003da64u));
         failure="thread LLE service family requires continuation integration";return 0;
@@ -45,6 +48,7 @@ static void thread_service_prepare(struct OriginalThread *thread,uint32_t *entry
     memcpy(thread->call_args,guest_memory+sp+4,count*4);
     if(thread->call_ordinal==250)thread->call_args[0]=thread->call_regs[1];
     thread_before_call(thread->call_ordinal,thread->call_args);if(failure)return;
+    storage_caller_prepare(thread->call_ordinal,thread->call_args);if(failure)return;
     vm_caller_prepare(thread->call_ordinal,thread->call_args,&thread->vm_access);if(failure)return;
     thread->call_arguments=count;thread->call_return=return_pc;
     thread->call_flags=2u|(caller_if?0x200u:0);
@@ -90,6 +94,7 @@ static void thread_cpu_service_prepare(struct OriginalThread *thread,uint32_t *e
      * an absent stack argument or a previous service's retained argument. */
     if(thread->call_ordinal==250)IO_UC(uc_reg_read(cpu,UC_X86_REG_ECX,thread->call_args));
     thread_before_call(thread->call_ordinal,thread->call_args);if(failure)return;
+    storage_caller_prepare(thread->call_ordinal,thread->call_args);if(failure)return;
     vm_caller_prepare(thread->call_ordinal,thread->call_args,&thread->vm_access);if(failure)return;
     for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],thread->call_regs+i));
     thread->call_arguments=count;thread->call_return=return_pc;thread->call_flags=flags;

@@ -61,6 +61,7 @@ struct VmAccessPage {uint32_t va;DWORD protection;};
 struct VmCallerAccess {struct VmAccessPage *pages;unsigned count;int active;};
 static void vm_caller_prepare(unsigned ordinal,const uint32_t *args,struct VmCallerAccess *access);
 static void vm_caller_complete(unsigned ordinal,const uint32_t *args,uint32_t status,struct VmCallerAccess *access);
+static void storage_caller_prepare(unsigned ordinal,const uint32_t *args);
 static struct {uint32_t base,bytes;} stacks[64];
 static unsigned stack_count;
 static uint32_t interrupt_objects[16],pending_callback;
@@ -780,28 +781,14 @@ static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
     if(input[0]!=base || input[1]!=bytes){failure="device LLE image mapping range changed";return;}
     if(type==MEM_COMMIT)publish_range(base,bytes);
 }
+#include "io_storage_thread_lle.inc"
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     unsigned pin_slot=MAX_PUBLISHED;
     if(gpu_bootstrap_published && (ordinal==17 || ordinal==171) && args[0]==0x80000000u) {
         failure="device LLE console bootstrap page is not a caller allocation";return;
     }
-#ifdef PILOT_FILES_LLE
-    /* File-driver DMA can pin loader/stack pages internally, without a title
-     * MmLockUnlockBufferPages call. Materialize only owned resident pages via
-     * the real VM before the driver walks those PTEs. Heap pages are already
-     * published by the original allocator. */
-    if(ordinal==219 || ordinal==236 || ordinal==196 || ordinal==200) {
-        uint32_t base=ordinal==219 || ordinal==236?args[5]:args[8];
-        uint32_t bytes=ordinal==219 || ordinal==236?args[6]:args[9];
-        if((uint64_t)base+bytes>0x100000000ull){failure="storage LLE buffer wraps guest RAM";return;}
-        for(uint64_t page=base&~4095u;bytes && page<(uint64_t)base+bytes;page+=4096) {
-            if(publication_slot((uint32_t)page)==published_count && caller_owned((uint32_t)page,4096) && guest_page((uint32_t)page)) {
-                image_vm((uint32_t)page,4096,MEM_COMMIT);if(failure)return;
-            }
-        }
-    }
-#endif
+    storage_caller_prepare(ordinal,args);if(failure)return;
     if(ordinal!=1 && ordinal!=2 && ordinal!=3 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=45 && ordinal!=46 && ordinal!=47 && ordinal!=50 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&

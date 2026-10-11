@@ -1023,3 +1023,44 @@ original firmware prefix stops explicitly at FFFFC5=0FFF and is not a boot pass.
 No hardware write, audible playback or repeated attract run is required here.
 The prior configured HLE attract evidence retains its own executable identity.
 Family count stays **4/9**, with the same **25 safe deferrals**.
+
+## Actual-thread file transport - 2026-10-10 continuation
+
+Original-thread services now admit the maintained file/cache/namespace arities
+and prepare file buffers through the existing image/stack and original VM
+owners. The same helper serves C and raw-thread callers, saves complete CPU
+state and uses a separate nested frame before publishing actual PTE/PFN pages.
+Heap buffers already belong to the original allocator. FATX/IDE/PIC performs
+the real bytes, IRP/IOSB and event effects; no native completion is supplied.
+File APC callbacks remain guarded before buffer/device effects.
+
+Six authored original-CPU lifetimes exercise synchronous reads, immediate
+cached asynchronous reads, and an uncached asynchronous PENDING read followed
+by an actual original event wait. Both published image pages and original heap
+pages receive bytes matching a separately supplied owned XBE. Original network
+metadata supplies the independently checked file length. Aligned beyond-EOF
+reads preserve bytes and clear the event, zero-time polling returns timeout,
+missing opens and repeated closes return their original errors, and original
+thread/handle baselines return after cleanup.
+
+The initial fixture incorrectly requested desktop standard-information success;
+the existing original FATX contract rejects that class. It now requests the
+already qualified network-open class34. Another attempted fixture configuration
+disabled all cache pages before a fresh open and observed original NO_MEMORY;
+that unsuccessful generation is preserved. The final nonbuffered asynchronous
+case checks both immediate and PENDING completion without inventing a delay.
+
+With `PILOT_FILES_COMPARISON` set to the owned installed default.xbe, the raw
+fixture and the existing whole-file C transport check join the coherent CPU
+suite: **60/60 in14.187s**. Fresh rebuilt original Blinx passes NtOpenFile202
+and next stops at **MmAllocateContiguousMemory165**. Raw-thread contiguous
+allocation/publication/retirement is the next dependency. The default native
+file HLE needs no new correction or extra work from this batch.
+
+Reports: `thread-files-qualified-validation-20261010.aot-private.json` and
+`thread-files-title-startup-20261010.aot-private.json`; earlier fixture failures
+remain separate `thread-files-test*-20261010.aot-private.log` generations.
+No physical Xbox operation, audible playback or attract rerun occurred.
+Scheduling/title/audio/graphics gates remain open at **4/9**, with **25 safe
+deferrals**. This raw-thread connection does not substitute for the wider
+GPU/audio/startup requirements.

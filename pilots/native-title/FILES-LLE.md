@@ -7,6 +7,16 @@ Independent original contract cases, cross-process persistence and the final
 native correction regression pass. Scope and remaining tolerances are explicit
 below; this is not exhaustive Xbox filesystem qualification.
 
+The later original scheduling route now shares the same file-driver buffer
+preparation with C callers. Six raw CPU lifetimes check real image/heap DMA
+bytes, synchronous/cached-immediate/uncached-PENDING completion, original event
+waits, metadata/EOF/missing/close errors and handle cleanup. The optional owned
+`PILOT_FILES_COMPARISON` input registers this fixture and the existing whole-file
+C check; the combined CPU batch passes60/60 in14.187s. Original Blinx gets past
+file open202 to the separately guarded contiguous allocation165. This extends
+the existing bounded file floor; it does not qualify whole original scheduling.
+See [the raw-thread evidence and preserved failures](SCHEDULING-LLE.md#actual-thread-file-transport---2026-10-10-continuation).
+
 ## Executable floor and independent evidence
 
 `tools/native_filesystem_reference.py` executes the original kernel's Nt file,
