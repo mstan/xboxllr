@@ -838,3 +838,81 @@ unreached service families are not established by this representative batch.
 No physical Xbox operation, default HLE attract run or audio playback was
 needed. HLE graphics/cache/audio algorithms are unchanged. The family count
 remains **4/9**, with **23 safely deferred questions**; `.112.2` stays open.
+
+### Early child admission and critical sections - 2026-10-10 continuation
+
+The original CPU route now retains a child **before the original creator makes
+it runnable**, without changing the caller's priority or the original queues.
+At the reviewed kernel's80025332 boundary, the successful handle is already
+installed. The adapter checks the real EBP frame and ESI status, references
+that handle through original ObReferenceObjectByHandle, and checks the returned
+object against the creator's actual local. The nested ownership call has its
+own bounded guest frame and preserves the complete CPU context. No second
+ownership registration occurs when creation returns. A child may exit and close
+its handle first; its retained object cannot be retired until the creator has
+returned. Failed-creation cleanup retains an explicit qualification guard.
+
+The authored parent/child programs cover **12 lifetimes /24 CPU workers** using
+both original creation ABIs, actual parent priorities8 and7, real stack/TLS/
+extension/context arguments and independent resource observations. Six children
+run and close their handles before the creator returns. Two system children
+start suspended and are resumed through the original API. Live parent x87/XMM
+values and distinct controls survive creation, nested references and child
+execution. Children observe their actual original FP startup state. Closed
+handles are independently invalid; original thread counts and the settled
+global handle baseline are restored.
+
+An Xbox SystemRoutine must terminate explicitly: returning reaches the original
+bugcheck thunk. The system-child program therefore calls actual PsTerminate
+SystemThread258 with status12345678. The adapter unwinds only its retained host
+continuation, then sends the **unchanged original CALL frame** to that export.
+Original termination owns context switching, stack release and exit status.
+Held original references expose the real child exit result. Fastcall object
+dereference uses the actual ECX; it does not reuse a stale stack argument.
+
+Allowing ordinary-priority work exposed dependencies in the unchanged captured
+boot worker. Its bounded DbgPrint now enters the actual reviewed INT2D IDT
+handler, which itself adjusts the saved return PC and dispatches the print
+service. The host supplies no print result or instruction skip. Other debug
+commands remain guarded. Its original MmMapIoSpace then reads the owned flash
+image through the real page-table mapping. The256KiB image is hash-bound and
+mirrored like the maintained machine profile, with read-only host/CPU backing;
+ROM is separate from writable RAM/publication/DMA ownership. ROM writes and
+instruction fetches remain guarded rather than establishing those contracts.
+
+The captured worker also issues SMC LED sequence08/E1 and mode07/1 requests.
+The maintained SMC now retains those raw requests for a later board-output
+owner. Original HAL byte transactions and three controller rounds check that
+owner, real IRQ11 acknowledgment and request replacement. No SMBus LED readback,
+automatic LED state or blink phase is invented. Physical/automatic/blink details
+are safely deferred as LLE-D05; they do not block the display/game foundation.
+
+Actual original RtlInitialize/Enter/LeaveCriticalSection291/277/294 now use the
+same CALL-frame transport. A separate authored batch covers **six lifetimes /
+12 workers**: recursive ownership, a higher-priority contender, actual original
+blocking/wakeup and ownership transfer on final release. Shared object fields,
+ordering observations, canaries, invalid closed handles and resource baselines
+provide independent checks. No host critical section or manufactured wakeup
+implements this LLE path. The initial fixture mistakenly used suspend231 where
+it needed signal225; its failed log remains preserved, and the corrected fixture
+is the passing generation.
+
+The final source-bound CPU batch passes **52/52 in14.10s**. Its preceding51-entry
+admission batch and focused failures remain distinct artifacts. The separately
+rebuilt, muted original Blinx startup now runs its real childD0038018 through
+critical-section entry and stops at **ExQueryNonVolatileSetting24**. Connecting
+that original settings query to the shared EEPROM owner, followed by reached
+service/callback publication and lifetimes, is the next required work. The stop
+diagnostic0000009F is an outer wait adapter argument, not the original CPU PC.
+This is progress beyond child admission, not a whole-title scheduling pass.
+
+Private final reports in `build/blinx/`:
+`child-critical-qualified-validation-20261010.aot-private.json` and
+`child-critical-final-title-startup-20261010.aot-private.json`. ROM and EEPROM
+input files retain their before/after SHA values. The title and CPU tests ran
+sequentially because their scratch HDD has one exclusive owner. No physical
+Xbox operation, HLE attract run or audio playback was performed. HLE generated
+CPU, rendering/cache and audio algorithms remain unchanged. One authorized
+independent audio worker completed the raw SSL foundation concurrently in a
+separate build, sharing the four-core Normal-priority budget. `.112.2` remains
+open; family count stays **4/9**, with **24 safely deferred questions**.

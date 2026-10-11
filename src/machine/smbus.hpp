@@ -49,6 +49,10 @@ public:
     bool quick(bool) override { return true; }
 
     void set_tray_state_reader(std::function<uint8_t()> reader) { tray_state_ = std::move(reader); }
+    // Retain programmed LED requests for the board/output owner. This is
+    // host telemetry, not invented SMBus readback or automatic/blink timing.
+    struct LedRequests {uint8_t known=0,mode=0,sequence=0;};
+    LedRequests led_requests() const { return led_; }
 
 private:
     FaultFn fault_;
@@ -58,6 +62,7 @@ private:
     uint8_t fan_speed_ = 50;  // SMC units are 0..50; fixed auto-mode telemetry for now.
     uint8_t version_[3] = {0x50, 0x31, 0x31};  // "P11" (SMC/PIC version, read from silicon)
     int version_index_ = 0;
+    LedRequests led_;
 };
 
 // Conexant CX25871 video encoder, 7-bit address 0x45 (the v1.x boards' TV encoder; this

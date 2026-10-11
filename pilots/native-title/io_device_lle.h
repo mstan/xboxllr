@@ -58,6 +58,10 @@ const char *pilot_io_device_thread_checkpoint(uint32_t pc,uint32_t regs[8],uint3
  * PC/EFLAGS/x87/MMX/SSE stay in that one engine across IRQs and switches.
  * This is an LLE build route, not a conversion of an executing native body. */
 const char *pilot_io_device_thread_execute(uint32_t entry,uint32_t regs[8]);
+/* CPU execution may reach an actual nonreturning PsTerminateSystemThread
+ * CALL. Report that request to unwind the host loader continuation; original
+ * kernel termination/cleanup still executes on its unchanged guest frame. */
+const char *pilot_io_device_thread_completion(int *terminated,uint32_t *status);
 /* Input clock only, in 1,125,000-Hz PIT ticks. Called solely by the original
  * engine owner between execution slices. The provider must not reenter this
  * transport or complete kernel waits. NULL unbinds; bind only while idle. */

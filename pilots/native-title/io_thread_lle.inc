@@ -9,21 +9,23 @@ static struct OriginalThread {
     HANDLE host_thread,request_event,resume_event;
     uint32_t native_regs[8],call_regs[8],call_args[10],return_pc,call_return,call_flags;
     unsigned call_ordinal,call_arguments,request;
-    int in_kernel,in_checkpoint,in_cpu,cpu_used,terminate;
+    int in_kernel,in_checkpoint,in_cpu,cpu_used,terminate,cpu_exit_request;
     uint32_t cpu_entry,cpu_return;
+    uint32_t creation_child,birth_parent;
     uint32_t checkpoint_pc,checkpoint_flags,initial_flags;
     volatile LONG checkpoint_requested;
     uint32_t exit_status;
     const char *callback_error;
 } original_threads[64];
 static PilotIoThread thread_callback;
-static struct OriginalThread *pending_thread,*pending_thread_return,*pending_cpu_service;
+static struct OriginalThread *pending_thread,*pending_thread_return,*pending_cpu_service,*pending_cpu_birth;
 static __declspec(thread) struct OriginalThread *native_thread_worker;
 static int thread_pcr_published;
 static unsigned original_cpu_threads;
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static uint32_t original_export(unsigned ordinal);
 static void thread_after_call(unsigned ordinal,const uint32_t *args,uint32_t result);
+static void thread_cpu_birth_prepare(struct OriginalThread *parent,uint32_t *entry);
 
 static struct OriginalThread *thread_object(uint32_t object)
 {
@@ -57,6 +59,13 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
     if(!original_cpu_threads)return 0;
     struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
     if(!thread || !thread->in_cpu)return 0;
+    /* In this hash-bound kernel the handle has been installed and ESI holds
+     * its status before the next original ready-thread call. Stop outside the
+     * engine to retain ownership before that call can dispatch the child. */
+    if(address==0x80025332u && thread->in_kernel &&
+       (thread->call_ordinal==254 || thread->call_ordinal==255) && !thread->creation_child) {
+        pending_cpu_birth=thread;uc_emu_stop(engine);return 1;
+    }
     if(thread->in_kernel && address==thread->call_return) {
         pending_thread_return=thread;uc_emu_stop(engine);return 1;
     }
@@ -69,13 +78,18 @@ static void thread_before_call(unsigned ordinal,const uint32_t *args)
 {
     if(ordinal==254 || ordinal==255) {
         uint32_t current=kernel_word(0x8003da64u);
-        if(!thread_callback || ((kernel_word(current+0x30)>>16)&255)!=31) {
+        struct OriginalThread *parent=thread_object(current);
+        int original_parent=parent && parent->in_cpu;
+        if(!thread_callback || (!original_parent && ((kernel_word(current+0x30)>>16)&255)!=31)) {
             fprintf(stderr,"[THREAD LLE CREATE GUARD] ordinal=%u current=%08x priority=%u suspended=%u entry=%08x\n",
                 ordinal,current,(kernel_word(current+0x30)>>16)&255,ordinal==255?args[7]:0,args[ordinal==254?2:9]);
             failure="thread LLE creation requires bound callback and qualified priority-31 caller";return;
         }
         unsigned i;for(i=0;i<64 && original_threads[i].object;++i){}
         if(i==64){failure="thread LLE ownership capacity";return;}
+        if(original_parent && parent->creation_child) {
+            failure="original CPU creation has an unfinished child admission";return;
+        }
         if(ordinal==255 && (args[1]>0x1000 || args[2]>0x100000 || args[3]>0x10000))
             failure="thread LLE creation exceeds qualified stack/TLS/extension scope";
     }
@@ -174,6 +188,13 @@ const char *pilot_io_device_thread_execute(uint32_t entry,uint32_t regs[8])
         return "original CPU execution host handoff failed";
     if(thread->callback_error)return thread->callback_error;
     memcpy(regs,thread->call_regs,sizeof(thread->call_regs));return NULL;
+}
+const char *pilot_io_device_thread_completion(int *terminated,uint32_t *status)
+{
+    struct OriginalThread *thread=native_thread_worker;
+    if(!thread || !thread->cpu_used || !terminated || !status)
+        return "original CPU completion outside admitted worker";
+    *terminated=thread->cpu_exit_request;*status=thread->exit_status;return NULL;
 }
 const char *pilot_io_device_thread_checkpoint(uint32_t pc,uint32_t regs[8],uint32_t *flags)
 {

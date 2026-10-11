@@ -9,12 +9,13 @@ static unsigned thread_service_arguments(unsigned ordinal)
     /* Original scheduling/dispatcher operations. Other families must connect
      * their publication/lifetime postconditions before using this boundary. */
     switch(ordinal) {
-    case 121:case 125:return 0;
-    case 97:case 128:case 137:case 186:case 187:case 256:return 1;
+    case 121:case 125:case 250:return 0;
+    case 97:case 128:case 137:case 186:case 187:case 256:case 258:
+    case 277:case 291:case 294:return 1;
     case 113:case 148:case 224:case 225:case 231:return 2;
-    case 107:case 108:case 119:case 233:return 3;
+    case 107:case 108:case 119:case 233:case 246:return 3;
     case 149:case 189:case 234:return 4;
-    case 150:case 159:return 5;
+    case 150:case 159:case 254:return 5;
     case 255:return 10;
     default:
         fprintf(stderr,"[THREAD LLE SERVICE GUARD] ordinal=%u thread=%08x\n",ordinal,kernel_word(0x8003da64u));
@@ -42,6 +43,8 @@ static void thread_service_prepare(struct OriginalThread *thread,uint32_t *entry
         failure="thread LLE service return outside resident native caller";return;
     }
     memcpy(thread->call_args,guest_memory+sp+4,count*4);
+    if(thread->call_ordinal==250)thread->call_args[0]=thread->call_regs[1];
+    thread_before_call(thread->call_ordinal,thread->call_args);if(failure)return;
     thread->call_arguments=count;thread->call_return=return_pc;
     thread->call_flags=2u|(caller_if?0x200u:0);
     thread->in_kernel=1;
@@ -79,16 +82,20 @@ static void thread_cpu_service_prepare(struct OriginalThread *thread,uint32_t *e
         failure="original CPU service return outside resident caller";return;
     }
     IO_UC(uc_mem_read(cpu,sp+4,thread->call_args,count*4));
+    /* ObfDereferenceObject is fastcall: its object is in the real ECX, not
+     * an absent stack argument or a previous service's retained argument. */
+    if(thread->call_ordinal==250)IO_UC(uc_reg_read(cpu,UC_X86_REG_ECX,thread->call_args));
     thread_before_call(thread->call_ordinal,thread->call_args);if(failure)return;
-    /* Creation needs registration before a normal-priority child can start,
-     * and nested ownership calls need an independently retained guest frame.
-     * Keep that route guarded even for the older priority-31 fixture scope. */
-    if(thread->call_ordinal==255) {
-        failure="original CPU child creation requires admission and lifetime integration";return;
-    }
     for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],thread->call_regs+i));
     thread->call_arguments=count;thread->call_return=return_pc;thread->call_flags=flags;
     check_publications(1);if(failure)return;
+    if(thread->call_ordinal==258) {
+        /* Unwind only the retained host continuation. The actual CALL frame,
+         * flags and FP state stay in this CPU until original Ps termination. */
+        thread->cpu_exit_request=1;thread->terminate=1;
+        thread->exit_status=thread->call_args[0];thread->in_cpu=0;--original_cpu_threads;
+        return;
+    }
     /* The private import gate transfers control only. Keep actual flags,
      * every register and FP state; the original CALL frame is already live. */
     thread->in_kernel=1;*entry=original_export(thread->call_ordinal);
@@ -204,6 +211,17 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
     for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],thread->native_regs+i));
     *entry=thread->return_pc;
     if(thread->terminate) {
+        if(thread->cpu_exit_request) {
+            uint32_t sp=0,pc=0;
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_ESP,&sp));
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&pc));
+            if(kernel_word(0x8003da64u)!=thread->object || sp!=thread->call_regs[4] ||
+               pc!=0xfe000408u || thread->call_ordinal!=258 || thread->call_arguments!=1 ||
+               thread->native_regs[4]!=sp) {
+                failure="original CPU termination lost its actual CALL frame";return;
+            }
+            *entry=original_export(258);return;
+        }
         uint32_t sp=thread->native_regs[4]-8,frame[]={0,thread->exit_status};
         if(sp<thread->stack || (uint64_t)sp+sizeof(frame)>(uint64_t)thread->stack+thread->stack_bytes) {
             failure="thread LLE termination frame outside original stack";return;

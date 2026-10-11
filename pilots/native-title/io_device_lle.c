@@ -22,6 +22,7 @@
 #endif
 
 #define RAM_BYTES (64u*1024*1024)
+#define ROM_BYTES (256u*1024)
 #define SCRATCH PILOT_IO_BRIDGE_BASE
 #define STACK (SCRATCH+0x8000u)
 #define RETURN_PC (SCRATCH+0x9000u)
@@ -30,6 +31,7 @@
 static SRWLOCK lock=SRWLOCK_INIT;
 static uc_engine *cpu;
 static unsigned char *ram,*guest_memory;
+static unsigned char *rom;
 static unsigned char *shared_pages[RAM_BYTES/4096];
 static const char *failure;
 static struct {uint32_t va,pa;unsigned char *backing;} mapped[MAX_PAGES];
@@ -89,7 +91,7 @@ static uint32_t ram_word(uint32_t pa)
     if(pa>RAM_BYTES-4){failure="device LLE page table outside RAM";return 0;}
     memcpy(&value,physical_backing(pa),4);return value;
 }
-static int physical(uint32_t va,uint32_t *pa)
+static int physical_translation(uint32_t va,uint32_t *pa)
 {
     uint32_t pde=ram_word(0xf000u+(va>>22)*4);
     if(!(pde&1))return 0;
@@ -99,7 +101,13 @@ static int physical(uint32_t va,uint32_t *pa)
         if(!(pte&1))return 0;
         *pa=(pte&0xfffff000u)+(va&4095);
     }
-    return *pa<RAM_BYTES;
+    return 1;
+}
+/* Allocator/publication/DMA ownership remains strictly RAM. Bus-backed ROM
+ * is a separate immutable owner, never an entry in the writable RAM ledger. */
+static int physical(uint32_t va,uint32_t *pa)
+{
+    return physical_translation(va,pa) && *pa<RAM_BYTES;
 }
 static uint32_t kernel_word(uint32_t va)
 {
@@ -120,20 +128,31 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
     if(address>UINT32_MAX){failure="device LLE non-x86 address";return false;}
     if(type==UC_MEM_FETCH_UNMAPPED && thread_cpu_import_fault(engine,address))return false;
     uint32_t page=(uint32_t)address&~4095u,pa;
-    unsigned char *backing;
+    unsigned char *backing;uint32_t protection=UC_PROT_ALL;
     unsigned publication=publication_slot(page);
     if(publication==published_count && (page<0x80000000u || (page>=0xe0000000u && page<0xe4000000u) ||
        (page>=PILOT_KERNEL_DATA_BASE && page<PILOT_KERNEL_DATA_BASE+PILOT_KERNEL_DATA_BYTES))) {
         if(!guest_page(page)){failure="device LLE invalid caller memory";return false;}
         backing=guest_memory+page;pa=UINT32_MAX;
     } else {
-        if(!physical(page,&pa)){failure="device LLE unmodelled memory or MMIO";return false;}
-        backing=physical_backing(pa);
+        if(!physical_translation(page,&pa) || (pa>=RAM_BYTES && (!rom || pa<0xff000000u))) {
+            uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
+            fprintf(stderr,"[IO DEVICE LLE MEMORY GUARD] access=%u address=%08x bytes=%d pc=%08x thread=%08x\n",
+                type,(uint32_t)address,size,pc,kernel_word(0x8003da64u));
+            failure="device LLE unmodelled memory or MMIO";return false;
+        }
+        if(pa>=0xff000000u) {
+            if(type==UC_MEM_WRITE_UNMAPPED || type==UC_MEM_WRITE_PROT ||
+               type==UC_MEM_FETCH_UNMAPPED || type==UC_MEM_FETCH_PROT) {
+                failure="device LLE immutable ROM permits qualified reads only";return false;
+            }
+            backing=rom+((pa-0xff000000u)&(ROM_BYTES-1));protection=UC_PROT_READ;
+        } else backing=physical_backing(pa);
     }
     if(mapped_count==MAX_PAGES){failure="device LLE mapping capacity";return false;}
     mapped[mapped_count].va=page;mapped[mapped_count].pa=pa;
     mapped[mapped_count++].backing=backing;
-    uc_err error=uc_mem_map_ptr(engine,page,4096,UC_PROT_ALL,backing);
+    uc_err error=uc_mem_map_ptr(engine,page,4096,protection,backing);
     if(error){failure=uc_strerror(error);return false;}
     return true;
 }
@@ -238,6 +257,33 @@ static uc_err write_interrupt_frame(uc_engine *engine,uint32_t sp,const uint32_t
 static void interrupt(uc_engine *engine,uint32_t number,void *data)
 {
     (void)data;
+    if(number==0x2d) {
+        /* The captured boot worker's real DbgPrint uses INT2D followed by
+         * INT3. Its original IDT handler advances the saved PC past INT3 and
+         * dispatches the debugger service. Do not fabricate its return code
+         * or skip either instruction in the host. Other debugger commands
+         * remain outside this bounded print route. */
+        uint32_t pc=0,command=0;
+        uc_err e=uc_reg_read(engine,UC_X86_REG_EIP,&pc);
+        if(!e)e=uc_reg_read(engine,UC_X86_REG_EAX,&command);
+        uint32_t gate=0x8003dcc0u+number*8,low=kernel_word(gate),high=kernel_word(gate+4);
+        uint32_t entry=(low&65535)|(high&0xffff0000u);
+        if(!e && pc==0x80027975u && command==1 && entry==0x8001e85cu &&
+           (low>>16)==8 && (high&65535)==0xee00) {
+            uint32_t sp,frame[3],flags;
+            e=uc_reg_read(engine,UC_X86_REG_ESP,&sp);
+            frame[0]=pc;
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_CS,frame+1);
+            if(!e)e=uc_reg_read(engine,UC_X86_REG_EFLAGS,frame+2);
+            sp-=12;flags=frame[2]&~(0x100u|0x200u|0x4000u|0x10000u|0x20000u);
+            if(!e)e=write_interrupt_frame(engine,sp,frame);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_ESP,&sp);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_EFLAGS,&flags);
+            if(!e)e=uc_reg_write(engine,UC_X86_REG_EIP,&entry);
+            if(e)forbidden(engine,uc_strerror(e));
+            return;
+        }
+    }
     if(number==7 && thread_cpu_npx_owner()) {
         /* The reviewed capture's actual #NM gate owns lazy NPX switching.
          * Retry the faulting PC through its real FXSAVE/FXRSTOR handler, not
@@ -368,6 +414,24 @@ static void initialize(unsigned char *guest)
     }
     for(unsigned i=0;i<32;++i)sprintf(hex+i*2,"%02x",hash[i]);
     if(strcmp(hex,PILOT_IO_DEVICE_SNAPSHOT_SHA)){failure="device LLE unreviewed RAM capture";return;}
+#ifdef PILOT_IO_DEVICE_ROM
+    file=fopen(PILOT_IO_DEVICE_ROM,"rb");
+    if(!file){failure="device LLE owned ROM image missing";return;}
+    rom=VirtualAlloc(NULL,ROM_BYTES,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+    if(!rom){fclose(file);failure="device LLE ROM allocation failed";return;}
+    read=fread(rom,1,ROM_BYTES,file);extra=fgetc(file);fclose(file);
+    if(read!=ROM_BYTES || extra!=EOF){failure="device LLE ROM profile size mismatch";return;}
+    if(BCryptHash(BCRYPT_SHA256_ALG_HANDLE,NULL,0,rom,ROM_BYTES,hash,32)<0) {
+        failure="device LLE ROM hash failed";return;
+    }
+    char rom_hex[65];
+    for(unsigned i=0;i<32;++i)sprintf(rom_hex+i*2,"%02x",hash[i]);
+    if(strcmp(rom_hex,PILOT_IO_DEVICE_ROM_SHA)){failure="device LLE ROM changed since configuration";return;}
+    DWORD previous;
+    if(!VirtualProtect(rom,ROM_BYTES,PAGE_READONLY,&previous)) {
+        failure="device LLE immutable ROM protection failed";return;
+    }
+#endif
     if(guest_page(SCRATCH)){failure="device LLE private stack collides with caller";return;}
     IO_UC(uc_open(UC_ARCH_X86,UC_MODE_32,&cpu));
     if(!VirtualAlloc(guest+SCRATCH,0x10000,MEM_COMMIT,PAGE_READWRITE)) {
@@ -413,6 +477,9 @@ static void refresh_mappings(void)
         if(mapped[i].pa==UINT32_MAX) {
             unsigned j=publication_slot(mapped[i].va);
             stale=j<published_count || !guest_page(mapped[i].va);
+        } else if(mapped[i].pa>=0xff000000u) {
+            stale=!rom || !physical_translation(mapped[i].va,&pa) || pa!=mapped[i].pa ||
+                  rom+((pa-0xff000000u)&(ROM_BYTES-1))!=mapped[i].backing;
         } else stale=!physical(mapped[i].va,&pa) || pa!=mapped[i].pa ||
                      physical_backing(pa)!=mapped[i].backing;
         if(stale) {
@@ -569,7 +636,8 @@ static void run_original(uint32_t entry,size_t instruction_limit)
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
     for(unsigned calls=0;calls<8192;++calls) {
-        pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;pending_cpu_service=NULL;
+        pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;
+        pending_cpu_service=NULL;pending_cpu_birth=NULL;
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
 #endif
@@ -583,10 +651,17 @@ static void run_original(uint32_t entry,size_t instruction_limit)
         uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,slice);
         if(failure)return;
         if(pending_cpu_service && (error==UC_ERR_OK || error==UC_ERR_FETCH_UNMAPPED)) {
-            thread_cpu_service_prepare(pending_cpu_service,&entry);if(failure)return;
+            struct OriginalThread *thread=pending_cpu_service;
+            thread_cpu_service_prepare(thread,&entry);if(failure)return;
+            if(thread->cpu_exit_request)thread_handoff(thread,0,&entry);
+            if(failure)return;
             continue;
         }
         if(error){failure=uc_strerror(error);return;}
+        if(pending_cpu_birth) {
+            thread_cpu_birth_prepare(pending_cpu_birth,&entry);if(failure)return;
+            continue;
+        }
 #ifdef PILOT_USB_LLE
         if(device_irq_pending) {
             int vector=pilot_usb_pic_vector(1);
@@ -727,7 +802,8 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
        ordinal!=186 && ordinal!=187 && ordinal!=189 && ordinal!=190 && ordinal!=196 && ordinal!=198 &&
        ordinal!=200 && ordinal!=202 && ordinal!=203 && ordinal!=207 && ordinal!=209 && ordinal!=211 &&
        ordinal!=215 && ordinal!=218 && ordinal!=219 && ordinal!=224 && ordinal!=225 && ordinal!=226 && ordinal!=231 && ordinal!=233 && ordinal!=234 && ordinal!=236 &&
-       ordinal!=246 && ordinal!=250 && ordinal!=254 && ordinal!=255 && ordinal!=256
+       ordinal!=246 && ordinal!=250 && ordinal!=254 && ordinal!=255 && ordinal!=256 &&
+       ordinal!=277 && ordinal!=291 && ordinal!=294
 #endif
        ) {
         failure="device LLE unsupported ordinal";return;

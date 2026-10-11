@@ -22,6 +22,9 @@ static void test_thread_cpu_body(void)
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
     ++thread_cpu_calls;
+    int terminated=0;uint32_t status=0;
+    CHECK(!pilot_io_device_thread_completion(&terminated,&status));
+    if(terminated){original_thread_exit.status=status;longjmp(original_thread_exit.target,1);}
 }
 static void test_thread_cpu_peer(void)
 {

@@ -5,8 +5,18 @@ USB/PIC LLE now requires the reviewed
 Original scheduling has bounded no-peer idle-clock and integer compute
 checkpoints. Its LLE thread bodies now execute original bytes on that same CPU,
 retaining flags and full FP state across original IRQs, waits and switches.
+Normal-priority child creation, explicit termination and recursive critical
+sections now use that original route; the latest combined CPU batch passes52
+checks. Original Blinx runs its child and reaches the settings-query dependency.
 Whole title scheduling remains unqualified. See
-[the CPU route and remaining integration](SCHEDULING-LLE.md#original-cpu-thread-execution---2026-10-10-continuation).
+[the CPU route and remaining integration](SCHEDULING-LLE.md#early-child-admission-and-critical-sections---2026-10-10-continuation).
+
+Original ROM reads additionally require the owned256KiB flash input, configured
+with `-DPILOT_IO_DEVICE_ROM=F:/Projects/xboxlle/machine/flash-dump-ff000000.bin`.
+Its hash is checked at configuration and load; the RAM bridge's ROM backing is
+immutable and maps read-only. RAM/DMA publication retains its separate owner.
+Full original startup needs this asset when its captured worker maps the ROM;
+component builds that never reach it need no ROM input.
 
 **Working attract checkpoint:** `milestone/blinx-attract-20261008` preserves
 owner-observed FMVs and real-time Demo play on runtime `318f5ac`. See the

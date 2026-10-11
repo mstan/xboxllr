@@ -83,6 +83,13 @@ bool XboxSmc::write_byte(uint8_t cmd, uint8_t val) {
         case 0x01: version_index_ = val; return true;   // VER: reset version-string read index
         case 0x0e: error_reg_ = val; return true;       // ERROR_WRITE
         case 0x06: fan_speed_ = val > 50 ? 50 : val; return true;  // requested fan speed
+        case 0x07:
+            if(val>1) {
+                if(fault_)fault_("SMC LED mode outside automatic/programmed profile");
+                return false;
+            }
+            led_.mode=val;led_.known|=1;return true;
+        case 0x08: led_.sequence=val;led_.known|=2;return true;
         case 0x1b: scratch_reg_ = val; return true;     // SCRATCH
         case 0x0c:
             // Do not inherit the empty-drive bring-up's ignored motor command
@@ -98,7 +105,7 @@ bool XboxSmc::write_byte(uint8_t cmd, uint8_t val) {
             }
             return true;
         default:
-            // All other SMC registers drive physical outputs (LED 0x07/0x08, fan 0x05/0x06,
+            // Other SMC registers drive physical outputs (fan 0x05/0x06,
             // tray 0x0c, interrupt enable/ack 0x1a/0x0d, challenge response 0x20/0x21, ...) with
             // no guest-visible readback. Accept + ignore, as xemu does for unhandled writes.
             return true;

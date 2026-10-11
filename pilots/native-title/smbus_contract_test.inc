@@ -31,6 +31,16 @@ static void test_smbus_smc_lle(void)
         CHECK(!g_eax && MEM32(output)==0x39+life);
         uint32_t status=0;CHECK(!pilot_usb_board_port(0xc000,1,0,&status));
         CHECK(!(status&0x10) && pilot_usb_pic_vector(0)<0);
+        uint32_t known=0,mode=0,sequence=0;
+        args[1]=7;args[3]=0;CHECK(!pilot_io_device_lle(50,memory,args,&g_eax));CHECK(!g_eax);
+        args[1]=8;args[3]=0xe1+life;CHECK(!pilot_io_device_lle(50,memory,args,&g_eax));CHECK(!g_eax);
+        CHECK(!pilot_usb_board_smc_led_requests(&known,&mode,&sequence));
+        CHECK(known==3 && mode==0 && sequence==0xe1+life);
+        args[1]=7;args[3]=1;CHECK(!pilot_io_device_lle(50,memory,args,&g_eax));CHECK(!g_eax);
+        CHECK(!pilot_usb_board_smc_led_requests(&known,&mode,&sequence));
+        CHECK(known==3 && mode==1 && sequence==0xe1+life);
+        CHECK(!pilot_usb_board_port(0xc000,1,0,&status));
+        CHECK(!(status&0x10) && pilot_usb_pic_vector(0)<0);
     }
     // Admission fails before starting work without its settings owner.
     uint32_t address=0xa9,command=0x1a;
@@ -39,7 +49,7 @@ static void test_smbus_smc_lle(void)
     uint32_t status=0;CHECK(!pilot_usb_board_port(0xc000,1,0,&status));
     CHECK(!(status&0x10) && pilot_usb_pic_vector(0)<0);
     address=0x20;CHECK(!pilot_usb_board_port(0xc004,1,1,&address));
-    uint32_t smc_register=7;CHECK(!pilot_usb_board_port(0xc008,1,1,&smc_register));
+    uint32_t smc_register=5;CHECK(!pilot_usb_board_port(0xc008,1,1,&smc_register));
     CHECK(pilot_usb_board_port(0xc002,1,1,&command));
     CHECK(!pilot_usb_board_port(0xc000,1,0,&status));
     CHECK(!(status&0x10) && pilot_usb_pic_vector(0)<0);

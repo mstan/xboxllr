@@ -8,6 +8,9 @@ static void scheduling_lle_execute(uint32_t entry)
     if(error)stop(error,entry);
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
+    int terminated=0;uint32_t status=0;
+    error=pilot_io_device_thread_completion(&terminated,&status);if(error)stop(error,entry);
+    if(terminated){original_thread_exit.status=status;longjmp(original_thread_exit.target,1);}
 }
 static void scheduling_lle_bootstrap(void)
 {

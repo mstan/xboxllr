@@ -937,6 +937,50 @@ Actual filters/scaling, SSL/GP/EP ownership/output and original DirectSound/titl
 selection remain active implementation gaps. Existing HLE audio stays on its
 maintained output path.
 
+## Raw SSL descriptor ownership - 2026-10-10
+
+`beads-xbox.1.113.2` adds the missing shared-RAM staging foundation for SSL.
+`SET_CURRENT_SSL` selects a bounded 64-entry window, and its 128 DWORD methods
+write the actual offset/control pairs at `VPSSLADDR`, rather than falling into
+generic register storage. Each voice has distinct A/B base/count bindings.
+`read_ssl_segment` validates the binding and reads both opaque DWORDs freshly
+from the current physical table. CPU rewrites and table remaps are observed
+without a descriptor cache. The authored `apu_ssl.hpp` owner isolates the
+staging/address policy from later stream decoding and completion.
+
+This implements **raw staging**, not interpretation of the control word or
+consumption of stream samples. The existing streaming source/retirement guards
+remain; no start/advance, A/B switching, starvation silence, notifier payload,
+IRQ, timing or whole-stream output is supplied. The strict original-driver
+transport deliberately does not admit these new methods yet. No linked SSL
+emitter was identified in the inspected Blinx static audio region, so this
+batch is not an original-stream-driver qualification.
+
+The bounded admission uses the published method numbers/field masks and pinned
+[xemu register definitions](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/apu_regs.h).
+Its [VP reference](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/vp/vp.c)
+supplies the staging-address relation, while explicitly marking interpretation
+and several stream lifecycle details uncertain. No implementation body was
+copied. Admit only the 8,192-entry reservation, aligned 64-entry windows and
+at most 16 entries per bank; these conservative limits do not qualify malformed
+or broader silicon behavior. Unknown context-DMA selection, partial/misaligned
+transactions, bad extents, address overflow and failed memory access stop
+explicitly. A failed descriptor read leaves its caller's output unchanged.
+
+The separate, silent APU batch passes **10/10 in 0.23s**. Eight fresh lifetimes
+cover four voices and both banks, with 384 actual DWORD stores and 256 fresh
+pair reads; delayed cross-owner reads prevent one global binding from passing.
+Additional cases exercise the last descriptor, direct CPU rewrite, table
+remap, empty bank, fresh device isolation and terminal failures. Full caller
+RAM comparisons include voice/cursor/notifier storage and establish that
+staging changes only the addressed words. Stream pulls still stop before
+samples or completion are invented. Evidence is
+`build/blinx/audio-ssl-foundation-20261010/{apu-tests.log,host/Testing/Temporary/LastTest.log}`.
+Only its private build was rebuilt; earlier source-bound reference DLLs are
+retained. No console probe, audio playback or title/attract run was required.
+The native HLE audio implementation has no changes. Audio stays open and the
+family count remains **4/9**, with the same deferred-question queue.
+
 ## References and reuse
 
 - Original NTSC private input: full helpers at `0x1789a0` and `0x178c97`;

@@ -25,6 +25,7 @@
 #include "machine/apu_adpcm.h"
 #include "machine/apu_gp_dma.hpp"
 #include "machine/apu_envelope_curve.hpp"
+#include "machine/apu_ssl.hpp"
 
 namespace xlle {
 
@@ -151,6 +152,26 @@ public:
     // The returned count owns actual output; no padding or GP output is supplied.
     bool process_2d_voice(uint16_t voice,float* bins,uint32_t& count,bool& completed);
 
+    // Fresh opaque descriptor reads for the later stream owner. This stages
+    // real shared RAM, without consuming samples or decoding control fields.
+    bool read_ssl_segment(uint16_t voice,unsigned bank,uint32_t segment,ApuSslDescriptor& descriptor) {
+        if(faulted_)return false;
+        uint32_t address=0;
+        if(!ssl_.segment_address(reg32(0x2034),voice,bank,segment,address)) {
+            device_fault("SSL segment binding/address remains unqualified");return false;
+        }
+        uint8_t raw[8];
+        if(!read_mem(address,raw,sizeof(raw))) {
+            device_fault("SSL descriptor DMA read failed");return false;
+        }
+        ApuSslDescriptor candidate;
+        for(unsigned i=0;i<4;++i) {
+            candidate.offset|=uint32_t(raw[i])<<(i*8);
+            candidate.control|=uint32_t(raw[4+i])<<(i*8);
+        }
+        descriptor=candidate;return true;
+    }
+
     // Stable GP RAM banks for the build-selected DSP core. Encoded addresses:
     // X, mix, Y+0x1800, P+0x2800. Unknown banks have no storage/default value.
     uint32_t* gp_word(uint32_t address) {
@@ -183,6 +204,14 @@ public:
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         uint32_t off = addr - base_;
         if (faulted_) return;
+        if(off>=kVpBase) {
+            const uint32_t method=off-kVpBase;
+            const bool ssl=method==0x18c || method==0x190 || method==0x320 || method==0x35c ||
+                           (method>=0x600 && method<0x800);
+            if(ssl && (size!=4 || (method&3))) {
+                device_fault("SSL transaction width/alignment remains unqualified");return;
+            }
+        }
         // Original audio deferred work synchronizes notifications through this
         // control/address/data sequence. The old immediate FEMEMDATA write
         // assumed the fence's prerequisite work was complete. Keep it explicit
@@ -202,6 +231,7 @@ public:
         }
         if (size == 4 && off >= kVpBase) {
             uint32_t method = off - kVpBase;
+            if(configure_ssl(method,value))return;
             if (method == 0x2f8) {
                 if (value >= kMaxVoices) device_fault("selected voice out of range");
                 else set_reg32(kFecv, value);
@@ -268,6 +298,33 @@ public:
     uint64_t idle_voice_traps() const { return idle_voice_traps_; }
 
 private:
+    bool configure_ssl(uint32_t method,uint32_t value) {
+        if(method==0x190) {
+            if(!ssl_.select(value))device_fault("SSL staging window remains unqualified");
+            return true;
+        }
+        if(method==0x320 || method==0x35c) {
+            if(!ssl_.bind(reg32(kFecv),method==0x35c,value))
+                device_fault("SSL voice binding extent remains unqualified");
+            return true;
+        }
+        if(method>=0x600 && method<0x800) {
+            uint32_t address=0;
+            if((method&3) || !ssl_.staged_address(reg32(0x2034),(method-0x600)/4,address)) {
+                device_fault("SSL staging descriptor address remains unqualified");return true;
+            }
+            const uint8_t raw[]={uint8_t(value),uint8_t(value>>8),uint8_t(value>>16),uint8_t(value>>24)};
+            if(!write_mem(address,raw,sizeof(raw)))device_fault("SSL descriptor DMA write failed");
+            return true;
+        }
+        // Alternate context-DMA ownership cannot fall through to a successful
+        // register-file write. The bounded table uses VPSSLADDR directly.
+        if(method==0x18c) {
+            device_fault("SSL context DMA selection remains unqualified");return true;
+        }
+        return false;
+    }
+    ApuSsl ssl_;
     // Unamplified source/rate output and separately evaluated control permit a
     // future owned filter between rate conversion and amplitude application.
     bool source_signal_quantum(uint16_t voice,float* stereo,uint32_t& count,

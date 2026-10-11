@@ -34,6 +34,7 @@ xlle::McpxStaticOutputs board_outputs(1u<<15,
     [](const std::string& why){board_failure=why;});
 xlle::Mc146818Rtc rtc;
 std::unique_ptr<xlle::Amd756Smbus> smbus;
+xlle::XboxSmc *smc_owner;
 std::string smbus_failure;
 PilotUsbTrayState tray_state;
 PilotUsbEepromAccess eeprom_access;
@@ -139,6 +140,7 @@ extern "C" const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level)
         auto fault=[](const std::string& why){if(smbus_failure.empty())smbus_failure=why;};
         smbus=std::make_unique<xlle::Amd756Smbus>(0xc000,fault);
         auto smc=std::make_unique<xlle::XboxSmc>(fault);
+        smc_owner=smc.get();
         smc->set_tray_state_reader([] {
             uint8_t value=0;
             if(!tray_state || !tray_state(&value))smbus_failure="SMC tray state owner unavailable";
@@ -177,12 +179,12 @@ extern "C" const char *pilot_usb_board_port(uint32_t port,int size,int write,uin
             uint32_t address=smbus->io_read(0xc004,1),command=smbus->io_read(0xc008,1);
             bool modeled=address&1?(command==1 || (command==3 && tray_state) || command==4 || command==0x0f ||
                 command==0x10 || command==0x11 || command==0x1b):
-                (command==1 || command==6 || command==0x0e || command==0x1b);
+                (command==1 || command==6 || command==7 || command==8 || command==0x0e || command==0x1b);
             if((address>>1)==0x54 && eeprom_access) {
                 if((*value&7)!=2 && (*value&7)!=3)error="SMBus EEPROM protocol outside qualified byte/word profile";
             } else if((address>>1)!=0x10)
                 error="SMBus endpoint requires connected storage/encoder owner";
-            else if((*value&7)!=2 || !modeled) {
+            else if((*value&7)!=2 || !modeled || (!(address&1) && command==7 && smbus->io_read(0xc006,1)>1)) {
                 std::fprintf(stderr,"[SMBus SMC GUARD] address=%02x command=%02x data=%02x control=%02x\n",
                     address,command,smbus->io_read(0xc006,1),*value);
                 error="SMBus SMC operation outside qualified byte-register profile";
@@ -209,6 +211,17 @@ extern "C" const char *pilot_usb_board_port(uint32_t port,int size,int write,uin
     } else if(port!=0x80cf || size!=1 || !write || !value)
         error="MCPX retail FWENB unsupported register transaction";
     else if(!board_outputs.write((uint16_t)port,*value))error=board_failure.c_str();
+    ReleaseSRWLockExclusive(&usb_lock);return error;
+}
+extern "C" const char *pilot_usb_board_smc_led_requests(uint32_t *known,uint32_t *mode,uint32_t *sequence)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    const char *error=nullptr;
+    if(!smc_owner || !known || !mode || !sequence)error="SMC LED observer outside initialized owner";
+    else {
+        const auto state=smc_owner->led_requests();
+        *known=state.known;*mode=state.mode;*sequence=state.sequence;
+    }
     ReleaseSRWLockExclusive(&usb_lock);return error;
 }
 extern "C" const char *pilot_usb_board_bind_tray(PilotUsbTrayState read)

@@ -1631,8 +1631,24 @@ here. The capture's #NM IDT/handler binding is a factual execution reference;
 the original handler bytes remain private and execute unchanged. No kernel
 body or new external implementation is copied into these adapters. The default
 native HLE CPU path keeps its existing donor pin and notices. Qualification and
-the still-guarded normal-priority child creation are recorded in
+the subsequently connected normal-priority child creation are recorded in
 `pilots/native-title/SCHEDULING-LLE.md`.
+
+The subsequent early-child/termination/critical-section adapters and authored
+raw-worker fixtures are written here. Original creation-frame and INT2D gate
+addresses are factual bindings to the reviewed private capture; all original
+routine bytes remain private and execute unchanged. The immutable ROM adapter
+uses the owner's existing flash input and the maintained machine's mirror
+profile; no flash bytes or external implementation body are committed. The raw
+SMC LED request owner consults the already credited
+[xemu SMC register definitions](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/smbus_xbox_smc.c)
+for07/08 command identities, not physical timing or automatic-output behavior.
+
+The SSL staging/address owner and fixtures are authored here. Published method
+encodings and pinned xemu VP staging relations are factual references; no
+implementation body was copied. Opaque descriptor control words and stream
+lifecycle remain unqualified. See the existing APU references above and
+`pilots/native-title/AUDIO-LLE.md` for their precise scope.
 
 ## Theseus behavioral reference
 
