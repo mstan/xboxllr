@@ -1631,3 +1631,60 @@ Private final reports: `idle-callback-final-qualified-20261011.aot-private.json`
 and `idle-callback-title-startup-20261011.aot-private.json`. The dedicated
 callback executable selects original scheduling/files; mixed-target checks
 retain their declared native scheduling scope.
+
+### Original execution owner and passive component waits - 2026-10-11
+
+The8192 transition ceiling counted clock slices and successful component/import
+returns during a real application join. A nonalertable159 join now renews that
+ceiling only while its tracked original CPU thread is started, unsignalled and
+owned by the bound clock. Ordinary services, IRQ callbacks, unclocked execution
+and post-termination work retain the ceiling. The original wait still owns its
+finite timeout and RET. Three raw CPU lives perform30720 whole-component calls
+across infinite, finite and closed-handle joins, restoring all nine memory
+counters and thread/handle baselines. The old83cc generation fails after8191
+successful components; its causal source/executable/log proof remains separate.
+
+A passive component leases32 bytes of its actual original stack, creates an
+unnamed unsignalled original synchronization event, performs finite233 timeouts
+and closes/releases the lease. All native locks must be released before yielding.
+Exact release permits reopening or actual VM allocation/query/free in the same
+component. DPC, actual IRQL, clock, owner, range and occupied-workspace guards
+remain. Fastcall160/161 now transport actual ECX and RET0, preserving real IRQL.
+
+Both mixed and selected production scheduling executables prove twelve timeouts
+across three waiter/compute-peer lives each. Actual233/234 locals bind the private
+event to the real KWAIT_BLOCK while its KTHREAD is Waiting5; the selected original
+integer peer is Running2 with counter and IRQ0 progress. Waiter30/peer29 isolate
+this fixture from the captured background thread without changing production
+priority or dispatcher policy. Actual209 supplies private event state; no forced
+host publication. Stop/join/close/reference retirement restore exact FP/GP/ESP,
+all nine memory counters, threads and handles. Existing idle-without-peer and ISR
+regressions remain. Earlier failed generations retain exact sources/executables.
+The extra background pool page's allocation caller is unproven; no tolerance was
+introduced. A static audit independently binds inheritedhandle10's original file
+object and actual close callers, rather than attributing it to this fixture.
+
+Native fences yield through this original passive wait while retaining the shared
+component gate and releasing graphics/VM host locks. Only actual GPU completion
+advances the completed serial. Three source-bound CPU/GPU lives prove216 fence
+identities, actual RET0/RET4, invalid-token guards and exact pixels. This GPU
+completed before a blocked fence or64-slot capacity wait; both required branches
+remain open and are not counted as qualified.
+
+The coherent **62/62 checks pass in14.73s**, with no skips and the shared HDD
+resource lock retained. A hidden muted startup registers six buffers and creates
+45 vertex shaders beyond the former callback-budget stop. It reaches the35s run
+limit without a recorded guard/fault; termination/collection finish at40.074s.
+This is bounded progress, not startup/attract completion. An earlier35s attempt's
+output collection failed on bytes/text concatenation; its unknown boundary is
+separately retained and the replacement uses file-backed capture. Full captured
+startup ownership, callbacks/display pulses, reset/destruction and AV/GPU/APU/title
+integration remain required. Default HLE scheduling excludes the new original
+owner paths. No physical Xbox operation or audible playback occurred;4/9 families
+and26 agreed precision deferrals remain.
+
+Private proof: `build/blinx/original-owner-budget-20261011/qualified-v4.aot-private.json`
+(SHA256 `148e51b4ef8520bee9fcbdd5d9d4e0b03ee044dcaf9b0371493a98d9b8908393`),
+with112 immutable identities and all90 prior backing-proof snapshots reverified.
+The static audit is `component-wait-owner-audit-20261011/owner-static-audit.aot-private.json`
+(SHA256 `fad62166dde569728c6de867cc52ff375b4cd2019c56de9f081d86969493e06e`).

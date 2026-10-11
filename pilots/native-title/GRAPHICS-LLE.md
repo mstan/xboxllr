@@ -3568,3 +3568,34 @@ complete inputs and build provenance. They do not supply the missing algorithm.
 The next observation must bind both control words and actual owned pixel bytes
 to identical source inputs. Enabled pixels, original startup/full output and
 `.116.2` remain open; the family count stays4/9 with26 safe precision deferrals.
+
+## Original CPU native fence retirement and wait boundary - 2026-10-11
+
+The source-bound original CPU/native graphics bridge admits InsertFence and
+BlockOnFence with actual RET0/RET4. Invalid zero/future tokens retire the original
+gate before returning a guard, without GPU or wait mutation. Native completion
+comes only from actual GPU queries. A busy passive caller releases graphics/VM
+host locks, retains its shared original component gate and yields through private
+original-event finite timeouts. Display waits keep their separate pulse guard.
+Default HLE scheduling retains its existing path.
+
+Three actual CPU/GPU lives execute216 original fence insertions, wrap the64-slot
+cache, reuse retired tokens and compare1MiB texture plus16KiB surface bytes per
+life. GP/FLAGS/x87/XMM/ESP, nine memory counters and thread/handle cleanup are
+checked; one inherited file-handle retirement is independently attributed. The
+passive wait is separately proven against actual KWAIT/private-event ownership
+and original compute-peer IRQ0 preemption with exact cleanup. **62/62 combined
+checks pass in14.73s**. However, the GPU finished before explicit fence waits and
+capacity pressure could block. Slot wrap and nonbusy retirement do not qualify
+those required branches; `.116.4` remains open for actual pending GPU work with
+real dispatcher progress and unlocked host graphics/VM owners.
+
+Hidden muted startup passes the former transition-budget stop, registers six
+buffers and creates45 shaders, then reaches the35s run limit without a guard or
+fault recorded. Termination and collection complete at40.074s. Full startup,
+callbacks/pulses and teardown remain required;4/9 families and26 precision
+deferrals are unchanged. No physical Xbox or audible playback operation occurred.
+Current source/executable/log identities, earlier failures and the separately
+failed output-collection attempt remain in
+`build/blinx/original-owner-budget-20261011/qualified-v4.aot-private.json`
+(SHA256 `148e51b4ef8520bee9fcbdd5d9d4e0b03ee044dcaf9b0371493a98d9b8908393`).

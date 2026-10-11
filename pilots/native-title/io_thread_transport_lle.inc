@@ -9,7 +9,7 @@ static unsigned thread_service_arguments(unsigned ordinal)
     /* Original scheduling/dispatcher operations. Other families must connect
      * their publication/lifetime postconditions before using this boundary. */
     switch(ordinal) {
-    case 1:case 35:case 36:case 121:case 125:case 250:return 0;
+    case 1:case 35:case 36:case 121:case 125:case 160:case 161:case 250:return 0;
     case 97:case 128:case 137:case 138:case 186:case 187:case 256:case 258:
     case 4:case 14:case 17:case 23:case 37:case 68:case 69:case 98:case 100:case 165:case 171:case 173:case 179:case 180:
     case 277:case 291:case 294:case 301:case 316:return 1;
@@ -72,7 +72,8 @@ static void thread_service_prepare(struct OriginalThread *thread,uint32_t *entry
         failure="thread LLE service return outside resident native caller";return;
     }
     memcpy(thread->call_args,guest_memory+sp+4,count*4);
-    if(thread->call_ordinal==250)thread->call_args[0]=thread->call_regs[1];
+    if(thread->call_ordinal==160 || thread->call_ordinal==161 || thread->call_ordinal==250)
+        thread->call_args[0]=thread->call_regs[1];
     thread_before_call(thread->call_ordinal,thread->call_args);if(failure)return;
     storage_caller_prepare(thread->call_ordinal,thread->call_args);if(failure)return;
     device_caller_prepare(thread->call_ordinal,thread->call_args,&thread->device_access);if(failure)return;
@@ -120,7 +121,8 @@ static void thread_cpu_service_prepare(struct OriginalThread *thread,uint32_t *e
     IO_UC(uc_mem_read(cpu,sp+4,thread->call_args,count*4));
     /* ObfDereferenceObject is fastcall: its object is in the real ECX, not
      * an absent stack argument or a previous service's retained argument. */
-    if(thread->call_ordinal==250)IO_UC(uc_reg_read(cpu,UC_X86_REG_ECX,thread->call_args));
+    if(thread->call_ordinal==160 || thread->call_ordinal==161 || thread->call_ordinal==250)
+        IO_UC(uc_reg_read(cpu,UC_X86_REG_ECX,thread->call_args));
     thread_before_call(thread->call_ordinal,thread->call_args);if(failure)return;
     storage_caller_prepare(thread->call_ordinal,thread->call_args);if(failure)return;
     device_caller_prepare(thread->call_ordinal,thread->call_args,&thread->device_access);if(failure)return;

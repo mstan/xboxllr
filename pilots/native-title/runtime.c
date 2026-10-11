@@ -507,6 +507,7 @@ static void scheduling_lle_execute(uint32_t entry);
 #endif
 #ifdef PILOT_USB_LLE
 #include "usb_lle.inc"
+#include "component_wait.inc"
 #endif
 #ifdef PILOT_GPU_LLE
 #include "gpu_lle.inc"
@@ -570,12 +571,22 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
     if(index==PILOT_D3D_D3DDevice_Swap)
         return "original scheduling native graphics display pulse requires integration";
 #endif
-    /* InsertFence may itself wait when its finite outstanding queue is full. */
-    if(index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank || index==PILOT_D3D_D3DDevice_BlockOnFence ||
-       index==PILOT_D3D_D3DDevice_InsertFence)
+    /* Display waits have an independent pulse owner. GPU fence waits use
+     * actual native completion and the original passive timed-wait route. */
+    if(index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank)
         return "original scheduling native graphics wait ownership requires integration";
     const char *error=graphics_original_enter();
     if(error)return error;
+    if(index==PILOT_D3D_D3DDevice_BlockOnFence) {
+        uint32_t token=MEM32(regs[4]+4);
+        AcquireSRWLockExclusive(&graphics_lock);
+        int invalid=!token || token>=graphics_fence_next;
+        ReleaseSRWLockExclusive(&graphics_lock);
+        if(invalid) {
+            error=graphics_original_leave();
+            return error?error:"unowned GPU fence";
+        }
+    }
     uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];

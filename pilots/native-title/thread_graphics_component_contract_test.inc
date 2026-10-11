@@ -57,7 +57,7 @@ static void test_thread_graphics_component_lle(const char *path,int failure_case
     if(failure_case && !constructor) {
         unsigned entry=failure_case==1?PILOT_D3D_D3DDevice_Reset:
             failure_case==2?PILOT_D3D_D3DDevice_InsertCallback:
-            failure_case==5?PILOT_D3D_D3DDevice_InsertFence:PILOT_D3D_D3DDevice_Swap;
+            failure_case==5?PILOT_D3D_D3DDevice_BlockUntilVerticalBlank:PILOT_D3D_D3DDevice_Swap;
         for(unsigned word=0;word<pilot_d3d_calls[entry].stack_bytes/4;++word) {
             test_graphics_cpu_emit(&cursor,0x6a);test_graphics_cpu_emit(&cursor,0);
         }

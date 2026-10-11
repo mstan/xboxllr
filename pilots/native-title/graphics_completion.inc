@@ -12,13 +12,40 @@ static void graphics_fence_poll(void)
 static void graphics_fence_wait(uint32_t token)
 {
     if(!token || token>=graphics_fence_next)stop("unowned GPU fence",token);
+#ifdef PILOT_SCHEDULING_LLE
+    struct ComponentWait wait={0};
+#endif
     for(;;) {
-        graphics_fence_poll();if(token<=graphics_fence_done)return;
+        graphics_fence_poll();if(token<=graphics_fence_done) {
+#ifdef PILOT_SCHEDULING_LLE
+            if(wait.event) {
+                ReleaseSRWLockExclusive(&graphics_lock);
+                const char *error=component_wait_close(&wait);
+                AcquireSRWLockExclusive(&graphics_lock);
+                if(error)stop(error,token);
+            }
+#endif
+            return;
+        }
         ++graphics_clock_waiters;ReleaseSRWLockExclusive(&graphics_lock);
+#ifdef PILOT_SCHEDULING_LLE
+        /* Only the native GPU query above retires a fence. The finite
+         * original event timeout gives the real dispatcher/clock ownership
+         * of this caller while GPU work progresses, with no host lock held.
+         * Retain the shared original component gate to serialize passive
+         * graphics/VM owners; interrupt/device work never takes that gate. */
+        const char *error=wait.event?NULL:component_wait_open(&wait);
+        uint32_t status=0;
+        if(!error)error=component_wait_slice(&wait,10000,&status);
+#else
         int blocked=scheduler_block_begin();
         Sleep(1);
         scheduler_block_end(blocked);
+#endif
         AcquireSRWLockExclusive(&graphics_lock);--graphics_clock_waiters;
+#ifdef PILOT_SCHEDULING_LLE
+        if(error)stop(error,token);
+#endif
     }
 }
 static uint32_t graphics_fence_insert(void)

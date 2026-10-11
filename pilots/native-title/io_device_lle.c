@@ -759,12 +759,27 @@ static void pump_original_clock(void)
     failure="original clock requires the maintained PIT/PIC build";
 #endif
 }
-static void run_original(uint32_t entry,size_t instruction_limit)
+static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispatcher_object)
 {
     /* Never re-enter uc_emu_start from a hook. At an actual ISR call, stop,
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
-    for(unsigned calls=0;calls<8192;++calls) {
+    for(unsigned calls=0;;++calls) {
+        if(calls==8192) {
+            /* A nonalertable join of an actually retained original
+             * thread owns that thread's application lifetime. Clock slices
+             * and successful component/import returns are execution, not a
+             * callback failure. Renew only while that real owner is alive;
+             * the original timeout/return still owns finite waits. Ordinary
+             * services, IRQs and post-termination work remain bounded.
+             * This never supplies a wait result or replaces the original RET. */
+            struct OriginalThread *owner=dispatcher_object?thread_object(dispatcher_object):NULL;
+            if(!clock_provider || !owner || !owner->started || !owner->cpu_used ||
+               kernel_word(dispatcher_object+4)) {
+                failure="device LLE callback budget exhausted";return;
+            }
+            calls=0;
+        }
         pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;pending_component=NULL;
         pending_cpu_service=NULL;pending_cpu_birth=NULL;
 #ifdef PILOT_USB_LLE
@@ -897,7 +912,6 @@ static void run_original(uint32_t entry,size_t instruction_limit)
         entry=return_pc;
 
     }
-    failure="device LLE callback budget exhausted";
 }
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
@@ -992,7 +1006,8 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
      * counts REP iterations; a megabyte-scale loader commit can legitimately
      * exceed the small device-call budget. Permit bounded console-sized work
      * without replacing its zeroing or declaring an unfinished call complete. */
-    run_original(entry,ordinal==184?64u*1024*1024:ordinal==279?4000000:1000000);
+    uint32_t dispatcher_object=ordinal==159 && !args[3] && thread_object(args[0])?args[0]:0;
+    run_original(entry,ordinal==184?64u*1024*1024:ordinal==279?4000000:1000000,dispatcher_object);
     if(failure)return;
     IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&observed));
     if(observed!=RETURN_PC){failure="device LLE instruction limit without return";return;}
@@ -1033,7 +1048,7 @@ static void deliver_irq(int *delivered)
     for(unsigned i=0;i<8;++i){uint32_t v=i==4?sp:0x12345000u+i;IO_UC(uc_reg_write(cpu,general_regs[i],&v));}
     IO_UC(uc_reg_write(cpu,UC_X86_REG_EFLAGS,&flags));
     if(pilot_usb_pic_vector(1)!=vector){failure="device LLE PIC changed before INTA";return;}
-    run_original(entry,1000000);if(failure)return;
+    run_original(entry,1000000,0);if(failure)return;
     uint32_t observed;IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&observed));
     if(observed!=RETURN_PC){failure="device LLE IRQ failed to return";return;}
     for(unsigned i=0;i<8;++i) {
@@ -1110,6 +1125,13 @@ const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context)
     if(execution_depth)error="original clock binding during execution";
     else {clock_provider=provider;clock_context=provider?context:NULL;}
     ReleaseSRWLockExclusive(&lock);return error;
+}
+int pilot_io_device_clock_bound(void)
+{
+    if(device_bus_borrow)return 0;
+    AcquireSRWLockShared(&lock);
+    int bound=!failure && clock_provider!=NULL;
+    ReleaseSRWLockShared(&lock);return bound;
 }
 #ifdef PILOT_USB_LLE
 static struct OriginalClock {

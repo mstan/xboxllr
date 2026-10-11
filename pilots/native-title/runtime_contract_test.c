@@ -85,7 +85,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
     if(va==0x125c0)return test_thread_timeout_body;
     if(va==0x126c0)return test_thread_idle_clock_body;
     if(va==0x126e0)return test_thread_compute_body;
-    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00 || va==0x13e00 || va==0x13f00 || va==0x15000 || va==0x16000 || va==0x16400 || va==0x16500 || va==0x16700 || va==0x16800)return test_thread_cpu_body;
+    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00 || va==0x13e00 || va==0x13f00 || va==0x15000 || va==0x16000 || va==0x16400 || va==0x16500 || va==0x16700 || va==0x16800 || va==0x17000 || va==0x17200 || va==0x17400 || va==0x17600)return test_thread_cpu_body;
     if(va==0x12800)return test_thread_cpu_peer;
 #endif
 #ifdef PILOT_USB_LLE
@@ -140,6 +140,8 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_component_vm_contract_test.inc"
 #include "thread_component_pool_contract_test.inc"
 #include "thread_component_physical_owner_contract_test.inc"
+#include "thread_component_long_owner_contract_test.inc"
+#include "thread_component_wait_contract_test.inc"
 #include "thread_string_cpu_contract_test.inc"
 #include "thread_string_compare_cpu_contract_test.inc"
 #include "thread_device_cpu_contract_test.inc"
@@ -464,6 +466,7 @@ static void test_timers(void)
 #if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
 #include "thread_graphics_component_contract_test.inc"
 #include "thread_graphics_resource_contract_test.inc"
+#include "thread_graphics_fence_contract_test.inc"
 #include "thread_graphics_gate_contract_test.inc"
 #endif
 #endif
@@ -548,6 +551,12 @@ int main(int argc,char **argv)
         if(!strncmp(argv[1],"graphics-component-",19)) {
             CHECK(argc==3);
             if(!strcmp(argv[1],"graphics-component-gate-lle")) {test_thread_graphics_gate_lle(argv[2]);return 0;}
+            if(!strcmp(argv[1],"graphics-component-fence-lle") ||
+               !strcmp(argv[1],"graphics-component-fence-zero-guard-lle") ||
+               !strcmp(argv[1],"graphics-component-fence-future-guard-lle")) {
+                test_thread_graphics_fence_lle(argv[2],!strcmp(argv[1],"graphics-component-fence-lle")?0:
+                    !strcmp(argv[1],"graphics-component-fence-zero-guard-lle")?1:2);return 0;
+            }
             if(!strcmp(argv[1],"graphics-component-resource-lle") || !strcmp(argv[1],"graphics-component-resource-free-guard-lle")) {
                 test_thread_graphics_resource_lle(argv[2],!strcmp(argv[1],"graphics-component-resource-free-guard-lle"));return 0;
             }
@@ -556,7 +565,7 @@ int main(int argc,char **argv)
                 !strcmp(argv[1],"graphics-component-callback-guard-lle")?2:
                 !strcmp(argv[1],"graphics-component-pulse-guard-lle")?3:
                 !strcmp(argv[1],"graphics-component-constructor-lle")?4:
-                !strcmp(argv[1],"graphics-component-fence-guard-lle")?5:-1;
+                !strcmp(argv[1],"graphics-component-vblank-guard-lle")?5:-1;
             CHECK(kind>=0);test_thread_graphics_component_lle(argv[2],kind);return 0;
         }
 #endif
@@ -672,6 +681,16 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-files-cpu-lle")) { CHECK(argc==3);test_thread_files_cpu_lle(argv[2]);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-cpu-lle")) { test_thread_contiguous_cpu_lle(0);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-borrowed-free-lle")) { test_thread_contiguous_cpu_lle(1);return 0; }
+        if(!strncmp(argv[1],"thread-component-wait-",22)) {
+            CHECK(argc==2);int kind=!strcmp(argv[1],"thread-component-wait-owner-lle")?0:
+                !strcmp(argv[1],"thread-component-wait-workspace-guard-lle")?1:
+                !strcmp(argv[1],"thread-component-wait-clock-guard-lle")?2:-1;
+            CHECK(kind>=0);test_thread_component_wait_lle(kind);return 0;
+        }
+        if(!strcmp(argv[1],"thread-component-long-owner-lle") || !strcmp(argv[1],"thread-component-long-owner-before-lle") || !strcmp(argv[1],"thread-component-long-owner-unclocked-guard-lle")) {
+            CHECK(argc==2);test_thread_component_long_owner_lle(!strcmp(argv[1],"thread-component-long-owner-before-lle")?1:
+                !strcmp(argv[1],"thread-component-long-owner-unclocked-guard-lle")?2:0);return 0;
+        }
         if(!strncmp(argv[1],"thread-component-physical-",26)) {
             CHECK(argc==2);int kind=!strcmp(argv[1],"thread-component-physical-owner-lle")?0:
                 !strcmp(argv[1],"thread-component-physical-free-guard-lle")?1:

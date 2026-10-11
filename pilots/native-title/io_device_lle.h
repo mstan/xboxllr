@@ -64,6 +64,9 @@ const char *pilot_io_device_thread_component_bind_abi(uint32_t entry,uint32_t by
     const char *sha256,uint32_t stack_bytes,PilotIoComponent callback);
 int pilot_io_device_thread_component_active(void);
 const char *pilot_io_device_thread_component_workspace(uint32_t bytes,uint32_t *base);
+/* Retire the exact manual lease after all original calls using it return.
+ * A VM-owned workspace retains its separate component lifetime. */
+const char *pilot_io_device_thread_component_workspace_release(uint32_t base,uint32_t bytes);
 const char *pilot_io_device_thread_component_call(unsigned ordinal,
     const uint32_t *args,uint32_t *result);
 /* Called from a generated thread body's kernel-dispatch boundary. The real
@@ -93,6 +96,9 @@ const char *pilot_io_device_thread_completion(int *terminated,uint32_t *status);
  * transport or complete kernel waits. NULL unbinds; bind only while idle. */
 typedef const char *(*PilotIoClock)(void *context,uint64_t *ticks);
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context);
+/* Query the actual sole engine's bound clock; a programmed PIT alone does
+ * not establish a producer for finite original waits. No guest execution. */
+int pilot_io_device_clock_bound(void);
 /* Runtime original scheduling: execute the reviewed retired INIT PIT routine
  * on the same engine and bind monotonic input time. Requires initialized idle
  * transport, an unprogrammed PIT and no pending device interrupt. */

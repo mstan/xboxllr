@@ -146,6 +146,9 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
 }
 static void thread_before_call(unsigned ordinal,const uint32_t *args)
 {
+    if((ordinal==160 || ordinal==161) && (args[0]&255)>31) {
+        failure="device LLE IRQL out of range";return;
+    }
     if(ordinal==24) {settings_before_query(args);if(failure)return;}
     if(ordinal==254 || ordinal==255) {
         uint32_t current=kernel_word(0x8003da64u);
@@ -282,6 +285,16 @@ const char *pilot_io_device_thread_component_workspace(uint32_t bytes,uint32_t *
     thread->component_call_top-=bytes;thread->component_workspace=bytes;
     *base=thread->component_call_top;return NULL;
 }
+const char *pilot_io_device_thread_component_workspace_release(uint32_t base,uint32_t bytes)
+{
+    struct OriginalThread *thread=native_thread_worker;
+    if(device_bus_borrow || failure || !thread || !thread->in_component || thread->in_kernel ||
+       thread->component_vm_workspace || !bytes || thread->component_workspace!=bytes ||
+       thread->component_call_top!=base || base<thread->stack ||
+       (uint64_t)base+bytes!=thread->component_before[4])
+        return "selected helper release outside its original stack lease";
+    thread->component_call_top+=bytes;thread->component_workspace=0;return NULL;
+}
 const char *pilot_io_device_thread_component_call(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     struct OriginalThread *thread=native_thread_worker;
@@ -289,6 +302,7 @@ const char *pilot_io_device_thread_component_call(unsigned ordinal,const uint32_
         return "selected helper call outside its original continuation";
     unsigned count=thread_service_arguments(ordinal);if(failure)return failure;
     uint32_t regs[8];memcpy(regs,thread->component_regs,sizeof(regs));
+    if(ordinal==160 || ordinal==161 || ordinal==250)regs[1]=args[0];
     if(ordinal==258)return "selected helper cannot replace original thread termination";
     uint32_t bytes=(count+1)*4,top=thread->component_call_top;
     if(top<thread->stack+bytes || (uint64_t)top>=(uint64_t)thread->stack+thread->stack_bytes)
