@@ -31,7 +31,8 @@ APU, VOICE = 0xfe800000, 71
 # Revision-specific original entry bindings; never shared runtime addresses.
 ENTRIES = dict(init=0x178705, filter=0x179283, start=0x179c4b,
                stop=0x179a44, isr=0x17856e, dpc=0x17838e,
-               unlink=0x178d7c, completion=0x17a34b, fence=0x177df0)
+               unlink=0x178d7c, completion=0x17a34b, fence=0x177df0,
+               fe_control=0x17bc0c)
 
 
 class AudioHardware:

@@ -9,6 +9,54 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## Observed idle FE fence through original helper - 2026-10-11
+
+The retained physical token observations now have an executable maintained
+counterpart. A fresh device can import only the observed probe context:
+FECTL=`00071F8F`, SECTL=`7`, FE control=`1`, GP reset=`0`. This is explicit
+captured state, not a cold-reset default. Other MMIO writes, DSP writes or
+CPU-owner bindings revoke this admission; a later register restoration or
+snapshot import cannot erase intervening work. Busy-to-idle ordering remains
+unqualified.
+
+Exact DWORD control reads/writes and owned physical FEMEMADDR/FEMEMDATA stores
+now operate in that context. FEMEMDATA enqueues one token. A separate serialized
+device service performs the actual four-byte little-endian RAM write; CPU
+polls and control release perform no publication. Service works with control
+still `1`, matching the held-window observation, and after release to `0`.
+Address/data reads, partial/crossing accesses, other control values, duplicate
+pending data, pending rebinds, outstanding work and failed/reentrant DMA remain
+guarded. No IRQ or voice completion is fabricated.
+
+`native_fe_fence_reference.py` executes original helper `177DF0`, both original
+control calls `17BC0C` and their critical-section callees over real captured
+kernel mappings, actual kernel allocation/physical translation and device RAM
+DMA. Across 12 contexts, nine fences complete at three independently scheduled
+instruction-service intervals; three withheld-service cases retain the CPU
+sentinel when the real helper returns. This establishes that its return alone
+is insufficient evidence. Subsequent explicit service publishes the token
+before that allocation is freed. Sequence wraparound, original stack/register
+state, neighboring RAM, control restoration and allocator statistics pass.
+There are 12 helper calls and 36 original control calls, with no replaced callee
+or CPU token store. These service intervals are nominal policy, not silicon
+latency measurements.
+
+The focused APU batch passes **10/10 in 0.14s**. The new fixture covers 96 actual
+idle publications over six lifetimes and 90 captured-context overlap guards,
+plus cold-state, ownership/history, pending-work, RAM failure and reentry cases.
+The original active-audio DPC audit still rejects at `17BC1D`, before a fence
+store or completion consumer. This bounded slice closes `.115.1`; parent `.115`,
+active ordering, cold initialization and full audio remain open at **4/9**.
+The 26 safe precision deferrals are unchanged.
+
+Private evidence is `build/blinx/audio-fe-idle-20261011/qualified.aot-private.json`,
+SHA-256 `dcf4b3bafe96f5e03c771aef281a93f37f8f62972ec5f3c8b5f1fcc36caf7943`.
+It binds 22 retained source/dependency files, actual binaries, original outcomes
+and the failed test generations. Current APU reference DLL SHA-256 is
+`148df223b8c49a4835e3b0e6581c483d8bf858e4750079585a0583e59bc14172`.
+No Xbox request, attract/audio playback, native HLE implementation change or
+whole-title LLE qualification occurred.
+
 ## GP FIFO transport - 2026-10-09
 
 The maintained DMA engine now transfers real bytes through GP output FIFOs

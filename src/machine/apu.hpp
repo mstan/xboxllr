@@ -2,7 +2,7 @@
 //
 // Harvested from xemu/hw/xbox/mcpx/apu. The top level is a RAM-backed register file with
 // special handling for interrupt status and XGSCNT. The FE fence/control route
-// remains guarded until its ordering contract is independently qualified. The 5.333 ms APU
+// admits captured idle token transfers; busy ordering and cold state remain guarded. The 5.333 ms APU
 // frame walker encounters inactive voices in the 2D/3D/MP list and emits
 // SE2FE_IDLE_VOICE. With FETFORCE1 enabled,
 // that publishes the front-end trap and drives the APU's level IRQ according to IEN/ISTS.
@@ -208,6 +208,7 @@ public:
         return !faulted_ && ep_dma_.read(address,value);
     }
     bool ep_write(uint32_t address,uint32_t value) {
+        fe_context_known_=false;fe_state_used_=true;
         return !faulted_ && ep_dma_.write(address,value);
     }
     uint64_t ep_dma_nodes()const{return ep_dma_.nodes();}
@@ -224,6 +225,7 @@ public:
     uint64_t ep_program_revision()const{return ep_program_revision_;}
     bool bind_ep_program_owner(void* owner,ApuDspDma::ProgramWrite guard) {
         if(!owner || !guard || ep_program_owner_)return false;
+        fe_context_known_=false;fe_state_used_=true;
         ep_program_owner_=owner;ep_program_guard_=std::move(guard);return true;
     }
     void unbind_ep_program_owner(void* owner) {
@@ -239,6 +241,7 @@ public:
     }
     bool gp_write(uint32_t address,uint32_t value) {
         if(faulted_)return false;
+        fe_context_known_=false;fe_state_used_=true;
         if(address!=0xffffc5)return gp_dma_.write(address,value);
         if((value&~0x82u) && !(value==0xfff && gp_startup_clear_ && gp_startup_clear_())) {
             device_fault("unqualified GP event acknowledgement mask");return false;
@@ -254,6 +257,7 @@ public:
     uint64_t gp_program_revision()const{return gp_program_revision_;}
     bool bind_gp_program_owner(void* owner,ApuGpDma::ProgramWrite guard) {
         if(!owner || !guard || gp_program_owner_)return false;
+        fe_context_known_=false;fe_state_used_=true;
         gp_program_owner_=owner;gp_program_guard_=std::move(guard);return true;
     }
     void unbind_gp_program_owner(void* owner) {
@@ -304,6 +308,39 @@ private:
     }
 public:
     bool gp_frame_outstanding()const{return gp_mix_lease_ || gp_frame_pending_;}
+    // Restore only the independently observed running-probe FE context. This
+    // is snapshot input, not a cold-reset default or an admission of title work.
+    // A used device cannot discard its history by importing this idle floor.
+    bool capture_fe_idle_context(uint32_t fectl,uint32_t sectl,uint32_t control,uint32_t gp_reset) {
+        if(faulted_)return false;
+        if(fe_context_known_ || fe_state_used_ || frame_ || voice_mix_quanta_ ||
+           !fe_work_idle() || fectl!=kObservedIdleFectl || sectl!=kObservedIdleSectl ||
+           control!=1 || gp_reset!=0) {
+            device_fault("FE captured idle context remains unqualified");return false;
+        }
+        set_reg32(kFectl,fectl);set_reg32(kSectl,sectl);
+        set_reg32(kFeFenceControl,control);set_reg32(0x3fffc,gp_reset);
+        fe_context_known_=true;fe_state_used_=true;return true;
+    }
+    bool fe_fence_pending()const{return fe_fence_pending_;}
+    uint64_t fe_fences_published()const{return fe_fences_published_;}
+    // The serialized device owner supplies service boundaries, independently
+    // of CPU polls. Exact latency is unspecified. A control release is neither
+    // required for publication nor treated as proof that prior work finished.
+    bool service_fe_fence() {
+        if(faulted_)return false;
+        if(fe_fence_working_) {device_fault("reentrant FE fence device work");return false;}
+        if(!fe_fence_pending_)return true;
+        if(!fe_context_idle()) {device_fault("FE fence outstanding work remains unqualified");return false;}
+        fe_fence_working_=true;
+        const uint32_t token=reg32(kFememdata);
+        const uint8_t raw[4]={uint8_t(token),uint8_t(token>>8),uint8_t(token>>16),uint8_t(token>>24)};
+        const bool done=write_mem(reg32(kFememaddr),raw,sizeof(raw));
+        fe_fence_working_=false;
+        if(!done) {device_fault("FE fence token DMA write failed");return false;}
+        if(faulted_)return false;
+        fe_fence_pending_=false;++fe_fences_published_;return true;
+    }
     // Explicit scratch transport for the GP bootstrap/graph owner. It uses
     // the same physical SGE mapping as descriptor DMA and never starts GP.
     bool gp_scratch(uint32_t address,void* data,uint32_t bytes,bool output) {
@@ -326,7 +363,10 @@ public:
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (faulted_) return 0;
+        fe_state_used_=true;
+        if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
         if(touches_fe_fence(off,size)) {
+            if(off==kFeFenceControl && size==4 && fe_context_idle())return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
         }
         if(off>=0x30000 && off<0x40000) {
@@ -352,11 +392,28 @@ public:
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         uint32_t off = addr - base_;
         if (faulted_) return;
+        fe_state_used_=true;
+        if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
         // Guard the device itself, including partial/overlapping transactions;
         // reference-wrapper whitelists cannot establish unknown fence behavior.
         if(touches_fe_fence(off,size)) {
+            if(size==4 && (off==kFeFenceControl || off==kFememaddr || off==kFememdata) &&
+               fe_context_idle()) {
+                if(off==kFeFenceControl && value<=1) {set_reg32(off,value);return;}
+                if(off==kFememaddr && !fe_fence_pending_ && !(value&3) && value<=0x03fffffc) {
+                    set_reg32(off,value);fe_address_known_=true;return;
+                }
+                if(off==kFememdata && !fe_fence_pending_ && fe_address_known_ && reg32(kFeFenceControl)==1) {
+                    set_reg32(off,value);fe_fence_pending_=true;return;
+                }
+            }
             device_fault("FE notification fence/control remains unqualified");return;
         }
+        if(fe_fence_pending_) {device_fault("FE fence has pending publication");return;}
+        // The captured observation covers these FE transactions only. Changing
+        // other device state cannot recreate the observation just by later
+        // restoring a few register values; busy-to-idle ordering is still open.
+        fe_context_known_=false;
         if(off>=kVpBase) {
             const uint32_t method=off-kVpBase;
             const bool ssl=method==0x18c || method==0x190 || method==0x320 || method==0x35c ||
@@ -567,12 +624,23 @@ private:
     static constexpr uint32_t kFedecmeth = 0x1300, kFedecparam = 0x1304;
     static constexpr uint32_t kFememaddr = 0x1324, kFememdata = 0x1334;
     static constexpr uint32_t kFeFenceControl = 0x1510;
+    static constexpr uint32_t kObservedIdleFectl=0x00071f8f, kObservedIdleSectl=7;
+    bool fe_work_idle()const {
+        return !processing_quantum_ && !gp_mix_admitting_ && !gp_frame_outstanding() &&
+               !dsp_work_active() && !gp_dma_.work_pending() && !ep_dma_.work_pending() &&
+               !gp_program_owner_ && !gp_frame_owner_ && !ep_program_owner_ &&
+               !gp_program_revision_ && !ep_program_revision_ &&
+               reg32(0x3fffc)==0 && reg32(0x5fffc)==0;
+    }
+    bool fe_context_idle()const {
+        return fe_context_known_ && reg32(kFectl)==kObservedIdleFectl &&
+               reg32(kSectl)==kObservedIdleSectl && fe_work_idle();
+    }
     static bool touches_fe_fence(uint32_t off,int size) {
         if(size<=0 || off>=kFeFenceControl+4)return false;
         const uint64_t end=uint64_t(off)+static_cast<unsigned>(size);
-        // Original audio deferred work uses these three DWORDs. Until its
-        // ownership/ordering is qualified, no lane may fabricate readback or
-        // bypass the fence by mutating a partial register-file value.
+        // Only exact qualified DWORD transactions may reach the idle model.
+        // No other lane may fabricate readback or mutate partial fields.
         return (off<kFememaddr+4 && end>kFememaddr) ||
                (off<kFememdata+4 && end>kFememdata) ||
                (off<kFeFenceControl+4 && end>kFeFenceControl);
@@ -917,6 +985,9 @@ private:
     int irq_num_ = 5;
     bool irq_level_ = false;
     bool faulted_ = false;
+    bool fe_context_known_=false,fe_state_used_=false,fe_address_known_=false;
+    bool fe_fence_pending_=false,fe_fence_working_=false;
+    uint64_t fe_fences_published_=0;
     uint64_t frame_ = 0;
     uint64_t voice_on_methods_ = 0;
     uint64_t voice_off_methods_ = 0;

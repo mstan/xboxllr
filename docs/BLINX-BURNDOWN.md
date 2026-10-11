@@ -51,13 +51,15 @@ Actual enabled pixels remain unimplemented; the preserved draw2 and eight mip
 inputs define the next paired observation. No title/audio run or HLE change.
 See the [bounded route](../pilots/native-title/GRAPHICS-LLE.md#enabled-noise-with-no-assembled-primitives---2026-10-11).
 
-The FE fence guard now covers direct device reads and every overlapping byte
-lane in its control/address/data DWORDs. Nine focused APU checks pass, including
-96 direct read/write cases with unchanged register/RAM/IRQ state and sticky
-failure. The new regression fails against the previous device implementation.
-Actual fence ordering and original consumer integration remain required; this
-fix adds no default HLE audio work. See the
-[device boundary](../pilots/native-title/AUDIO-LLE.md#direct-device-fe-fence-guard---2026-10-11).
+The observed idle FE fence now executes through Blinx's original helper and
+actual kernel-owned RAM. Nine original fences complete, including publication
+while control remains 1; three withheld-service cases prove that helper return
+alone is insufficient. Ten APU checks pass in 0.14s, including 96 publications
+and 90 captured-context overlap guards. Cold state and active DPC ordering remain
+guarded; intervening device work cannot be erased by reimporting the idle state.
+This closes bounded `.115.1`, with parent `.115` and whole audio still open.
+No Xbox request, title/audio run or native HLE change. See the
+[working idle route](../pilots/native-title/AUDIO-LLE.md#observed-idle-fe-fence-through-original-helper---2026-10-11).
 
 The encoder initialization dependency now has23 more documented control latches
 and an independently reviewed guard for nonzero master HSYNC offsets. Thirteen
