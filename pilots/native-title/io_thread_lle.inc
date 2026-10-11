@@ -14,6 +14,10 @@ static struct OriginalThread {
     uint32_t cpu_entry,cpu_return;
     uint32_t creation_child,birth_parent;
     uint32_t checkpoint_pc,checkpoint_flags,initial_flags;
+    uint32_t trace_return,trace_stack;
+    uint32_t component_regs[8],component_before[8],component_return,component_flags;
+    uint32_t component_call_top,component_workspace;
+    int in_component,component_requested;
     volatile LONG checkpoint_requested;
     uint32_t exit_status;
     const char *callback_error;
@@ -23,10 +27,18 @@ static struct OriginalThread *pending_thread,*pending_thread_return,*pending_cpu
 static __declspec(thread) struct OriginalThread *native_thread_worker;
 static int thread_pcr_published;
 static unsigned original_cpu_threads;
+static uint32_t original_trace_entry;
+static unsigned original_trace_hits;
+static uint32_t original_component_entry;
+static uint32_t original_component_bytes;
+static unsigned char original_component_code[4096];
+static PilotIoComponent component_callback;
+static struct OriginalThread *pending_component;
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static uint32_t original_export(unsigned ordinal);
 static void thread_after_call(unsigned ordinal,const uint32_t *args,uint32_t result);
 static void thread_cpu_birth_prepare(struct OriginalThread *parent,uint32_t *entry);
+static unsigned thread_service_arguments(unsigned ordinal);
 static int settings_owner_initialized;
 static void settings_before_query(const uint32_t *args)
 {
@@ -78,6 +90,25 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
     if(!original_cpu_threads)return 0;
     struct OriginalThread *thread=thread_object(kernel_word(0x8003da64u));
     if(!thread || !thread->in_cpu)return 0;
+    if(original_trace_entry && !thread->in_kernel) {
+        uint32_t sp=0,ax=0,pc=0;
+        if(uc_reg_read(engine,UC_X86_REG_ESP,&sp)==UC_ERR_OK &&
+           sp>=thread->stack && (uint64_t)sp+4<=(uint64_t)thread->stack+thread->stack_bytes) {
+            if(address==thread->trace_return && sp==thread->trace_stack+4 &&
+               uc_reg_read(engine,UC_X86_REG_EAX,&ax)==UC_ERR_OK) {
+                fprintf(stderr,"[ORIGINAL FUNCTION RETURN] entry=%08x thread=%08x caller=%08x eax=%08x stack=%08x\n",
+                    original_trace_entry,thread->object,address,ax,sp);
+                thread->trace_return=thread->trace_stack=0;
+            }
+            if(address==original_trace_entry && original_trace_hits<8 &&
+               uc_mem_read(engine,sp,&pc,4)==UC_ERR_OK) {
+                ++original_trace_hits;
+                fprintf(stderr,"[ORIGINAL FUNCTION ENTRY] entry=%08x thread=%08x caller=%08x stack=%08x\n",
+                    address,thread->object,pc,sp);
+                if(!thread->trace_return){thread->trace_return=pc;thread->trace_stack=sp;}
+            }
+        }
+    }
     /* In this hash-bound kernel the handle has been installed and ESI holds
      * its status before the next original ready-thread call. Stop outside the
      * engine to retain ownership before that call can dispatch the child. */
@@ -90,6 +121,11 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
     }
     if(address==thread->cpu_return) {
         pending_thread_return=thread;uc_emu_stop(engine);return 1;
+    }
+    if(address==original_component_entry && !thread->in_kernel) {
+        if(thread->in_component)failure="original CPU nested selected helper";
+        else pending_component=thread;
+        uc_emu_stop(engine);return 1;
     }
     return 0;
 }
@@ -149,7 +185,7 @@ static int thread_admit(uc_engine *engine,uint32_t address)
 }
 
 enum { THREAD_REQUEST_CALL=1, THREAD_REQUEST_FINISH=2, THREAD_REQUEST_CHECKPOINT=3,
-       THREAD_REQUEST_CPU=4 };
+       THREAD_REQUEST_CPU=4, THREAD_REQUEST_COMPONENT_DONE=5 };
 /* Only the original engine's controller runs guest work. Host workers retain
  * C call stacks and TLS while blocked; no host priority/timeout chooses which
  * one runs. The event handshakes transfer sole execution ownership. */
@@ -204,10 +240,47 @@ const char *pilot_io_device_thread_execute(uint32_t entry,uint32_t regs[8])
     uint32_t expected=thread->entry==PILOT_IO_BOOTSTRAP_ENTRY?PILOT_IO_BOOTSTRAP_ENTRY:thread->return_pc;
     if(thread->cpu_return!=expected)return "original CPU execution has an invalid entry return";
     thread->cpu_used=1;thread->request=THREAD_REQUEST_CPU;
-    if(!SetEvent(thread->request_event) || WaitForSingleObject(thread->resume_event,INFINITE)!=WAIT_OBJECT_0)
-        return "original CPU execution host handoff failed";
+    if(!SetEvent(thread->request_event))return "original CPU execution host handoff failed";
+    for(;;) {
+        if(WaitForSingleObject(thread->resume_event,INFINITE)!=WAIT_OBJECT_0)
+            return "original CPU execution host handoff failed";
+        if(thread->callback_error)return thread->callback_error;
+        if(!thread->component_requested)break;
+        thread->component_requested=0;
+        thread->callback_error=component_callback(original_component_entry,thread->component_regs);
+        thread->request=THREAD_REQUEST_COMPONENT_DONE;
+        if(!SetEvent(thread->request_event))return "selected helper completion handoff failed";
+    }
     if(thread->callback_error)return thread->callback_error;
     memcpy(regs,thread->call_regs,sizeof(thread->call_regs));return NULL;
+}
+int pilot_io_device_thread_component_active(void)
+{return native_thread_worker && native_thread_worker->in_component;}
+const char *pilot_io_device_thread_component_workspace(uint32_t bytes,uint32_t *base)
+{
+    struct OriginalThread *thread=native_thread_worker;
+    if(!thread || !thread->in_component || !base || !bytes || bytes>4096 ||
+       thread->component_workspace || thread->component_call_top<thread->stack+bytes+44)
+        return "selected helper workspace outside its original stack lease";
+    thread->component_call_top-=bytes;thread->component_workspace=bytes;
+    *base=thread->component_call_top;return NULL;
+}
+const char *pilot_io_device_thread_component_call(unsigned ordinal,const uint32_t *args,uint32_t *result)
+{
+    struct OriginalThread *thread=native_thread_worker;
+    if(!thread || !thread->in_component || !args || !result)
+        return "selected helper call outside its original continuation";
+    unsigned count=thread_service_arguments(ordinal);if(failure)return failure;
+    uint32_t regs[8];memcpy(regs,thread->component_regs,sizeof(regs));
+    if(ordinal==258)return "selected helper cannot replace original thread termination";
+    uint32_t bytes=(count+1)*4,top=thread->component_call_top;
+    if(top<thread->stack+bytes || (uint64_t)top>=(uint64_t)thread->stack+thread->stack_bytes)
+        return "selected helper call frame outside original stack";
+    regs[4]=top-bytes;
+    uint32_t frame[11]={original_component_entry};memcpy(frame+1,args,count*4);
+    memcpy(guest_memory+regs[4],frame,bytes);
+    const char *error=pilot_io_device_thread_call(ordinal,regs);
+    if(!error)*result=regs[0];return error;
 }
 const char *pilot_io_device_thread_completion(int *terminated,uint32_t *status)
 {

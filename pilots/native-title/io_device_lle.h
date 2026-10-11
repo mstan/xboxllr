@@ -40,6 +40,21 @@ void pilot_io_device_dpc_bind(PilotIoIsr callback);
 typedef const char *(*PilotIoThread)(uint32_t entry,uint32_t regs[8],
     unsigned arguments,int *terminate,uint32_t *exit_status);
 void pilot_io_device_thread_bind(PilotIoThread callback);
+/* Bounded read-only entry/return observation on the original CPU. Selection
+ * is diagnostic only; it does not admit a callback or alter guest state. */
+const char *pilot_io_device_thread_trace(uint32_t entry);
+/* Build-selected complete zero-argument helper: EAX result and RET0 only.
+ * Bind only reviewed original bytes by SHA256. The retained native worker
+ * runs the selected implementation while the same original CPU is stopped.
+ * Internal kernel calls use the executing original thread's real stack and
+ * scheduler; the engine retains flags/FP state and sole execution ownership. */
+typedef const char *(*PilotIoComponent)(uint32_t entry,uint32_t regs[8]);
+const char *pilot_io_device_thread_component_bind(uint32_t entry,uint32_t bytes,
+    const char *sha256,PilotIoComponent callback);
+int pilot_io_device_thread_component_active(void);
+const char *pilot_io_device_thread_component_workspace(uint32_t bytes,uint32_t *base);
+const char *pilot_io_device_thread_component_call(unsigned ordinal,
+    const uint32_t *args,uint32_t *result);
 /* Called from a generated thread body's kernel-dispatch boundary. The real
  * guest call frame is at regs[ESP]; original execution returns updated GPRs.
  * The host call remains suspended if the original kernel switches threads. */

@@ -11,7 +11,8 @@ file(GLOB generated CONFIGURE_DEPENDS "${PILOT_GENERATED}/*.c")
 set(PILOT_MEDIA "OPTICAL" CACHE STRING "Build-time media policy: OPTICAL or INSTALLED")
 set_property(CACHE PILOT_MEDIA PROPERTY STRINGS OPTICAL INSTALLED)
 if(PILOT_MEDIA STREQUAL "INSTALLED")
-  if(NOT EXISTS "${PILOT_GENERATED}/pilot_media_binding.c")
+  if(NOT EXISTS "${PILOT_GENERATED}/pilot_media_binding.c" OR
+     NOT EXISTS "${PILOT_GENERATED}/pilot_media_cpu_binding.h")
     message(FATAL_ERROR "Installed media requires a reviewed, hash-bound XAPI media helper")
   endif()
   set_source_files_properties(runtime.c "${PILOT_GENERATED}/pilot_media_binding.c"

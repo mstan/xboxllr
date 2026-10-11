@@ -651,7 +651,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
      * run its generated body over shared bytes, then restore this CPU. A
      * nested original service has its own stack and saved engine context. */
     for(unsigned calls=0;calls<8192;++calls) {
-        pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;
+        pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;pending_component=NULL;
         pending_cpu_service=NULL;pending_cpu_birth=NULL;
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
@@ -677,6 +677,10 @@ static void run_original(uint32_t entry,size_t instruction_limit)
             thread_cpu_birth_prepare(pending_cpu_birth,&entry);if(failure)return;
             continue;
         }
+        if(pending_component) {
+            thread_component_prepare(pending_component,&entry);if(failure)return;
+            continue;
+        }
 #ifdef PILOT_USB_LLE
         if(device_irq_pending) {
             int vector=pilot_usb_pic_vector(1);
@@ -691,6 +695,7 @@ static void run_original(uint32_t entry,size_t instruction_limit)
                 thread_service_complete(thread);if(failure)return;
                 thread_after_call(thread->call_ordinal,thread->call_args,thread->call_regs[0]);
                 if(failure)return;
+                if(thread->in_component){thread_handoff(thread,0,&entry);if(failure)return;continue;}
                 entry=thread->call_return;continue;
             }
             if(thread->in_cpu)thread_cpu_complete(thread);
@@ -994,6 +999,41 @@ static void deliver_irq(int *delivered)
 void pilot_io_device_isr_bind(PilotIoIsr callback){isr_callback=callback;}
 void pilot_io_device_dpc_bind(PilotIoIsr callback){dpc_callback=callback;}
 void pilot_io_device_thread_bind(PilotIoThread callback){thread_callback=callback;}
+const char *pilot_io_device_thread_trace(uint32_t entry)
+{
+    AcquireSRWLockExclusive(&lock);
+    const char *error=NULL;
+    if(execution_depth || (entry && (entry<0x10000u || entry>=0x80000000u)))
+        error="original thread trace requires an idle user-code address";
+    else {original_trace_entry=entry;original_trace_hits=0;}
+    ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_thread_component_bind(uint32_t entry,uint32_t bytes,
+    const char *sha256,PilotIoComponent callback)
+{
+    AcquireSRWLockExclusive(&lock);
+    const char *error=NULL;
+    if(!cpu || execution_depth || !callback || !sha256 || strlen(sha256)!=64 ||
+       !bytes || bytes>4096 || entry<image_start ||
+       (uint64_t)entry+bytes>(uint64_t)image_start+image_bytes || component_callback)
+        error="selected helper binding requires an idle, owned complete boundary";
+    else {
+        unsigned char digest[32];char actual[65];
+        for(uint64_t page=entry&~4095u;page<(uint64_t)entry+bytes;page+=4096)
+            if(!guest_page((uint32_t)page)){error="selected helper original bytes are not resident";break;}
+        if(!error && BCryptHash(BCRYPT_SHA256_ALG_HANDLE,NULL,0,guest_memory+entry,bytes,digest,32)<0)
+            error="selected helper original hash failed";
+        if(!error) {
+            for(unsigned i=0;i<32;++i)sprintf(actual+i*2,"%02x",digest[i]);
+            if(strcmp(actual,sha256))error="selected helper differs from reviewed original bytes";
+        }
+        if(!error) {
+            memcpy(original_component_code,guest_memory+entry,bytes);
+            original_component_entry=entry;original_component_bytes=bytes;component_callback=callback;
+        }
+    }
+    ReleaseSRWLockExclusive(&lock);return error;
+}
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context)
 {
     AcquireSRWLockExclusive(&lock);

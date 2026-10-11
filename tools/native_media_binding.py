@@ -6,6 +6,7 @@ the private build, selected by PILOT_MEDIA=OPTICAL. No proprietary bytes here.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from native_binding import Binding
@@ -48,7 +49,24 @@ def bind(xbe: Path, output: Path, symbols: Path):
         '#else\n'
         '    pilot_optical_verify_original();\n'
         '#endif\n}\n')
-    return context.emit("media", function, "pilot_optical_verify_original", binding, wrapper)
+    result = context.emit("media", function, "pilot_optical_verify_original", binding, wrapper)
+    # The original CPU selects the same complete reviewed helper as generated
+    # callers. This is factual boundary metadata, never replacement x86 bytes.
+    header = context.generated / "pilot_media_cpu_binding.h"
+    metadata = (
+        '/* Reviewed complete installed-media selection for the original CPU. */\n'
+        f'#define PILOT_MEDIA_CPU_ENTRY {function["start"]}u\n'
+        f'#define PILOT_MEDIA_CPU_BYTES {function["size"]}u\n'
+        f'#define PILOT_MEDIA_CPU_SHA256 "{digest}"\n')
+    if header.exists() and header.read_text() != metadata:
+        raise ValueError("existing original-CPU media metadata differs")
+    header.write_text(metadata, encoding="utf-8", newline="\n")
+    manifest = json.loads(context.manifest_path.read_text())
+    manifest["files"][header.name] = hashlib.sha256(header.read_bytes()).hexdigest()
+    manifest["media_cpu_binding"] = dict(address=function["start"], bytes=function["size"],
+        function_sha256=digest, arguments=[], result="EAX NTSTATUS", stack_pop=4)
+    context.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return result
 
 
 if __name__ == "__main__":

@@ -36,6 +36,14 @@ static unsigned thread_service_arguments(unsigned ordinal)
                uc_mem_read(cpu,bp,parent,sizeof(parent))==UC_ERR_OK)
                 fprintf(stderr,"[THREAD FIRMWARE CALLER] caller=%08x args=%08x/%08x/%08x/%08x/%08x\n",
                     parent[1],parent[2],parent[3],parent[4],parent[5],parent[6]);
+            if(thread)for(unsigned depth=0;depth<8;++depth) {
+                uint32_t link[7]={0};
+                if(bp<thread->stack || (uint64_t)bp+sizeof(link)>(uint64_t)thread->stack+thread->stack_bytes ||
+                   uc_mem_read(cpu,bp,link,sizeof(link))!=UC_ERR_OK)break;
+                fprintf(stderr,"[THREAD FIRMWARE ANCESTOR] depth=%u frame=%08x caller=%08x args=%08x/%08x/%08x/%08x/%08x\n",
+                    depth,bp,link[1],link[2],link[3],link[4],link[5],link[6]);
+                if(link[0]<=bp)break;bp=link[0];
+            }
         }
         failure="thread LLE service family requires continuation integration";return 0;
     }
@@ -67,7 +75,7 @@ static void thread_service_prepare(struct OriginalThread *thread,uint32_t *entry
     contiguous_caller_prepare(thread->call_ordinal,thread->call_args);if(failure)return;
     vm_caller_prepare(thread->call_ordinal,thread->call_args,&thread->vm_access);if(failure)return;
     thread->call_arguments=count;thread->call_return=return_pc;
-    thread->call_flags=2u|(caller_if?0x200u:0);
+    thread->call_flags=thread->in_component?thread->component_flags:2u|(caller_if?0x200u:0);
     thread->in_kernel=1;
     check_publications(1);if(failure)return;
     for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],thread->call_regs+i));
@@ -227,6 +235,25 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
     if(thread->request==THREAD_REQUEST_CALL){thread_service_prepare(thread,entry);return;}
     if(thread->request==THREAD_REQUEST_CHECKPOINT){thread_checkpoint_prepare(thread,entry);return;}
     if(thread->request==THREAD_REQUEST_CPU){thread_cpu_prepare(thread,entry);return;}
+    if(thread->request==THREAD_REQUEST_COMPONENT_DONE) {
+        uint32_t return_pc=0;
+        if(!thread->in_component || thread->in_kernel || !thread->in_cpu ||
+           kernel_word(0x8003da64u)!=thread->object ||
+           thread->component_regs[4]!=thread->component_before[4]+4) {
+            failure="selected helper completion outside its original CPU owner";return;
+        }
+        IO_UC(uc_mem_read(cpu,thread->component_before[4],&return_pc,4));
+        if(return_pc!=thread->component_return) {
+            failure="selected helper changed original return frame";return;
+        }
+        for(unsigned i=1;i<8;++i)if(i!=4 && thread->component_regs[i]!=thread->component_before[i]) {
+            failure="selected helper changed undeclared caller register";return;
+        }
+        check_publications(1);if(failure)return;
+        for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],thread->component_regs+i));
+        IO_UC(uc_reg_write(cpu,UC_X86_REG_EFLAGS,&thread->component_flags));
+        thread->in_component=0;*entry=thread->component_return;return;
+    }
     if(thread->request!=THREAD_REQUEST_FINISH){failure="thread LLE missing native continuation action";return;}
     /* Native work is finished; release its transport resources independently
      * of original thread/object lifetime. Original termination still follows. */
@@ -258,4 +285,32 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
         IO_UC(uc_reg_write(cpu,UC_X86_REG_ESP,&sp));
         *entry=original_export(258);
     }
+}
+static void thread_component_prepare(struct OriginalThread *thread,uint32_t *entry)
+{
+    uint32_t sp=0,flags=0;
+    IO_UC(uc_reg_read(cpu,UC_X86_REG_ESP,&sp));IO_UC(uc_reg_read(cpu,UC_X86_REG_EFLAGS,&flags));
+    if(!component_callback || thread->in_component || thread->in_kernel || !thread->in_cpu ||
+       kernel_word(0x8003da64u)!=thread->object || (kernel_word(0x8003da60u)&255) ||
+       (flags&0x600)!=0x200 || sp<thread->stack+44 ||
+       (uint64_t)sp+4>(uint64_t)thread->stack+thread->stack_bytes) {
+        failure="selected helper lacks original thread/stack/passive context";return;
+    }
+    if(memcmp(guest_memory+original_component_entry,original_component_code,original_component_bytes)) {
+        failure="selected helper original bytes changed after binding";return;
+    }
+    IO_UC(uc_mem_read(cpu,sp,&thread->component_return,4));
+    if(thread->component_return<0x10000u || thread->component_return>=0x80000000u ||
+       !guest_page(thread->component_return&~4095u)) {
+        failure="selected helper return outside resident original caller";return;
+    }
+    for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],thread->component_regs+i));
+    /* native_regs belonged to the outer retained callback; keep its entry
+     * unchanged. A separate snapshot certifies this helper's complete ABI. */
+    thread->component_flags=flags;
+    memcpy(thread->component_before,thread->component_regs,sizeof(thread->component_before));
+    thread->component_call_top=sp;thread->component_workspace=0;
+    check_publications(0);if(failure)return;
+    thread->in_component=1;thread->component_requested=1;
+    thread_handoff(thread,0,entry);
 }

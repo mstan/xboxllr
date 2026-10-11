@@ -1695,6 +1695,14 @@ ownership and executed transfer behavior. Primary xqemu issue discussions and
 the Motorola manual document uncertainty about B0..B3; no GPL implementation
 body is copied or unobserved timer producer inferred.
 
+
+The original-CPU installed-media component transport, per-thread stack lease,
+identity verification connection and fault controls are authored here. Existing
+reviewed complete XAPI boundary metadata supplies only address/extent/hash/ABI
+facts; no original helper body is committed. Actual file/VM/close operations
+reuse the already credited original-kernel, Unicorn and device reference floor.
+The read-only launch observation executes unchanged private owned code.
+
 ## Theseus behavioral reference
 
 [MrMilenko/Theseus](https://github.com/MrMilenko/Theseus/tree/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965),

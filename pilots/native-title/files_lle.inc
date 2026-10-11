@@ -8,7 +8,8 @@ static SRWLOCK files_lle_lock=SRWLOCK_INIT;
 #define FILES_SLOT (PILOT_IO_BRIDGE_BASE+0x3000u)
 static uint32_t files_call(unsigned ordinal,const uint32_t *args)
 {
-    uint32_t result=0;const char *error=pilot_io_device_lle(ordinal,memory,args,&result);
+    uint32_t result=0;const char *error=pilot_io_device_thread_component_active()?
+        pilot_io_device_thread_component_call(ordinal,args,&result):pilot_io_device_lle(ordinal,memory,args,&result);
     if(error)stop(error,ordinal);return result;
 }
 static uint32_t files_string(uint32_t slot,const char *text)
@@ -39,13 +40,24 @@ static void files_lle_start(void)
 }
 static uint32_t files_verify(const char *expected)
 {
+    uint32_t slot=FILES_SLOT;int component=pilot_io_device_thread_component_active();
+    if(component) {
+        const char *error=pilot_io_device_thread_component_workspace(4096,&slot);
+        if(error)stop(error,0);
+    }
     char path[1200];snprintf(path,sizeof(path),"%s\\default.xbe",PILOT_FILES_TITLE_ROOT);
-    const uint32_t attr=FILES_SLOT+0x800,output=attr+16,iosb=attr+24;
-    MEM32(attr)=0;MEM32(attr+4)=files_string(FILES_SLOT,path);MEM32(attr+8)=0x40;
+    const uint32_t attr=slot+0x800,output=attr+16,iosb=attr+24;
+    MEM32(attr)=0;MEM32(attr+4)=files_string(slot,path);MEM32(attr+8)=0x40;
     uint32_t open[]={output,0x100001,attr,iosb,1,0x20},status=files_call(202,open);
     if(status)return status;uint32_t handle=MEM32(output),buffer=0;
     uint32_t in[]={0,65536,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE,0},out[7];
-    const char *error=pilot_io_device_vm(184,memory,in,out,&status);
+    const uint32_t address=slot+0x840,size=slot+0x844;
+    const char *error=NULL;
+    if(component) {
+        MEM32(address)=0;MEM32(size)=65536;
+        uint32_t allocate[]={address,0,size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE};
+        status=files_call(184,allocate);out[0]=MEM32(address);
+    } else error=pilot_io_device_vm(184,memory,in,out,&status);
     if(error)stop(error,184);
     if(status){files_call(187,&handle);return status;}buffer=out[0];
     BCRYPT_HASH_HANDLE hash=NULL;
@@ -66,7 +78,10 @@ static uint32_t files_verify(const char *expected)
     }
     BCryptDestroyHash(hash);
     uint32_t release[]={buffer,0,MEM_RELEASE,0,0},released;
-    error=pilot_io_device_vm(199,memory,release,out,&released);
+    if(component) {
+        MEM32(address)=buffer;MEM32(size)=0;
+        uint32_t free_args[]={address,size,MEM_RELEASE};released=files_call(199,free_args);
+    } else error=pilot_io_device_vm(199,memory,release,out,&released);
     if(error)stop(error,199);if(released)stop("original media buffer release",released);
     if(files_call(187,&handle))stop("original media identity close",handle);
     return status;

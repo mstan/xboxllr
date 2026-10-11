@@ -1124,3 +1124,50 @@ original CPU route must be checked before implementing firmware transition.
 No reset is executed and no RET is supplied. The final observation is in
 `firmware-caller-title-startup-20261010.aot-private.json`, with unchanged input
 ROM/EEPROM files. Earlier62-entry qualification keeps its source identity.
+
+
+### Installed-media selection on the original CPU - 2026-10-10
+
+A bounded original-CPU entry/return trace established the quick-reboot cause.
+The reviewed optical helper at000F749D returned C0000010. XapiInitProcess
+followed its error path through the original fatal-launch helper and
+XLaunchNewImageA into HalReturnToFirmware49. The build's approved INSTALLED
+selection previously applied only to generated C callers. The original CPU
+executed the optical body regardless of that selection.
+
+The same reviewed complete helper now selects INSTALLED on the existing CPU.
+Generated metadata binds its address, full222-byte extent and original SHA256;
+registration verifies owned resident bytes, and admission rejects later changes.
+The retained native thread continuation executes this zero-argument helper
+outside the stopped engine. Its internal file, VM and close services use actual
+CALL/RET frames below that original thread's stack workspace, the same PCR,
+original scheduler and original FATX/IDE/PIC owner. A4KiB per-thread stack lease
+keeps paths and output records separate without a shared scratch lock across
+blocking calls. The engine retains actual x87/MMX/SSE state. Completion checks
+the unchanged return frame and every undeclared GPR, restores the original flags,
+and applies only EAX plus the declared RET0 stack effect.
+
+Installed verification streams the actual HDD default.xbe, compares its SHA256,
+then frees its real VM buffer and closes its original file handle. It retains
+real errors, including C0000012 for a wrong identity. It supplies no optical
+authentication packet and does not execute or turn a firmware request into RET.
+The OPTICAL selection retains the original helper. Default fast HLE uses its
+existing generated complete helper and does not incur this CPU transport.
+
+Three authored actual-CPU lifetimes cover successful identity, wrong identity
+and successful reuse, with exact flags/x87/XMM and settled original thread/handle
+baselines. Wrong registration hashes fail before binding. Three terminal controls
+reject changed original bytes, an undeclared register change and return-frame
+corruption before the original caller resumes. The coherent CPU batch passes
+**66/66 in12.969s**. Fresh original startup verifies real installed identity,
+returns zero to000F75EF and next guards **ordinal289**. Wider original services,
+GPU/audio startup and firmware transitions remain required; **4/9** gates and
+**25 safe deferrals** are unchanged.
+
+Evidence is in `media-launch-trace-title-startup-20261010.aot-private.json`,
+`media-component-final-qualified-20261010.aot-private.json` and
+`media-component-frame-final-title-startup-20261010.aot-private.json`. Earlier
+65-entry and intermediate startup observations keep their source identities.
+A private validation-helper BOM decoding failure is also preserved; it did not
+run a check or change product code. No physical Xbox operation, playback or
+attract rerun was performed.

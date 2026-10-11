@@ -81,7 +81,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
     if(va==0x125c0)return test_thread_timeout_body;
     if(va==0x126c0)return test_thread_idle_clock_body;
     if(va==0x126e0)return test_thread_compute_body;
-    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500)return test_thread_cpu_body;
+    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800)return test_thread_cpu_body;
     if(va==0x12800)return test_thread_cpu_peer;
 #endif
 #ifdef PILOT_USB_LLE
@@ -129,6 +129,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_vm_cpu_contract_test.inc"
 #include "thread_files_cpu_contract_test.inc"
 #include "thread_contiguous_cpu_contract_test.inc"
+#include "thread_component_cpu_contract_test.inc"
 #include "rtc_contract_test.inc"
 #include "smbus_contract_test.inc"
 #include "settings_lle_contract_test.inc"
@@ -590,6 +591,12 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-files-cpu-lle")) { CHECK(argc==3);test_thread_files_cpu_lle(argv[2]);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-cpu-lle")) { test_thread_contiguous_cpu_lle(0);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-borrowed-free-lle")) { test_thread_contiguous_cpu_lle(1);return 0; }
+        if (!strncmp(argv[1],"thread-component-",17)) {
+            CHECK(argc==3);int kind=!strcmp(argv[1],"thread-component-cpu-lle")?0:
+                !strcmp(argv[1],"thread-component-abi-lle")?1:!strcmp(argv[1],"thread-component-bytes-lle")?2:
+                !strcmp(argv[1],"thread-component-return-lle")?3:-1;
+            CHECK(kind>=0);test_thread_component_cpu_lle(argv[2],kind);return 0;
+        }
         if (!strcmp(argv[1],"thread-critical-cpu-lle")) { test_thread_critical_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"rtc-cmos-lle")) { test_rtc_cmos_lle(); return 0; }
         if (!strcmp(argv[1],"smbus-smc-lle")) { test_smbus_smc_lle(); return 0; }

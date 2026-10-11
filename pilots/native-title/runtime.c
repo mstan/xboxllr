@@ -508,6 +508,24 @@ static void scheduling_lle_execute(uint32_t entry);
 #ifdef PILOT_FILES_LLE
 #include "files_lle.inc"
 #endif
+#if defined(PILOT_MEDIA_INSTALLED) && defined(PILOT_SCHEDULING_LLE)
+#include "pilot_media_cpu_binding.h"
+static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
+{
+    if(entry!=PILOT_MEDIA_CPU_ENTRY)return "unbound installed-media CPU helper";
+#ifdef PILOT_FILES_LLE
+    /* Each original thread leases its own stack workspace. All actual file,
+     * VM and close calls may yield through the existing original scheduler. */
+    regs[0]=files_verify(PILOT_XBE_SHA256);
+    fprintf(stderr,"[MEDIA VERIFY CPU LLE FILES] actual installed HDD XBE status=%08x\n",regs[0]);
+#else
+    AcquireSRWLockExclusive(&media_lock);regs[0]=media_verify(PILOT_XBE_SHA256);
+    ReleaseSRWLockExclusive(&media_lock);
+    fprintf(stderr,"[MEDIA VERIFY CPU] installed default.xbe identity/status=%08x\n",regs[0]);
+#endif
+    regs[4]+=4;return NULL;
+}
+#endif
 #ifdef PILOT_SCHEDULING_LLE
 #include "scheduling_lle.inc"
 #endif
@@ -961,6 +979,17 @@ int main(int argc,char **argv)
     fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
 #else
     fprintf(stderr,"[MEDIA POLICY] original optical verification routine\n");
+#endif
+#ifdef PILOT_IO_DEVICE_LLE
+    if(trace_function) {
+        const char *trace_error=pilot_io_device_thread_trace(trace_function);
+        if(trace_error)stop(trace_error,trace_function);
+    }
+#endif
+#if defined(PILOT_MEDIA_INSTALLED) && defined(PILOT_SCHEDULING_LLE)
+    const char *media_error=pilot_io_device_thread_component_bind(PILOT_MEDIA_CPU_ENTRY,
+        PILOT_MEDIA_CPU_BYTES,PILOT_MEDIA_CPU_SHA256,installed_media_component);
+    if(media_error)stop(media_error,PILOT_MEDIA_CPU_ENTRY);
 #endif
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);
