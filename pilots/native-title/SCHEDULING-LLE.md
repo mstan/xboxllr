@@ -5,6 +5,46 @@ explicitly deferred real-console-dependent work on 2026-10-09; this family
 proceeds independently of GPU startup `.109` / hardware observation `.111`.
 The total remains four qualified families and five open.
 
+## Shared original component owner, pool and whole audio calls - 2026-10-11
+
+Whole native graphics, audio and installed-media components now share one real
+initialized28-byte original RTL critical section before their host locks. This
+cross-family owner prevents an original preemption from scheduling an audio or
+graphics worker into their shared native VM/pool lock while another owner holds
+it. Actual original277/294 calls block/wake the contender; host locks are released
+before the original owner is released. No original queue or ready result is edited.
+Three contended lifetimes exercise six original CPU owners across audio/graphics
+locks, real event waits, actual pool calls and complete authored-handle cleanup.
+
+Active components now invoke actual pool15 allocation,23 usable-size query and17
+free through the existing original CALL/RET transport; ordinary callers retain
+the direct route. The native ledger, shared budget and release-before-mutation
+pin guard remain. Three original CPU lives consume first/last allocation words,
+cover small/page-crossing blocks, pin/unpin, free/reuse, all nine original memory
+counters and original thread/handle/ABI/flags/x87/XMM/ESP state.
+
+The source-bound bridge also admits21 whole native audio APIs, with four guarded
+original inner vtable destruction entries. Three muted original CPU lives create
+a device and PCM buffer, perform full/wrapped Lock/Unlock, verify exact real host
+PCM, detach/rebind storage and release both objects. All36 actual API calls and
+pool/thread/handle cleanup pass. Unsupported effects composition, original
+callbacks and recursive host-lock entry remain guarded. The same wait guard now
+covers InsertFence, whose full queue contains an implicit host wait.
+
+Final combined validation passes **39/39 checks in8.90s**, zero skips. Private
+proof freezes105 identities:
+`build/blinx/audio-pool-component-20261011/qualified-final.aot-private.json`, SHA-256
+`a83d4e224cb600a93ece499c007a2cdc7a65b678d7a7c447a91ea0a47f1cdbbb`.
+The independently frozen muted **7.812s** startup binds129 graphics/21 audio APIs,
+verifies the installed HDD XBE, creates the640x480 device, textures and vertex
+buffers, then stops at original physical resource backing `838B4000`. That
+registration owner is required next. The startup keeps its actual earlier
+executable/source identity; the final additional, unreached fence guard is
+covered by its real original CPU negative check without rerunning the title.
+No physical Xbox, attract run or audio Play occurred. Default HLE scheduling
+excludes the new shared owner and typed admission. **4/9 families** and
+**26 agreed precision deferrals** remain unchanged.
+
 ## Original graphics gate, constructor and USB DMA lock ownership - 2026-10-11
 
 Whole graphics components now acquire an owned **28-byte original RTL critical

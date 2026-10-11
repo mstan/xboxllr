@@ -11,7 +11,7 @@ static unsigned thread_service_arguments(unsigned ordinal)
     switch(ordinal) {
     case 1:case 35:case 36:case 121:case 125:case 250:return 0;
     case 97:case 128:case 137:case 138:case 186:case 187:case 256:case 258:
-    case 4:case 14:case 17:case 37:case 68:case 69:case 98:case 100:case 165:case 171:case 173:case 179:case 180:
+    case 4:case 14:case 17:case 23:case 37:case 68:case 69:case 98:case 100:case 165:case 171:case 173:case 179:case 180:
     case 277:case 291:case 294:case 301:case 316:return 1;
     case 67:case 113:case 148:case 198:case 203:case 209:case 217:case 224:case 225:case 231:
     case 15:case 44:case 47:case 168:case 289:case 290:return 2;

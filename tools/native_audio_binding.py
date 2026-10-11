@@ -65,9 +65,21 @@ def bind(xbe,output,symbols):
             if len(pushes)!=8 or pushes[:2]!=[0,0] or pushes[4:]!=[80,8,0,0]:raise ValueError('unreviewed DSP seed ABI')
             dsp['seed']['value']=(pushes[2]<<32)|pushes[3]
     binding=dict(xbe_sha256=IMAGE,calls=calls,tables=tables,device_interface_offset=8,buffer_interface_offset=28,buffer_descriptor_bytes=24,dsp_helpers=dsp)
-    header=['#pragma once','enum PilotAudioEntry {']+[f'    PILOT_AUDIO_{c["name"]},' for c in calls]
-    header+=['    PILOT_AUDIO_COUNT','};','static const struct { const char *name; unsigned stack_bytes; } pilot_audio_calls[] = {']
-    header+=[f'    {{"{c["name"]}",{c["stack_bytes"]}}},' for c in calls]+['};']
+    header=['#pragma once','#include <stdint.h>','enum PilotAudioEntry {']+[f'    PILOT_AUDIO_{c["name"]},' for c in calls]
+    header+=['    PILOT_AUDIO_COUNT','};','static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_audio_calls[] = {']
+    header+=[f'    {{"{c["name"]}", {c["address"]}u, {c["stack_bytes"]}u, {functions[c["address"]]["size"]}u, "{c["sha256"]}"}},' for c in calls]+['};']
+    # These vtable entries destroy the original, larger object layout. A whole
+    # public Release owns native teardown; an original CPU must stop before
+    # running an inner Release or ECX scalar destructor on a native object.
+    header+=['static const struct { const char *name; uint32_t address, bytes; const char *sha256; } pilot_audio_guards[] = {']
+    for kind,table in tables.items():
+        for slot,name in ((0,'Destructor'),(2,'InnerRelease')):
+            address=table['entries'][slot];function=functions[address]
+            code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(address,function['size']),address))
+            if {int(i.op_str or '0',0) for i in code if i.mnemonic=='ret'}!={4}:
+                raise ValueError('unreviewed audio object guard cleanup')
+            header.append(f'    {{"{kind}_{name}", {address}u, {function["size"]}u, "{context.digest(function)}"}},')
+    header+=['};']
     header+=[f'#define PILOT_AUDIO_{kind}_VTABLE 0x{v["address"]:08x}u' for kind,v in tables.items()]
     header+=[f'#define PILOT_AUDIO_DSP_SEED UINT64_C(0x{dsp["seed"]["value"]:016x})']
     wrapper=['#include "pilot_audio_bindings.h"','extern void pilot_audio_dispatch(unsigned);']

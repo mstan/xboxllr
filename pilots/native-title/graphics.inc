@@ -15,8 +15,7 @@ static const char *graphics_original_enter(void)
 {
     if(!graphics_original_gate || !pilot_io_device_thread_component_active() || graphics_original_gate_depth)
         return "original graphics gate outside a nonrecursive component";
-    uint32_t ignored=0;
-    const char *error=pilot_io_device_thread_component_call(277,&graphics_original_gate,&ignored);
+    const char *error=native_component_original_enter();
     if(error)return error;
     if(MEM32(graphics_original_gate+20)!=1 ||
        MEM32(graphics_original_gate+24)!=MEM32(0x8003da64u))
@@ -27,8 +26,7 @@ static const char *graphics_original_leave(void)
 {
     if(graphics_original_gate_depth!=1 || graphics_original_dispatch_depth)
         return "original graphics gate release before native dispatch completion";
-    uint32_t ignored=0;
-    const char *error=pilot_io_device_thread_component_call(294,&graphics_original_gate,&ignored);
+    const char *error=native_component_original_leave();
     if(!error)graphics_original_gate_depth=0;
     return error;
 }

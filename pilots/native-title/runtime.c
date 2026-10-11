@@ -501,6 +501,7 @@ static void query_setting(void)
 #include "physical_memory.inc"
 #include "pool_memory.inc"
 #ifdef PILOT_SCHEDULING_LLE
+#include "component_owner.inc"
 static void scheduling_lle_bootstrap(void);
 static void scheduling_lle_execute(uint32_t entry);
 #endif
@@ -521,6 +522,7 @@ static void scheduling_lle_execute(uint32_t entry);
 static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
 {
     if(entry!=PILOT_MEDIA_CPU_ENTRY)return "unbound installed-media CPU helper";
+    const char *owner_error=native_component_original_enter();if(owner_error)return owner_error;
 #ifdef PILOT_FILES_LLE
     /* Each original thread leases its own stack workspace. All actual file,
      * VM and close calls may yield through the existing original scheduler. */
@@ -531,6 +533,7 @@ static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
     ReleaseSRWLockExclusive(&media_lock);
     fprintf(stderr,"[MEDIA VERIFY CPU] installed default.xbe identity/status=%08x\n",regs[0]);
 #endif
+    owner_error=native_component_original_leave();if(owner_error)return owner_error;
     regs[4]+=4;return NULL;
 }
 #endif
@@ -567,7 +570,9 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
     if(index==PILOT_D3D_D3DDevice_Swap)
         return "original scheduling native graphics display pulse requires integration";
 #endif
-    if(index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank || index==PILOT_D3D_D3DDevice_BlockOnFence)
+    /* InsertFence may itself wait when its finite outstanding queue is full. */
+    if(index==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank || index==PILOT_D3D_D3DDevice_BlockOnFence ||
+       index==PILOT_D3D_D3DDevice_InsertFence)
         return "original scheduling native graphics wait ownership requires integration";
     const char *error=graphics_original_enter();
     if(error)return error;
@@ -587,13 +592,7 @@ static void native_graphics_components_bind(void)
     /* Before original CPU admission there are no component contenders or host
      * renderer locks. The normal original pool owner publishes this real RTL
      * object's storage; initialization is VOID, not an EAX success status. */
-    graphics_original_gate=pool_allocate(28,0x4c786647u);
-    if(!graphics_original_gate)stop("original graphics gate allocation failed",28);
-    uint32_t ignored=0;
-    const char *gate_error=pilot_io_device_lle(291,memory,&graphics_original_gate,&ignored);
-    if(gate_error)stop(gate_error,291);
-    if(MEM32(graphics_original_gate+16)!=UINT32_MAX || MEM32(graphics_original_gate+20) ||
-       MEM32(graphics_original_gate+24))stop("original graphics gate initialization differs",graphics_original_gate);
+    native_component_gate_bind();graphics_original_gate=native_component_original_gate;
     for(unsigned index=0;index<PILOT_D3D_COUNT;++index) {
         const char *error=pilot_io_device_thread_component_bind_abi(pilot_d3d_calls[index].address,
             pilot_d3d_calls[index].bytes,pilot_d3d_calls[index].sha256,
@@ -601,6 +600,48 @@ static void native_graphics_components_bind(void)
         if(error)stop(error,pilot_d3d_calls[index].address);
     }
     fprintf(stderr,"[GRAPHICS CPU COMPONENTS] bound=%u; original flags/FP/thread owner retained\n",PILOT_D3D_COUNT);
+}
+#endif
+
+#if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_AUDIO_NATIVE)
+static const char *native_audio_component(uint32_t entry,uint32_t regs[8])
+{
+    unsigned index;for(index=0;index<PILOT_AUDIO_COUNT && pilot_audio_calls[index].address!=entry;++index){}
+    if(index==PILOT_AUDIO_COUNT || !pilot_io_device_thread_component_active())
+        return "unbound original CPU native audio entry";
+    if(index==PILOT_AUDIO_IDirectSound_DownloadEffectsImage)
+        return "original scheduling native audio effects ownership requires integration";
+    const char *error=audio_original_enter();if(error)return error;
+    uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
+    g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
+    g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
+    pilot_audio_dispatch(index);
+    uint32_t returned[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};memcpy(regs,returned,sizeof(returned));
+    g_eax=saved[0];g_ecx=saved[1];g_edx=saved[2];g_ebx=saved[3];
+    g_esp=saved[4];g_ebp=saved[5];g_esi=saved[6];g_edi=saved[7];
+    return audio_original_leave();
+}
+static const char *native_audio_object_guard(uint32_t entry,uint32_t regs[8])
+{
+    (void)entry;(void)regs;
+    return "original audio inner object destruction requires its native lifetime owner";
+}
+static void native_audio_components_bind(void)
+{
+    if(audio_original_gate)stop("original audio components already bound",audio_original_gate);
+    native_component_gate_bind();audio_original_gate=native_component_original_gate;
+    const char *error=NULL;
+    for(unsigned index=0;index<PILOT_AUDIO_COUNT;++index) {
+        error=pilot_io_device_thread_component_bind_abi(pilot_audio_calls[index].address,pilot_audio_calls[index].bytes,
+            pilot_audio_calls[index].sha256,pilot_audio_calls[index].stack_bytes,native_audio_component);
+        if(error)stop(error,pilot_audio_calls[index].address);
+    }
+    for(unsigned index=0;index<sizeof(pilot_audio_guards)/sizeof(pilot_audio_guards[0]);++index) {
+        error=pilot_io_device_thread_component_bind_abi(pilot_audio_guards[index].address,pilot_audio_guards[index].bytes,
+            pilot_audio_guards[index].sha256,4,native_audio_object_guard);
+        if(error)stop(error,pilot_audio_guards[index].address);
+    }
+    fprintf(stderr,"[AUDIO CPU COMPONENTS] bound=%u; inner object destruction guarded; original flags/FP/thread owner retained\n",PILOT_AUDIO_COUNT);
 }
 #endif
 
@@ -1048,12 +1089,16 @@ int main(int argc,char **argv)
     }
 #endif
 #if defined(PILOT_MEDIA_INSTALLED) && defined(PILOT_SCHEDULING_LLE)
+    native_component_gate_bind();
     const char *media_error=pilot_io_device_thread_component_bind(PILOT_MEDIA_CPU_ENTRY,
         PILOT_MEDIA_CPU_BYTES,PILOT_MEDIA_CPU_SHA256,installed_media_component);
     if(media_error)stop(media_error,PILOT_MEDIA_CPU_ENTRY);
 #endif
 #if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_D3D_NATIVE)
     native_graphics_components_bind();
+#endif
+#if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_AUDIO_NATIVE)
+    native_audio_components_bind();
 #endif
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);

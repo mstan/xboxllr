@@ -9,6 +9,39 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## Whole native audio under the original CPU owner - 2026-10-11
+
+The selected21 audio bindings now retain actual original address, extent and
+SHA-256 as well as their real stack cleanup. The reviewed image's original
+DSOUND code is preloaded; registration verifies resident bytes before sealing
+CPU admission. Generated native/original wrapper bodies and the selected binding
+record remain unchanged. Four additional original vtable entries stop before
+inner Release or ECX scalar destruction can access shortened native objects;
+whole selected public Release retains their native lifetime owner.
+
+A shared original RTL critical section serializes audio, graphics and installed
+media before native audio/renderer/VM locks. Actual original pool15/23/17 and
+owned VM services resume the same original thread through the existing CALL/RET
+protocol. Native completion callbacks retain host-owned chunk/PCM lifetimes;
+this route does not invent original DSP readiness, interrupts or completion.
+
+Three muted original CPU lifetimes perform36 real whole API calls: device/buffer
+creation, full/wrapped Lock/Unlock, exact host PCM readback, settings,
+detach/rebind and buffer/device Release. Pool/thread/handle cleanup, original
+flags/x87/XMM, integer registers and stack cleanup pass. Three more contended
+lifetimes prove audio/graphics exclusion and host-lock release before original
+wake. Effects composition, compiled IRQ/DPC audio entry, recursive host locks
+and inner object destruction remain explicitly guarded. No Play is used.
+
+The combined generation passes **39/39 checks in8.90s**, zero skips, with105
+frozen identities in
+`build/blinx/audio-pool-component-20261011/qualified-final.aot-private.json`, SHA-256
+`a83d4e224cb600a93ece499c007a2cdc7a65b678d7a7c447a91ea0a47f1cdbbb`.
+This qualifies the original-scheduler/native-audio connection, not the whole
+original GP/EP/control/cadence/codec/title-output gate. Those required behaviors
+remain open. The family count remains **4/9**, with the same26 precision deferrals.
+No physical Xbox operation or repeated audible/attract test occurred.
+
 ## Observed idle FE fence through original helper - 2026-10-11
 
 The retained physical token observations now have an executable maintained

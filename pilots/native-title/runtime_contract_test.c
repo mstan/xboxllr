@@ -85,7 +85,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
     if(va==0x125c0)return test_thread_timeout_body;
     if(va==0x126c0)return test_thread_idle_clock_body;
     if(va==0x126e0)return test_thread_compute_body;
-    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00 || va==0x13e00 || va==0x15000)return test_thread_cpu_body;
+    if(va==0x12740 || va==0x127a0 || va==0x12840 || va==0x12a00 || va==0x12c00 || va==0x12c80 || va==0x12d00 || va==0x12e00 || va==0x12f00 || va==0x13200 || va==0x13500 || va==0x13800 || va==0x13900 || va==0x13a00 || va==0x13b00 || va==0x13c00 || va==0x13d00 || va==0x13e00 || va==0x13f00 || va==0x15000 || va==0x16000 || va==0x16400 || va==0x16500)return test_thread_cpu_body;
     if(va==0x12800)return test_thread_cpu_peer;
 #endif
 #ifdef PILOT_USB_LLE
@@ -138,6 +138,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_component_cpu_contract_test.inc"
 #include "thread_component_abi_contract_test.inc"
 #include "thread_component_vm_contract_test.inc"
+#include "thread_component_pool_contract_test.inc"
 #include "thread_string_cpu_contract_test.inc"
 #include "thread_string_compare_cpu_contract_test.inc"
 #include "thread_device_cpu_contract_test.inc"
@@ -465,6 +466,11 @@ static void test_timers(void)
 #endif
 #endif
 
+#if defined(PILOT_AUDIO_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
+#include "thread_audio_component_contract_test.inc"
+#include "thread_audio_gate_contract_test.inc"
+#endif
+
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -487,9 +493,23 @@ int main(int argc,char **argv)
      * that loader input in the original allocator before any dynamic calls. */
     uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
     if(argc==2 && !strcmp(argv[1],"sections"))fixture_image_size=0x16000;
+#if defined(PILOT_AUDIO_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
+    if(argc>=2 && !strncmp(argv[1],"audio-component-",16)) {
+        uint32_t end=0x20000;
+        for(unsigned i=0;i<PILOT_AUDIO_COUNT;++i) {
+            uint32_t bound=pilot_audio_calls[i].address+pilot_audio_calls[i].bytes;if(bound>end)end=bound;
+        }
+        for(unsigned i=0;i<sizeof(pilot_audio_guards)/sizeof(pilot_audio_guards[0]);++i) {
+            uint32_t bound=pilot_audio_guards[i].address+pilot_audio_guards[i].bytes;if(bound>end)end=bound;
+        }
+        fixture_image_size=((end+4095)&~4095u)-0x10000;
+        image_base=0x10000;*(uint32_t*)(image_bytes+0x10c)=fixture_image_size;
+    }
+#endif
 #ifdef PILOT_D3D_NATIVE
-    if(argc>=2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture") || !strncmp(argv[1],"graphics-present",16) || !strncmp(argv[1],"graphics-component-",19))) {
-        fixture_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
+    if(argc>=2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture") || !strncmp(argv[1],"graphics-present",16) || !strncmp(argv[1],"graphics-component-",19) || !strncmp(argv[1],"audio-component-",16))) {
+        uint32_t graphics_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
+        if(graphics_image_size>fixture_image_size)fixture_image_size=graphics_image_size;
         image_base=0x10000;*(uint32_t*)(image_bytes+0x10c)=fixture_image_size;
     }
 #endif
@@ -506,6 +526,22 @@ int main(int argc,char **argv)
 #endif
 #endif
     if (argc>1) {
+#if defined(PILOT_AUDIO_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
+        if(!strncmp(argv[1],"audio-component-",16)) {
+            if(!strcmp(argv[1],"audio-component-callback-guard-lle")) {
+                usb_device_callback_depth=1;pilot_audio_dispatch(PILOT_AUDIO_DirectSoundCreate);return 1;
+            }
+            CHECK(argc==3);
+            if(!strcmp(argv[1],"audio-component-gate-lle")) {test_thread_audio_gate_lle(argv[2]);return 0;}
+            int kind=!strcmp(argv[1],"audio-component-cpu-lle")?0:
+                !strcmp(argv[1],"audio-component-effects-guard-lle")?1:
+                !strcmp(argv[1],"audio-component-device-destructor-guard-lle")?2:
+                !strcmp(argv[1],"audio-component-device-release-guard-lle")?3:
+                !strcmp(argv[1],"audio-component-buffer-destructor-guard-lle")?4:
+                !strcmp(argv[1],"audio-component-buffer-release-guard-lle")?5:-1;
+            CHECK(kind>=0);test_thread_audio_component_lle(argv[2],kind);return 0;
+        }
+#endif
 #if defined(PILOT_D3D_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
         if(!strncmp(argv[1],"graphics-component-",19)) {
             CHECK(argc==3);
@@ -514,7 +550,8 @@ int main(int argc,char **argv)
                 !strcmp(argv[1],"graphics-component-memory-guard-lle")?1:
                 !strcmp(argv[1],"graphics-component-callback-guard-lle")?2:
                 !strcmp(argv[1],"graphics-component-pulse-guard-lle")?3:
-                !strcmp(argv[1],"graphics-component-constructor-lle")?4:-1;
+                !strcmp(argv[1],"graphics-component-constructor-lle")?4:
+                !strcmp(argv[1],"graphics-component-fence-guard-lle")?5:-1;
             CHECK(kind>=0);test_thread_graphics_component_lle(argv[2],kind);return 0;
         }
 #endif
@@ -630,6 +667,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-files-cpu-lle")) { CHECK(argc==3);test_thread_files_cpu_lle(argv[2]);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-cpu-lle")) { test_thread_contiguous_cpu_lle(0);return 0; }
         if (!strcmp(argv[1],"thread-contiguous-borrowed-free-lle")) { test_thread_contiguous_cpu_lle(1);return 0; }
+        if(!strcmp(argv[1],"thread-component-pool-cpu-lle") || !strcmp(argv[1],"thread-component-pool-pinned-lle")) {
+            CHECK(argc==2);test_thread_component_pool_lle(!strcmp(argv[1],"thread-component-pool-pinned-lle"));return 0;
+        }
         if(!strcmp(argv[1],"thread-component-vm-cpu-lle") || !strcmp(argv[1],"thread-component-vm-workspace-lle")) {
             CHECK(argc==2);test_thread_component_vm_lle(!strcmp(argv[1],"thread-component-vm-workspace-lle"));return 0;
         }

@@ -56,7 +56,8 @@ static void test_thread_graphics_component_lle(const char *path,int failure_case
     uint32_t cursor=THREAD_COMPONENT_ABI;memcpy(memory+cursor,prefix,sizeof(prefix));cursor+=sizeof(prefix);
     if(failure_case && !constructor) {
         unsigned entry=failure_case==1?PILOT_D3D_D3DDevice_Reset:
-            failure_case==2?PILOT_D3D_D3DDevice_InsertCallback:PILOT_D3D_D3DDevice_Swap;
+            failure_case==2?PILOT_D3D_D3DDevice_InsertCallback:
+            failure_case==5?PILOT_D3D_D3DDevice_InsertFence:PILOT_D3D_D3DDevice_Swap;
         for(unsigned word=0;word<pilot_d3d_calls[entry].stack_bytes/4;++word) {
             test_graphics_cpu_emit(&cursor,0x6a);test_graphics_cpu_emit(&cursor,0);
         }
@@ -92,6 +93,7 @@ static void test_thread_graphics_component_lle(const char *path,int failure_case
             uint32_t join[]={object,0,0,0,0},result=0;const char *error=pilot_io_device_lle(159,memory,join,&result);
             CHECK(error && !strcmp(error,failure_case==1?"original scheduling native graphics memory ownership requires integration":
                 failure_case==2?"original scheduling native graphics callback ownership requires integration":
+                failure_case==5?"original scheduling native graphics wait ownership requires integration":
                 "original scheduling native graphics display pulse requires integration"));
             CHECK(!MEM32(context+76) && !graphics_gpu_head && !graphics_gpu_running && !graphics_callback);
             CHECK(graphics_active==(failure_case!=1) && MEM32(PILOT_D3D_DEVICE_GLOBAL)==(failure_case==1?0u:PILOT_D3D_DEVICE_OBJECT));

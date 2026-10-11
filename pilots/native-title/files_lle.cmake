@@ -54,6 +54,11 @@ if(PILOT_FILES STREQUAL "LLE")
     set_tests_properties("pilot_thread_component_vm_${component_case}_lle" PROPERTIES TIMEOUT 30)
   endforeach()
   set_tests_properties(pilot_event_timer_lle PROPERTIES TIMEOUT 30)
+  pilot_add_test(NAME pilot_thread_component_pool_cpu_lle COMMAND pilot_contract_test thread-component-pool-cpu-lle)
+  pilot_add_test(NAME pilot_thread_component_pool_pinned_lle COMMAND "${CMAKE_COMMAND}"
+    "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DCASE=thread-component-pool-pinned-lle"
+    "-DREASON=device LLE allocation release while DMA pinned" -P "${CMAKE_CURRENT_SOURCE_DIR}/component_owner_guards.cmake")
+  set_tests_properties(pilot_thread_component_pool_cpu_lle pilot_thread_component_pool_pinned_lle PROPERTIES TIMEOUT 30)
   pilot_add_test(NAME pilot_timer_dpc_lle COMMAND pilot_contract_test timer-dpc-lle)
   set_tests_properties(pilot_timer_dpc_lle PROPERTIES TIMEOUT 30)
   if(PILOT_SCHEDULING STREQUAL "LLE")
@@ -75,9 +80,20 @@ if(PILOT_FILES STREQUAL "LLE")
     pilot_add_test(NAME pilot_idle_isr_stack_lle COMMAND pilot_callback_kernel_lle_test idle-isr-stack-lle)
     pilot_add_test(NAME pilot_idle_isr_stack_guard_lle COMMAND pilot_callback_kernel_lle_test idle-isr-stack-guard-lle)
     set_tests_properties(pilot_idle_isr_stack_lle pilot_idle_isr_stack_guard_lle PROPERTIES TIMEOUT 30)
+    if(EXISTS "${PILOT_FILES_COMPARISON}" AND EXISTS "${PILOT_GENERATED}/pilot_audio_bindings.h")
+      foreach(audio_case cpu gate effects-guard device-destructor-guard device-release-guard buffer-destructor-guard buffer-release-guard)
+        pilot_add_test(NAME "pilot_audio_component_${audio_case}_lle" COMMAND pilot_callback_kernel_lle_test
+          "audio-component-${audio_case}-lle" "${PILOT_FILES_COMPARISON}")
+        set_tests_properties("pilot_audio_component_${audio_case}_lle" PROPERTIES TIMEOUT 30)
+      endforeach()
+      pilot_add_test(NAME pilot_audio_component_callback_guard_lle COMMAND "${CMAKE_COMMAND}"
+        "-DPROGRAM=$<TARGET_FILE:pilot_callback_kernel_lle_test>" "-DCASE=audio-component-callback-guard-lle"
+        "-DREASON=original callback cannot acquire native audio owner locks" -P "${CMAKE_CURRENT_SOURCE_DIR}/component_owner_guards.cmake")
+      set_tests_properties(pilot_audio_component_callback_guard_lle PROPERTIES TIMEOUT 15)
+    endif()
     if(PILOT_RENDERER STREQUAL "D3D11" AND EXISTS "${PILOT_FILES_COMPARISON}"
        AND EXISTS "${PILOT_GENERATED}/pilot_d3d_bindings.h")
-      foreach(graphics_case cpu memory-guard callback-guard pulse-guard constructor gate)
+      foreach(graphics_case cpu memory-guard callback-guard pulse-guard fence-guard constructor gate)
         pilot_add_test(NAME "pilot_graphics_component_${graphics_case}_lle" COMMAND pilot_callback_kernel_lle_test
           "graphics-component-${graphics_case}-lle" "${PILOT_FILES_COMPARISON}")
         set_tests_properties("pilot_graphics_component_${graphics_case}_lle" PROPERTIES TIMEOUT 30)

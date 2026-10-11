@@ -18,6 +18,17 @@ static unsigned pool_find(uint32_t pointer)
     for(unsigned i=0;i<4096;++i)if(pool_blocks[i].span && pool_blocks[i].payload==pointer)return i;
     stop("unowned pool block",pointer);
 }
+#ifdef PILOT_USB_LLE
+static const char *pool_original_call(unsigned ordinal,const uint32_t *args,uint32_t *result)
+{
+    /* A whole native component retains its own original thread and CALL/RET
+     * continuation. Re-enter that owner instead of the ordinary synchronous
+     * transport; its existing device hooks publish and retire the same RAM. */
+    if(pilot_io_device_thread_component_active())
+        return pilot_io_device_thread_component_call(ordinal,args,result);
+    return pilot_io_device_lle(ordinal,memory,args,result);
+}
+#endif
 static uint32_t pool_allocate(uint32_t bytes,uint32_t tag)
 {
     if(!bytes)stop("zero-size pool allocation outside contract",0);
@@ -28,15 +39,15 @@ static uint32_t pool_allocate(uint32_t bytes,uint32_t tag)
     uint32_t pointer=0,usable=0;
     if(slot<4096 && vm_committed(0,0x100000000ull)+vm_service_bytes+bytes<=POOL_BYTES) {
         uint32_t args[]={bytes,tag};
-        const char *error=pilot_io_device_lle(15,memory,args,&pointer);
+        const char *error=pool_original_call(15,args,&pointer);
         if(error)stop(error,15);
         if(pointer && vm_committed(0,0x100000000ull)+vm_service_bytes>POOL_BYTES) {
-            uint32_t ignored=0;error=pilot_io_device_lle(17,memory,&pointer,&ignored);
+            uint32_t ignored=0;error=pool_original_call(17,&pointer,&ignored);
             if(error)stop(error,17);
             pointer=0;
         }
         if(pointer) {
-            error=pilot_io_device_lle(23,memory,&pointer,&usable);
+            error=pool_original_call(23,&pointer,&usable);
             if(error)stop(error,23);
             if(usable<bytes)stop("original pool returned undersized allocation",pointer);
             pool_blocks[slot].base=pool_blocks[slot].payload=pointer;
@@ -83,7 +94,7 @@ static void pool_free(uint32_t pointer)
     unsigned slot=pool_find(pointer);uint32_t result=0;
     const char *error=pilot_io_device_release_check(pointer,pool_blocks[slot].usable);
     if(error)stop(error,pointer);
-    error=pilot_io_device_lle(17,memory,&pointer,&result);
+    error=pool_original_call(17,&pointer,&result);
     if(error)stop(error,17);
 #else
     unsigned slot=pool_find(pointer),first=(pool_blocks[slot].base-POOL_BASE)/4096;
@@ -108,7 +119,7 @@ static void pool_kernel(unsigned ordinal)
         AcquireSRWLockShared(&vm_lock);g_eax=pool_blocks[pool_find(argument)].usable;
 #ifdef PILOT_USB_LLE
         uint32_t original=0;
-        const char *error=pilot_io_device_lle(23,memory,&argument,&original);
+        const char *error=pool_original_call(23,&argument,&original);
         if(error)stop(error,23);
         if(original!=g_eax)stop("original pool size differs from owned extent",argument);
         g_eax=original;

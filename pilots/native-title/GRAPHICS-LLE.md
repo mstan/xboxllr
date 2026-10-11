@@ -6,6 +6,32 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance remains open and the total remains **4/9**.
 
+## Shared original owner and resource-backing boundary - 2026-10-11
+
+Graphics and audio now use the same actual original RTL critical section before
+renderer/audio/VM locks; installed-media components participate in that owner.
+Separate family gates could otherwise admit a preempting original thread into a
+shared VM lock. Three actual cross-family contention lifetimes prove blocking,
+real original wake and host-lock release before ownership transfer.
+
+Original component pool allocation/query/free now preserves the actual15/23/17
+calls, returned usable-size, ledger/budget and pin guard. The final combined
+source generation passes **39/39 checks in8.90s**, including original CPU pool,
+audio and graphics ownership and a pre-mutation InsertFence implicit-wait guard.
+Callbacks, display pulses, waits, reset/teardown and effects retain their guards.
+The105-identity private proof is
+`build/blinx/audio-pool-component-20261011/qualified-final.aot-private.json`, SHA-256
+`a83d4e224cb600a93ece499c007a2cdc7a65b678d7a7c447a91ea0a47f1cdbbb`.
+
+The independently frozen **7.812s** muted title startup reaches640x480 device,
+texture and vertex-buffer creation, then rejects resource registration at
+`838B4000`: the native physical-allocation ledger does not establish that
+original allocation's backing/borrower owner. Connecting that owner is required;
+it is not a precision deferral. The startup retains its own executable generation;
+the subsequent unreached fence guard reuses that evidence. Default HLE remains
+unchanged. No physical probe or new scene/attract review occurred. **4/9 families**
+and **26 agreed precision deferrals** remain.
+
 ## Original-thread native constructor and lock handoffs - 2026-10-11
 
 The native graphics replacement now uses an actual original RTL critical-section

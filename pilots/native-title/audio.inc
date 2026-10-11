@@ -18,6 +18,30 @@ static void audio_effects_free(void)
 }
 #endif
 static SRWLOCK audio_lock=SRWLOCK_INIT;
+#ifdef PILOT_SCHEDULING_LLE
+/* Original threads serialize before any host audio/VM lock. The backend's
+ * completion callbacks consume host-owned storage and never enter this gate. */
+static uint32_t audio_original_gate;
+static RECOMP_TLS unsigned audio_original_gate_depth,audio_original_dispatch_depth;
+static const char *audio_original_enter(void)
+{
+    if(!audio_original_gate || !pilot_io_device_thread_component_active() || audio_original_gate_depth)
+        return "original audio gate outside a nonrecursive component";
+    const char *error=native_component_original_enter();
+    if(error)return error;
+    if(MEM32(audio_original_gate+20)!=1 || MEM32(audio_original_gate+24)!=MEM32(0x8003da64u))
+        return "original audio gate lost its actual thread owner";
+    audio_original_gate_depth=1;return NULL;
+}
+static const char *audio_original_leave(void)
+{
+    if(audio_original_gate_depth!=1 || audio_original_dispatch_depth)
+        return "original audio gate release before native dispatch completion";
+    const char *error=native_component_original_leave();
+    if(!error)audio_original_gate_depth=0;
+    return error;
+}
+#endif
 static uint32_t audio_device;
 struct PilotAudioBuffer {
     uint32_t base,data,bytes,owned,channels,rate,bits,headroom,frequency;
@@ -253,6 +277,14 @@ static int32_t audio_download_effects(const uint32_t *a)
 void pilot_audio_dispatch(unsigned entry)
 {
     if(entry>=PILOT_AUDIO_COUNT)stop("unknown audio entry",entry);
+#ifdef PILOT_SCHEDULING_LLE
+    if(usb_device_callback_depth || dispatch_in_dpc)
+        stop("original callback cannot acquire native audio owner locks",entry);
+    if(audio_original_dispatch_depth ||
+       (pilot_io_device_thread_component_active() && audio_original_gate_depth!=1))
+        stop("native audio dispatch requires its nonrecursive original gate",entry);
+    ++audio_original_dispatch_depth;
+#endif
     const uint32_t *a=audio_pointer(g_esp+4,pilot_audio_calls[entry].stack_bytes);
     int32_t result=0;
     AcquireSRWLockExclusive(&audio_lock);
@@ -363,5 +395,8 @@ void pilot_audio_dispatch(unsigned entry)
         }
     }
     ReleaseSRWLockExclusive(&audio_lock);
+#ifdef PILOT_SCHEDULING_LLE
+    --audio_original_dispatch_depth;
+#endif
     g_eax=(uint32_t)result;g_esp+=4+pilot_audio_calls[entry].stack_bytes;
 }
