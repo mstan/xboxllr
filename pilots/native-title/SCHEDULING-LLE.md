@@ -531,6 +531,12 @@ the compatible passed v2 entries without rerunning them, plus
 remain preserved: one mistakenly admitted old shader test and an old realtime
 native audio comparison failed; missing native test executables were subsequently
 built and passed. Neither old failure is relabelled as qualification of this
-generation. Fresh graphics/native-audio follow-up and a representative title
-regression remain pending while Marvel Rivals is running; CPU work used two
-cores at Below Normal. Whole-family original scheduling remains open.
+generation. After Marvel Rivals exited, fresh graphics/native-audio follow-up
+passed both entries on four cores at Normal priority. The representative muted
+title run then stopped after 144.062s and five captures at HRESULT `0x087a0001`
+(`DXGI_STATUS_OCCLUDED`). The hidden-window presentation guard currently rejects
+that documented nonfailure status. Preserve this stopped run; it does not count
+as a completed 190s regression. No scheduling/audio stop or fault was logged.
+Evidence is `services-foundation-fresh-followup-20261010.aot-private.json` and
+`services-foundation-attract-20261010/run.aot-private.json` under `build/blinx/`.
+Whole-family original scheduling remains open.

@@ -919,9 +919,13 @@ its `apu-tests` log. No waveform playback or console probe was required.
 An earlier broad batch ran an old standalone realtime native mixer comparison,
 which failed without scenario/sample diagnostics. That executable predates this
 generation and does not honor the newer output-mute switch. Its failure is
-preserved for fresh-build follow-up when the game is no longer running; no
-source/tolerance correction or cause is inferred. The current 9/9 result covers
-the changed CPU stages, not that native output comparison or whole-title audio.
+preserved without inferring a cause or changing source/tolerances. After the
+game exited, the fresh executable honored output mute and passed that comparison
+alongside the fresh shader follow-up (2/2). Evidence is
+`build/blinx/services-foundation-fresh-followup-20261010.aot-private.json`.
+The separate muted title regression stopped at the host hidden-window
+`DXGI_STATUS_OCCLUDED` guard after 144.062s; it is not a completed title pass.
+The current 9/9 APU result covers the changed CPU stages, not whole-title audio.
 Actual filters/scaling, SSL/GP/EP ownership/output and original DirectSound/title
 selection remain active implementation gaps. Existing HLE audio stays on its
 maintained output path.
