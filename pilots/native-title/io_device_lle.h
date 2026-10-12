@@ -114,6 +114,12 @@ const char *pilot_io_device_alias_cache_retired(unsigned *retired);
 /* Read-only memo diagnostics, also available after a fatal validation guard. */
 const char *pilot_io_device_publication_memo_info(uint64_t *hits,uint64_t *misses);
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context);
+/* Optional pure guest-counter observer. Bind only on an initialized idle CPU
+ * with an input clock; clock rebind/unbind clears it. The actual RDTSC remains
+ * interpreter-owned, including architectural privilege checks. NULL preserves
+ * the engine's ordinary counter behavior. The provider must not reenter us. */
+typedef const char *(*PilotIoTsc)(void *context,uint64_t *counter);
+const char *pilot_io_device_tsc_bind(PilotIoTsc provider,void *context);
 /* Query the actual sole engine's bound clock; a programmed PIT alone does
  * not establish a producer for finite original waits. No guest execution. */
 int pilot_io_device_clock_bound(void);

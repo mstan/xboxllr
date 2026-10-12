@@ -2396,3 +2396,29 @@ and `causal/qualified-causal.aot-private.json`
 (`5455594f784d33bb7807d79d8cc237628e706afb7e5ddba63c917ac90f44e4a7`).
 These are clock-composition checks, not full movie completion or a canonical
 guest TSC-policy decision. The composed movie gate remains open.
+
+## Reference timestamp ownership - 2026-10-11
+
+The controlled reference selection now binds the original engine's actual
+RDTSC instruction to a pure nominal733333333-Hz observer of the common absolute
+PIT epoch. Its compiled helper samples the same counter. The pinned pilot
+Unicorn2.1.4 already supports this instruction hook after architectural privilege
+checks; no engine source, canonical replay policy or hardware CPU-cycle model
+changes. Default HLE keeps its QPC helper, and ordinary clock binding clears
+the optional original-counter provider.
+
+Three real original-created CPU thread lifetimes execute two RDTSC instructions
+each, preserving flags/CF, ECX, stack, a memory canary and exact thread/handle
+cleanup. Both instruction results equal the compiled counter through120ms of
+host stalls. Only explicit common-clock steps advance it. Leaving the provider
+unbound on that same engine reproduces actual host-counter mismatch and exits1;
+a failed provider stops original execution with its precise error. Pure counter
+fixtures cover a nonzero epoch, overflow and failed-consumer observation without
+output mutation. Eighteen affected reference checks and six native clock/input
+checks pass. No title or physical operation occurred.
+
+Source-bound proof `reference-tsc-20261011/v1/qualified-tsc.aot-private.json`
+has SHA256 `81cbe843cfe9ed4c5486d9b0213ad7b1908cb9d0f89e58d4e2119f74eb1979ac`.
+This completes Q01 of the bounded closing checklist. Relative device/execution
+cadence and actual movie completion remain required; a component pass does not
+close `.123`, scheduling or the movie family.

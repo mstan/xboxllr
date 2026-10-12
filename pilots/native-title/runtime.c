@@ -116,6 +116,7 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 #include "thread_affinity.inc"
 #ifdef PILOT_AUDIO_REFERENCE
 static void audio_reference_clock_start(void);
+static uint64_t audio_reference_counter(void);
 #endif
 #ifdef PILOT_USB_LLE
 #include "io_device_lle.h"
@@ -313,11 +314,15 @@ void recomp_trace_exit(const char *name, uint32_t va) { (void)name; (void)va; }
 void recomp_trace_esp(const char *name, const char *tag) { fprintf(stderr, "[ESP] %s %s %08x\n", name, tag, g_esp); }
 uint64_t xbox_ReadTimeStampCounter(void)
 {
+#ifdef PILOT_AUDIO_REFERENCE
+    return audio_reference_counter();
+#else
     LARGE_INTEGER now, frequency;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&frequency);
     return (uint64_t)(now.QuadPart / frequency.QuadPart) * 733333333ull +
            (uint64_t)(now.QuadPart % frequency.QuadPart) * 733333333ull / frequency.QuadPart;
+#endif
 }
 void recomp_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t out[4])
 {

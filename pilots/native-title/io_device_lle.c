@@ -134,6 +134,10 @@ static PilotIoClock clock_provider;
 static void *clock_context;
 static PilotIoClockStep clock_step;
 static uint64_t clock_block_entries;
+static PilotIoTsc tsc_provider;
+static void *tsc_context;
+static uc_hook tsc_hook;
+static int tsc_hook_installed;
 #ifdef PILOT_USB_LLE
 static int device_irq_pending;
 static int clock_initializing;
@@ -640,6 +644,18 @@ static int guest_cpuid(uc_engine *engine,void *unused)
     }
     if(failure)uc_emu_stop(engine);
     return 1; /* handled: never execute the host/default engine CPUID */
+}
+static int guest_rdtsc(uc_engine *engine,void *unused)
+{
+    (void)unused;
+    if(!tsc_provider)return 0;
+    uint64_t counter=0;const char *error=tsc_provider(tsc_context,&counter);
+    if(error){forbidden(engine,error);return 1;}
+    uint32_t low=(uint32_t)counter,high=(uint32_t)(counter>>32);
+    uc_err status=uc_reg_write(engine,UC_X86_REG_EAX,&low);
+    if(!status)status=uc_reg_write(engine,UC_X86_REG_EDX,&high);
+    if(status)forbidden(engine,uc_strerror(status));
+    return 1; /* Actual RDTSC hook: never also sample the host counter. */
 }
 static void initialize(unsigned char *guest)
 {
@@ -1441,7 +1457,23 @@ const char *pilot_io_device_clock_bind_step(PilotIoClock provider,void *context,
     else {
         clock_provider=provider;clock_context=provider?context:NULL;
         clock_step=provider?step:NULL;clock_block_entries=0;
+        tsc_provider=NULL;tsc_context=NULL;
     }
+    ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_tsc_bind(PilotIoTsc provider,void *context)
+{
+    if(device_bus_borrow)return "original TSC binding from device work";
+    AcquireSRWLockExclusive(&lock);
+    const char *error=failure;
+    if(!error && (!cpu || execution_depth))error="original TSC binding outside idle initialized CPU";
+    if(!error && provider && !clock_provider)error="original TSC binding without input clock";
+    if(!error && provider && !tsc_hook_installed) {
+        uc_err status=uc_hook_add(cpu,&tsc_hook,UC_HOOK_INSN,guest_rdtsc,NULL,1,0,UC_X86_INS_RDTSC);
+        if(status)error=uc_strerror(status);
+        else tsc_hook_installed=1;
+    }
+    if(!error){tsc_provider=provider;tsc_context=provider?context:NULL;}
     ReleaseSRWLockExclusive(&lock);return error;
 }
 int pilot_io_device_clock_bound(void)

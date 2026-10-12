@@ -5,6 +5,12 @@ static PilotReferenceClock audio_reference_clock;
 static uint64_t audio_reference_input,audio_reference_blocks;
 static uint64_t audio_reference_blocked_at;
 static int audio_reference_blocked;
+static uint64_t audio_reference_counter(void)
+{
+    uint64_t counter=0;const char *error=pilot_reference_clock_tsc(&audio_reference_clock,&counter);
+    if(error)stop(error,0);
+    return counter;
+}
 static const char *audio_reference_observe(void *context,uint64_t *ticks)
 {(void)context;*ticks=audio_reference_input;return NULL;}
 static const char *audio_reference_drive(void *context,uint64_t blocks)
@@ -48,8 +54,9 @@ static void audio_reference_clock_start(void)
     if(!error && !next)error="reference clock requires the original programmed PIT";
     if(!error)error=pilot_reference_clock_init(&audio_reference_clock,audio_reference_observe,audio_reference_drive,NULL);
     if(!error)error=pilot_io_device_clock_bind_step(pilot_reference_clock_observe,&audio_reference_clock,audio_reference_step);
+    if(!error)error=pilot_io_device_tsc_bind(pilot_reference_clock_tsc,&audio_reference_clock);
     if(error)stop(error,0);
-    fprintf(stderr,"[REFERENCE TIME] stopped input: %u observed blocks per 1ms PIT opportunity; caller-driven APU; no CPU-cycle/TSC claim\n",PILOT_REFERENCE_BLOCKS_PER_MS);
+    fprintf(stderr,"[REFERENCE TIME] stopped input: %u observed blocks per 1ms PIT opportunity; caller-driven APU/input/nominal TSC; no hardware CPU-cycle claim\n",PILOT_REFERENCE_BLOCKS_PER_MS);
 }
 static void audio_reference_clock_open(void)
 {

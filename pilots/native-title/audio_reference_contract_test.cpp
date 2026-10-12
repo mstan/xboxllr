@@ -19,6 +19,8 @@ static const char *advance(void *context,uint32_t frames)
 int main()
 {
     Input input;PilotReferenceClock clock{};
+    uint64_t counter=0x1122334455667788ull;
+    CHECK(pilot_reference_clock_tsc(&clock,&counter) && counter==0x1122334455667788ull);
     CHECK(!pilot_reference_clock_init(&clock,observe,drive,&input));
     CHECK(!pilot_audio_open());
     CHECK(!reference_capture_epoch(0));
@@ -32,6 +34,7 @@ int main()
     CHECK(!pilot_audio_buffer_play(buffer,1));
     float mix[48*32];CHECK(!pilot_audio_capture_begin(mix,48,0));
     input.ticks=1125;CHECK(!pilot_reference_clock_step(&clock,0));
+    CHECK(!pilot_reference_clock_tsc(&clock,&counter) && counter==733333);
     CHECK(reference_output_frames()==48 && clock.frames==48 && input.advances==1);
     CHECK(pilot_audio_capture_end()==48);
     float gain=static_cast<float>(std::pow(10.,-.3));
@@ -56,6 +59,14 @@ int main()
     CHECK(pilot_reference_clock_step(&clock,0));
     CHECK(clock.ticks==4500 && clock.frames==192 && reference_output_frames()==96);
     unsigned calls=input.advances;CHECK(pilot_reference_clock_step(&clock,0) && input.advances==calls);
+    counter=0x1122334455667788ull;
+    CHECK(pilot_reference_clock_tsc(&clock,&counter) && counter==0x1122334455667788ull);
     pilot_audio_close();
+    Input offset;offset.ticks=1125001;PilotReferenceClock epoch{};
+    CHECK(!pilot_reference_clock_init(&epoch,observe,drive,&offset));
+    CHECK(!pilot_reference_clock_tsc(&epoch,&counter) && counter==733333984ull);
+    offset.ticks=UINT64_MAX;CHECK(!pilot_reference_clock_step(&epoch,0));
+    counter=0x1122334455667788ull;
+    CHECK(pilot_reference_clock_tsc(&epoch,&counter) && counter==0x1122334455667788ull);
     puts("PASS actual APU/headroom/routing/cursors; pure clock reads; detach/reopen epoch; failed consumer stops before time publication");
 }

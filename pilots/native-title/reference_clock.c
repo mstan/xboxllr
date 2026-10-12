@@ -30,6 +30,16 @@ const char *pilot_reference_clock_observe(void *context,uint64_t *ticks)
     if(clock->failure)return clock->failure;
     *ticks=clock->ticks;return NULL;
 }
+const char *pilot_reference_clock_tsc(void *context,uint64_t *counter)
+{
+    uint64_t ticks=0;const char *error=pilot_reference_clock_observe(context,&ticks);
+    if(error)return error;
+    if(!counter)return "reference TSC observation without output";
+    uint64_t seconds=ticks/1125000;
+    uint64_t fraction=(ticks%1125000)*733333333ull/1125000;
+    if(seconds>(UINT64_MAX-fraction)/733333333ull)return "reference TSC overflow";
+    *counter=seconds*733333333ull+fraction;return NULL;
+}
 const char *pilot_reference_clock_step(void *context,uint64_t block_entries)
 {
     PilotReferenceClock *clock=context;
