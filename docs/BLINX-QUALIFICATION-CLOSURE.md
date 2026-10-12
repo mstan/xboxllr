@@ -80,6 +80,19 @@ No production fix is needed in this scope. A01's final census can require anothe
 stage only if it identifies an additional reached mode. Actual original audio
 allocation/configuration/ISR/DPC/output remains required in A03/A04/A05.
 
+The loop/control readiness audit reuses the accepted A01 prefix: all194 region
+setters precede their generation's first Play, including20 nonzero-loop Plays.
+Original stopped SetLoopRegion stores settings and returns without region PIO;
+later Play owns actual region/start writes and the derived control queue. Root
+verifies16 original function bodies, two vtables and the existing source/stop
+proof limits. No additional required offline loop implementation was identified.
+Do not repeat arithmetic fixtures or substitute an authored allocated/active
+object for the required original title route. After A03/A04, observe original
+allocation, pre-Play region setup, actual Play/loop/Stop/DPC/output together.
+Proof `audio-loop-control-readiness-20261012/accepted-root.aot-private.json`,
+SHA256 `95e5957b43c4fcc8244f23726173e5cf708308480cea821d98abdafe8355abd4`.
+This is readiness evidence; full A01/A05 and audio remain open.
+
 A05's offline readiness audit found a concrete integration gap: `ORIGINAL`
 already retained original DirectSound execution, but the native-title runtime
 did not own or map the complete APU/AC97 devices. The shared engine already
@@ -191,6 +204,19 @@ a risk, not a demonstrated failure. If an observer limit stops the batch, retain
 complete earlier evidence with its cutoff and missing gates; a failed batch does
 not satisfy the current whole-run closing contract. Q03 and both families remain
 open until complete numeric, scene, census and ownership acceptance.
+
+The v8 second opening has a retained closed visual/caller window: final source
+picture2263, accepted Stop/Release after75.566 modeled seconds, then independently
+matched title. Its final texture remains presented after the first audio Stop;
+the analyzer therefore uses only distinctive pictures within actual playback
+to prove source truncation. Later held pictures do not invalidate that evidence,
+and post-retirement pictures alone cannot establish it. Sixteen affected checks
+pass with unchanged numerical limits and other analyzer functions. Proof
+`q03-held-presentation-20261012/qualified-root.aot-private.json`, SHA256
+`210f3ff3d3872825ec0f76d9eb63f46ca051840ba0459db8e783b33c5cc85415`;
+window `q03-v8-second-retirement-review/observed-retirement.aot-private.json`,
+SHA256 `bc08bf48b363df9d92096e8361760db16e40fab3214156a4bdee98e361e60d60`.
+The window alone does not qualify DMA voice ownership, waveform/A-V or Q03.
 
 The first v6 natural opening now reaches picture2263, real Stop after75.567s,
 Destroy and the title transition, with zero ring mismatches or source rereads.

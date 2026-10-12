@@ -216,9 +216,12 @@ def classify_movie_lifetimes(phases, voices, epoch, press, release):
             continue
         if play < press <= stop:
             points = [point for point in phase['matches'] if point['pts'] is not None and
-                      point['second_rmse']-point['rmse'] >= LIMITS['video_frame_separation_min']]
+                      point['second_rmse']-point['rmse'] >= LIMITS['video_frame_separation_min'] and
+                      play-uncertainty <= point['model']/1e7 <= stop+uncertainty]
+            # A retired movie's texture can remain presented until title loads.
+            # Source truncation needs evidence from the playback interval; later
+            # held presentations neither consume media nor invalidate that proof.
             truncated = bool(points) and all(
-                play-uncertainty <= point['model']/1e7 <= stop+uncertainty and
                 0 <= point['pts'] < point['reference_end_pts_lower_bound'] and
                 point['reference_end_pts_lower_bound']-point['pts'] >
                 stop-point['model']/1e7+uncertainty for point in points)

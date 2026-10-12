@@ -156,6 +156,20 @@ class MovieClassificationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.classify(phases, voices)
 
+    def test_held_presentation_after_stop_needs_in_playback_source_evidence(self):
+        phases, voices = self.fixture()
+        movie_phase = phases[-2]
+        held = dict(movie_phase['matches'][0], model=2908000000)
+        movie_phase['matches'].append(held)
+        movie_phase['last_model'] = held['model']
+        phases[-1] = title(291)
+        self.assertEqual(len(self.classify(phases, voices)[1]), 1)
+        # A post-retirement picture alone does not prove the source was
+        # truncated while the actual voice was still playing.
+        movie_phase['matches'] = [held]
+        with self.assertRaises(ValueError):
+            self.classify(phases, voices)
+
     def test_idempotent_stops_retain_first_playback_retirement(self):
         phases, voices = self.fixture()
         # audio_reference.cpp records kind 5 on each successful Stop, including
