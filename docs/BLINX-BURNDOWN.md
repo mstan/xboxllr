@@ -35,13 +35,17 @@ phase0 processing now passes12 actual original PCM/ADPCM lives, with8 persistent
 guards and12 wrong-gain controls; `.113.22` is closed at `12daa02`. The required
 original-scheduler host-to-OHCI connection is fixed at `99b06b4`: five affected
 checks pass, and its unbound control fails on the actual Start report bytes.
-Frozen Q03 generation v6 is running muted/invisible on two logical CPUs, with
-actual replay initialization confirmed. One final analysis follows that batch;
-it never launches another title or automatically closes a family. The first
+Frozen Q03 generation v6 ran muted/invisible on two logical CPUs, with
+actual replay initialization confirmed. Its final-analysis waiter starts no
+title and cannot automatically close a family. The first
 opening now reaches2263, real75.567s Stop/Destroy and title. Full independent
 waveform and A/V checks pass after correcting the analyzer's ideal44100 rate
 to independently established original packed pitch-501; the failed nominal
-comparison is retained. The title continues unchanged. Fixed encoder-read
+comparison is retained. At first-demo startup, model133.43s, the title then
+self-returned2 after3773.188 wall seconds on the real guest-call-frame handoff
+guard (ordinal166, entries0). Its78 finalized artifacts and zero-error capture
+are verified. No title/waiter is running; a short causal scheduling reproducer
+and fix precede the next changed generation. Fixed encoder-read
 preparation `.111.1` is also root-reviewed and closed, with11 focused controls
 and182 suite passes/3 existing optional skips; actual startup is unresolved.
 G03 now has

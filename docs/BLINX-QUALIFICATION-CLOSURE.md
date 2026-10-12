@@ -80,7 +80,7 @@ No production fix is needed in this scope. A01's final census can require anothe
 stage only if it identifies an additional reached mode. Actual original audio
 allocation/configuration/ISR/DPC/output remains required in A03/A04/A05.
 
-The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` uses frozen sources
+The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` used frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three
 affected checks and the actual original-thread configuration fixture. One accepted-settings
 JSONL census records stable object generations, effective rates, ordered routes,
@@ -109,8 +109,8 @@ another title run. It identifies sources from independent luma references,
 uses one fixed audio alignment per real Play, compares the complete opening
 media span and requires actual Stop/destroy, final picture2263, Start/release
 and subsequent title. Whole-run artifact identities and zero-error capture
-finalization must pass first. A separate waiting process will execute the frozen
-analysis once after v6 finishes. It starts no title or hardware operation and
+finalization must pass first. A separate waiting process executes frozen analysis
+once after a successful batch finishes. It starts no title or hardware operation and
 does not close a family automatically; final scene/census/ownership review
 remains required. Five analyzer controls reuse998 actual complete records and
 the exact456000-frame Microsoft comparison, while rejecting partial records,
@@ -135,9 +135,23 @@ defect. Corrected full-span independent RMSE0.00434/0.00462 and correlation
 `b8ec74744b90b66390cd7f70d70789bffd28456777abc73eacc3c0fa6744f5df`.
 Five retained analyzer controls also pass unchanged in `analysis-controls-v3`,
 SHA256 `5e593d4fab04f5c32cdbd45c2430255fd08f144afb1523d1c40262165023b836`.
-The final observer freezes the corrected analyzer as a new generation; the
-title executable/run is unchanged. Second-opening and Start/reentry acceptance
+The corrected analyzer is ready for the next validated generation; the v6
+executable/captures are unchanged. Second-opening and Start/reentry acceptance
 remain required before Q03 or either family closes.
+
+Generation v6 then self-returned2 after3773.188 wall seconds at first-demo
+startup, model133.43s: `thread LLE continuation handoff requires its real
+guest-call frame`, ordinal166, entries0. The first completed opening remains
+valid, but this is a genuine integrated scheduling failure. Its waiter correctly
+rejected full acceptance before numeric analysis; no analyzer or title process
+remains running. Root verifies all78 finalized run artifacts and exact
+zero-error6150480-frame/187960-record finalization, with zero ring mismatches.
+Proof `q03-c32000-v6/finalized-failure-review/review.aot-private.json`, SHA256
+`9e833a07daf60c7e46d90f527f8e2cadaabe0ae27a6d4ca4c9fd94e0d7870e53`.
+The bounded next task reproduces that original handoff in a short fixture and
+preserves real CPU/thread/guest-frame/IRQ/FP ownership. Do not suppress the
+guard or restart this unchanged title generation. Source/input/clock cadence
+sweeps are not indicated by this failure.
 
 G02's fixed encoder-read preparation is committed in the probe repository at
 `1283882cde262b299d4d83f36e00b4de30e1e47a`. Two404-byte payloads resolve only
