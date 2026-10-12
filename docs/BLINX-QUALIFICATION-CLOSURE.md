@@ -104,6 +104,44 @@ The restarted generation checks for actual replay initialization immediately.
 Final movie/scheduling acceptance awaits
 the actual two natural openings and subsequent Start/release/reentry evidence.
 
+`tools/native_reference_movie_closure.py` reviews the finalized batch without
+another title run. It identifies sources from independent luma references,
+uses one fixed audio alignment per real Play, compares the complete opening
+media span and requires actual Stop/destroy, final picture2263, Start/release
+and subsequent title. Whole-run artifact identities and zero-error capture
+finalization must pass first. A separate waiting process will execute the frozen
+analysis once after v6 finishes. It starts no title or hardware operation and
+does not close a family automatically; final scene/census/ownership review
+remains required. Five analyzer controls reuse998 actual complete records and
+the exact456000-frame Microsoft comparison, while rejecting partial records,
+backwards model time and unfinished batches. Proof
+`reference-input-ohci-20261012/analysis-controls-v2/qualified-controls.aot-private.json`,
+SHA256 `f5bbb6d0ddd194e50915816359933cb26aa7aeed0958d9659bd84ecbfa250dbd`.
+
+G03's source investigation identifies a required implementation gap. Original
+MMIO already publishes into the same PRAMIN store used by object/DMA/RAMHT
+consumers. The missing behavior is selected-image PGRAPH load/save through
+`400784/400788`, including real completion and save-before-release ordering.
+Original `13F032/13F26D` produce the image; `13FC4C/13EDEA` consume it. The
+inspected Linux NV2A/NV20 code initializes the image and asks hardware to perform
+the transfer; the inspected xemu implementation restores only its first word
+and leaves save unfinished. Neither establishes the consumed image-field map.
+See the primary [Linux NV2A](https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/gpu/drm/nouveau/nvkm/engine/gr/nv2a.c),
+[Linux NV20](https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/gpu/drm/nouveau/nvkm/engine/gr/nv20.c)
+and [pinned xemu PGRAPH](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/nv2a/pgraph/pgraph.c#L135).
+The bounded title needs only its reached transfer/state contract. A default-only
+restriction cannot yet establish that contract: original saved program/constant
+defaults differ from the model's zero arrays, and the driver can save programmed
+channel state and load a selected channel again. Capture the actual first-load
+image/owner/queue, then determine the reached fields and reloads. Use independent
+owned state/save/load observations only for mappings that source cannot establish.
+Keep this dependency separate from physical RAMFC UNK17/alias questions.
+Frozen primary map SHA256
+`d0442b1965630fe3d9558c2114c0d0411576081cc416899707c1e0eabfb11899`,
+startup-feasibility SHA256
+`c42df222562eca5882a512b0339933c114742d254b94b6d9ca85bfd55555ad1e`,
+under `graphics-startup-consumer-20261012`. No context no-op is admitted.
+
 Already proven, do not rerun for bookkeeping: actual blocked BlockOnFence and
 full64-slot capacity, original KWAIT/compute-peer progress, real callback FIFO,
 GPU bytes and cleanup across three CPU/GPU lives. Retained66-check proof and

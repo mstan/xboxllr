@@ -30,9 +30,17 @@ The whole-family count remains **4/9**, with **26 precision deferrals**. See the
 relative-time checkpoint Q02 pass. Original queued Reset/Release G01 passes15
 selected original checks and13 native regressions. Tasks `.116.4` and `.116.5`
 are closed; full original movie lifecycles, graphics startup/output and original
-audio processing remain required. The retained audio census narrows A02 to the
-actually supported ordinary settings/stages. This is subgate progress, with the
-whole-family count still4/9. See the fixed [closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
+audio device integration remain required. A02's ordinary constructor/bypass/
+phase0 processing now passes12 actual original PCM/ADPCM lives, with8 persistent
+guards and12 wrong-gain controls; `.113.22` is closed at `12daa02`. The required
+original-scheduler host-to-OHCI connection is fixed at `99b06b4`: five affected
+checks pass, and its unbound control fails on the actual Start report bytes.
+Frozen Q03 generation v6 is running muted/invisible on two logical CPUs, with
+actual replay initialization confirmed. One final analysis follows that batch;
+it never launches another title or automatically closes a family. G03 now has
+an explicit PGRAPH image load/save mapping dependency, separately from hardware
+RAMFC questions. This is subgate progress, with the whole-family count still4/9.
+See the fixed [closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
 
 Tracked in `beads-xbox.1.102`; baseline is the committed working attract
 milestone below. Follow [recomp-template HLE.md](../../../recomp-template/HLE.md)
