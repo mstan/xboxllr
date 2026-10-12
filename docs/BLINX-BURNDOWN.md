@@ -67,6 +67,11 @@ Initial replay/common-clock/GP capture routes are observed. Four logical CPUs
 at Normal priority are available with the worker idle; Marvel Rivals detection
 reduces allocation to two/BelowNormal. Frozen independent numeric/scene review
 is queued once after successful finalization. Full acceptance remains pending.
+That run has now passed the former calendar305 stop into rendered first-demo
+gameplay and ADPCM voice creation. Root accepts the bounded integration at proof
+`31c80d58b62eac7909c654b2d4e64f537d211eb08bc3838160303b537773a3bf`;
+calendar task `.112.2.18` is closed, reusing its actual CPU controls without a
+rerun. Movie/scheduling family acceptance still awaits the full lifetimes.
 The rejected-batch analyzer/gallery waiters run no numeric/title repetition.
 Analyzer `2075d64` retains any later diagnostic opening without
 substituting it for the required two natural and one interrupted lifetimes;

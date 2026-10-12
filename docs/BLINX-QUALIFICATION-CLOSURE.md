@@ -229,6 +229,18 @@ skip incomplete runs. The unchanged analyzer and12 independent media files are
 copied and pinned before this observation. No movie/scheduling acceptance or
 Xbox operation is claimed while the run and recovery hold remain pending.
 
+The v8 run has now crossed the former first-demo calendar305 boundary and
+reached actual ADPCM voice creation and rendered 3D attract gameplay. Root
+review of retained frame105 establishes progression; it does not claim new
+pixel accuracy or completed movie lifetimes. The frozen executable, selected
+transport/calendar sources, matched replay, prior actual305 failure and existing
+independent CPU calendar controls are bound by
+`calendar-transport-20261012/title-integration-v8/accepted-integration.aot-private.json`,
+SHA256 `31c80d58b62eac7909c654b2d4e64f537d211eb08bc3838160303b537773a3bf`.
+This closes the concrete calendar admission task `.112.2.18` at fix `1eeadf7`.
+No tests or title runs were repeated for this review. Q03 and both whole-family
+gates remain open while the existing run completes its required lifetimes.
+
 The final analyzer explicitly binds required opening lifetimes to actual Play
 not after the declared Start. A fixed600s diagnostic can also reach a later
 opening; it retains that lifetime and its source/ring/census evidence without
