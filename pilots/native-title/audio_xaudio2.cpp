@@ -21,6 +21,7 @@
 #include <new>
 #include "audio_backend.h"
 #include "audio_dsp.h"
+#include "audio_capture_windows.hpp"
 
 static void fail(const char *what,HRESULT hr=E_FAIL)
 {fprintf(stderr,"[PILOT AUDIO STOP] %s: %08x\n",what,(unsigned)hr);fflush(stderr);ExitProcess(2);}
@@ -362,10 +363,11 @@ static float *diagnostic_samples;
 static CaptureStamp *diagnostic_stamps;
 static FILE *diagnostic_clock_file;
 static unsigned diagnostic_seconds=30;
-static DWORD WINAPI diagnostic_capture_worker(void*)
+static AudioCaptureWindows diagnostic_windows;
+static uint64_t diagnostic_origin;
+static unsigned diagnostic_window;
+static void diagnostic_capture_write(void)
 {
-    DWORD wait=WaitForSingleObject(diagnostic_stop,diagnostic_seconds*1000);
-    if(wait!=WAIT_OBJECT_0 && wait!=WAIT_TIMEOUT)fail("audio capture wait");
     UINT32 frames=pilot_audio_capture_end();DWORD written=0,bytes=frames*6*sizeof(float);
     AudioTimelineRecord *timeline=nullptr;unsigned records=0,overflow=0;
     BYTE *ingress=nullptr;uint32_t ingress_size=0,ingress_overflow=0;
@@ -380,7 +382,7 @@ static DWORD WINAPI diagnostic_capture_worker(void*)
         if(!WriteFile(audio_ingress_file,ingress,ingress_size,&stored,nullptr) || stored!=ingress_size ||
             !CloseHandle(audio_ingress_file))fail("audio source capture write",HRESULT_FROM_WIN32(GetLastError()));
         audio_ingress_file=nullptr;delete[] ingress;
-        fprintf(stderr,"[AUDIO INGRESS] bytes=%u overflow=%u\n",ingress_size,ingress_overflow);
+        fprintf(stderr,"[AUDIO INGRESS] bytes=%u overflow=%u window=%u\n",ingress_size,ingress_overflow,diagnostic_window);
     }
     if(timeline) {
         for(unsigned i=0;i<records;++i) {
@@ -392,7 +394,7 @@ static DWORD WINAPI diagnostic_capture_worker(void*)
         }
         if(fclose(audio_timeline_file))fail("audio timeline close");
         audio_timeline_file=nullptr;delete[] timeline;
-        fprintf(stderr,"[AUDIO TIMELINE] records=%u overflow=%u\n",records,overflow);
+        fprintf(stderr,"[AUDIO TIMELINE] records=%u overflow=%u window=%u\n",records,overflow,diagnostic_window);
     }
     if(!WriteFile(diagnostic_file,diagnostic_samples,bytes,&written,nullptr) || written!=bytes ||
        !CloseHandle(diagnostic_file))fail("audio capture write",HRESULT_FROM_WIN32(GetLastError()));
@@ -402,7 +404,86 @@ static DWORD WINAPI diagnostic_capture_worker(void*)
             (unsigned long long)diagnostic_stamps[i].time)<0)fail("audio capture clock write");
     if(fclose(diagnostic_clock_file))fail("audio capture clock close");
     diagnostic_clock_file=nullptr;delete[] diagnostic_stamps;diagnostic_stamps=nullptr;
-    fprintf(stderr,"[AUDIO CAPTURE] complete frames=%u rate=48000 channels=6 format=float32 bytes=%lu\n",frames,bytes);
+    fprintf(stderr,"[AUDIO CAPTURE] complete frames=%u rate=48000 channels=6 format=float32 bytes=%lu window=%u\n",frames,bytes,diagnostic_window);
+}
+static bool diagnostic_capture_path(const char *variable,char *path,size_t size)
+{
+    const char *base=getenv(variable);
+    if(!base || !*base)return false;
+    int bytes=diagnostic_windows.explicit_windows?snprintf(path,size,"%s.window%u",base,diagnostic_window):snprintf(path,size,"%s",base);
+    if(bytes<0 || (size_t)bytes>=size)fail("audio capture path");
+    return true;
+}
+static void diagnostic_capture_arm(void)
+{
+    char path[2048];
+    if(!diagnostic_capture_path("XLLE_PILOT_AUDIO_CAPTURE",path,sizeof(path)))fail("audio capture path removed");
+    diagnostic_file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(diagnostic_file==INVALID_HANDLE_VALUE)fail("audio capture create",HRESULT_FROM_WIN32(GetLastError()));
+    char clock_path[2048];
+    if(snprintf(clock_path,sizeof(clock_path),"%s.clock.csv",path)>=(int)sizeof(clock_path))fail("audio capture clock path");
+    diagnostic_clock_file=fopen(clock_path,"wx");if(!diagnostic_clock_file)fail("audio capture clock create");
+    if(fprintf(diagnostic_clock_file,"frame,time_100ns\n")<0)fail("audio capture clock header");
+    diagnostic_samples=new(std::nothrow) float[48000*diagnostic_seconds*6]{};
+    if(!diagnostic_samples)fail("audio capture allocation",E_OUTOFMEMORY);
+    UINT32 stamp_capacity=diagnostic_seconds*10+2;
+    diagnostic_stamps=new(std::nothrow) CaptureStamp[stamp_capacity];
+    if(!diagnostic_stamps)fail("audio capture clock allocation",E_OUTOFMEMORY);
+    BYTE *ingress=nullptr;AudioTimelineRecord *timeline=nullptr;
+    char ingress_path[2048],timeline_path[2048];
+    if(diagnostic_capture_path("XLLE_PILOT_AUDIO_INGRESS",ingress_path,sizeof(ingress_path))) {
+        audio_ingress_file=CreateFileA(ingress_path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(audio_ingress_file==INVALID_HANDLE_VALUE)fail("audio source capture create",HRESULT_FROM_WIN32(GetLastError()));
+        ingress=new(std::nothrow) BYTE[audio_ingress_capacity];
+        if(!ingress)fail("audio source capture allocation",E_OUTOFMEMORY);
+    }
+    if(diagnostic_capture_path("XLLE_PILOT_AUDIO_TIMELINE",timeline_path,sizeof(timeline_path))) {
+        audio_timeline_file=fopen(timeline_path,"wx");if(!audio_timeline_file)fail("audio timeline create");
+        if(fprintf(audio_timeline_file,"time,buffer,operation,offset,bytes,play,write,samples,baseline,queued,playing,capacity,rate,thread,cpu\n")<0)
+            fail("audio timeline header");
+        timeline=new(std::nothrow) AudioTimelineRecord[audio_timeline_capacity];
+        if(!timeline)fail("audio timeline allocation",E_OUTOFMEMORY);
+    }
+    {
+        Guard guard;audio_ingress_size=audio_ingress_overflow=0;audio_ingress=ingress;
+        audio_timeline_count=audio_timeline_overflow=0;audio_timeline=timeline;
+        /* A late observation needs the actual current caller-owned ring, not
+         * an assumed zero initializer. Preserve capture IDs and playback. */
+        for(auto *b:buffers)if(b) {
+            audio_ingress_record(b,3,0,b->data,b->bytes);
+            audio_stream_record(b,"window-snapshot");
+        }
+    }
+    HRESULT hr=audio_capture_begin(diagnostic_samples,48000*diagnostic_seconds,1,diagnostic_stamps,stamp_capacity);
+    if(FAILED(hr))fail("audio capture begin",hr);
+    fprintf(stderr,"[AUDIO CAPTURE] armed seconds=%u real GP output tap; clock is mixer processing time, not speaker latency window=%u time=%llu\n",diagnostic_seconds,diagnostic_window,(unsigned long long)capture_clock());
+}
+static bool diagnostic_capture_wait(uint64_t deadline)
+{
+    for(;;) {
+        DWORD wait=WaitForSingleObject(diagnostic_stop,audio_capture_remaining_ms(capture_clock(),deadline));
+        if(wait==WAIT_OBJECT_0)return false;
+        if(wait!=WAIT_TIMEOUT)fail("audio capture wait");
+        if(capture_clock()>=deadline)return true;
+    }
+}
+static DWORD WINAPI diagnostic_capture_worker(void*)
+{
+    for(unsigned i=0;i<diagnostic_windows.count;++i) {
+        const auto &window=diagnostic_windows.items[i];
+        uint64_t begin=diagnostic_origin+(uint64_t)window.start*10000000;
+        uint64_t end=begin+(uint64_t)window.seconds*10000000;
+        if(i && capture_clock()>=begin)fail("audio capture missed next window");
+        if(!diagnostic_capture_wait(begin))break;
+        diagnostic_window=i+1;diagnostic_seconds=window.seconds;
+        diagnostic_capture_arm();
+        if(capture_clock()>=end)fail("audio capture window missed during allocation");
+        bool complete=diagnostic_capture_wait(end);
+        diagnostic_capture_write();
+        fprintf(stderr,"[AUDIO WINDOW] index=%u scheduled_begin=%llu scheduled_end=%llu complete=%u time=%llu\n",diagnostic_window,
+            (unsigned long long)begin,(unsigned long long)end,complete?1:0,(unsigned long long)capture_clock());
+        if(!complete)break;
+    }
     return 0;
 }
 static void diagnostic_capture_start(void)
@@ -417,41 +498,13 @@ static void diagnostic_capture_start(void)
         if(!*duration || *end || seconds<1 || seconds>300)fail("audio capture duration outside 1..300 seconds");
         diagnostic_seconds=(unsigned)seconds;
     }
-    diagnostic_file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
-    if(diagnostic_file==INVALID_HANDLE_VALUE)fail("audio capture create",HRESULT_FROM_WIN32(GetLastError()));
-    char clock_path[2048];
-    if(snprintf(clock_path,sizeof(clock_path),"%s.clock.csv",path)>=(int)sizeof(clock_path))fail("audio capture clock path");
-    diagnostic_clock_file=fopen(clock_path,"wx");if(!diagnostic_clock_file)fail("audio capture clock create");
-    if(fprintf(diagnostic_clock_file,"frame,time_100ns\n")<0)fail("audio capture clock header");
-    diagnostic_samples=new(std::nothrow) float[48000*diagnostic_seconds*6]{};
-    if(!diagnostic_samples)fail("audio capture allocation",E_OUTOFMEMORY);
-    UINT32 stamp_capacity=diagnostic_seconds*10+2;
-    diagnostic_stamps=new(std::nothrow) CaptureStamp[stamp_capacity];
-    if(!diagnostic_stamps)fail("audio capture clock allocation",E_OUTOFMEMORY);
-    const char *ingress_path=getenv("XLLE_PILOT_AUDIO_INGRESS");
-    if(ingress_path && *ingress_path) {
-        audio_ingress_file=CreateFileA(ingress_path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
-        if(audio_ingress_file==INVALID_HANDLE_VALUE)fail("audio source capture create",HRESULT_FROM_WIN32(GetLastError()));
-        BYTE *bytes=new(std::nothrow) BYTE[audio_ingress_capacity];
-        if(!bytes)fail("audio source capture allocation",E_OUTOFMEMORY);
-        Guard guard;audio_ingress_size=audio_ingress_overflow=0;audio_ingress=bytes;
-    }
-    const char *timeline_path=getenv("XLLE_PILOT_AUDIO_TIMELINE");
-    if(timeline_path && *timeline_path) {
-        audio_timeline_file=fopen(timeline_path,"wx");if(!audio_timeline_file)fail("audio timeline create");
-        if(fprintf(audio_timeline_file,"time,buffer,operation,offset,bytes,play,write,samples,baseline,queued,playing,capacity,rate,thread,cpu\n")<0)
-            fail("audio timeline header");
-        auto *records=new(std::nothrow) AudioTimelineRecord[audio_timeline_capacity];
-        if(!records)fail("audio timeline allocation",E_OUTOFMEMORY);
-        Guard guard;audio_timeline_count=audio_timeline_overflow=0;audio_timeline=records;
-    }
-    HRESULT hr=audio_capture_begin(diagnostic_samples,48000*diagnostic_seconds,1,diagnostic_stamps,stamp_capacity);
-    if(FAILED(hr))fail("audio capture begin",hr);
+    if(!audio_capture_windows_parse(getenv("XLLE_PILOT_AUDIO_CAPTURE_WINDOWS"),diagnostic_seconds,diagnostic_windows))
+        fail("audio capture windows outside bounded ordered contract");
+    diagnostic_origin=capture_clock();
     diagnostic_stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     if(!diagnostic_stop)fail("audio capture stop event",HRESULT_FROM_WIN32(GetLastError()));
     diagnostic_thread=CreateThread(nullptr,0,diagnostic_capture_worker,nullptr,0,nullptr);
     if(!diagnostic_thread)fail("audio capture worker",HRESULT_FROM_WIN32(GetLastError()));
-    fprintf(stderr,"[AUDIO CAPTURE] armed seconds=%u real GP output tap; clock is mixer processing time, not speaker latency\n",diagnostic_seconds);
 }
 static void diagnostic_capture_close(void)
 {
@@ -497,7 +550,11 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
     }
     if(SUCCEEDED(hr)) {
         Guard guard;unsigned slot=0;while(slot<256 && buffers[slot])++slot;
-        if(slot==256)hr=E_OUTOFMEMORY;else buffers[slot]=b;
+        if(slot==256)hr=E_OUTOFMEMORY;else {
+            /* Record the bytes actually initialized above before publishing
+             * this lifetime to the feeder; late windows never infer zeros. */
+            audio_ingress_record(b,3,0,b->data,b->bytes);buffers[slot]=b;
+        }
     }
     if(FAILED(hr)){if(b->voice)b->voice->DestroyVoice();delete[] b->data;delete b;return hr;}
     *out=b;return S_OK;

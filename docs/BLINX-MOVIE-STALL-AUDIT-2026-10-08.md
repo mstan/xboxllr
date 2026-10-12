@@ -245,3 +245,57 @@ one complete opening lifetime and composed-original-LLE startup/pacing. The
 minimal source-bound acceptance plan is retained under `.73.1`; no further
 human still/ear review or playback run is needed to establish this bounded case.
 No physical Xbox operation or audible playback occurred.
+
+## Current default HLE repeat and interruption - 2026-10-11
+
+One immutable current default-native observation now passes two natural op01
+lifetimes and a real Start interruption during the third. The scheduler setting
+is unset; files/storage/memory/display remain native. The550.109s muted,
+invisible observation ends at its explicit deadline with no STOP/guard/fault.
+No game decoder, queue size, timeout, voice clock or GP state was replaced.
+
+Distinct voices6/369 consume75.5800/75.5700s, both reach the distinctive final
+source picture2263, then Stop/Destroy and transition to the next title movie.
+Each voice has exact initialized caller-ring byte provenance and its own full
+fresh GP-output comparison: RMSE0.008010/0.007946 and correlation
+0.999434/0.999491. One fixed alignment spans each actual Play lifetime and quiet
+tail. Active-picture A/V medians are31.66/28.68ms, p9543.17/39.89ms within
+captured producer clocks. These nominal-resampling residuals are measured
+differences; they are not a universal original-silicon tolerance. The caller
+streams agree through75.5414059s;64 later bytes and prefetched lengths differ.
+Both comparisons use their own actual PCM, without claiming identical tails.
+
+Actual Start/release arrive at445016/446016ms during the third opening.
+Voice732 consumes9.8200s, stops and is destroyed once, with no subsequent
+same-ID ingress. Title/menu assets, actual `demoplay/r01s01demo.dat`,61 completed
+save writes and numeric captures24/26 support title return and fresh demo
+reentry. Capture26 shows gameplay with the previously reviewed pause overlay.
+This does not assert manual menu navigation or completion of that later demo.
+Existing focused lifetime contracts are reused; instantaneous VM/process leak
+baselines and full attract stress were not measured in this run.
+
+Three finite backend-relative output windows complete without overflow,
+partial records or nonfinite PCM. The late-window byte snapshots are tested
+against authored live/new rings; unknown initialization now fails verification.
+One unrelated mono gameplay voice359 has two custom-loop observations/682bytes
+that the capacity-wrap verifier cannot interpret without actual loop-span
+metadata. This is explicitly excluded from the movie-voice proof and tracked
+in `.113.20`; it is not declared a playback defect or silently passed.
+
+Final private proof
+`movie-repeat-20261011/qualified-native-repeat-final.aot-private.json`, SHA256
+`053fd458bbdff57e4b7487ef6c6c5ec58c7a0c79b69145968ee361f135519698`,
+binds348 primary artifacts, eight reference inputs and231 retained snapshots.
+The native build has343 unchanged pre/post identities. Stronger control proof
+`qualified-capture-controls-v2.aot-private.json`, SHA256
+`53995f8c887e8c3b8521e724226d63ba63b8d1031e9e94f8e2652b8cc2fff31f`,
+retains the causal old-verifier false pass and new unknown-byte rejection.
+
+The current default-HLE repetition and interruption subgates are complete.
+This also satisfies `.98`, the specific HLE ring-cycle/stalled-opening bug:
+the independent display wait, default scheduler and current producer-readiness
+fixes now have two fresh complete waveform/video lifetimes and stable replay.
+Closing that bug does not close the movie integration family.
+The whole movie gate remains open for completed composed-original-LLE movie
+execution and pacing. Physical speaker/monitor timing stays separately scoped.
+No new still/ear review, physical Xbox operation or audible playback was needed.
