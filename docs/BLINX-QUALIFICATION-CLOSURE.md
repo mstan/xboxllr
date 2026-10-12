@@ -25,7 +25,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | --- | --- | --- | --- | --- |
 | Q01 | Complete | `.123` | Reference timestamp ownership; input replay fix at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
-| Q03 | Open: publication fix validated; changed title run pending | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
+| Q03 | Running: corrected v9 title; short checkpoint passed | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
@@ -266,14 +266,49 @@ This closes uncertainty about the completed lifetimes, not the failed batch:
 the publication repair, later Start/release/reentry and complete-generation
 scene/census/ownership review remain required.
 
-The next changed generation raises only the passive DMA-record ceiling from
+The changed v9 generation raises only the passive DMA-record ceiling from
 512MiB to2GiB. Records remain streamed; the pending/read and output buffers,
 600-second modeled duration, processing and tolerances are unchanged. At v8's
 observed average,600 seconds would already exceed512MiB. Its13222.609 wall
 seconds for341.467 GP seconds also projects beyond the old six-hour host cap;
-the next launcher will declare an eight-hour host allowance. These are bounded
+the v9 launcher declares an eight-hour host allowance. These are bounded
 observation budgets, not a relaxation of LLE correctness or an instruction to
 optimize its speed. The final generation must pin its actual compiled limits.
+
+Generation v9 is built from `a3f03889488828e7018d4dd198ea67f56f013c3f` and
+running in its private directory. All three isolated IO/audio/title builds pass;
+root verifies the prepared executable and source/build/receipt identities.
+Prepared manifest SHA256
+`c93173acc41e29c1434d4b4b85e666b9bf2b14171bd58693c75ab05f873f8de0`, executable
+`12faf55ded6c40bf94c860de21285b16c82c3d93a8095d6c9693560f2fa17613`.
+Actual startup reports the600-second/2048MiB capture limits and delivers neutral
+replay input at time zero. The original disk and verified private copy match
+before launch; the run never opens the original disk for title storage. The
+hidden, muted title uses cores12-15 at Normal priority with automatic reduction
+while Marvel Rivals runs. Frozen numeric and scene waiters observe this single
+generation. Old failure-site passage and complete Q03 acceptance are pending;
+no Xbox operation or additional title is started.
+
+The v9 short checkpoint now passes from retained complete-record prefixes of
+this same live run. Actual Microsoft voice4 has Stop/destroy and the next
+independently identified artoon phase. One fixed alignment compares456000 GP
+frames exactly against caller PCM; independent media RMSE is0.007314/0.007018
+and correlation0.996618/0.996390. Absolute A/V p95 is49.533ms, with source
+span9.910811s versus model9.917s and zero ring-byte mismatches. All declared
+Q02 limits are unchanged. The snapshot excludes2912 bytes of an incomplete DMA
+tail explicitly; it does not invent whole-run finalization. Root verifies the
+retained prefixes. Proof `q03-c32000-v9/short-checkpoint/review.aot-private.json`,
+SHA256 `1d9edb2ff2adc7be1d40f1a98030d4e882c0afc687d40f4918fe0d5cbf72beed`.
+
+A read-only final census collector is prepared beside the existing numeric and
+scene waiters. It reuses the accepted1819-record/201-generation v8 inventory,
+retains actual Play/loop/Stop/Release records, and reports new observed settings
+and routes for root review. It requires finalized numeric acceptance and exact
+configuration/source identities; no family is automatically qualified. Its
+retained-prefix recomputation agrees on194 ADPCM Plays,20 nonzero ADPCM loops,
+44 configuration routes,42 Play routes and140 gain levels. The frozen corrected
+collector is in `q03-c32000-v9/final-census-wait-v2`, SHA256
+`6fde2c28c51b3f69d0aeaf112705e5522903a41d8dbefc444795bb8c18d451fa`.
 
 The first v6 natural opening now reaches picture2263, real Stop after75.567s,
 Destroy and the title transition, with zero ring mismatches or source rereads.
