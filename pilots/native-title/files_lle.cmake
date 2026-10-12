@@ -86,6 +86,7 @@ if(PILOT_FILES STREQUAL "LLE")
     target_compile_definitions(pilot_callback_kernel_lle_test PRIVATE PILOT_SCHEDULING_LLE PILOT_FILES_LLE
       "$<TARGET_PROPERTY:pilot_contract_test,COMPILE_DEFINITIONS>")
     target_include_directories(pilot_callback_kernel_lle_test PRIVATE
+      "${CMAKE_CURRENT_BINARY_DIR}/io-device-private"
       "$<TARGET_PROPERTY:pilot_contract_test,INCLUDE_DIRECTORIES>")
     target_compile_options(pilot_callback_kernel_lle_test PRIVATE
       "$<TARGET_PROPERTY:pilot_contract_test,COMPILE_OPTIONS>")
@@ -133,7 +134,7 @@ if(PILOT_FILES STREQUAL "LLE")
         set_tests_properties("pilot_graphics_component_${graphics_case}_lle" PROPERTIES TIMEOUT 30)
       endforeach()
       if(PILOT_DISPLAY STREQUAL "NATIVE")
-        foreach(graphics_case pulse callbacks)
+        foreach(graphics_case pulse callbacks reset-lifetime)
           pilot_add_test(NAME "pilot_graphics_component_${graphics_case}_lle" COMMAND pilot_callback_kernel_lle_test
             "graphics-component-${graphics_case}-lle" "${PILOT_FILES_COMPARISON}")
           set_tests_properties("pilot_graphics_component_${graphics_case}_lle" PROPERTIES TIMEOUT 30)

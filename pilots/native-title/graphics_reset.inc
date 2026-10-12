@@ -9,12 +9,26 @@ static uint32_t graphics_reset(uint32_t pointer)
     int32_t hr=pilot_gfx_parameters(p);if(hr<0)return (uint32_t)hr;
     if(dispatch_in_dpc || graphics_clock_closing)stop("reset during callback/device close",pointer);
     uint32_t data[3]={0},width=p[0],height=p[1],pitch=(width*4+63)&~63u;
+#ifdef PILOT_SCHEDULING_LLE
+    /* A completed wait lease and a VM lease are sequential owners. Retire
+     * original queued work before reserving replacement presentation VAs. */
+    int original=pilot_io_device_thread_component_active();
+    if(original) {
+        graphics_present_drain();
+        graphics_fence_wait(graphics_fence_insert());
+    }
+#endif
     for(unsigned i=0;i<3;++i) {
         uint32_t bytes=pitch*height;
         if(vm_allocate(&data[i],0,&bytes,MEM_RESERVE,PAGE_NOACCESS)) {hr=(int32_t)0x8007000eu;goto failed;}
     }
-    graphics_present_drain();
-    graphics_fence_wait(graphics_fence_insert());
+#ifdef PILOT_SCHEDULING_LLE
+    if(!original)
+#endif
+    {
+        graphics_present_drain();
+        graphics_fence_wait(graphics_fence_insert());
+    }
     hr=pilot_gfx_reset(p);if(hr<0)goto failed;
     for(unsigned i=0;i<3;++i) {
         uint32_t bytes=0;

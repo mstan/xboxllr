@@ -48,13 +48,33 @@ hold RDTSC/compiled observations constant through120ms host stalls and advance
 only on common-clock input. Source-bound proof is
 `reference-tsc-20261011/v1/qualified-tsc.aot-private.json`, SHA256
 `81cbe843cfe9ed4c5486d9b0213ad7b1908cb9d0f89e58d4e2119f74eb1979ac`.
-Q02/Q03 and whole family acceptance remain open.
+Q02 now passes the retained short title checkpoint `c32000-tsc-v3`: Microsoft
+source PTS span9.910811s versus model9.917s, zero mismatched or repeated source
+bytes, and456000 actual GP frames exactly equal caller PCM after one32-frame
+pipeline alignment. Independent media RMSE0.00731/0.00702 and correlation
+0.99662/0.99639 pass declared limits; A/V p95 is58.22ms. The effective playback
+rate is48000, separate from creation44100. Full Q03/family acceptance stays open.
+
+G01 passes in the maintained selection:15 original graphics checks and13
+native regressions. Three real Reset/Release lives wait on queued GPU completion
+before replacing presentation allocations or collecting backing. Source-bound
+proof is `graphics-reset-lifetime-20261011/maintained-v3/qualified-root.aot-private.json`,
+SHA256 `82d2802691744814c71a41073a99a38e65fb0e13a5a86c1888a394154e490192`.
+The private paced-Swap variant did not observe pending-present ownership; that
+specific witness remains unclaimed. Graphics-family startup/output remains open.
+
+A01 retained inventory establishes ordinary original constructor defaults and
+actual PCM/ADPCM objects plus44100/48000 playback. Quiet captures omit custom
+route/gain/pitch/loop inputs. The already planned final title batch will record
+those configuration events. Generic unobserved filter extensions do not expand
+the closing scope; A02 is one composed defaults/settings-to-processing contract.
 
 Already proven, do not rerun for bookkeeping: actual blocked BlockOnFence and
 full64-slot capacity, original KWAIT/compute-peer progress, real callback FIFO,
 GPU bytes and cleanup across three CPU/GPU lives. Retained66-check proof and
 root38-pin review are under `build/blinx/graphics-reset-lifetime-20261011`.
-Reuse the default HLE two-opening/interruption/reentry proof and the owner's
+The complete retained fence/capacity task `.116.4` is closed. Reuse the default
+HLE two-opening/interruption/reentry proof and the owner's
 accepted appearance baseline when their runtime dependencies are unchanged.
 
 ## Profile and validation boundaries

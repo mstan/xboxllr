@@ -354,6 +354,12 @@ static void graphics_dispatch_impl(unsigned entry)
         break;
     case PILOT_D3D_D3DDevice_Release: {
         if(graphics_clock_waiters)stop("device release with active vertical-blank waits",entry);
+#ifdef PILOT_SCHEDULING_LLE
+        if(pilot_io_device_thread_component_active()) {
+            graphics_present_drain();
+            graphics_fence_wait(graphics_fence_insert());
+        }
+#endif
         graphics_clock_close();
         graphics_gpu_close();
         if(graphics_target!=graphics_headers || (graphics_depth && graphics_depth!=graphics_headers+64))

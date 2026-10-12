@@ -592,10 +592,11 @@ static const char *native_graphics_component(uint32_t entry,uint32_t regs[8])
     unsigned index;for(index=0;index<PILOT_D3D_COUNT && pilot_d3d_calls[index].address!=entry;++index){}
     if(index==PILOT_D3D_COUNT || !pilot_io_device_thread_component_active())
         return "unbound original CPU native graphics entry";
-    /* Reset/teardown retain outstanding asynchronous resource lifetimes;
-     * constructor admission does not establish those contracts. */
-    if(index==PILOT_D3D_D3DDevice_Reset || index==PILOT_D3D_D3DDevice_Release)
-        return "original scheduling native graphics memory ownership requires integration";
+    /* Reset/teardown own real original timed waits for queued work before
+     * replacement/collection. Without the clock owner, reject pre-mutation. */
+    if((index==PILOT_D3D_D3DDevice_Reset || index==PILOT_D3D_D3DDevice_Release) &&
+       !pilot_io_device_clock_bound())
+        return "original scheduling native graphics teardown requires bound clock";
     /* These native paths still use a generated guest callback/native pulse
      * dispatcher. Stop before queueing work against the original scheduler. */
     if((index==PILOT_D3D_D3DDevice_InsertCallback || index==PILOT_D3D_D3DDevice_SetVerticalBlankCallback ||

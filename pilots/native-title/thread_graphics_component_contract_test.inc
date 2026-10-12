@@ -91,7 +91,7 @@ static void test_thread_graphics_component_lle(const char *path,int failure_case
             uint32_t handle=MEM32(out),ref[]={handle,0,out+4};CHECK(!event_lle_call(246,ref));uint32_t object=MEM32(out+4);
             uint32_t priority[]={object,29};CHECK(event_lle_call(148,priority)==8);
             uint32_t join[]={object,0,0,0,0},result=0;const char *error=pilot_io_device_lle(159,memory,join,&result);
-            CHECK(error && !strcmp(error,failure_case==1?"original scheduling native graphics memory ownership requires integration":
+            CHECK(error && !strcmp(error,failure_case==1?"original scheduling native graphics teardown requires bound clock":
                 failure_case==2?"original scheduling native graphics callback ownership requires integration":
                 failure_case==5?"original scheduling native graphics wait ownership requires integration":
                 "original scheduling native graphics display pulse requires integration"));

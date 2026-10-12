@@ -1,12 +1,31 @@
 /* Exercise native ownership/ABI contracts without a game executing. */
+#include <windows.h>
 #ifdef PILOT_D3D_NATIVE
+static HANDLE WINAPI test_clock_timer_ex(LPSECURITY_ATTRIBUTES,LPCWSTR,DWORD,DWORD);
+static HANDLE WINAPI test_clock_timer_legacy(LPSECURITY_ATTRIBUTES,BOOL,LPCWSTR);
+static BOOL WINAPI test_clock_handle_close(HANDLE);
+#define CreateWaitableTimerExW test_clock_timer_ex
+#define CreateWaitableTimerW test_clock_timer_legacy
+#define CloseHandle test_clock_handle_close
 /* Change only the desktop return status after the real rendering/Swap. */
 #define pilot_gfx_present test_desktop_present
+#endif
+#if defined(PILOT_D3D_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE) && !defined(PILOT_DISPLAY_LLE)
+/* Assert actual Release completion before retiring fixture-owned GPU work. */
+#define pilot_gfx_close test_lifetime_close
+static void test_lifetime_close(void);
 #endif
 #define main pilot_unused_main
 #include "runtime.c"
 #undef main
+#if defined(PILOT_D3D_NATIVE) && defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE) && !defined(PILOT_DISPLAY_LLE)
+#undef pilot_gfx_close
+void pilot_gfx_close(void);
+#endif
 #ifdef PILOT_D3D_NATIVE
+#undef CreateWaitableTimerExW
+#undef CreateWaitableTimerW
+#undef CloseHandle
 #undef pilot_gfx_present
 int32_t pilot_gfx_present(void);
 static int test_desktop_override;
@@ -15,6 +34,7 @@ static int32_t test_desktop_result;
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c); ExitProcess(1); } } while (0)
 #ifdef PILOT_D3D_NATIVE
+#include "graphics_clock_handle_contract_test.inc"
 int32_t test_desktop_present(void)
 {
     int32_t result=pilot_gfx_present();
@@ -491,6 +511,7 @@ static void test_timers(void)
 #include "thread_graphics_resource_contract_test.inc"
 #include "thread_graphics_fence_contract_test.inc"
 #ifndef PILOT_DISPLAY_LLE
+#include "thread_graphics_reset_lifetime_contract_test.inc"
 #include "thread_graphics_pulse_contract_test.inc"
 #include "thread_graphics_callback_contract_test.inc"
 #endif
@@ -592,6 +613,7 @@ int main(int argc,char **argv)
         if(!strncmp(argv[1],"graphics-component-",19)) {
             CHECK(argc==3);
 #ifndef PILOT_DISPLAY_LLE
+            if(!strcmp(argv[1],"graphics-component-reset-lifetime-lle")) {test_thread_graphics_reset_lifetime(argv[2]);return 0;}
             if(!strcmp(argv[1],"graphics-component-pulse-lle")) {test_thread_graphics_pulse_lle(argv[2]);return 0;}
             if(!strcmp(argv[1],"graphics-component-callbacks-lle")) {test_thread_graphics_callback_lle(argv[2]);return 0;}
 #endif

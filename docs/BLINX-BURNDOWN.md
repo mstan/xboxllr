@@ -26,6 +26,14 @@ failure parity remains explicitly unsupported under that issue's guard scope.
 The whole-family count remains **4/9**, with **26 precision deferrals**. See the
 [reference runtime and capture scope](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#maintained-reference-consumer-and-bounded-capture---2026-10-11).
 
+**Bounded-plan progress, 2026-10-12:** common reference timestamps Q01 and short
+relative-time checkpoint Q02 pass. Original queued Reset/Release G01 passes15
+selected original checks and13 native regressions. Tasks `.116.4` and `.116.5`
+are closed; full original movie lifecycles, graphics startup/output and original
+audio processing remain required. The retained audio census narrows A02 to the
+actually supported ordinary settings/stages. This is subgate progress, with the
+whole-family count still4/9. See the fixed [closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
+
 Tracked in `beads-xbox.1.102`; baseline is the committed working attract
 milestone below. Follow [recomp-template HLE.md](../../../recomp-template/HLE.md)
 verbatim: LLE is the maintained correctness foundation; HLE is its performance

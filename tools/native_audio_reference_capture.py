@@ -54,6 +54,7 @@ def inspect(path, output=None, log=None):
                     raise ValueError('missing unique complete initial ring ownership')
                 rings[voice] = dict(data=bytearray(payload), shape=(channels, bits, capacity),
                                     destroyed=False, writes=0, reads=0, bytes=0, rate=rate,
+                                    rate_history=[],source_bytes_by_rate={},
                                     first_frame=frame, last_frame=frame, stop_frames=[], play_frames=[],
                                     fetched=fetched)
                 source[voice] = bytearray()
@@ -68,6 +69,8 @@ def inspect(path, output=None, log=None):
             if frame < ring['last_frame'] or fetched < ring['fetched']:
                 raise ValueError('actual output/source counters went backwards')
             ring['last_frame'], ring['fetched'] = frame, fetched
+            if not ring['rate_history'] or ring['rate_history'][-1]['rate'] != rate:
+                ring['rate_history'].append(dict(frame=frame,rate=rate))
             if kind == 1:
                 if not size:
                     raise ValueError('empty caller write')
@@ -87,6 +90,8 @@ def inspect(path, output=None, log=None):
                 source[voice].extend(payload)
                 ring['reads'] += 1
                 ring['bytes'] += size
+                key=str(rate)
+                ring['source_bytes_by_rate'][key]=ring['source_bytes_by_rate'].get(key,0)+size
                 owner = generations[voice]
                 current = owner['current'][offset:offset+size]
                 seen = owner['seen'][offset:offset+size]

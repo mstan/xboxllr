@@ -84,14 +84,34 @@ static unsigned graphics_present_retire(uint64_t frame)
 }
 static void graphics_present_drain(void)
 {
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    struct ComponentWait wait={0};
+    int original=pilot_io_device_thread_component_active();
+#endif
     ++graphics_clock_waiters;
     for(;;) {
         graphics_present_retire(0);
         if(!graphics_present_count)break;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+        if(original) {
+            ReleaseSRWLockExclusive(&graphics_lock);
+            const char *error=wait.event?NULL:component_wait_open(&wait);uint32_t status=0;
+            if(!error)error=component_wait_slice(&wait,10000,&status);
+            AcquireSRWLockExclusive(&graphics_lock);if(error)stop(error,0);
+            continue;
+        }
+#endif
         if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,1,0) && GetLastError()!=ERROR_TIMEOUT)
             stop("presentation drain wait failed",GetLastError());
     }
     --graphics_clock_waiters;
+#if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
+    if(wait.event) {
+        ReleaseSRWLockExclusive(&graphics_lock);
+        const char *error=component_wait_close(&wait);
+        AcquireSRWLockExclusive(&graphics_lock);if(error)stop(error,0);
+    }
+#endif
 }
 static void graphics_vblank_deliver(uint64_t frame)
 {

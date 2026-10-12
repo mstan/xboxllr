@@ -3620,3 +3620,34 @@ its own owners; the three maintained NV2A transport/thread/AV regression checks
 pass in0.39s alongside72 combined checks. This qualifies bus composition and
 native scheduling dependencies. Full NV2A pixels/startup and the graphics gate
 remain open. See the [scheduling evidence](SCHEDULING-LLE.md#shared-usb-work-and-generated-callback-abi---2026-10-11).
+
+## Original queued Reset/Release ownership - 2026-10-12
+
+Actual original CPU Reset/Release now require the bound clock and retire queued
+GPU work before replacement/collection. Reset finishes its original wait lease
+before reserving replacement presentation VAs, preserving the separate original
+wait and VM workspace owners. Original teardown drains completion before closing
+callbacks and collecting the last bound original resource. Default HLE ordering
+retains its existing allocation/wait path.
+
+Three maintained CPU/GPU lifetimes prove real Reset/Release KWAIT and compute-peer
+IRQ0 progress, retained original165/180 backing through Reset, exact16MiB queued
+GPU bytes twice per life,8192 vertex bytes, and exact nine original memory,
+thread/handle and stale-token cleanup before original171. The fixture checks
+completion before any diagnostic readback or backend close. Its private missing
+Release-wait control fails at that boundary. A missing root fixture-only close
+hook was corrected; its failed integration remains retained.
+
+Fifteen selected original graphics tests and13 default native regressions pass.
+The native display fixture now observes the actual22 timer opens and successful
+closes rather than using asynchronous process-wide handle growth as a proxy.
+Worker/event closes and exact waiter state remain checked. This instrumentation
+exists only in the test translation. No native production timer behavior changes.
+Maintained proof `graphics-reset-lifetime-20261011/maintained-v3/qualified-root.aot-private.json`
+has SHA256 `82d2802691744814c71a41073a99a38e65fb0e13a5a86c1888a394154e490192`.
+
+This closes the bounded `.116.5` queued-work task. The stronger private paced-Swap
+case did not witness a pending-present waiter, so that branch is not qualified
+by this result. Original NV2A startup/full title output remains open. The retained
+blocked-fence/full64 task `.116.4` is also closed from its existing66-check proof;
+no unchanged title run or physical console operation was added for bookkeeping.
