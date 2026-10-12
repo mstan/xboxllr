@@ -1868,12 +1868,25 @@ screen. See the [coupled scheduling evidence](SCHEDULING-LLE.md#whole-audio-effe
 
 Original location updates and old descriptor retirement precede new allocation;
 the maintained native graph implementation retains transactional rollback until
-installation succeeds. Allocation/install failure postconditions therefore remain
-an explicit offline question in `.113.19`. The original CPU route guards negative
-results after gate release instead of claiming equivalent continuation. Default
-HLE failure-state parity, precise original processing state and causal failed
-replacement checks remain required. This is separate from the26 timing/precision
-deferrals, and does not qualify whole audio or require new console probing.
+installation succeeds. The bounded `.113.19` investigation now executes three
+complete original failure calls under real captured-kernel pool pressure. Failed
+descriptor allocation frees/clears the old descriptor, stores the requested
+location, clears readiness and leaves output untouched. Failed scratch allocation
+after successful descriptor replacement retains the new zeroed descriptor and
+clears its scratch pointer while recording the requested size. No allocation
+callee is replaced, and no original GP rollback state is inferred.
+
+Default HLE now terminally guards failed effects allocation/install after
+releasing the unsuccessful candidate. Continued-call failure parity is explicitly
+unsupported: retaining the known previous native resources until shutdown does
+not reproduce the original failure postconditions. Genuine Windows commit failure
+and actual closed-backend installation reproduce both former negative returns;
+the guarded candidates pass, and three successful replacements have byte-identical
+logs before/after. The prior twelve-install original success proof is reused.
+Source-bound evidence is under `build/blinx/effects-failure-20261011`. This meets
+the bounded issue's guarded-unsupported acceptance alternative; whole audio,
+continued-call failure semantics and original GP/EP output remain open. There is
+no timing-policy, successful playback or performance-path change.
 
 ## Native partial-loop ingress provenance - 2026-10-11
 
@@ -1902,4 +1915,5 @@ converted captures and historical movie-repeat version1 negatives remain
 excluded; the current verifier refuses to infer their missing controls. Earlier
 build/analysis failures are retained separately. This closes the loop-provenance
 task only: submission is not consumption or speaker correctness, and original
-GP/EP, hardware output, effects-failure semantics and the audio family remain open.
+GP/EP, hardware output, continued-call effects-failure semantics and the audio
+family remain open.

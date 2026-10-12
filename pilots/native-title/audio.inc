@@ -258,14 +258,14 @@ static int32_t audio_download_effects(const uint32_t *a)
     if(a[3])memcpy(location,audio_pointer(a[3],8),8);
     fprintf(stderr,"[AUDIO EFFECTS LOCATION] reverb=%08x crosstalk=%08x\n",location[0],location[1]);
     uint32_t storage=0,bytes=pilot_dsp_storage_bytes(image),offset=pilot_dsp_descriptor_offset(image);
-    if(vm_allocate(&storage,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)){pilot_dsp_image_destroy(image);return (int32_t)0x8007000e;}
+    if(vm_allocate(&storage,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)){pilot_dsp_image_destroy(image);stop("effects allocation failure continuation is unqualified",(uint32_t)0x8007000e);}
     PilotDsp *graph=pilot_dsp_create(image,memory+storage,storage);pilot_dsp_image_destroy(image);
     uint32_t count=MEM32(storage+offset);
     /* Original location setter stores both values verbatim (or -1 for NULL).
      * These select subsequent parameter services, not execution of the graph.
      * Validate them when such a consuming service is qualified, not on upload. */
     int32_t hr=graph?pilot_audio_effects_install(graph):(int32_t)0x8007000e;
-    if(hr<0){pilot_dsp_destroy(graph);uint32_t zero=0;if(vm_free(&storage,&zero,MEM_RELEASE))stop("effects install rollback failed",storage);return hr;}
+    if(hr<0){pilot_dsp_destroy(graph);uint32_t zero=0;if(vm_free(&storage,&zero,MEM_RELEASE))stop("effects install rollback failed",storage);stop("effects install failure continuation is unqualified",(uint32_t)hr);}
     /* The audio thread now owns graph execution; the previous graph has no
      * remaining processing reader. Its descriptor lifetime ends on replacement. */
     audio_effects_free();audio_effects=graph;audio_effects_storage=storage;
