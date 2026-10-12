@@ -144,6 +144,31 @@ def align_audio(voice, source, gp):
     return lo+best-anchor, expected, float(scores[best]), playback
 
 
+def bind_opening_lifetimes(openings, voices, epoch, press):
+    required, later = [], []
+    for phase in openings:
+        start_frame = round((phase['first_model']/1e7-epoch)*48000)
+        candidates = [voice for voice in voices if len(voice['play_frames']) == 1 and
+                      abs(voice['play_frames'][0]-start_frame) < 48000]
+        if len(candidates) != 1:
+            raise ValueError('movie source does not identify one actual Play lifetime')
+        voice = candidates[0]
+        # A fixed diagnostic may reach another opening after the declared
+        # interruption/reentry. Its termination is not that new voice's Stop.
+        # Keep its data; it cannot replace a required pre-Start lifetime.
+        if epoch+voice['play_frames'][0]/48000 > press:
+            later.append(dict(voice=voice,
+                video={key:value for key,value in phase.items() if key!='matches'},
+                no_source_rereads=voice['repeated_before_another_write_bytes']==0,
+                excluded_from_required_lifetimes=True,
+                reason='actual Play begins after the declared Start interruption'))
+        else:
+            if not voice['destroyed'] or not voice['stop_frames']:
+                raise ValueError('opening lacks actual Stop/destroy')
+            required.append((phase, voice))
+    return required, later
+
+
 def evaluate(folder, reference, output):
     output.mkdir(); (output/'declared-limits.aot-private.json').write_text(json.dumps(LIMITS, indent=2)+'\n')
     manifest_path = folder/'run.aot-private.json'; manifest = json.loads(manifest_path.read_text())
@@ -177,18 +202,12 @@ def evaluate(folder, reference, output):
     if len(endings) != 1 or int(endings[0]) != len(gp):
         raise ValueError('GP output frame count differs from finalization')
     epoch = audio['epoch_pit_ticks']/1125000
+    press = deliveries[1]['elapsed_ms']/1000
     movie_rows = read_movie(folder/'movie.bin'); phases, references = match_movies(movie_rows, reference)
     openings = [phase for phase in phases if phase['source'] == 'op01']
     comparisons = []
-    for phase in openings:
-        start_frame = round((phase['first_model']/1e7-epoch)*48000)
-        candidates = [voice for voice in audio['voices'] if len(voice['play_frames']) == 1 and
-                      abs(voice['play_frames'][0]-start_frame) < 48000]
-        if len(candidates) != 1:
-            raise ValueError('movie source does not identify one actual Play lifetime')
-        voice = candidates[0]
-        if not voice['destroyed'] or not voice['stop_frames']:
-            raise ValueError('opening lacks actual Stop/destroy')
+    required, later_openings = bind_opening_lifetimes(openings, audio['voices'], epoch, press)
+    for phase, voice in required:
         stopped = voice['stop_frames'][0]; duration = (stopped-voice['play_frames'][0])/48000
         natural = duration >= LIMITS['natural_opening_seconds_min']
         row = dict(voice=voice, video={key: value for key, value in phase.items() if key != 'matches'},
@@ -229,13 +248,12 @@ def evaluate(folder, reference, output):
         comparisons.append(row)
     natural = [row for row in comparisons if row['natural']]
     interrupted = [row for row in comparisons if not row['natural']]
-    press = deliveries[1]['elapsed_ms']/1000
     checks = dict(exact_source_ring_bytes=audio['ring_byte_mismatches']==0,
                   two_natural_openings=len(natural)==2,
                   distinctive_final_picture=all(row['video']['frame_max']==LIMITS['natural_final_frame'] and
                                                row['video']['final_min_rmse']<LIMITS['video_rmse_max'] for row in natural),
                   natural_waveform_and_av=all(row['numeric_pass'] for row in natural),
-                  movie_no_rereads=all(row['no_source_rereads'] for row in comparisons),
+                  movie_no_rereads=all(row['no_source_rereads'] for row in comparisons+later_openings),
                   actual_interruption=len(interrupted)==1 and epoch+interrupted[0]['voice']['play_frames'][0]/48000<press<=
                                       epoch+interrupted[0]['voice']['stop_frames'][0]/48000 and
                                       epoch+interrupted[0]['voice']['stop_frames'][0]/48000-press<=LIMITS['start_to_stop_seconds_max'],
@@ -255,6 +273,9 @@ def evaluate(folder, reference, output):
                   family_qualified=False, fresh_demo_scene_review_required=True, diagnostic_termination_is_guest_teardown=False,
                   manifest=identity(manifest_path), analysis=identity(Path(__file__)), verified_artifacts=verified,
                   reference_inputs=references, audio=audio, opening_lifetimes=comparisons, deliveries=deliveries,
+                  required_opening_window=dict(actual_play_not_after_start_seconds=press,
+                      natural_lifetimes=2,interrupted_lifetimes=1),
+                  later_opening_lifetimes=later_openings,
                   movie_records=len(movie_rows), phases=[{key:value for key,value in phase.items() if key!='matches'} for phase in phases],
                   configuration_census=census, present_files=[identity(path) for path in sorted(folder.glob('present-*.ppm'))],
                   pending=['Confirm fresh demo gameplay after third Start/release from retained scene captures.',

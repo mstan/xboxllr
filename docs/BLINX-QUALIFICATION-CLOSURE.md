@@ -153,6 +153,30 @@ preserves real CPU/thread/guest-frame/IRQ/FP ownership. Do not suppress the
 guard or restart this unchanged title generation. Source/input/clock cadence
 sweeps are not indicated by this failure.
 
+The causal CPU fixture reproduces that same ordinal166 guard in1.062s.
+Fix `30a6be6` routes selected components' contiguous allocate/query/protect/
+persist/saved-data/free calls through the existing real original-thread call
+transport. Root services retain their route and strict guest-frame guard.
+Three actual original CPU lifetimes preserve stack/GPR/flags/x87/XMM and exact
+memory/thread/handle/ledger baselines; the deliberate root-only control still
+rejects before completing the original join. Seven focused checks pass, with
+no title, GPU, audio or console operation. This fixes a required scheduling
+integration boundary; Q03 still requires the changed full title batch.
+Root source/ownership review also verifies its frozen proof and unchanged
+engine transport against v6; accepted proof
+`component-contiguous-20261012/root-review/accepted.aot-private.json`, SHA256
+`f7c4d0effd8ff33f8793977ef0ab6ce013969b77b3a73d43deec42620f628b6d`.
+
+The final analyzer explicitly binds required opening lifetimes to actual Play
+not after the declared Start. A fixed600s diagnostic can also reach a later
+opening; it retains that lifetime and its source/ring/census evidence without
+inventing Stop/Destroy at capture termination or substituting it for the
+required two natural and one interrupted lifetimes. All required actual
+Stop/Destroy, final-picture, full waveform/A-V and source-ownership gates stay
+unchanged. Seven boundary/ownership controls and the prior five analyzer
+controls pass in `reference-input-ohci-20261012/analysis-controls-v4`, SHA256
+`208e525b4d15a97e57de3b2ee34861f03d3819ff56d79886001c2e02758cc655`.
+
 G02's fixed encoder-read preparation is committed in the probe repository at
 `1283882cde262b299d4d83f36e00b4de30e1e47a`. Two404-byte payloads resolve only
 HAL ordinal45 and perform byte reads at slave8A, commandsC4 then6C. Eleven
