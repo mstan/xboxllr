@@ -101,6 +101,8 @@ typedef const char *(*PilotIoClock)(void *context,uint64_t *ticks);
 /* Read-only interpreter cache occupancy/capacity; no page or owner mutation. */
 const char *pilot_io_device_alias_cache_info(unsigned *count,unsigned *capacity);
 const char *pilot_io_device_alias_cache_retired(unsigned *retired);
+/* Read-only memo diagnostics, also available after a fatal validation guard. */
+const char *pilot_io_device_publication_memo_info(uint64_t *hits,uint64_t *misses);
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context);
 /* Query the actual sole engine's bound clock; a programmed PIT alone does
  * not establish a producer for finite original waits. No guest execution. */

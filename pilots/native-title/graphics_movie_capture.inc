@@ -24,6 +24,11 @@ static void graphics_movie_capture_draw(void)
             stop("movie capture uploaded texture unavailable",header);
         uint32_t metadata[]={0x434d4c58,1,header,t->format,t->width,t->height,
             stage,16,columns,rows,0,columns*rows,graphics_target,t->native};
+#ifdef PILOT_SCHEDULING_LLE
+        /* v2 retains an observer QPC and the independently owned display
+         * clock. The original PIT epoch is not the host QPC epoch. */
+        metadata[1]=2;
+#endif
         memcpy(graphics_movie_capture.metadata,metadata,sizeof(metadata));
         graphics_movie_capture.draw_time=dispatch_monotonic();graphics_movie_capture.pending=1;
         if(!graphics_movie_capture.file) {
@@ -42,7 +47,12 @@ static void graphics_movie_capture_present(uint64_t time,uint32_t swap,uint64_t 
     DWORD written;
 #define MOVIE_WRITE(data,bytes) do {if(!WriteFile(graphics_movie_capture.file,data,bytes,&written,NULL) || written!=(bytes))stop("movie capture write",GetLastError());} while(0)
     MOVIE_WRITE(graphics_movie_capture.metadata,sizeof(graphics_movie_capture.metadata));
+#ifdef PILOT_SCHEDULING_LLE
+    uint64_t observed[]={graphics_movie_capture.draw_time,dispatch_monotonic(),serial,time};
+    MOVIE_WRITE(observed,sizeof(observed));
+#else
     MOVIE_WRITE(times,sizeof(times));
+#endif
     MOVIE_WRITE(graphics_movie_capture.luma,graphics_movie_capture.metadata[11]);
 #undef MOVIE_WRITE
     if(++graphics_movie_capture.records==36000) {

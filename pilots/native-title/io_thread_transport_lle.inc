@@ -211,7 +211,7 @@ static DWORD thread_clock_wait(void)
     failure="thread LLE clock without PIT/PIC";return 0;
 #endif
 }
-static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *entry)
+static void thread_handoff_impl(struct OriginalThread *thread,int start,uint32_t *entry)
 {
     if(start) {
         thread->request_event=CreateEventW(NULL,FALSE,FALSE,NULL);
@@ -297,6 +297,12 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
         IO_UC(uc_reg_write(cpu,UC_X86_REG_ESP,&sp));
         *entry=original_export(258);
     }
+}
+static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *entry)
+{
+    uint64_t cost=original_cost_begin();
+    thread_handoff_impl(thread,start,entry);
+    original_cost_end(ORIGINAL_COST_HANDOFF,cost);
 }
 static void thread_component_prepare(struct OriginalThread *thread,uint32_t *entry)
 {

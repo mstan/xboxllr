@@ -82,11 +82,21 @@ presents9-31 match forward Microsoft intro frames1-138: about4.6s of content
 across180s wall time, with no later publisher/opening transition established.
 This resolves the old main cancel wait; the next bounded investigation separates
 original CPU execution cost from wait/cursor ownership before another long run.
+Exact publication reuse now passes three raw page-table mutation guards and
+the combined88-check batch. The later v73 capture advances through Microsoft,
+Artoon and opening frames0-187, then faults at325.422s inside Unicorn's host
+translation allocator. Small unchanged-library cases reproduce its Windows
+commit request extending past the reserved buffer; a bounded correction is
+now qualified in four engine checks. Rebuilt profiles with that package pass
+88 combined and three NV2A bus checks. The raw decoder remains original, with a passive-level
+admission shortcut preserving actual IRQ/FP/thread ownership. This is the
+current integration repair; the faulted observation does not pass
+the original movie gate.
 Integrated attract remains open. HLE incurs no interpreter cache work.
 Earlier filename/open/cache failures retain their separate generations.
 Independent GPU/graphics/audio/movie gates stay open. **4/9 families** and
 **26 precision deferrals** are unchanged.
-See the [current boundary](../pilots/native-title/SCHEDULING-LLE.md#resident-alias-cache-mmio-routing-and-original-movie-progress---2026-10-11).
+See the [current boundary](../pilots/native-title/SCHEDULING-LLE.md#exact-publication-reuse-and-current-original-movie-integration---2026-10-11).
 
 The current default native HLE scheduler is now enabled when its diagnostic
 environment selection is unset; the original-kernel route keeps sole CPU
@@ -99,7 +109,8 @@ real voice retirement and next-title loading establish one normal opening.
 This closes the default-path stall. A subsequent current default HLE batch
 now passes two natural opening lifetimes, real Start interruption, title/menu
 return and fresh demo reentry, with exact selected-movie ring-byte provenance
-and fresh full GP-output comparisons. **Movies remain open** for completed
+and fresh full GP-output comparisons. The specific ring-cycle/stalled-opening
+bug `.98` is closed in commit3812a2b. **Movies remain open** for completed
 composed-original-LLE coverage. Exact
 physical A/V timing remains separately scoped. Reuse this current source-bound
 capture rather than repeating playback for documentation or another still review.

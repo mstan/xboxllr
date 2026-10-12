@@ -2210,8 +2210,80 @@ Next distinguish original execution cost from wait/cursor ownership using
 bounded state evidence before committing to another long full sequence.
 
 The old USB progress blocker is resolved. Whole scheduling and integrated
-attract acceptance remain open, as do current movie interruption/reentry,
-repetition and composed A/V acceptance. Reuse the established default HLE v62
-normal opening rather than replaying it for documentation. The family count
+attract acceptance remain open. Current default HLE movie repetition and
+interruption/reentry now pass in commit3812a2b; completed composed-original
+movie execution remains open. Reuse that current evidence rather than replaying
+native movies for documentation. The family count
 remains4/9 with26 precision deferrals. No physical Xbox request or audible
 playback occurred; the existing hardware inspection stop remains binding.
+
+## Exact publication reuse and current original movie integration - 2026-10-11
+
+Boundary publication now reuses a previously successful reconciliation only
+while the complete actual page directory, each relevant full PTE page and the
+published VA/PA/pin ledger are byte-identical. Index consistency still runs on
+every boundary. Any raw CPU alias change invalidates reuse; no allocation,
+mapping, ownership or service result is invented. Three negative CPU fixtures
+clear a real self-mapped PTE, a pinned PTE or a real physical-directory alias;
+each requires the original guard before a return marker can execute. The
+current v72/v73 combined batch passes88/88, with three maintained NV2A bus
+checks passing separately. This includes the new finite capture parser.
+
+Inclusive phase counters separate interpreter, publication, alias, callback,
+handoff and clock work; their overlapping durations must not be added. In v70,
+publication consumes75.047s over3,478,655 boundary checks. In v72 it consumes
+33.790s over4,287,824 checks, with4,260,932 exact memo hits and26,892 misses.
+The observations use different CPU allocations and guest progress; this is
+cause evidence, not a matched speed or pacing benchmark. Interpreter work
+remains substantial. Memo proof `qualified-publication-memo-v72.aot-private.json`
+has SHA256 `7848922423c26e2de511411efe7cbf313b714bcd140d03e9a136c53bacfdb405`.
+
+Alias retirement now keeps the last512 admitted cache entries, retiring the
+prefix outside execution at the existing1024 threshold. Refresh/removal can
+reorder the list, so this is not an asserted LRU or strict FIFO policy. Actual
+PTE/PFN/pin/DMA ownership remains unchanged; a retirement error permanently
+fails the context, with no recovery or continued execution admitted.
+
+Original movie capture version2 separately records host-QPC draw/present and
+the actual display-owner clock; version1 mixed the original PIT present epoch
+with host draw QPC. Those different epochs must never be subtracted. The
+completed v73 capture has698 uploaded-luma records: distinctive Microsoft
+frames3->298, Artoon1->90 and opening0->187. These identify actual content
+progression, not exact every-frame output or decoder EOS. Its first250s audio
+window completes with zero ingress/timeline overflow; later windows are
+incomplete and provide no audio acceptance. Raw capture proof
+`original-grids-v73.aot-private.json` has SHA256
+`31152f9ceb2f6040ee8fcdb0b2f0feae380bbd7b73277c59a0a963c74bde23f9`.
+
+The v73 process terminates at325.422s with a real host access violation.
+Frozen-executable RVA A92270E resolves to Unicorn `tb_gen_code_x86_64`, writing
+`TranslationBlock.tc.ptr` after `tcg_tb_alloc_x86_64`. This is not a completed
+movie run or a harmless observation timeout. The Windows code-buffer commit
+handler requests4MiB even when fewer reserved bytes remain. The unchanged
+library reproduces this in1/5/8MiB buffers with Windows error487. A default
+copied-source correction clamps the commit to the actual reservation; the
+upstream checkout remains unchanged. Four engine checks pass, including
+nine50,000-block pressure passes, real automatic retirement, explicit flush,
+exact150,000 register/memory contributions per engine and unchanged canaries.
+The final unused guard page retains the engine's existing protection policy.
+Engine proof `unicorn-codebuffer-20261011/qualified-codebuffer.aot-private.json`
+has SHA256 `56df222e792106b493bb7d0670e2450169fd767cabfce35d6e6da9022844c142`.
+
+Ordinary instructions of the retained raw CPU thread now avoid unrelated
+ISR-object scans only at actual passive IRQL0, after returns and selected
+component admission. Kernel/component/checkpoint and raised-IRQL execution
+retain the existing route. A failed IRQL read stops execution. Alias pressure
+and real PIC/IF/inhibition checks still precede admission; decoder instructions,
+FP state, clocks, ownership and scheduling are unchanged.
+
+Rebuilt original and GPU profiles select the same corrected package, whose
+library SHA256 is `b245e0892f39d66dbf31dc0333adb906f79c03b905fa8988f9b7478682ccd40f`.
+Title configuration rejects a stale package before generation. The current
+v75 batch passes88/88 combined and3/3 NV2A bus checks. Root proof
+`original-display-pulse-20261011/qualified-integration-v75.aot-private.json`,
+SHA256 `1972c1d3ffa28c0e56a884d959942e03de17b9376b5128cdfa5901de9dcf7778`,
+binds72 source snapshots, five current selected programs and65 independently
+reverified engine artifacts. A fresh bounded movie observation is separate
+from these fixture passes; its result must establish original completion.
+The specific HLE ring-cycle/stalled-opening issue `.98` is closed; parent `.73`,
+whole scheduling and the movie family remain open.

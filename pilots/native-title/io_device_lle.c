@@ -42,6 +42,19 @@ struct IoMappedPage {uint32_t va,pa;unsigned char *backing;};
 static struct IoMappedPage *mapped;
 static unsigned mapped_capacity;
 static struct {uint32_t va,pa,pins;} published[MAX_PUBLISHED];
+/* Exact-state memo of a successful publication reconciliation. Compare all
+ * directory bytes, every relevant original page-table page and the complete
+ * publication ledger before reusing it. This is not an assumed mutation
+ * epoch: a raw original CPU store through any alias invalidates the memo too.
+ * Index checks still run at every boundary. No guest ownership is cached. */
+static struct {
+    int valid;
+    unsigned publications,tables;
+    unsigned char directory[4096];
+    unsigned char ledger[sizeof(published)];
+    struct {uint32_t pa;unsigned char bytes[4096];} table[1024];
+} publication_memo;
+static uint64_t publication_memo_hits,publication_memo_misses;
 static unsigned mapped_count,published_count;
 static unsigned alias_evictions;
 static int cpu_running,alias_trim_pending;
@@ -128,6 +141,26 @@ static uint32_t clock_initialization_ports[3],clock_initialization_values[3];
 static const int general_regs[]={UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX,
     UC_X86_REG_EBX,UC_X86_REG_ESP,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI};
 static int original_usb_trace_enabled;
+/* Optional cumulative cause diagnostics. Times overlap when a native handoff
+ * invokes an original service; they are not an exclusive CPU-time account.
+ * The default route performs no QPC calls or per-instruction profiling. */
+enum { ORIGINAL_COST_CPU, ORIGINAL_COST_CLOCK, ORIGINAL_COST_PUBLICATION,
+       ORIGINAL_COST_ALIAS, ORIGINAL_COST_HANDOFF, ORIGINAL_COST_CALLBACK,
+       ORIGINAL_COST_COUNT };
+static struct {uint64_t ticks,calls;} original_costs[ORIGINAL_COST_COUNT];
+static uint64_t original_cost_begin(void)
+{
+    LARGE_INTEGER now;
+    return original_usb_trace_enabled && QueryPerformanceCounter(&now)?(uint64_t)now.QuadPart:0;
+}
+static void original_cost_end(unsigned kind,uint64_t start)
+{
+    LARGE_INTEGER now;
+    if(start && QueryPerformanceCounter(&now) && (uint64_t)now.QuadPart>=start) {
+        original_costs[kind].ticks+=(uint64_t)now.QuadPart-start;
+        ++original_costs[kind].calls;
+    }
+}
 static void original_usb_instruction(uc_engine *engine,uint64_t address,uint32_t size,void *data);
 /* Bounded diagnostics for an actual execution guard. They never admit code,
  * change registers or supply a failed access. */
@@ -266,14 +299,28 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
     mapped[mapped_count++]=(struct IoMappedPage){page,pa,backing};
     return true;
 }
-static void trim_aliases(void)
+static void trim_aliases_impl(void)
 {
     if(cpu_running){failure="device LLE alias retirement during CPU execution";return;}
-    while(mapped_count>ALIAS_TRIM_AT/2) {
-        uc_err error=uc_mem_unmap(cpu,mapped[mapped_count-1].va,4096);
+    unsigned retire=mapped_count>ALIAS_TRIM_AT/2?mapped_count-ALIAS_TRIM_AT/2:0;
+    /* Keep recently admitted translations rather than permanently keeping
+     * startup pages and discarding the current decoder's working set. These
+     * are cache entries only; original mapping/ownership bytes stay live. */
+    for(unsigned i=0;i<retire;++i) {
+        uc_err error=uc_mem_unmap(cpu,mapped[i].va,4096);
         if(error){failure=uc_strerror(error);return;}
-        --mapped_count;++alias_evictions;
+        ++alias_evictions;
     }
+    if(retire) {
+        mapped_count-=retire;
+        memmove(mapped,mapped+retire,mapped_count*sizeof(*mapped));
+    }
+}
+static void trim_aliases(void)
+{
+    uint64_t start=original_cost_begin();
+    trim_aliases_impl();
+    original_cost_end(ORIGINAL_COST_ALIAS,start);
 }
 static uc_err owned_cpu_read(uc_engine *engine,uint32_t address,void *buffer,size_t bytes)
 {
@@ -739,7 +786,7 @@ static void release_publication(unsigned i)
     if(!VirtualFree(guest_memory+va,4096,MEM_DECOMMIT))
         failure="device LLE publication release failed";
 }
-static void check_publications(int before_call)
+static void check_publications_impl(int before_call)
 {
     for(unsigned i=0;i<published_count;) {
         uint32_t pa,va=published[i].va;
@@ -785,6 +832,60 @@ static void check_publications(int before_call)
         }
         ++i;
     }
+}
+static int publication_state_unchanged(void)
+{
+    if(!publication_memo.valid || publication_memo.publications!=published_count ||
+       memcmp(publication_memo.ledger,published,published_count*sizeof(published[0])) ||
+       memcmp(publication_memo.directory,physical_backing(0xf000u),4096))return 0;
+    for(unsigned i=0;i<publication_memo.tables;++i)
+        if(memcmp(publication_memo.table[i].bytes,
+                  physical_backing(publication_memo.table[i].pa),4096))return 0;
+    return 1;
+}
+static void publication_state_remember(void)
+{
+    publication_memo.valid=0;publication_memo.tables=0;
+    memcpy(publication_memo.directory,physical_backing(0xf000u),4096);
+    for(unsigned i=0;i<published_count;++i) {
+        uint32_t pde=ram_word(0xf000u+(published[i].va>>22)*4);
+        if(failure)return;
+        if(!(pde&1)){failure="device LLE memo encountered absent published directory";return;}
+        if(pde&128)continue;
+        uint32_t pa=pde&0xfffff000u;
+        if(pa>RAM_BYTES-4096){failure="device LLE memo page table outside RAM";return;}
+        unsigned slot;
+        for(slot=0;slot<publication_memo.tables && publication_memo.table[slot].pa!=pa;++slot){}
+        if(slot<publication_memo.tables)continue;
+        if(slot==1024){failure="device LLE memo page table capacity";return;}
+        publication_memo.table[slot].pa=pa;
+        memcpy(publication_memo.table[slot].bytes,physical_backing(pa),4096);
+        ++publication_memo.tables;
+    }
+    publication_memo.publications=published_count;
+    memcpy(publication_memo.ledger,published,published_count*sizeof(published[0]));
+    publication_memo.valid=1;
+}
+static void check_publications(int before_call)
+{
+    uint64_t start=original_cost_begin();
+    /* Do not skip corruption checks of the independently maintained indices
+     * even when the actual original translation and ownership bytes match. */
+    for(unsigned i=0;i<published_count;++i) {
+        if(publication_by_va[published[i].va/4096]!=i+1 ||
+           publication_by_pa[published[i].pa/4096]!=i+1) {
+            failure="device LLE publication index mismatch";break;
+        }
+    }
+    if(!failure) {
+        if(publication_state_unchanged())++publication_memo_hits;
+        else {
+            ++publication_memo_misses;
+            check_publications_impl(before_call);
+            if(!failure)publication_state_remember();
+        }
+    }
+    original_cost_end(ORIGINAL_COST_PUBLICATION,start);
 }
 static int caller_owned(uint32_t object,uint32_t bytes)
 {
@@ -942,7 +1043,9 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
 #ifdef PILOT_USB_LLE
         device_irq_pending=0;
 #endif
-        pump_original_clock();if(failure)return;
+        uint64_t clock_cost=original_cost_begin();
+        pump_original_clock();
+        original_cost_end(ORIGINAL_COST_CLOCK,clock_cost);if(failure)return;
         original_progress(entry);if(failure)return;
         size_t slice=instruction_limit;
         if(clock_provider) {
@@ -951,7 +1054,9 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
             if(slice>instruction_limit)slice=instruction_limit;
         }
         alias_trim_pending=0;cpu_running=1;
+        uint64_t cpu_cost=original_cost_begin();
         uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,slice);
+        original_cost_end(ORIGINAL_COST_CPU,cpu_cost);
         cpu_running=0;
         if(failure)return;
         if(alias_trim_pending) {
@@ -1073,8 +1178,10 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
         InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
         if(!failure) {
             ReleaseSRWLockExclusive(&lock);
+            uint64_t callback_cost=original_cost_begin();
             const char *callback_error=(is_dpc?dpc_callback:isr_callback)(routine,regs);
             AcquireSRWLockExclusive(&lock);
+            original_cost_end(ORIGINAL_COST_CALLBACK,callback_cost);
             if(callback_error)failure=callback_error;
         }
         error=uc_context_restore(cpu,context);uc_context_free(context);
@@ -1308,6 +1415,14 @@ const char *pilot_io_device_alias_cache_retired(unsigned *retired)
     const char *error=failure;
     if(!error && (!cpu || execution_depth || !retired))error="device LLE alias observation outside idle transport";
     if(!error)*retired=alias_evictions;
+    ReleaseSRWLockExclusive(&lock);return error;
+}
+const char *pilot_io_device_publication_memo_info(uint64_t *hits,uint64_t *misses)
+{
+    if(device_bus_borrow)return "device LLE memo query from device work";
+    AcquireSRWLockExclusive(&lock);
+    const char *error=(!cpu || !hits || !misses)?"device LLE invalid memo query":NULL;
+    if(!error){*hits=publication_memo_hits;*misses=publication_memo_misses;}
     ReleaseSRWLockExclusive(&lock);return error;
 }
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context)

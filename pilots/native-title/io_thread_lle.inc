@@ -143,6 +143,16 @@ static int thread_cpu_admit(uc_engine *engine,uint32_t address)
         else {thread->component_index=component;pending_component=thread;}
         uc_emu_stop(engine);return 1;
     }
+    /* Ordinary passive-level instructions of the retained raw CPU owner
+     * need no ISR-object scan. code_block already checked alias pressure
+     * and real PIC/IF/inhibition; returns and selected helpers stay above.
+     * Checkpoint and raised-IRQL execution retain the callback admission. */
+    if(!thread->in_kernel && !thread->in_component && !thread->in_checkpoint &&
+       address>=0x10000u && address<0x80000000u) {
+        uint32_t irql=kernel_word(0x8003da60u);
+        if(failure){uc_emu_stop(engine);return 1;}
+        if(!(irql&255u))return 1;
+    }
     return 0;
 }
 static void thread_before_call(unsigned ordinal,const uint32_t *args)

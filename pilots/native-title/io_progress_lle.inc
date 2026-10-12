@@ -56,6 +56,18 @@ static void original_progress(uint32_t entry)
         kernel_word(0x8003da60u)&255,(unsigned long long)ticks,(unsigned long long)irq,vector,
         (unsigned long long)(((uint64_t)high<<32)|low),kernel_word(0x8003da8cu),
         kernel_word(0x8003da68u),mapped_count,mapped_capacity,alias_evictions);
+    LARGE_INTEGER frequency;
+    if(QueryPerformanceFrequency(&frequency) && frequency.QuadPart>0) {
+        static const char *names[]={"cpu","clock","publication","alias","handoff","callback"};
+        fprintf(stderr,"[ORIGINAL PROGRESS COST] sample=%u inclusive=1",samples);
+        for(unsigned i=0;i<ORIGINAL_COST_COUNT;++i)
+            fprintf(stderr," %s_ms=%.3f %s_calls=%llu",names[i],
+                (double)original_costs[i].ticks*1000.0/(double)frequency.QuadPart,
+                names[i],(unsigned long long)original_costs[i].calls);
+        fprintf(stderr," memo_hits=%llu memo_misses=%llu publications=%u tables=%u\n",
+            (unsigned long long)publication_memo_hits,(unsigned long long)publication_memo_misses,
+            published_count,publication_memo.tables);
+    }
 #ifdef PILOT_USB_LLE
     pilot_usb_lle_progress(samples);
 #endif

@@ -421,6 +421,16 @@ records are copied into bounded memory; file writing remains off the audio
 processing thread. `XLLE_PILOT_AUDIO_STREAM_PROFILE=1` records actual source
 cursor, queued ownership and PCM updates for diagnosing streaming gaps.
 
+`XLLE_PILOT_AUDIO_CAPTURE_WINDOWS=0:125,205:125,425:110` optionally selects
+up to three finite observations from the audio backend's initialization QPC.
+Each duration remains1..300s; windows must be strictly separated and finish
+within1200s. Explicit windows write `.window1`/`.window2`/`.window3` suffixes;
+the ordinary one-shot filenames remain unchanged. Captures retain actual
+playback/GP state between windows. Late observations snapshot the actual live
+caller rings, and the ingress verifier rejects unknown initialization bytes.
+Capture timing is backend-relative, so a process deadline must also allow
+startup and completed off-thread writing. This diagnostic is disabled by default.
+
 `XLLE_PILOT_MOVIE_CAPTURE=<new file>` records sparse uploaded YUV luma grids
 from successful draws, associated with the next accepted native present.
 Blinx draws its movie into an intermediate render target, so the record keeps
@@ -430,6 +440,13 @@ guest buffer that might already contain the next frame. It requires no GPU
 readback and is bounded to 36000 records; its file handle is process-owned.
 This is diagnostic observation, not a second production decoder. Sparse grids
 do not establish every output pixel or physical scan-out timing.
+
+Native scheduling retains version1 records:14 DWORDs followed by draw QPC,
+present QPC and checkpoint (three uint64 values), then the luma payload.
+Original scheduling uses version2: the same14 DWORDs followed by draw QPC,
+accepted-present observer QPC, checkpoint and the separately owned display
+clock (four uint64 values), then luma. Original PIT display ticks and host QPC
+have different epochs; comparing them directly cannot establish A/V timing.
 
 Independent FFmpeg decoding of the owned SFD inputs yields 302 Microsoft,
 150 Artoon, 2264 opening and 540 title frames. Actual captured opening-movie
