@@ -1874,3 +1874,32 @@ results after gate release instead of claiming equivalent continuation. Default
 HLE failure-state parity, precise original processing state and causal failed
 replacement checks remain required. This is separate from the26 timing/precision
 deferrals, and does not qualify whole audio or require new console probing.
+
+## Native partial-loop ingress provenance - 2026-10-11
+
+The bounded `.113.20` diagnostic now records actual loop start/end and looping/
+playing state in version2 ingress headers under the existing XAudio2 owner lock.
+Live-window and new-buffer snapshots retain actual initialized/caller bytes and
+controls; successful submissions, control changes and lifetime retirement carry
+the same process-global capture ID. Caller writes wrap at capacity. Submission
+verification uses the captured loop span, including prefix/beyond-loop seeks and
+multiple repeats inside one native chunk. Unknown bytes, absent/invalid metadata,
+uncaptured control changes and reuse before retirement are rejected.
+
+The [independent verifier checks](../../tests/test_native_audio_ingress.py) pass
+16 focused cases. One isolated muted backend run completes in3.359s with two
+complete one-second capture windows, zero ingress/timeline overflow and three
+buffer lifetimes, including actual reuse of the same pointer with a new ID.
+Four lifetime/window reports verify71,506 mono PCM16 submitted frames with zero
+byte mismatches. The actual101504-byte ring exercises2432..99072 and offset98784;
+a late snapshot includes a caller write made during the gap. A16-byte loop also
+repeats inside882-byte submissions, and finite mode retains its real tail.
+
+Private frozen evidence is under `build/blinx/audio-loop-provenance-20261011`.
+Removing only the actual loop metadata while retaining literal observed bytes
+reproduces854/92 mismatched bytes in the old capacity-based verifier. Those
+converted captures and historical movie-repeat version1 negatives remain
+excluded; the current verifier refuses to infer their missing controls. Earlier
+build/analysis failures are retained separately. This closes the loop-provenance
+task only: submission is not consumption or speaker correctness, and original
+GP/EP, hardware output, effects-failure semantics and the audio family remain open.

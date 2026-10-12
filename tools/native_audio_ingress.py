@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Inspect a completed opt-in native audio capture and extract one PCM voice.
 
-Checks bytes at submission against the latest caller-written ring. This does
+Checks bytes at submission against the latest caller-written ring and actual
+captured loop controls. Version1 has no loop provenance and is rejected. This does
 not prove consumption, uninterrupted playback, or correct speaker output.
 Buffer identities are process-local capture IDs, not title addresses. Choose
 the relevant lifetime using the file-open and audio timeline observations.
@@ -14,7 +15,29 @@ import struct
 from pathlib import Path
 
 
-HEADER = struct.Struct('<4I3Q6I')
+HEADER = struct.Struct('<4I3Q10I')
+
+
+def submission_ranges(offset, size, capacity, start, end, looping):
+    """Independent byte extents of one actual feeder submission.
+
+    A seek before the loop plays its prefix; a seek beyond its end plays the
+    remaining capacity before entering the loop. Small loops can repeat within
+    one chunk. Caller writes always use capacity, independently of this route.
+    """
+    if not looping:
+        if size > capacity - offset:
+            raise ValueError('finite submission wraps beyond the owned ring')
+        yield offset, size
+        return
+    boundary = end if offset < end else capacity
+    first = min(size, boundary - offset)
+    yield offset, first
+    remaining = size - first
+    while remaining:
+        count = min(remaining, end - start)
+        yield start, count
+        remaining -= count
 
 
 def inspect(capture, log, identity, window=None):
@@ -33,23 +56,57 @@ def inspect(capture, log, identity, window=None):
     shape = None
     submitted = bytearray()
     mismatches = 0
+    pointer_owner = {}
+    ended = set()
+    controls = None
+    last_time = None
     while cursor < len(data):
         if len(data) - cursor < HEADER.size:
             raise ValueError('partial capture header')
+        magic, version, kind, header = struct.unpack_from('<4I', data, cursor)
+        if version == 1:
+            raise ValueError('capture lacks actual loop metadata (version1)')
         (magic, version, kind, header, time, voice, pointer, rate, channels,
-         bits, capacity, offset, size) = HEADER.unpack_from(data, cursor)
-        if (magic != 0x50414c58 or version != 1 or header != HEADER.size or
-                kind not in (1, 2, 3) or not 0 < size <= capacity or
-                not 0 <= offset < capacity or size > len(data) - cursor - header):
+         bits, capacity, offset, size, start, end, looping, playing) = HEADER.unpack_from(data, cursor)
+        if (magic != 0x50414c58 or version != 2 or header != HEADER.size or
+                kind not in (1, 2, 3, 4, 5) or not voice or not pointer or
+                channels not in (1, 2) or bits not in (8, 16) or not 100 <= rate <= 200000 or
+                not capacity or not 0 <= offset < capacity or
+                size > len(data) - cursor - header or
+                (last_time is not None and time < last_time)):
             raise ValueError(f'invalid record at byte {cursor}')
+        last_time = time
+        alignment = channels * (bits // 8)
+        if (capacity % alignment or offset % alignment or size % alignment or
+                not 0 <= start < end <= capacity or start % alignment or end % alignment or
+                looping not in (0, 1) or playing not in (0, 1)):
+            raise ValueError('invalid or unaligned actual loop metadata')
+        if ((kind in (1, 3) and not 0 < size <= capacity) or
+                (kind == 2 and (not 0 < size <= 2048 or not playing)) or
+                (kind in (4, 5) and (size or offset))):
+            raise ValueError('invalid record payload or playback state')
         if kind == 3 and (offset != 0 or size != capacity):
             raise ValueError('initial ring snapshot must cover the complete owned ring')
         payload = data[cursor + header:cursor + header + size]
         cursor += header + size
-        row = inventory.setdefault(voice, dict(id=voice, first_time=time,
-            last_time=time, writes=0, snapshots=0, submissions=0, submitted_bytes=0))
+        if voice in ended:
+            raise ValueError('record follows the retired buffer lifetime')
+        row = inventory.setdefault(voice, dict(id=voice, pointer=pointer, first_time=time,
+            last_time=time, writes=0, snapshots=0, submissions=0, submitted_bytes=0,
+            controls=0, destroys=0, loop_states=[]))
+        if row['pointer'] != pointer:
+            raise ValueError('capture ID changed its owned buffer pointer')
+        if pointer in pointer_owner and pointer_owner[pointer] != voice:
+            raise ValueError('buffer pointer reused before captured lifetime retirement')
+        pointer_owner[pointer] = voice
         row['last_time'] = time
-        row[{1: 'writes', 2: 'submissions', 3: 'snapshots'}[kind]] += 1
+        row[{1: 'writes', 2: 'submissions', 3: 'snapshots', 4: 'controls', 5: 'destroys'}[kind]] += 1
+        state = dict(start=start, end=end, looping=looping, playing=playing)
+        if not row['loop_states'] or row['loop_states'][-1] != state:
+            row['loop_states'].append(state)
+        if kind == 5:
+            ended.add(voice)
+            del pointer_owner[pointer]
         if kind == 2:
             row['submitted_bytes'] += size
         if voice != identity:
@@ -60,8 +117,14 @@ def inspect(capture, log, identity, window=None):
                 raise ValueError('extraction requires aligned mono/stereo PCM16')
             ring = bytearray(capacity)
             known = bytearray(capacity)
-        if shape != (rate, channels, bits, capacity) or size % (2 * channels):
+        if shape != (rate, channels, bits, capacity):
             raise ValueError('voice format changed or payload is not frame aligned')
+        current_controls = (start, end, looping, playing)
+        if controls is not None and current_controls != controls and kind not in (3, 4):
+            raise ValueError('loop/playback controls changed without a captured control record')
+        controls = current_controls
+        if kind in (4, 5):
+            continue
         first = min(size, capacity - offset)
         if kind in (1, 3):
             ring[offset:offset + first] = payload[:first]
@@ -69,16 +132,18 @@ def inspect(capture, log, identity, window=None):
             known[offset:offset + first] = b'\1' * first
             known[:size - first] = b'\1' * (size - first)
         else:
-            if 0 in known[offset:offset + first] + known[:size - first]:
-                raise ValueError('submission contains bytes without captured caller ownership')
-            expected = ring[offset:offset + first] + ring[:size - first]
+            expected = bytearray()
+            for begin, count in submission_ranges(offset, size, capacity, start, end, looping):
+                if 0 in known[begin:begin + count]:
+                    raise ValueError('submission contains bytes without captured caller ownership')
+                expected.extend(ring[begin:begin + count])
             if payload != expected:
                 mismatches += sum(a != b for a, b in zip(payload, expected))
             submitted.extend(payload)
     if shape is None or not submitted:
         raise ValueError(f'voice {identity} has no captured PCM submissions')
     report = dict(capture_sha256=hashlib.sha256(data).hexdigest(),
-        capture_bytes=len(data), capture_window=window, inventory=list(inventory.values()),
+        capture_bytes=len(data), capture_version=2, capture_window=window, inventory=list(inventory.values()),
         selected_id=identity, rate=shape[0], channels=shape[1], bits=shape[2],
         ring_byte_mismatches=mismatches,
         submitted_frames=len(submitted) // (2 * shape[1]),

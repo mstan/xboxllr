@@ -781,6 +781,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME replay_observer_reports
            COMMAND ${Python3_EXECUTABLE}
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_replay_observer_reports.py)
+  add_test(NAME native_audio_ingress
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_audio_ingress.py)
   set(XLLE_PYTHON_GUARD_TESTS
       perf_excl_guards
       dispatch_table_guards

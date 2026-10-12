@@ -205,8 +205,9 @@ struct AudioIngressHeader {
     uint32_t magic,version,kind,header_bytes;
     uint64_t time,id,buffer;
     uint32_t rate,channels,bits,capacity,offset,bytes;
+    uint32_t loop_start,loop_end,looping,playing;
 };
-static_assert(sizeof(AudioIngressHeader)==64,"source capture header layout");
+static_assert(sizeof(AudioIngressHeader)==80,"source capture v2 header layout");
 static BYTE *audio_ingress;
 static constexpr uint32_t audio_ingress_capacity=128*1024*1024;
 static uint32_t audio_ingress_size,audio_ingress_overflow;
@@ -216,10 +217,14 @@ static void audio_ingress_record(Buffer *b,uint32_t kind,uint32_t offset,const v
     if(!audio_ingress)return;
     if(audio_ingress_size>audio_ingress_capacity-sizeof(AudioIngressHeader) ||
         bytes>audio_ingress_capacity-audio_ingress_size-sizeof(AudioIngressHeader)) {++audio_ingress_overflow;return;}
-    AudioIngressHeader h{0x50414c58,1,kind,sizeof(AudioIngressHeader),capture_clock(),b->capture_id,
-        (uint64_t)(uintptr_t)b,b->frequency,b->channels,b->align/b->channels*8,b->bytes,offset,bytes};
+    /* Every record carries actual controls from this same locked owner. Caller
+     * writes wrap at capacity; successfully queued PCM wraps at loop_end/start
+     * only when looping. Kind4 is a control observation; kind5 retires the ID. */
+    AudioIngressHeader h{0x50414c58,2,kind,sizeof(AudioIngressHeader),capture_clock(),b->capture_id,
+        (uint64_t)(uintptr_t)b,b->frequency,b->channels,b->align/b->channels*8,b->bytes,offset,bytes,
+        b->loop_start,b->loop_end,b->looping?1u:0u,b->playing?1u:0u};
     memcpy(audio_ingress+audio_ingress_size,&h,sizeof(h));audio_ingress_size+=sizeof(h);
-    memcpy(audio_ingress+audio_ingress_size,data,bytes);audio_ingress_size+=bytes;
+    if(bytes)memcpy(audio_ingress+audio_ingress_size,data,bytes);audio_ingress_size+=bytes;
 }
 static void audio_stream_record(Buffer *b,const char *operation,UINT32 offset=0,UINT32 bytes=0)
 {
@@ -562,7 +567,7 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
 void pilot_audio_buffer_destroy(void *opaque)
 {
     auto *b=static_cast<Buffer*>(opaque);if(!b)return;
-    {Guard guard;audio_stream_record(b,"destroy");for(auto &p:buffers)if(p==b)p=nullptr;}
+    {Guard guard;audio_stream_record(b,"destroy");audio_ingress_record(b,5,0,nullptr,0);for(auto &p:buffers)if(p==b)p=nullptr;}
     b->voice->DestroyVoice();delete[] b->data;delete b;
 }
 int32_t pilot_audio_buffer_copy(void *opaque,uint32_t offset,void *data,uint32_t bytes,int readback)
@@ -580,7 +585,7 @@ static HRESULT seek(Buffer *b,UINT32 at,bool play);
 static XAUDIO2_VOICE_STATE refresh(Buffer *b)
 {
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
-    if(b->playing && b->submitted_end && !s.BuffersQueued){b->playing=false;b->origin=b->next=0;b->baseline=s.SamplesPlayed;b->submitted_end=false;}
+    if(b->playing && b->submitted_end && !s.BuffersQueued){b->playing=false;b->origin=b->next=0;b->baseline=s.SamplesPlayed;b->submitted_end=false;audio_ingress_record(b,4,0,nullptr,0);}
     return s;
 }
 int32_t pilot_audio_buffer_play(void *opaque,int looping)
@@ -589,7 +594,8 @@ int32_t pilot_audio_buffer_play(void *opaque,int looping)
     refresh(b);
     if(b->playing && b->looping!=!!looping){UINT32 at=position(b);b->looping=!!looping;return seek(b,at,true);}
     b->looping=!!looping;b->playing=true;
-    HRESULT hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();if(FAILED(hr))b->playing=false;
+    audio_ingress_record(b,4,0,nullptr,0);
+    HRESULT hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();if(FAILED(hr)){b->playing=false;audio_ingress_record(b,4,0,nullptr,0);}
     audio_stream_record(b,"play");
     SetEvent(wake);return hr;
 }
@@ -599,6 +605,7 @@ static HRESULT seek(Buffer *b,UINT32 at,bool play)
     if(FAILED(hr))return hr;
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
     b->origin=b->next=at;b->baseline=s.SamplesPlayed;b->submitted_end=false;b->playing=play;
+    audio_ingress_record(b,4,0,nullptr,0);
     if(play){hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();SetEvent(wake);}
     audio_stream_record(b,play?"seek-playing":"seek-stopped",at);
     return hr;
@@ -623,6 +630,7 @@ int32_t pilot_audio_buffer_loop_region(void *opaque,uint32_t start,uint32_t byte
     if(bytes>b->bytes-start || bytes%b->align)return E_INVALIDARG;
     Guard guard;UINT32 at=position(b);
     b->loop_start=start;b->loop_end=start+bytes;
+    audio_ingress_record(b,4,0,nullptr,0);
     /* Rebuild queued owned PCM at the actual device cursor; no elapsed-time
      * completion. This extends the donor's loop-start/span model to loop end. */
     return seek(b,at,b->playing);
@@ -634,5 +642,5 @@ int32_t pilot_audio_buffer_frequency(void *opaque,uint32_t frequency)
     auto *b=static_cast<Buffer*>(opaque);if(!frequency)frequency=b->rate;
     if(frequency<100 || frequency>200000)return E_INVALIDARG;Guard guard;
     HRESULT hr=b->voice->SetFrequencyRatio(frequency/48000.0f);
-    if(SUCCEEDED(hr)){b->frequency=frequency;SetEvent(wake);}return hr;
+    if(SUCCEEDED(hr)){b->frequency=frequency;audio_ingress_record(b,4,0,nullptr,0);SetEvent(wake);}return hr;
 }
