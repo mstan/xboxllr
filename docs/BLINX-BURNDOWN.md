@@ -44,8 +44,16 @@ to independently established original packed pitch-501; the failed nominal
 comparison is retained. At first-demo startup, model133.43s, the title then
 self-returned2 after3773.188 wall seconds on the real guest-call-frame handoff
 guard (ordinal166, entries0). Its78 finalized artifacts and zero-error capture
-are verified. No title/waiter is running; a short causal scheduling reproducer
-and fix precede the next changed generation. Fixed encoder-read
+are verified. A one-second CPU fixture reproduced the same guard, and
+`30a6be6` fixes selected workers' contiguous-service transport while preserving
+the root-only guard. Seven focused checks pass across three real original CPU
+lifetimes. Changed generation v7 is now running muted/invisible, with seven
+affected checks and the actual configuration fixture passing before launch.
+Its source/input/executable snapshot is frozen; one final analyzer runs after
+the batch. Analyzer `2075d64` retains any later diagnostic opening without
+substituting it for the required two natural and one interrupted lifetimes;
+12 analyzer controls pass with target acceptance gates unchanged. Movies and
+scheduling remain open pending this full title observation. Fixed encoder-read
 preparation `.111.1` is also root-reviewed and closed, with11 focused controls
 and182 suite passes/3 existing optional skips; actual startup is unresolved.
 G03 now has
