@@ -174,6 +174,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_component_vm_contract_test.inc"
 #include "thread_component_pool_contract_test.inc"
 #include "thread_component_physical_owner_contract_test.inc"
+#include "thread_component_contiguous_contract_test.inc"
 #include "thread_component_long_owner_contract_test.inc"
 #include "thread_component_wait_contract_test.inc"
 #if defined(PILOT_FILES_LLE) && defined(PILOT_SCHEDULING_LLE)
@@ -791,6 +792,11 @@ int main(int argc,char **argv)
             CHECK(argc==2);test_thread_component_long_owner_lle(!strcmp(argv[1],"thread-component-long-owner-before-lle")?1:
                 !strcmp(argv[1],"thread-component-long-owner-unclocked-guard-lle")?2:0);return 0;
         }
+#ifdef PILOT_SCHEDULING_LLE
+        if(!strcmp(argv[1],"thread-component-contiguous-lle") || !strcmp(argv[1],"thread-component-contiguous-root-guard-lle")) {
+            CHECK(argc==2);test_thread_component_contiguous_lle(!strcmp(argv[1],"thread-component-contiguous-root-guard-lle"));return 0;
+        }
+#endif
         if(!strncmp(argv[1],"thread-component-physical-",26)) {
             CHECK(argc==2);int kind=!strcmp(argv[1],"thread-component-physical-owner-lle")?0:
                 !strcmp(argv[1],"thread-component-physical-free-guard-lle")?1:

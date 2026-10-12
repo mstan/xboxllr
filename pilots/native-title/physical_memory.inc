@@ -12,6 +12,18 @@ static struct PhysicalAllocation physical_allocations[256];
 static uint16_t physical_protection[64*1024*1024/4096];
 static uint8_t physical_persistent[64*1024*1024/4096];
 static uint32_t av_saved_data;
+#ifdef PILOT_USB_LLE
+static const char *physical_original_call(unsigned ordinal,const uint32_t *args,uint32_t *result)
+{
+    /* Whole native components retain their executing original thread. Their
+     * kernel calls use that worker's leased stack and real CALL/RET transport,
+     * including the existing contiguous publication and lifetime hooks. The
+     * root-service API must keep rejecting native workers without that frame. */
+    if(pilot_io_device_thread_component_active())
+        return pilot_io_device_thread_component_call(ordinal,args,result);
+    return pilot_io_device_lle(ordinal,memory,args,result);
+}
+#endif
 static struct PhysicalAllocation *physical_find(uint32_t address,uint32_t bytes)
 {
     for(unsigned i=0;i<256;++i) {
@@ -40,7 +52,7 @@ static uint32_t physical_allocate(uint32_t length,uint32_t low,uint32_t high,uin
      * the same original kernel that owns page translation, rather than asking
      * its captured PTEs to describe an unrelated native allocation. */
     uint32_t args[]={length,low,high,alignment,protect},base=0;
-    const char *error=pilot_io_device_lle(166,memory,args,&base);
+    const char *error=physical_original_call(166,args,&base);
     if(error)stop(error,166);
     if(!base)goto done;
 #else
@@ -75,7 +87,7 @@ static void physical_free(uint32_t base)
     if(a->borrowers)stop("contiguous allocation still owns registered resources",base);
 #ifdef PILOT_USB_LLE
     uint32_t result=0;
-    const char *error=pilot_io_device_lle(171,memory,&base,&result);
+    const char *error=physical_original_call(171,&base,&result);
     if(error)stop(error,171);
 #else
     if(!VirtualFree(memory+base,a->bytes,MEM_DECOMMIT))stop("contiguous release failed",base);
@@ -95,7 +107,7 @@ static void physical_persist(uint32_t base,uint32_t bytes,int persist)
     if(!physical_find(low,(uint32_t)(end-low)))stop("persistence requires owned contiguous pages",base);
 #ifdef PILOT_USB_LLE
     uint32_t args[]={base,bytes,(uint32_t)!!persist},result=0;
-    const char *error=pilot_io_device_lle(178,memory,args,&result);
+    const char *error=physical_original_call(178,args,&result);
     if(error)stop(error,178);
 #endif
     memset(physical_persistent+(low&0x0fffffff)/4096,!!persist,(size_t)((end-low)/4096));
@@ -114,7 +126,7 @@ static void physical_protect(uint32_t base,uint32_t size,uint32_t protect)
     if(!physical_find(low,(uint32_t)(end-low)))stop("protection requires owned contiguous pages",base);
 #ifdef PILOT_USB_LLE
     uint32_t args[]={base,size,protect},result=0;
-    const char *error=pilot_io_device_lle(182,memory,args,&result);
+    const char *error=physical_original_call(182,args,&result);
     if(error)stop(error,182);
 #endif
     DWORD old;
@@ -134,7 +146,7 @@ static uint32_t physical_query_protection(uint32_t address)
     if(info.Protect!=(protect&6))stop("contiguous protection ownership mismatch",address);
 #ifdef PILOT_USB_LLE
     uint32_t original=0;
-    const char *error=pilot_io_device_lle(179,memory,&address,&original);
+    const char *error=physical_original_call(179,&address,&original);
     if(error)stop(error,179);
     if(original!=protect)stop("original contiguous protection differs from published policy",address);
     protect=original;
@@ -147,7 +159,7 @@ static void physical_kernel(unsigned ordinal)
 #ifdef PILOT_USB_LLE
     if(ordinal==1 || ordinal==4) {
         uint32_t original=0;
-        const char *error=pilot_io_device_lle(ordinal,memory,&first,&original);
+        const char *error=physical_original_call(ordinal,&first,&original);
         if(error)stop(error,ordinal);
         av_saved_data=original;g_eax=original;g_esp+=ordinal==1?4:8;return;
     }
@@ -166,7 +178,7 @@ static void physical_kernel(unsigned ordinal)
         g_eax=a->bytes;
 #ifdef PILOT_USB_LLE
         uint32_t original=0;
-        const char *error=pilot_io_device_lle(180,memory,&first,&original);
+        const char *error=physical_original_call(180,&first,&original);
         if(error)stop(error,180);
         if(original!=a->bytes)stop("original contiguous size differs from owned extent",first);
         g_eax=original;

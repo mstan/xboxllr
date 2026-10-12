@@ -79,6 +79,9 @@ if(PILOT_FILES STREQUAL "LLE")
     # same authored fixtures separately with the title's original selection;
     # inherit its other family dependencies once, at generation time.
     add_executable(pilot_callback_kernel_lle_test runtime_contract_test.c)
+    pilot_add_test(NAME pilot_component_contiguous_lle COMMAND pilot_callback_kernel_lle_test thread-component-contiguous-lle)
+    pilot_add_test(NAME pilot_component_contiguous_root_guard_lle COMMAND pilot_callback_kernel_lle_test thread-component-contiguous-root-guard-lle)
+    set_tests_properties(pilot_component_contiguous_lle pilot_component_contiguous_root_guard_lle PROPERTIES TIMEOUT 30)
     pilot_add_test(NAME pilot_callback_delay_cpu_lle COMMAND pilot_callback_kernel_lle_test thread-delay-cpu-lle)
     set_tests_properties(pilot_callback_delay_cpu_lle PROPERTIES TIMEOUT 30)
     pilot_add_test(NAME pilot_callback_priority_cpu_lle COMMAND pilot_callback_kernel_lle_test thread-priority-cpu-lle)
