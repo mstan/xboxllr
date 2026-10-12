@@ -229,6 +229,17 @@ pending packets. Calling that producer on an invented driver object would not
 establish the title's reached contract. No new title run is warranted before
 the earlier startup dependency changes.
 
+First-context capture preparation is now root-reviewed. Ten authored controls
+cover complete storage, queued/unread packets, actual return/frame provenance,
+incomplete observations and the retained selector guard. The private const-owner
+snapshot candidate is not compiled or integrated; the current DLL lacks its
+export and the current CPU hooks expose only scalar context. The next bounded
+task implements and compiles those passive receivers in an isolated build,
+without a title or hardware run. Preparation proof
+`graphics-startup-consumer-20261012/first-context-capture-preparation/root-review/accepted-preparation.aot-private.json`,
+SHA256 `0672fd9489899e6a87fcf51a295244b62d4655aedaa88ac47d6b3753017837e2`.
+This accepts capture preparation, not a reached image or PGRAPH transfer.
+
 Already proven, do not rerun for bookkeeping: actual blocked BlockOnFence and
 full64-slot capacity, original KWAIT/compute-peer progress, real callback FIFO,
 GPU bytes and cleanup across three CPU/GPU lives. Retained66-check proof and
