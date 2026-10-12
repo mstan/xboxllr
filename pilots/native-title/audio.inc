@@ -18,6 +18,9 @@ static void audio_effects_free(void)
 }
 #endif
 static SRWLOCK audio_lock=SRWLOCK_INIT;
+#ifdef PILOT_AUDIO_REFERENCE
+#include "audio_reference_clock.inc"
+#endif
 #ifdef PILOT_SCHEDULING_LLE
 /* Original threads serialize before any host audio/VM lock. The backend's
  * completion callbacks consume host-owned storage and never enter this gate. */
@@ -82,6 +85,9 @@ static uint32_t audio_ref(uint32_t base,int acquire)
         if(b->owned){uint32_t bytes=0;if(vm_free(&b->data,&bytes,MEM_RELEASE))stop("audio data release failed",base);}
         pool_free(base);memset(b,0,sizeof(*b));audio_ref(audio_device,0);
     } else {
+#ifdef PILOT_AUDIO_REFERENCE
+        audio_reference_clock_close();
+#endif
         pilot_audio_close();
 #ifdef PILOT_AUDIO_DSP
         audio_effects_free();
@@ -300,11 +306,20 @@ void pilot_audio_dispatch(unsigned entry)
             if(!base)result=(int32_t)0x8007000e;
             else {
                 result=pilot_audio_open();
+#ifdef PILOT_AUDIO_REFERENCE
+                if(result>=0)audio_reference_clock_open();
+#endif
                 if(result<0)pool_free(base);
                 else {audio_device=base;memset(memory+base,0,44);MEM32(base)=PILOT_AUDIO_DEVICE_VTABLE;MEM32(base+4)=1;}
             }
         }
-        if(result>=0){MEM32(a[1])=audio_device+8;fprintf(stderr,"[AUDIO DEVICE] real native output; 48000 Hz stereo PCM\n");}
+        if(result>=0){MEM32(a[1])=audio_device+8;
+#ifdef PILOT_AUDIO_REFERENCE
+            fprintf(stderr,"[AUDIO DEVICE] caller-driven reference APU/GP; 48000 Hz software output\n");
+#else
+            fprintf(stderr,"[AUDIO DEVICE] real native output; 48000 Hz stereo PCM\n");
+#endif
+        }
     } else if(entry==PILOT_AUDIO_IDirectSound_Release) {
         audio_device_check(a[0]);result=audio_ref(audio_device,0);
     } else if(entry==PILOT_AUDIO_ObjectAddRef)result=audio_ref(a[0],1);

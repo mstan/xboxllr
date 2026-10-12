@@ -3,7 +3,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Native OS audio engine. All failures propagate; no silent clock/output fallback. */
+/* Build-selected audio transport. All failures propagate; no silent clock/output fallback. */
 int32_t pilot_audio_open(void);
 void pilot_audio_close(void);
 int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate,unsigned bits,void **out);
@@ -13,7 +13,7 @@ int32_t pilot_audio_buffer_play(void *buffer,int looping);
 #ifdef PILOT_AUDIO_DSP
 int32_t pilot_audio_buffer_loop_region(void *buffer,uint32_t start,uint32_t bytes);
 int32_t pilot_audio_buffer_mixbins(void *buffer,unsigned count,const uint32_t *bins,const int32_t *volumes);
-/* Diagnostic tap of the real XAudio2 mixer input (32 channels) or GP output
+/* Diagnostic tap of actual mixer input (32 channels) or GP output
  * (6 channels). Caller owns storage until end; production never enables it. */
 int32_t pilot_audio_capture_begin(float *samples,uint32_t frames,int after_effects);
 uint32_t pilot_audio_capture_end(void);

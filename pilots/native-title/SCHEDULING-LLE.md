@@ -2341,3 +2341,36 @@ and excluded. Native compute handoffs, ordinary movie controls and runtime
 capture ownership still require composition. No full-title or movie acceptance
 is inferred from these fixture passes. See the
 [reference consumer foundation](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#controlled-reference-clock-and-audio-consumer-foundation---2026-10-11).
+
+## Maintained reference runtime and controlled compute - 2026-10-11
+
+The statically selected `APU_REFERENCE` pilot now connects the stopped original
+controller to the maintained common clock and actual software APU/DSP consumer.
+Controlled native compute requests its next certified checkpoint before resuming;
+host waits cannot create input opportunities. The original PC, all eight GPRs,
+flags and FP continuation stay owned by the existing transport. Fast/delayed
+compute lifetimes match15/38 input steps,1,971/4,271 observed blocks and838/2,733
+checkpoints, including both original CLI windows. Seven affected clock/compute
+checks pass. The maintained common-clock fixture emits identical1,680-frame
+idle and2,544-frame compute output/source/carry state with different host delays.
+
+USB SOF and XGSCNT use reference PIT time in this selection. The actual runtime
+fixture holds them unchanged through a host stall and repeated MMIO reads, then
+advances one OHCI frame and48 samples on one admitted millisecond. Current20
+focused profile checks pass in4.13s; the strengthened SOF check passes separately.
+Capture integration subsequently passes both affected runtime/consumer checks.
+The external100-block fixture schedule is not a CPU-cycle or TSC model. The first
+full-title generation selected an explicit8,000-block schedule separately; no
+time is derived from producer writes or readiness. That generation is now excluded
+after its captured prefix established audio rereads and content/device-time drift.
+Slow host execution is expected; qualification requires appropriate relative
+original execution and device timing. No idle-loop acceleration is required.
+Native HLE retains its existing performance path.
+
+An original VM call may retain the audio owner while waiting on an actual kernel
+critical section. Input admission waits for a consistent unlocked boundary and
+stops after2,000,000 further observed blocks if that owner remains retained.
+Clock-dependent MM contention has not been established or qualified; this guard
+does not fabricate a wait result. Whole title/movie acceptance remains open.
+Evidence is under `build/blinx/reference-clock-maintained-20261011` and the
+current immutable run under `build/blinx/reference-movie-batch-20261011`.

@@ -426,3 +426,71 @@ and binds290 verified identities. This is an executed composition foundation,
 not full-title acceptance. The movie's ordinary controls, runtime input/capture
 integration and complete original lifecycle remain required. Default HLE is
 unchanged; movies remain open at4/9 families with26 precision deferrals.
+
+## Maintained reference consumer and bounded capture - 2026-10-11
+
+The private pilot can now select `APU_REFERENCE` at build time with original
+scheduling and an explicitly specified external block schedule. Its software
+consumer retains actual maintained APU source DMA, persistent rate conversion,
+2D routing/packed attenuation and original installed GP processing. It creates
+no host audio device or independent clock thread. The default HLE path keeps
+its existing live consumer. Reference Stop/resume preserves fetched history;
+explicit Seek admits a clean binding. Dirty pitch/loop changes and natural finite
+completion positions remain guarded rather than silently guessed. The current
+movie uses separately qualified ordinary clean setup and looping controls.
+
+The maintained common-clock module advances actual consumer frames before
+publishing PIT input. Consumer detach/reopen retains device time while discarding
+retired audio state. Original idle/compute compositions match actual source/DSP
+state across fast and delayed host execution, and20 focused profile checks pass.
+Reference USB SOF and XGSCNT now share that same PIT input. The final runtime
+fixture verifies a host stall leaves them unchanged and one admitted millisecond
+advances one real OHCI frame and48 samples. This does not establish silicon
+cadence or resolve the separately open canonical TSC policy.
+
+`XLLE_PILOT_REFERENCE_CAPTURE` optionally records actual initialized rings,
+caller writes, source DMA bytes, Play/Stop/Seek/destruction and six-channel GP
+output. Each engine carries its actual PIT attach epoch; QPC observation stamps
+stay separate. Capture is bounded to300 emitted seconds and128MiB of records;
+overflow/I/O failure stops the generation. The independent
+[reference verifier](../tools/native_audio_reference_capture.py) rejects missing
+lifetimes/bytes and partial records. Six actual-consumer/negative checks pass:
+two96-frame engines, independently expected mixed output, exact source bytes,
+empty-engine silence, missing snapshot, truncation and a changed caller byte.
+Both affected maintained runtime/consumer tests then pass in0.422s.
+
+The first immutable full-title run used an8,000-block external schedule, chosen
+separately from the100-block authored unit fixture. It captured original movie
+grids and actual consumer output in one pass. The earlier35s100-block startup
+check stops at its observation deadline without a fault or guard; it is not full
+movie evidence. Private artifacts are under
+`build/blinx/reference-clock-maintained-20261011` and
+`build/blinx/reference-movie-batch-20261011`. Final picture, natural retirement,
+title transition, reuse and interruption on this reference selection remain
+required. The current HLE opening/repeat/interruption proof is reused unchanged.
+
+Independent audio diagnostic `.113.20` is now closed at commit `aba91ea`:
+16 verifier checks and an isolated actual3.359s capture verify71,506 submitted
+frames across three buffer lifetimes without mismatches. Its observed loop
+metadata fixes the old capacity-only diagnostic interpretation, with missing
+metadata still rejected. This is not whole-audio or whole-movie closure.
+
+The8,000-block generation `c8000-v1` was deliberately stopped after691.688s host
+time. It has no successful capture finalization and is excluded from movie
+acceptance. Its complete captured prefix shows opening footage advancing23.091s
+while simulated PIT time advances37.479s; the corresponding host interval is
+218.054s. Exact source-DMA comparison has zero ring-byte mismatches, but the
+opening voice rereads3,222,016 of9,943,936 bytes before another caller write
+(32.4%). Microsoft also rereads19.9%; Artoon has no repeated-before-write bytes
+in that prefix. These are prefetch witnesses, not speaker retirement timestamps.
+
+This distinguishes expected slow host execution from an unsuitable relative
+CPU/device input schedule. Increasing host speed is not the remedy or a
+qualification requirement. Keep original execution and a common stopped device
+timeline, give the original work a conservative external execution budget, and
+accept longer host runtimes. Do not advance time based on audio writes or hide
+repeated data. The explicit schedule still makes no hardware CPU-cycle/TSC claim.
+No idle-loop acceleration is required for this qualification. Complete original
+movie lifecycle acceptance remains open; existing successful HLE playback is
+unchanged. Prefix feedback is retained under `c8000-v1/preview-first` and
+`c8000-v1/preview-audio-first`.

@@ -42,6 +42,9 @@ static void scheduling_lle_run(void)
 {
     const char *clock_error=pilot_io_device_clock_start();
     if(clock_error)stop(clock_error,0);
+#ifdef PILOT_AUDIO_REFERENCE
+    audio_reference_clock_start();
+#endif
     clock_error=pilot_io_device_sections_start();
     if(clock_error)stop(clock_error,327);
 #if defined(PILOT_D3D_NATIVE) && !defined(PILOT_DISPLAY_LLE)

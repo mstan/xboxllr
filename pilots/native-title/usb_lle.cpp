@@ -55,10 +55,14 @@ bool caps_bound;
 uint64_t output_reports,input_reports;
 uint64_t clock_ms()
 {
+#ifdef PILOT_USB_REFERENCE_CLOCK
+    return pit_ticks/1125;
+#else
     LARGE_INTEGER now,frequency;
     QueryPerformanceCounter(&now);QueryPerformanceFrequency(&frequency);
     return (uint64_t)(now.QuadPart/frequency.QuadPart)*1000+
         (uint64_t)(now.QuadPart%frequency.QuadPart)*1000/frequency.QuadPart;
+#endif
 }
 void advance()
 {
@@ -318,8 +322,14 @@ extern "C" const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t 
     /* XGSCNT is used by the original USB DPC for sample/frame synchronization.
      * Share the LLE counter contract without importing an entire APU backend. */
     if(address==0xfe80200cu && !write) {
+#ifdef PILOT_USB_REFERENCE_CLOCK
+        AcquireSRWLockShared(&usb_lock);
+        *value=xlle::apu_sample_counter(pit_ticks,1125000);
+        ReleaseSRWLockShared(&usb_lock);
+#else
         LARGE_INTEGER now,frequency;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&frequency);
         *value=xlle::apu_sample_counter((uint64_t)now.QuadPart,(uint64_t)frequency.QuadPart);
+#endif
         return nullptr;
     }
     AcquireSRWLockExclusive(&usb_lock);

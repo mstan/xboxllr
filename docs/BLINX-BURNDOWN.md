@@ -2,6 +2,25 @@
 
 ## LLE contract hardening burndown - 2026-10-08
 
+**Current reference-movie continuation, 2026-10-11:** the maintained caller-driven
+APU/DSP selection now shares controlled PIT time with original scheduling,
+display, USB SOF and XGSCNT. Twenty focused profile checks, strengthened SOF
+coverage, fast/delayed original idle/compute output comparisons and six bounded
+capture/negative checks pass. The first immutable original title batch was stopped
+after its trace established source rereads before new caller writes: the explicit
+8,000-block input schedule advances simulated device time too far for the game
+work it admits. Host execution speed is not the acceptance criterion. Correct
+relative execution/device timing and full original movie completion/reuse/
+interruption remain open. Existing default-HLE full movie
+proof is reused. Independent audio loop-span provenance `.113.20` is closed at
+`aba91ea` after16 checks and71,506 actual submitted frames with zero mismatches.
+Audio effects failure guard `.113.19` is closed at `ed7b716`: three genuine
+original allocation failures, two causal native failure guards, unchanged
+successful replacement logs and four maintained audio checks pass. Continued-call
+failure parity remains explicitly unsupported under that issue's guard scope.
+The whole-family count remains **4/9**, with **26 precision deferrals**. See the
+[reference runtime and capture scope](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#maintained-reference-consumer-and-bounded-capture---2026-10-11).
+
 Tracked in `beads-xbox.1.102`; baseline is the committed working attract
 milestone below. Follow [recomp-template HLE.md](../../../recomp-template/HLE.md)
 verbatim: LLE is the maintained correctness foundation; HLE is its performance

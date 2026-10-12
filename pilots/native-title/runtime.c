@@ -97,6 +97,11 @@ static SRWLOCK critical_lock=SRWLOCK_INIT;
 
 __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 {
+#ifdef PILOT_AUDIO_REFERENCE
+    /* Preserve failed observations without acquiring a suspended owner lock. */
+    extern int32_t reference_capture_finish(void);
+    reference_capture_finish();
+#endif
     fprintf(stderr, "[PILOT STOP] %s at %08x; entries=%llu esp=%08x\n",
             reason, va, (unsigned long long)entries, g_esp);
     fprintf(stderr, "[RECENT] oldest to newest:");
@@ -109,6 +114,9 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 }
 
 #include "thread_affinity.inc"
+#ifdef PILOT_AUDIO_REFERENCE
+static void audio_reference_clock_start(void);
+#endif
 #ifdef PILOT_USB_LLE
 #include "io_device_lle.h"
 #include "usb_lle.h"

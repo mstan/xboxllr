@@ -1,6 +1,9 @@
 static struct ThreadIdleClock {uint64_t origin,base,samples;} thread_idle_clock;
 static uint64_t thread_idle_elapsed;
 static int thread_idle_runtime_clock;
+#ifdef PILOT_AUDIO_REFERENCE
+static void (*thread_idle_reference_open)(void);
+#endif
 static unsigned thread_idle_fw_high,thread_idle_fw_low;
 static const char *test_thread_idle_board_port(uint16_t port,int size,int write,uint32_t *value)
 {
@@ -88,9 +91,12 @@ static void test_thread_idle_clock_lle(void)
         const char *error=pilot_io_device_clock_start();
         if(error)fprintf(stderr,"[RUNTIME CLOCK FAILURE] %s\n",error);
         CHECK(!error);
+#ifdef PILOT_AUDIO_REFERENCE
+        if(thread_idle_runtime_clock==4)audio_reference_clock_start();
+#endif
     }
     uint64_t next=0;CHECK(!pilot_usb_pit_clock(&thread_idle_clock.base,&next) && next>thread_idle_clock.base);
-    if(thread_idle_runtime_clock>=2) {
+    if(thread_idle_runtime_clock==2 || thread_idle_runtime_clock==3) {
         controlled_clock_ticks=thread_idle_clock.base;
         uint64_t first=0,second=0;
         CHECK(!test_thread_controlled_clock_input(NULL,&first));Sleep(40);
@@ -101,11 +107,14 @@ static void test_thread_idle_clock_lle(void)
         thread_idle_clock.origin=dispatch_monotonic();
         CHECK(!pilot_io_device_clock_bind(test_thread_idle_clock_input,&thread_idle_clock));
     }
+#ifdef PILOT_AUDIO_REFERENCE
+    if(thread_idle_runtime_clock==4){CHECK(thread_idle_reference_open);thread_idle_reference_open();}
+#endif
     uint32_t join[]={object,0,0,0,0};CHECK(!event_lle_call(159,join));
     CHECK(!pilot_io_device_clock_bind(NULL,NULL));
     uint64_t final_ticks=0;CHECK(!pilot_usb_pit_clock(&final_ticks,&next) && final_ticks>thread_idle_clock.base);
     CHECK((thread_idle_runtime_clock || thread_idle_clock.samples>1) && thread_idle_elapsed>=330000);
-    if(thread_idle_runtime_clock>=2) {
+    if(thread_idle_runtime_clock==2 || thread_idle_runtime_clock==3) {
         CHECK(controlled_clock_steps>33 && controlled_clock_steps<=100);
         CHECK(final_ticks==controlled_clock_ticks && controlled_clock_reads>controlled_clock_steps);
         CHECK(thread_idle_elapsed<=1000000);

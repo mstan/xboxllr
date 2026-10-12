@@ -90,7 +90,11 @@ static void test_thread_compute_clock_lle(void)
         }
         uint64_t next=0;CHECK(!pilot_usb_pit_clock(&thread_idle_clock.base,&next));
         thread_idle_clock.origin=dispatch_monotonic();thread_idle_clock.samples=0;
-        CHECK(!pilot_io_device_clock_bind(test_thread_idle_clock_input,&thread_idle_clock));
+        if(thread_idle_runtime_clock>=2) {
+            controlled_clock_ticks=thread_idle_clock.base;controlled_clock_blocks=0;
+            controlled_clock_steps=controlled_clock_reads=controlled_clock_stalls=0;
+            CHECK(!pilot_io_device_clock_bind_step(test_thread_controlled_clock_input,NULL,test_thread_controlled_clock_step));
+        } else CHECK(!pilot_io_device_clock_bind(test_thread_idle_clock_input,&thread_idle_clock));
         for(unsigned id=0;id<2;++id) {
             uint32_t join[]={objects[id],0,0,0,0};CHECK(!event_lle_call(159,join));
             CHECK(!event_lle_call(187,handles+id));event_lle_call(250,objects+id);
@@ -98,6 +102,13 @@ static void test_thread_compute_clock_lle(void)
         CHECK(!pilot_io_device_clock_bind(NULL,NULL));CHECK(!event_lle_call(187,&event));
         CHECK(thread_compute_elapsed>=(lifetime?330000u:100000u));
         CHECK(thread_compute_checks && thread_compute_cli_checks==(lifetime?2u:0u));
+        if(thread_idle_runtime_clock>=2) {
+            CHECK(controlled_clock_steps && controlled_clock_steps<100);
+            CHECK(controlled_clock_stalls==(thread_idle_runtime_clock==3?controlled_clock_steps:0));
+            fprintf(stderr,"[CONTROLLED COMPUTE] lifetime=%u steps=%u blocks=%llu checks=%u CLI=%u elapsed=%llu; host-independent checkpoint opportunities\n",
+                lifetime,controlled_clock_steps,(unsigned long long)controlled_clock_blocks,thread_compute_checks,
+                thread_compute_cli_checks,(unsigned long long)thread_compute_elapsed);
+        }
         fprintf(stderr,"PASS: original compute clock lifetime=%u checkpoints=%u CLI=%u elapsed=%llu; exact PC/eight GPRs/EFLAGS retained across IRQ0 and higher-priority peer\n",
             lifetime,thread_compute_checks,thread_compute_cli_checks,(unsigned long long)thread_compute_elapsed);
     }

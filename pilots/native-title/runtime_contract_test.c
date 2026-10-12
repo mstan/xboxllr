@@ -204,6 +204,9 @@ static int test_write_faults(uint32_t va)
 #include "memory_statistics_contract_test.inc"
 #ifdef PILOT_AUDIO_NATIVE
 #include "audio_contract_test.inc"
+#ifdef PILOT_AUDIO_REFERENCE
+#include "audio_reference_runtime_contract_test.inc"
+#endif
 #include "audio_mix_contract_test.inc"
 #include "audio_detach_contract_test.inc"
 #include "audio_adpcm_contract_test.inc"
@@ -667,6 +670,9 @@ int main(int argc,char **argv)
 #endif
 #ifdef PILOT_AUDIO_NATIVE
         if (!strcmp(argv[1],"audio")) { test_audio(); return 0; }
+#ifdef PILOT_AUDIO_REFERENCE
+        if (!strcmp(argv[1],"audio-reference-runtime")) { test_audio_reference_runtime();return 0; }
+#endif
         if (!strncmp(argv[1],"audio-",6)) { test_audio_failure(argv[1]+6); return 0; }
 #endif
 #ifdef PILOT_INPUT_NATIVE
@@ -720,6 +726,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-controlled-clock-lle")) { thread_idle_runtime_clock=2;test_thread_idle_clock_lle();return 0; }
         if (!strcmp(argv[1],"thread-controlled-delayed-clock-lle")) { thread_idle_runtime_clock=3;test_thread_idle_clock_lle();return 0; }
         if (!strcmp(argv[1],"thread-compute-clock-lle")) { test_thread_compute_clock_lle(); return 0; }
+        if (!strcmp(argv[1],"thread-compute-controlled-clock-lle")) { thread_idle_runtime_clock=2;test_thread_compute_clock_lle();return 0; }
+        if (!strcmp(argv[1],"thread-compute-controlled-delayed-clock-lle")) { thread_idle_runtime_clock=3;test_thread_compute_clock_lle();return 0; }
         if (!strcmp(argv[1],"thread-delay-cpu-lle")) { test_thread_delay_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-priority-cpu-lle")) { test_thread_priority_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-cpu-lle")) { test_thread_cpu_lle(); return 0; }

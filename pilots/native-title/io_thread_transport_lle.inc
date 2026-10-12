@@ -196,6 +196,9 @@ static void thread_cpu_complete(struct OriginalThread *thread)
 static DWORD thread_clock_wait(void)
 {
     if(!clock_provider)return INFINITE;
+    /* External input is admitted only at stopped controller boundaries.
+     * Host waiting must not schedule input or checkpoint opportunities. */
+    if(clock_step)return INFINITE;
 #ifdef PILOT_USB_LLE
     uint64_t ticks=0,next=0,now=0;
     const char *error=pilot_usb_pit_clock(&ticks,&next);
@@ -226,7 +229,10 @@ static void thread_handoff_impl(struct OriginalThread *thread,int start,uint32_t
         }
     }
     thread->request=0;
-    InterlockedExchange(&thread->checkpoint_requested,0);
+    /* A controlled-input owner asks for the next real native checkpoint
+     * before resuming. The retained PC/flags/FP boundary then returns to the
+     * controller without depending on a host timer. QPC keeps its deadline. */
+    InterlockedExchange(&thread->checkpoint_requested,clock_step?1:0);
     InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
     if(failure)return;
     if(!SetEvent(thread->resume_event)){failure="thread LLE native resume failed";return;}
