@@ -38,6 +38,15 @@ if(PILOT_CALENDAR STREQUAL "LLE")
        NOT EXISTS "${PILOT_CALENDAR_UNICORN}/source/translate.c")
       message(FATAL_ERROR "Native engine needs the reviewed FP state correction; rebuild its package")
     endif()
+    string(JSON engine_codebuffer_patch_sha ERROR_VARIABLE engine_codebuffer_patch_error GET "${engine_identity}" codebuffer_patch_sha256)
+    string(JSON engine_codebuffer_sha ERROR_VARIABLE engine_codebuffer_error GET "${engine_identity}" codebuffer_compiled_sha256)
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/unicorn-engine/codebuffer.cmake" current_codebuffer_patch_sha)
+    if(engine_codebuffer_patch_error OR engine_codebuffer_error OR
+       NOT engine_codebuffer_patch_sha STREQUAL current_codebuffer_patch_sha OR
+       NOT EXISTS "${PILOT_CALENDAR_UNICORN}/source/translate-all.c")
+      message(FATAL_ERROR "Native engine needs the reviewed Windows code-buffer correction; rebuild its package")
+    endif()
+    file(SHA256 "${PILOT_CALENDAR_UNICORN}/source/translate-all.c" packaged_codebuffer_sha)
     file(SHA256 "${PILOT_CALENDAR_UNICORN}/source/fpu_helper.c" packaged_fpu_sha)
     file(SHA256 "${PILOT_CALENDAR_UNICORN}/source/translate.c" packaged_translator_sha)
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/../../src/cpu/unicorn_irq_boundary.c" current_helper_sha)
@@ -50,6 +59,7 @@ if(PILOT_CALENDAR STREQUAL "LLE")
         NOT engine_helper_header_sha STREQUAL current_helper_header_sha OR
         NOT engine_fpu_sha STREQUAL packaged_fpu_sha OR
         NOT engine_translator_sha STREQUAL packaged_translator_sha OR
+        NOT engine_codebuffer_sha STREQUAL packaged_codebuffer_sha OR
         NOT packaged_helper_header_sha STREQUAL current_helper_header_sha)
       message(FATAL_ERROR "Native engine package/source identities disagree; rebuild the reviewed engine")
     endif()

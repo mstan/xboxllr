@@ -20,6 +20,7 @@ set(UNICORN_LEGACY_STATIC_ARCHIVE OFF CACHE BOOL "" FORCE)
 add_subdirectory("${XLLE_UNICORN_SOURCE}" unicorn)
 get_filename_component(xlle_root "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 include(fxstate.cmake)
+include(codebuffer.cmake)
 target_sources(x86_64-softmmu PRIVATE "${xlle_root}/src/cpu/unicorn_irq_boundary.c")
 # Bundle the three pinned x86 components without upstream's optional .o
 # symlink, which requires an unnecessary privilege on Windows.
@@ -37,6 +38,8 @@ add_custom_command(TARGET xlle_native_unicorn_package POST_BUILD
     "-DFPU_CORRECTED_SHA=${fpu_corrected_sha}" "-DFPU_CORRECTED=${fpu_corrected}"
     "-DTRANSLATOR_ORIGINAL_SHA=${translator_original_sha}"
     "-DTRANSLATOR_CORRECTED_SHA=${translator_corrected_sha}" "-DTRANSLATOR_CORRECTED=${translator_corrected}"
+    "-DCODEBUFFER_PATCH_SHA=${codebuffer_patch_sha}" "-DCODEBUFFER_ORIGINAL_SHA=${codebuffer_original_sha}"
+    "-DCODEBUFFER_CORRECTED_SHA=${codebuffer_corrected_sha}" "-DCODEBUFFER_CORRECTED=${codebuffer_corrected}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/package.cmake")
 add_executable(test_native_unicorn_irq "${xlle_root}/tests/test_native_unicorn_irq.c")
 target_include_directories(test_native_unicorn_irq PRIVATE "${xlle_root}/src/cpu")
@@ -52,3 +55,7 @@ add_executable(test_native_unicorn_fp_metadata "${xlle_root}/tests/test_native_u
 target_link_libraries(test_native_unicorn_fp_metadata PRIVATE xlle_native_unicorn_package)
 add_test(NAME native_unicorn_fp_metadata COMMAND test_native_unicorn_fp_metadata)
 set_tests_properties(native_unicorn_fp_metadata PROPERTIES TIMEOUT 10)
+add_executable(test_native_unicorn_codebuffer "${xlle_root}/tests/test_native_unicorn_codebuffer.c")
+target_link_libraries(test_native_unicorn_codebuffer PRIVATE xlle_native_unicorn_package)
+add_test(NAME native_unicorn_codebuffer COMMAND test_native_unicorn_codebuffer)
+set_tests_properties(native_unicorn_codebuffer PROPERTIES TIMEOUT 60)

@@ -61,5 +61,26 @@ selectors, transparent controls, reset/environment/save/restore and SSE2
 rejection. The scheduling document records the preceding33-check failure and
 the44 passing current-generation original-service checks.
 
+`codebuffer.cmake` also corrects the pinned Windows lazy translation-buffer
+allocator by compiling a reviewed private copy of `translate-all.c`. Each
+commit is limited to the smaller of 4 MiB and the bytes remaining in the
+reservation. The original allocator requested 4 MiB even at the reservation's
+end; an unaligned fault could cross the boundary even for an 8 MiB buffer.
+Windows rejects a commit unless the entire requested range was reserved.
+See the [VirtualAlloc contract](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc).
+The upstream checkout, cache size, flush policy, guard-page policy and
+non-Windows allocators retain their existing behavior. This correction is
+applied by default, and the package records the original allocator, compiled
+copy and transformation hashes.
+
+`native_unicorn_codebuffer` executes 50,000 authored integer/memory blocks three
+times in each of three independent engines with 1, 5 and 8 MiB reservations.
+It observes real lazy faults without handling them, verifies committed pages
+remain within the reservation, witnesses actual translation retirement through
+repeated generated edges, and checks explicit flush, GPR canaries and exact
+guest memory contributions. Its prior old-package failures are retained
+privately. This is a Windows allocation and execution check; full original-title
+movie completion remains a separate requirement.
+
 Do not commit the generated package, upstream checkout, private kernel inputs
 or qualification captures. See [scheduling evidence](../SCHEDULING-LLE.md).
