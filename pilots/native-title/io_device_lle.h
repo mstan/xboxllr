@@ -98,6 +98,16 @@ const char *pilot_io_device_thread_completion(int *terminated,uint32_t *status);
  * engine owner between execution slices. The provider must not reenter this
  * transport or complete kernel waits. NULL unbinds; bind only while idle. */
 typedef const char *(*PilotIoClock)(void *context,uint64_t *ticks);
+/* A controlled external-input driver is separate from the read-only clock.
+ * It runs on the sole controller before input sampling, with the CPU stopped.
+ * block_entries counts observed engine block entries (including stopped
+ * boundaries), not retired instructions or hardware cycles. Native callbacks
+ * are not charged as original CPU execution. This is a fixture opportunity,
+ * never a source of guest wait results. No CPU/transport reentry is permitted.
+ * Bind only while idle; ordinary clock_bind selects no step driver. */
+typedef const char *(*PilotIoClockStep)(void *context,uint64_t block_entries);
+const char *pilot_io_device_clock_bind_step(PilotIoClock provider,void *context,
+    PilotIoClockStep step);
 /* Read-only interpreter cache occupancy/capacity; no page or owner mutation. */
 const char *pilot_io_device_alias_cache_info(unsigned *count,unsigned *capacity);
 const char *pilot_io_device_alias_cache_retired(unsigned *retired);

@@ -717,6 +717,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-timeout-lle")) { test_thread_timeout_lle(); return 0; }
         if (!strcmp(argv[1],"thread-idle-clock-lle")) { test_thread_idle_clock_lle(); return 0; }
         if (!strcmp(argv[1],"thread-idle-runtime-clock-lle")) { thread_idle_runtime_clock=1;test_thread_idle_clock_lle();return 0; }
+        if (!strcmp(argv[1],"thread-controlled-clock-lle")) { thread_idle_runtime_clock=2;test_thread_idle_clock_lle();return 0; }
+        if (!strcmp(argv[1],"thread-controlled-delayed-clock-lle")) { thread_idle_runtime_clock=3;test_thread_idle_clock_lle();return 0; }
         if (!strcmp(argv[1],"thread-compute-clock-lle")) { test_thread_compute_clock_lle(); return 0; }
         if (!strcmp(argv[1],"thread-delay-cpu-lle")) { test_thread_delay_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-priority-cpu-lle")) { test_thread_priority_cpu_lle(); return 0; }

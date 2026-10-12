@@ -22,6 +22,32 @@ static const char *test_thread_idle_clock_input(void *context,uint64_t *ticks)
     *ticks=clock->base+(elapsed/10000000)*1125000+(elapsed%10000000)*1125000/10000000;
     ++clock->samples;return NULL;
 }
+static uint64_t controlled_clock_ticks,controlled_clock_blocks;
+static unsigned controlled_clock_steps,controlled_clock_reads,controlled_clock_stalls;
+static const char *test_thread_controlled_clock_input(void *context,uint64_t *ticks)
+{
+    (void)context;*ticks=controlled_clock_ticks;++controlled_clock_reads;return NULL;
+}
+static const char *test_thread_controlled_clock_step(void *context,uint64_t blocks)
+{
+    (void)context;
+    /* Explicit fixture input opportunities, like TimerReference.block's
+     * 100-block schedule. This deliberately makes no CPU-cycle claim. Each
+     * opportunity admits one PIT period after original CPU execution; an
+     * observer read or host delay cannot admit an input. */
+    if(blocks<controlled_clock_blocks)return "controlled clock block count backwards";
+    if(blocks-controlled_clock_blocks>=100 && controlled_clock_steps<100) {
+        controlled_clock_blocks=blocks;controlled_clock_ticks+=1125;
+        ++controlled_clock_steps;
+        if(thread_idle_runtime_clock==3) {
+            uint64_t before=0,after=0;
+            CHECK(!test_thread_controlled_clock_input(NULL,&before));Sleep(3);
+            CHECK(!test_thread_controlled_clock_input(NULL,&after) && before==after);
+            ++controlled_clock_stalls;
+        }
+    }
+    return NULL;
+}
 static void test_thread_idle_clock_body(void)
 {
     uint32_t context=MEM32(g_esp+4);
@@ -64,7 +90,14 @@ static void test_thread_idle_clock_lle(void)
         CHECK(!error);
     }
     uint64_t next=0;CHECK(!pilot_usb_pit_clock(&thread_idle_clock.base,&next) && next>thread_idle_clock.base);
-    if(!thread_idle_runtime_clock) {
+    if(thread_idle_runtime_clock>=2) {
+        controlled_clock_ticks=thread_idle_clock.base;
+        uint64_t first=0,second=0;
+        CHECK(!test_thread_controlled_clock_input(NULL,&first));Sleep(40);
+        CHECK(!test_thread_controlled_clock_input(NULL,&second) && first==second);
+        CHECK(pilot_io_device_clock_bind_step(NULL,NULL,test_thread_controlled_clock_step));
+        CHECK(!pilot_io_device_clock_bind_step(test_thread_controlled_clock_input,NULL,test_thread_controlled_clock_step));
+    } else if(!thread_idle_runtime_clock) {
         thread_idle_clock.origin=dispatch_monotonic();
         CHECK(!pilot_io_device_clock_bind(test_thread_idle_clock_input,&thread_idle_clock));
     }
@@ -72,6 +105,18 @@ static void test_thread_idle_clock_lle(void)
     CHECK(!pilot_io_device_clock_bind(NULL,NULL));
     uint64_t final_ticks=0;CHECK(!pilot_usb_pit_clock(&final_ticks,&next) && final_ticks>thread_idle_clock.base);
     CHECK((thread_idle_runtime_clock || thread_idle_clock.samples>1) && thread_idle_elapsed>=330000);
+    if(thread_idle_runtime_clock>=2) {
+        CHECK(controlled_clock_steps>33 && controlled_clock_steps<=100);
+        CHECK(final_ticks==controlled_clock_ticks && controlled_clock_reads>controlled_clock_steps);
+        CHECK(thread_idle_elapsed<=1000000);
+        CHECK(controlled_clock_stalls==(thread_idle_runtime_clock==3?controlled_clock_steps:0));
+        uint64_t first=0,second=0;
+        CHECK(!test_thread_controlled_clock_input(NULL,&first));Sleep(40);
+        CHECK(!test_thread_controlled_clock_input(NULL,&second) && first==second);
+        fprintf(stderr,"[CONTROLLED CLOCK] steps=%u observer_reads=%u stalls=%u block_entries=%llu elapsed=%llu; no host-delay progression\n",
+            controlled_clock_steps,controlled_clock_reads,controlled_clock_stalls,(unsigned long long)controlled_clock_blocks,
+            (unsigned long long)thread_idle_elapsed);
+    }
     CHECK(thread_idle_fw_high && thread_idle_fw_low);
     CHECK(!event_lle_call(187,&handle));event_lle_call(250,&object);CHECK(!event_lle_call(187,&event));
     fprintf(stderr,"PASS: original blocked timeout without tick peer; runtime=%d actual original continuation, modeled PIT/PIC IRQ0 and %llu clock samples\n",thread_idle_runtime_clock,(unsigned long long)thread_idle_clock.samples);

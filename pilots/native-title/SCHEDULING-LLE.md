@@ -2308,3 +2308,29 @@ binds264 verified identities. See the
 [actual original movie and audio evidence](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#composed-original-movie-observation-and-consumer-replay---2026-10-11).
 The completed default-HLE repeat/interruption result is reused; no new build,
 title run or physical request is needed to record this finding.
+
+## Separate controlled input steps and clock observation - 2026-10-11
+
+`pilot_io_device_clock_bind_step` optionally binds a controller-owned external
+input driver alongside the pure `PilotIoClock` observer. The driver runs with
+the CPU stopped before sampling input time. Its counter reports observed
+engine block entries, including stopped boundaries; it does not count retired
+instructions or hardware cycles. Ordinary clock binding clears the driver,
+and binding during original execution or a driver without an observer fails.
+Default runtime QPC selection is unchanged.
+
+The fast and deliberately delayed original33ms timeout fixtures both complete
+after35 actual PIT input steps and39,294 block entries, with35ms guest elapsed.
+The delayed case inserts35 host stalls and70 extra observer reads while leaving
+time unchanged. Original INIT, PIT/PIC IRQ0, blocked thread continuation and
+GPIO15 high/low transitions remain real. Current90/90 combined checks pass in
+60.43s. The fixture's100-block schedule is bounded external input, not a
+canonical CPU timing model.
+
+Root proof `reference-clock-deadlines-20261011/qualified-clock-seam.aot-private.json`
+has SHA256 `9b2811c451cc3e4224ebe7028ff0933f11fee0e9631e251f463bd27dd5076d23`.
+Fixed-time-jump and automatic next-PIT-deadline pump experiments remain failed
+and excluded. Native compute handoffs, the controlled audio adapter and common
+capture ownership still require composition. No full-title or movie acceptance
+is inferred from these fixture passes. See the
+[reference consumer foundation](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#controlled-reference-clock-and-audio-consumer-foundation---2026-10-11).

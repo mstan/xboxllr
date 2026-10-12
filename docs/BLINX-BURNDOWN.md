@@ -102,6 +102,13 @@ real-time or replay the same run longer. Final original completion and
 synchronized lifecycle coverage remain open. See the
 [current source-bound diagnosis](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#composed-original-movie-observation-and-consumer-replay---2026-10-11).
 Integrated attract remains open. HLE incurs no interpreter cache work.
+The separate controlled input/observer clock seam now passes90/90 combined
+checks. Fast and delayed original waits produce the same35ms guest progression;
+the caller-driven maintained APU/DSP consumer also passes partition/pause
+feasibility. The compatible audio adapter and shared timeline integration are
+next, before full original movie completion. No title run was repeated for
+this foundation. See the
+[current reference-time work](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#controlled-reference-clock-and-audio-consumer-foundation---2026-10-11).
 Earlier filename/open/cache failures retain their separate generations.
 Independent GPU/graphics/audio/movie gates stay open. **4/9 families** and
 **26 precision deferrals** are unchanged.

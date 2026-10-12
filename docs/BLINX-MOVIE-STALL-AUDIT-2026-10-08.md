@@ -364,3 +364,41 @@ retail GP/EP boot/output. It is software reference-composition work, rather
 than a hardware precision question. `.73` and the whole movie gate remain
 open; `.98` and the bounded allocator correction remain closed. No console
 operation or audible playback occurred.
+
+## Controlled reference clock and audio consumer foundation - 2026-10-11
+
+Task `.123` now has a maintained controller-step seam separate from its pure
+clock observer. Two original-kernel timeout cases pass with identical actual
+PIT/IRQ/wait progression:35 explicit input steps,39,294 observed engine block
+entries and35ms guest elapsed. The delayed case adds35 host stalls and70
+observer reads; neither advances the input clock. The combined current batch
+passes90/90 in60.43s. Default runtime QPC and native HLE audio remain unchanged.
+The100-block fixture opportunity is an authored input schedule, with no claim
+about retired instructions, hardware cycles or canonical TSC policy.
+
+The retained failed experiments matter to composition. A fixed100ms input jump
+exhausts the bounded original callback budget; automatically limiting each
+controller pump to the next PIT deadline also fails. Time cannot be advanced
+at every observer/pump opportunity without allowing original IRQ work to run.
+Both experimental generations are excluded and restored; no PIT interrupt
+count or fabricated wait result was added.
+
+Actual XAudio2 StopEngine/StartEngine preserves its queued source and current
+DSP carry through host delays. Its pass-end notification can overshoot to
+1,920/2,880 processed frames, so it is unsuitable as an exact-frame controller.
+The existing maintained APU supplies an alternative without an audio device:
+source DMA, persistent rate conversion,2D mixing and current DSP produce
+byte-identical output across different pull partitions. Three150ms stalls
+preserve the actual CBO, source bytes, graph state/storage and partial32-frame
+carry. The nominal44.1kHz case uses actual quantized pitch-501, or
+44,098.205613Hz; this is not an exact44,100Hz hardware claim.
+
+Root proof `reference-clock-deadlines-20261011/qualified-clock-seam.aot-private.json`
+has SHA256 `9b2811c451cc3e4224ebe7028ff0933f11fee0e9631e251f463bd27dd5076d23`.
+It verifies464 unique current/frozen identities, including73 current source
+inputs, two fixture programs and the retained consumer experiments. The next
+work is a compatible controlled audio adapter and shared clock/capture
+integration, then actual original movie completion. Native compute handoffs
+and full close/reopen ownership remain to be integrated. No full title was
+rebuilt or run for this foundation. Movies and `.123` remain open;4/9 families
+and26 precision deferrals are unchanged.

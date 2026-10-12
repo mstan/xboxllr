@@ -132,6 +132,8 @@ static int service_stack_page(uint32_t page)
 }
 static PilotIoClock clock_provider;
 static void *clock_context;
+static PilotIoClockStep clock_step;
+static uint64_t clock_block_entries;
 #ifdef PILOT_USB_LLE
 static int device_irq_pending;
 static int clock_initializing;
@@ -579,6 +581,7 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
         alias_trim_pending=1;uc_emu_stop(engine);return;
     }
     recent_blocks[recent_block_count++&15]=(uint32_t)address;
+    if(clock_step)++clock_block_entries;
 #ifdef PILOT_USB_LLE
     if(pilot_usb_pic_vector(0)>=0) {
         uint32_t flags=0;uc_reg_read(engine,UC_X86_REG_EFLAGS,&flags);
@@ -1004,7 +1007,8 @@ static void pump_original_clock(void)
     if(!clock_provider)return;
 #ifdef PILOT_USB_LLE
     uint64_t ticks=0;
-    const char *error=clock_provider(clock_context,&ticks);
+    const char *error=clock_step?clock_step(clock_context,clock_block_entries):NULL;
+    if(!error)error=clock_provider(clock_context,&ticks);
     if(!error)error=pilot_usb_pit_time(ticks);
     for(unsigned i=0;!error && i<8;++i)if(device_work[i].callback) {
         if(device_bus_borrow){failure="device LLE nested device work";return;}
@@ -1426,11 +1430,18 @@ const char *pilot_io_device_publication_memo_info(uint64_t *hits,uint64_t *misse
     ReleaseSRWLockExclusive(&lock);return error;
 }
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context)
+{return pilot_io_device_clock_bind_step(provider,context,NULL);}
+const char *pilot_io_device_clock_bind_step(PilotIoClock provider,void *context,
+    PilotIoClockStep step)
 {
     AcquireSRWLockExclusive(&lock);
     const char *error=NULL;
     if(execution_depth)error="original clock binding during execution";
-    else {clock_provider=provider;clock_context=provider?context:NULL;}
+    else if(step && !provider)error="original step driver without clock observer";
+    else {
+        clock_provider=provider;clock_context=provider?context:NULL;
+        clock_step=provider?step:NULL;clock_block_entries=0;
+    }
     ReleaseSRWLockExclusive(&lock);return error;
 }
 int pilot_io_device_clock_bound(void)
