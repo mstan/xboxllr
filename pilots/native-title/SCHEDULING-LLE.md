@@ -2374,3 +2374,25 @@ Clock-dependent MM contention has not been established or qualified; this guard
 does not fabricate a wait result. Whole title/movie acceptance remains open.
 Evidence is under `build/blinx/reference-clock-maintained-20261011` and the
 current immutable run under `build/blinx/reference-movie-batch-20261011`.
+
+## Reference controller replay uses simulated time - 2026-10-11
+
+The `APU_REFERENCE` selection now publishes controller replay time after a
+successful common-clock step. Input polling observes that time; it cannot advance
+it. The default native selection retains its existing host clock and performance
+path. Start/release and disconnect/reconnect occur at their declared simulated
+timestamps, including while the original interpreter takes longer to execute.
+Backward publication rejects before changing the replay state.
+
+The literal previous maintained input source reproduces the failure: a host
+stall delivers Start without any reference input step. The corrected source
+holds neutral through the stall and delivers Start at the explicit20ms step.
+Seven affected reference checks and five unchanged native input checks pass;
+the runtime check also holds controller state, USB SOF, sample counter and audio
+output fixed through repeated reads and a40ms host stall. The private source-bound
+proofs are `reference-input-clock-20261011/v1/qualified-input-clock.aot-private.json`
+(SHA256 `40ea69653e56792cfa1a2e53d1b8fa7d38e2173f8095736c553e6ae91aef29f4`)
+and `causal/qualified-causal.aot-private.json`
+(`5455594f784d33bb7807d79d8cc237628e706afb7e5ddba63c917ac90f44e4a7`).
+These are clock-composition checks, not full movie completion or a canonical
+guest TSC-policy decision. The composed movie gate remains open.

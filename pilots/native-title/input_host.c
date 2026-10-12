@@ -18,6 +18,22 @@
  * Real OS keys are read only while this process owns the foreground window. */
 static INIT_ONCE input_host_once=INIT_ONCE_STATIC_INIT;
 static int input_host_keyboard;
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+static uint64_t input_host_reference_ms;
+uint32_t pilot_input_host_reference_time(uint64_t milliseconds)
+{
+    if(milliseconds<input_host_reference_ms)return ERROR_INVALID_PARAMETER;
+    input_host_reference_ms=milliseconds;return ERROR_SUCCESS;
+}
+#endif
+static uint64_t input_host_replay_time(void)
+{
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+    return input_host_reference_ms;
+#else
+    return GetTickCount64();
+#endif
+}
 static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID *context)
 {
     char value[24]={0};
@@ -71,8 +87,9 @@ uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
     input_host_is_keyboard();
     if(input_replay_count) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
-        if(!input_replay_clock_started){input_replay_start=GetTickCount64();input_replay_clock_started=1;}
-        return input_replay_sample(GetTickCount64()-input_replay_start,gamepad);
+        uint64_t now=input_host_replay_time();
+        if(!input_replay_clock_started){input_replay_start=now;input_replay_clock_started=1;}
+        return input_replay_sample(now-input_replay_start,gamepad);
     }
     if(input_host_keyboard) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;

@@ -2,6 +2,11 @@ static uint32_t reference_test_device,reference_test_buffer;
 static float *reference_test_pcm;
 static void reference_test_open(void)
 {
+    input_host_is_keyboard();input_host_keyboard=0;
+    FILE *replay=tmpfile();CHECK(replay);
+    CHECK(fputs("0 000000000000000000000000000000000000\n20 100000000000000000000000000000000000\n",replay)>=0);
+    rewind(replay);CHECK(input_replay_load(replay) && !fclose(replay));
+    uint8_t pad[18];CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
     reference_test_device=audio_test_device();
     reference_test_buffer=audio_test_buffer_format(reference_test_device,65536,2,16,48000,0);
     struct PilotAudioBuffer *b=audio_buffer(reference_test_buffer);
@@ -37,17 +42,22 @@ static void test_audio_reference_runtime(void)
     CHECK(!pilot_usb_lle_access(0xfed0003c,0,&frame));
     uint64_t ticks=0,next=0;CHECK(!pilot_usb_pit_clock(&ticks,&next));
     CHECK(counter==(uint32_t)(ticks/1125000)*48000+(uint32_t)((ticks%1125000)*48000/1125000));
+    CHECK(input_host_reference_ms==(audio_reference_clock.ticks-audio_reference_clock.origin)/1125);
+    uint8_t pad[18];CHECK(!pilot_input_host_state(0,pad) && pad[0]==0x10);
     Sleep(40);
     for(unsigned i=0;i<100;++i) {
         uint32_t observed=0;CHECK(!pilot_usb_lle_access(0xfe80200c,0,&observed) && observed==counter);
         CHECK(!pilot_usb_lle_access(0xfed0003c,0,&observed) && observed==frame);
+        CHECK(!pilot_input_host_state(0,pad) && pad[0]==0x10);
     }
     CHECK(reference_output_frames()==frames);
     CHECK(!audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Stop,a));
     a[0]=reference_test_device;CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_Release,a)==1);
     a[0]=reference_test_buffer;CHECK(!audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,a));
     CHECK(!audio_device && !audio_reference_clock.audio && !reference_output_frames());
-    CHECK(!pilot_reference_clock_step(&audio_reference_clock,audio_reference_blocks+PILOT_REFERENCE_BLOCKS_PER_MS));
+    uint64_t previous_input_ms=input_host_reference_ms;
+    CHECK(!audio_reference_step(&audio_reference_clock,audio_reference_blocks+PILOT_REFERENCE_BLOCKS_PER_MS));
+    CHECK(input_host_reference_ms==previous_input_ms+1);
     CHECK(!pilot_usb_pit_time(audio_reference_clock.ticks) && !pilot_usb_lle_tick());
     uint32_t observed=0;CHECK(!pilot_usb_lle_access(0xfe80200c,0,&observed) && observed==counter+48);
     CHECK(!pilot_usb_lle_access(0xfed0003c,0,&observed) && (uint16_t)observed==(uint16_t)(frame+1));

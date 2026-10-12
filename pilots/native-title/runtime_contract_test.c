@@ -672,6 +672,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"audio")) { test_audio(); return 0; }
 #ifdef PILOT_AUDIO_REFERENCE
         if (!strcmp(argv[1],"audio-reference-runtime")) { test_audio_reference_runtime();return 0; }
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+        if (!strcmp(argv[1],"input-reference-clock")) { test_input_reference_clock();return 0; }
+#endif
 #endif
         if (!strncmp(argv[1],"audio-",6)) { test_audio_failure(argv[1]+6); return 0; }
 #endif

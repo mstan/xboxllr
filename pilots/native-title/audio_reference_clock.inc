@@ -1,5 +1,6 @@
 #include "audio_reference.h"
 #include "reference_clock.h"
+#include "input_host.h"
 static PilotReferenceClock audio_reference_clock;
 static uint64_t audio_reference_input,audio_reference_blocks;
 static uint64_t audio_reference_blocked_at;
@@ -34,6 +35,10 @@ static const char *audio_reference_step(void *context,uint64_t blocks)
     }
     audio_reference_blocked=0;
     const char *error=pilot_reference_clock_step(context,blocks);
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+    if(!error && pilot_input_host_reference_time((audio_reference_clock.ticks-audio_reference_clock.origin)/1125))
+        error="reference controller input time went backwards";
+#endif
     ReleaseSRWLockExclusive(&audio_lock);return error;
 }
 static void audio_reference_clock_start(void)

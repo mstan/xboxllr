@@ -34,6 +34,35 @@ static DWORD WINAPI input_test_set_state(DWORD port,XINPUT_VIBRATION *vibration)
 #undef XInputSetState
 
 static uint32_t input_test_last_error;
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+static void test_input_reference_clock(void)
+{
+    input_host_is_keyboard();input_host_keyboard=0;
+    FILE *replay=tmpfile();CHECK(replay);
+    CHECK(fputs("0 000000000000000000000000000000000000\n20 100000000000000000000000000000000000\n220 000000000000000000000000000000000000\n300 disconnected\n400 000000000000000000000000000000000000\n",replay)>=0);
+    rewind(replay);CHECK(input_replay_load(replay) && !fclose(replay));
+    uint8_t pad[18];CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
+    Sleep(40);
+    for(unsigned i=0;i<100;++i)CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
+    CHECK(!pilot_input_host_reference_time(19));
+    CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
+    CHECK(!pilot_input_host_reference_time(20));
+    CHECK(!pilot_input_host_state(0,pad) && pad[0]==0x10);
+    Sleep(40);CHECK(!pilot_input_host_state(0,pad) && pad[0]==0x10);
+    CHECK(pilot_input_host_reference_time(19)==ERROR_INVALID_PARAMETER);
+    CHECK(!pilot_input_host_state(0,pad) && pad[0]==0x10);
+    CHECK(!pilot_input_host_reference_time(20));
+    CHECK(!pilot_input_host_reference_time(220));
+    CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
+    CHECK(!pilot_input_host_reference_time(300));memset(pad,0xcc,sizeof(pad));
+    CHECK(pilot_input_host_state(0,pad)==ERROR_DEVICE_NOT_CONNECTED);
+    for(unsigned i=0;i<18;++i)CHECK(pad[i]==0xcc);
+    CHECK(!pilot_input_host_reference_time(400));
+    CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
+    CHECK(pilot_input_host_state(1,pad)==ERROR_DEVICE_NOT_CONNECTED);
+    fprintf(stderr,"PASS reference input: Start20ms/release220ms/hotplug300/400ms on external time; 80ms host stalls and100 observer polls preserve state; backwards publication rejects before mutation\n");
+}
+#endif
 static void input_test_error(void)
 {
     input_test_last_error=MEM32(g_esp+4); g_esp+=8;
