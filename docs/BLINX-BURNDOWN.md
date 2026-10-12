@@ -53,7 +53,14 @@ verifies340 immutable source/artifact identities and zero-error finalization;
 the two corrected-boundary and passive-observer audits are closed, while Q03
 stays open. Three short real original CPU calendar304/305 lives and four
 continuation regressions pass after admitting their unchanged RET8 bodies.
-Remaining title imports are being audited before another changed long batch.
+The static remaining-import audit is complete. Original heap comparison269
+and caller-owned Unicode308 are admitted as one coherent RET12 batch; allocating
+Unicode remains guarded before mutation until pool ownership is connected.
+Nine focused checks pass in1.22s, including36 actual helper CALL/RET cases,
+two allocation guards, calendar and four continuation regressions. Event,
+crypto/key, IRP, FP/exception and firmware branches retain named ownership or
+error guards; static call coverage does not claim dynamic unreachability.
+One changed long Q03 generation is next, with the same replay/cadence/bounds.
 The rejected-batch analyzer/gallery waiters run no numeric/title repetition.
 Analyzer `2075d64` retains any later diagnostic opening without
 substituting it for the required two natural and one interrupted lifetimes;

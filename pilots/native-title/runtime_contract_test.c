@@ -176,6 +176,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_component_physical_owner_contract_test.inc"
 #include "thread_component_contiguous_contract_test.inc"
 #include "thread_calendar_cpu_contract_test.inc"
+#include "thread_ordinary_helpers_cpu_contract_test.inc"
 #include "thread_component_long_owner_contract_test.inc"
 #include "thread_component_wait_contract_test.inc"
 #if defined(PILOT_FILES_LLE) && defined(PILOT_SCHEDULING_LLE)
@@ -771,6 +772,11 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-cpu-lle")) { test_thread_cpu_lle(); return 0; }
 #ifdef PILOT_SCHEDULING_LLE
         if (!strcmp(argv[1],"thread-calendar-cpu-lle")) { test_thread_calendar_cpu_lle(); return 0; }
+        if (!strcmp(argv[1],"thread-heap-compare-cpu-lle")) { test_thread_ordinary_helpers_cpu_lle(269,0); return 0; }
+        if (!strcmp(argv[1],"thread-unicode-cpu-lle")) { test_thread_ordinary_helpers_cpu_lle(308,0); return 0; }
+        if (!strcmp(argv[1],"thread-unicode-allocate-guard-lle")) {
+            CHECK(argc==2 || argc==3);test_thread_ordinary_helpers_cpu_lle(308,argc==3?(uint32_t)strtoul(argv[2],NULL,0):1);return 0;
+        }
 #endif
         if (!strcmp(argv[1],"thread-child-cpu-lle")) { test_thread_child_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-cpu-lle")) { test_thread_vm_cpu_lle(); return 0; }

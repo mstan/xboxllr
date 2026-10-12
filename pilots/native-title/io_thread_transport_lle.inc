@@ -20,7 +20,9 @@ static unsigned thread_service_arguments(unsigned ordinal)
      * caller's retained CPU; calendar conversion does not advance time. */
     case 304:case 305:return 2;
     case 99:case 107:case 108:case 119:case 145:case 178:case 182:case 199:case 215:case 233:case 246:
-    case 175:case 279:return 3;
+    /* Original heap comparison and caller-owned Unicode conversion both
+     * RET12. Allocated Unicode output remains guarded by its pool owner. */
+    case 175:case 269:case 279:case 308:return 3;
     case 2:case 45:case 50:case 149:case 189:case 204:case 234:return 4;
     case 24:case 150:case 159:case 166:case 184:case 211:case 218:case 226:case 254:return 5;
     case 3:case 46:case 65:case 202:return 6;

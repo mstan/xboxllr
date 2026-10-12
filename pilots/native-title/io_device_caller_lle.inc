@@ -4,6 +4,12 @@
 static void device_caller_prepare(unsigned ordinal,const uint32_t *args,struct DeviceCallerAccess *access)
 {
     access->pin_slot=MAX_PUBLISHED;access->retire=0;
+    /* The original BOOLEAN is its low byte. Outer308 does not yet publish
+     * or retire its nested pool allocation; reject before it changes even
+     * the caller's destination Length/MaximumLength/Buffer. */
+    if(ordinal==308 && (args[2]&255)) {
+        failure="device LLE allocated Unicode destination requires pool ownership";return;
+    }
     if(gpu_bootstrap_published && (ordinal==17 || ordinal==171) && args[0]==0x80000000u) {
         failure="device LLE console bootstrap page is not a caller allocation";return;
     }

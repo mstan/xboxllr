@@ -186,8 +186,30 @@ ESP/callee GPR/IF/DF/x87/XMM/canaries and exact cleanup. Four existing selected
 contiguous/root-guard/delay/priority cases pass. Candidate proof
 `calendar-transport-20261012/candidate/qualified.aot-private.json`, SHA256
 `141be0cc7470a469b81912eff9b9a0975e932651edb40d3bf47a63ec7cf5beb8`.
-Audit remaining title imports before the next changed Q03 batch; scheduling
-and movies stay open pending their full required lifetimes.
+The static original import audit is complete. It identifies two justified
+ordinary helpers outside replaced native entries: heap-pattern comparison269
+and Unicode conversion308. The sole distinct Blinx308 call disables allocation.
+Both unchanged original RET12 bodies now use the retained continuation;308's
+low-byte TRUE branch rejects before changing even the destination descriptor,
+until nested pool publication/retirement is connected. Pre-fix CPU callers
+reproduce both missing-service guards. Nine focused checks pass in1.22s:
+24 original heap cases and12 Unicode cases cover independent prefix/tail,
+ASCII/embedded-NUL, capacity/status, unaligned and unchanged caller bytes;
+two allocating-branch controls preserve an unfinished caller and untouched
+descriptors/output. Calendar and four continuation regressions also pass.
+Stack/callee registers/IF/DF/x87/XMM and all memory/thread/handle baselines
+remain intact. Proof `ordinary-helpers-transport-20261012/candidate/qualified.aot-private.json`,
+SHA256 `4962e4a25f6a773f4d35fb51d74593691eedf353364783942009f90628346738`.
+
+The audit is static call/source evidence, not dynamic unreachability proof.
+Event-object16 also needs246/250 event lifetime ownership; crypto335/336/337
+needs its current dispatch and opaque caller context, while signature-key
+data323/325/354 remains unbound. IRP, FP callback, exception and firmware/error
+branches retain their existing guards. These are named remaining conditions,
+not fabricated successful defaults or new precision deferrals. One changed
+Q03 batch can now integrate the calendar/helper fixes with unchanged cadence,
+replay and acceptance bounds. Scheduling and movies stay open pending their
+full required title lifetimes.
 
 The final analyzer explicitly binds required opening lifetimes to actual Play
 not after the declared Start. A fixed600s diagnostic can also reach a later
