@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: final hardware batch | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Shared device wiring complete; startup/output open | `.113`, `.113.23` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Shared device and PCM consumer complete; title startup/output open | `.113`, `.113.23`, `.113.24` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -81,8 +81,8 @@ stage only if it identifies an additional reached mode. Actual original audio
 allocation/configuration/ISR/DPC/output remains required in A03/A04/A05.
 
 A05's offline readiness audit found a concrete integration gap: `ORIGINAL`
-already retains original DirectSound execution, but the native-title runtime
-does not own or map the complete APU/AC97 devices. The shared engine already
+already retained original DirectSound execution, but the native-title runtime
+did not own or map the complete APU/AC97 devices. The shared engine already
 provides synchronous DMA, device work, PIT time and PIC interrupts. Task
 `.113.23` connects these interfaces with one APU/AC97 pair and held GP/EP
 owners, guarded access admission and exclusive build selection. Unknown
@@ -105,10 +105,32 @@ Six actual CMake selection cases and the changed runtime translation unit pass;
 29 frozen source files and50 artifact identities are verified without repeating
 functional tests. Root proof `audio-original-device-20261012/accepted-root.aot-private.json`,
 SHA256 `2ed6a4a206695499d15d4da5e20ba00a1b62323f54ebff20b45a2808c702e7aa`.
-The compatible ORIGINAL profile selects the adapter automatically. Its runtime
-still requires a real output consumer; compiled MMIO without shared-engine
-serialization remains guarded. Actual title startup/processing, original audio
-ISR/DPC, output and stop/reuse remain A05 work. No family is closed by this fixture.
+The compatible ORIGINAL profile selects the adapter automatically. This wiring
+checkpoint left the real output consumer for `.113.24`; compiled MMIO without
+shared-engine serialization remains guarded. Actual title startup/processing,
+original audio ISR/DPC, output and stop/reuse remain A05 work.
+
+The bounded `.113.24` consumer now accepts actual AC97-fetched PCM into owned
+memory with passive device-lifetime, PIT epoch, observed PIT and codec-frame
+stamps. Full, failed or finalized consumers reject whole chunks before device
+completion without altering accepted bytes or stamps. ORIGINAL runtime can
+select a new private destination through `XLLE_PILOT_ORIGINAL_PCM_CAPTURE`.
+Absent selection retains the before-DMA RUN guard. No native decoded source,
+audio worker or second clock is introduced. Complete publication requires
+retired device ownership and successful write/flush/close before a non-replacing
+move from the exclusive `.partial` file. Active or faulted owners retain their
+consumer; a readable footer in a failed partial is not successful persistence.
+
+Fifteen focused controls pass, including actual raw CPU RUN/DMA/clock/PIC and
+exact1024-byte output readback, nonempty-prefix rejection, retained ownership,
+rollback and write/flush/close/publication failures. Root verifies31 frozen and
+current sources and71 artifact identities, independently reads the output, and
+builds the production library and changed runtime translation unit. No title
+or unchanged functional test is repeated. Root proof
+`audio-original-pcm-root-20261012/accepted-root.aot-private.json`, SHA256
+`109bbd2b68bea463dfe5fb1a20fda428031d64cd9ee05fc25fbafca6a986f1ba`.
+This closes the consumer connection, not A03/A04 or actual title output;4/9
+families remain qualified.
 
 The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` used frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three

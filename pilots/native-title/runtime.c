@@ -16,6 +16,8 @@
 #include "guest_cpu_config.h"
 #ifdef PILOT_AUDIO_DEVICE_LLE
 #include "audio_device_lle.h"
+#include "audio_device_pcm_capture.h"
+static PilotPcmCapture *original_pcm_capture;
 /* Compiled continuations do not borrow the raw engine's lock/DMA capability.
  * Until that transport is independently admitted, stop before device work. */
 static const char *original_audio_compiled_guard(uint32_t address,unsigned size,int write,uint32_t *value)
@@ -107,6 +109,13 @@ static SRWLOCK critical_lock=SRWLOCK_INIT;
 
 __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 {
+#ifdef PILOT_AUDIO_DEVICE_LLE
+    if(original_pcm_capture) {
+        const char *capture_error=pilot_pcm_capture_finish(original_pcm_capture,0);
+        if(capture_error)fprintf(stderr,"[ORIGINAL PCM PARTIAL FAILURE] %s\n",capture_error);
+        /* Keep callback storage alive with any retained terminal owner. */
+    }
+#endif
 #ifdef PILOT_AUDIO_REFERENCE
     /* Preserve failed observations without acquiring a suspended owner lock. */
     extern int32_t reference_capture_finish(void);
@@ -1215,12 +1224,31 @@ int main(int argc,char **argv)
 #endif
 #ifdef PILOT_SCHEDULING_LLE
 #ifdef PILOT_AUDIO_DEVICE_LLE
-    /* No output consumer is implied by device selection. A codec RUN stops
-     * before publication until an actual PCM sink is explicitly supplied. */
-    const char *audio_error=pilot_audio_device_lle_open(NULL,NULL);
+    /* Diagnostic destination selects a real bounded AC97 memory consumer;
+     * absent selection retains the existing before-DMA RUN guard. */
+    const char *capture_destination=getenv("XLLE_PILOT_ORIGINAL_PCM_CAPTURE");
+    const char *audio_error=NULL;
+    if(capture_destination && *capture_destination) {
+        audio_error=pilot_pcm_capture_create(&original_pcm_capture,capture_destination,0,0);
+        if(audio_error)stop(audio_error,0xfe800000u);
+    }
+    audio_error=pilot_audio_device_lle_open(original_pcm_capture?pilot_pcm_capture_consume:NULL,original_pcm_capture);
     if(audio_error)stop(audio_error,0xfe800000u);
+    if(original_pcm_capture) {
+        audio_error=pilot_pcm_capture_bind(original_pcm_capture);
+        if(audio_error)stop(audio_error,0xfe800000u);
+    }
 #endif
-    scheduling_lle_run();return 0;
+    scheduling_lle_run();
+#ifdef PILOT_AUDIO_DEVICE_LLE
+    audio_error=pilot_audio_device_lle_close();if(audio_error)stop(audio_error,0xfe800000u);
+    if(original_pcm_capture) {
+        audio_error=pilot_pcm_capture_finish(original_pcm_capture,1);if(audio_error)stop(audio_error,0xfe800000u);
+        audio_error=pilot_pcm_capture_destroy(original_pcm_capture);if(audio_error)stop(audio_error,0xfe800000u);
+        original_pcm_capture=NULL;
+    }
+#endif
+    return 0;
 #endif
     thread_guest_cpu_enter();
     scheduler_publish(0,0,0);scheduler_enter(0);

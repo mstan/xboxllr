@@ -15,6 +15,7 @@ extern "C" {
 
 namespace {
 std::string failure;
+uint64_t next_lifetime=0;
 const char *fail(const char *why) {
     if(failure.empty())failure=why;
     return failure.c_str();
@@ -27,6 +28,7 @@ struct Owner {
     PilotAudioDevicePcm pcm=nullptr;
     void *context=nullptr;
     uint64_t ticks=0,reads=0,writes=0;
+    uint64_t lifetime=0,epoch=0;
     bool apu_mapped=false,aci_mapped=false,work=false,busy=false;
 };
 std::unique_ptr<Owner> owner;
@@ -128,12 +130,14 @@ extern "C" const char *pilot_audio_device_lle_close(void) {
 extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void *context) {
     if(!failure.empty())return failure.c_str();
     if(owner)return fail("original audio device already owned");
+    if(next_lifetime==UINT64_MAX)return fail("original audio device lifetime exhausted");
     uint64_t ticks=0,next=0;
     const char *error=pilot_usb_pit_clock(&ticks,&next);
     if(error)return fail(error);
     owner.reset(new(std::nothrow) Owner);
     if(!owner)return fail("original audio device allocation failed");
     owner->pcm=pcm;owner->context=context;owner->ticks=ticks;
+    owner->lifetime=++next_lifetime;owner->epoch=ticks;
     // Prime the stopped codec before publication. Device creation must not
     // consume any clock interval preceding its ownership.
     owner->aci.set_frame(ticks/6000);
@@ -206,7 +210,11 @@ extern "C" void pilot_audio_device_lle_state(PilotAudioDeviceState *state) {
     *state={};if(!owner)return;
     state->owned=1;state->apu_mapping=owner->apu_mapped;state->aci_mapping=owner->aci_mapped;state->work_binding=owner->work;
     state->clock_ticks=owner->ticks;state->dma_reads=owner->reads;state->dma_writes=owner->writes;
+    state->lifetime_id=owner->lifetime;state->epoch_ticks=owner->epoch;state->codec_frame=owner->aci.current_frame();
     state->pcm_words=owner->aci.consumed_pcm_words();state->descriptors=owner->aci.completed_descriptors();
     state->gp_held=owner->gp && owner->gp->phase()==xlle::ApuGpPhase::Held;
     state->ep_held=owner->ep && owner->ep->phase()==xlle::ApuEpPhase::Held;
+}
+extern "C" int pilot_audio_device_lle_consumer_attached(void *context) {
+    return owner && owner->pcm && owner->context==context;
 }

@@ -6,6 +6,8 @@
 #include <cstring>
 #include <vector>
 #include "audio_device_lle.h"
+#include "audio_device_pcm_capture.h"
+#include <string>
 extern "C" {
 #include "io_device_lle.h"
 #include "usb_lle.h"
@@ -15,6 +17,30 @@ static unsigned char *guest;
 static uint64_t ticks=60000;
 static unsigned raw_calls,clock_calls;
 static std::vector<uint8_t> received;
+static PilotPcmCapture *capture=nullptr;
+static std::string destination;
+static void capture_view_check(uint64_t expected_bytes,uint64_t expected_stamps,const uint8_t *expected) {
+    const uint8_t *bytes=nullptr;const PilotPcmCaptureStamp *stamps=nullptr;uint64_t count=0,records=0;
+    pilot_pcm_capture_view(capture,&bytes,&count,&stamps,&records);
+    CHECK(count==expected_bytes && records==expected_stamps);
+    if(count)CHECK(!memcmp(bytes,expected,size_t(count)));
+    if(records)CHECK(stamps[0].lifetime_id && stamps[0].epoch_ticks==60000 &&
+        stamps[0].observed_pit_ticks==66000 && stamps[0].codec_frame==11 && stamps[0].byte_offset==0 && stamps[0].bytes==1024);
+}
+static void capture_readback(const std::string& path,uint64_t expected_bytes,uint64_t expected_records,unsigned status,const uint8_t *expected) {
+    FILE *file=fopen(path.c_str(),"rb");CHECK(file);PilotPcmCaptureHeader h{};CHECK(fread(&h,sizeof(h),1,file)==1);
+    CHECK(!memcmp(h.magic,"XLLEAC97",8) && h.version==1 && h.header_bytes==sizeof(h) &&
+        h.rate==48000 && h.channels==2 && h.bits==16 && h.status==status && h.pcm_bytes==expected_bytes && h.stamp_count==expected_records);
+    PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
+    for(uint64_t i=0;i<h.stamp_count;++i){PilotPcmCaptureStamp stamp{};CHECK(fread(&stamp,sizeof(stamp),1,file)==1);
+        CHECK(stamp.lifetime_id==h.lifetime_id && stamp.epoch_ticks==h.epoch_ticks && stamp.bytes && !stamp.reserved);
+        if(i==0)CHECK(stamp.observed_pit_ticks==66000 && stamp.codec_frame==11 && !stamp.byte_offset);}
+    std::vector<uint8_t> actual(size_t(h.pcm_bytes));if(h.pcm_bytes)CHECK(fread(actual.data(),1,actual.size(),file)==actual.size());
+    if(h.pcm_bytes)CHECK(!memcmp(actual.data(),expected,actual.size()));
+    PilotPcmCaptureFooter footer{};CHECK(fread(&footer,sizeof(footer),1,file)==1);
+    CHECK(!memcmp(footer.magic,"XLLEEND1",8) && footer.pcm_bytes==h.pcm_bytes && footer.stamp_count==h.stamp_count && footer.status==status && fgetc(file)==EOF);
+    CHECK(!fclose(file));
+}
 static uint32_t &word(uint32_t address){return *reinterpret_cast<uint32_t*>(guest+address);}
 static uint32_t call(unsigned ordinal,const uint32_t *args) {
     uint32_t result=0;const char *error=pilot_io_device_lle(ordinal,guest,args,&result);
@@ -51,23 +77,31 @@ static void access(uint32_t address,unsigned size,uint32_t value) {
 }
 static const char *dummy(uint32_t,unsigned,int,uint32_t*){return nullptr;}
 int main(int argc,char **argv) {
-    CHECK(argc==3);const char *mode=argv[1];
+    CHECK(argc==3 || argc==4);const char *mode=argv[1];
+    const bool sink_mode=!strcmp(mode,"positive") || !strncmp(mode,"capture-",8);
+    if(sink_mode){CHECK(argc==4);destination=std::string(argv[3])+"/"+mode+"-"+std::to_string(GetCurrentProcessId())+".bin";
+        CHECK(!pilot_pcm_capture_create(&capture,destination.c_str(),!strcmp(mode,"capture-full")?1024:4096,
+            !strcmp(mode,"capture-stamps")?1:8));
+        PilotPcmCapture *duplicate=nullptr;CHECK(pilot_pcm_capture_create(&duplicate,destination.c_str(),1024,1) && !duplicate);
+        CHECK(GetFileAttributesA(destination.c_str())==INVALID_FILE_ATTRIBUTES);}
     guest=static_cast<unsigned char*>(VirtualAlloc(nullptr,size_t(1)<<32,MEM_RESERVE,PAGE_NOACCESS));CHECK(guest);
     CHECK(VirtualAlloc(guest+0x10000,0x10000,MEM_COMMIT,PAGE_READWRITE));
     CHECK(!pilot_io_device_initialize(guest));CHECK(!pilot_io_device_image(guest,0x10000,0x10000));
     CHECK(!pilot_io_device_resident(0x10000,0x10000));
     uint32_t prep[]={captured_thread(argv[2]),31};call(148,prep);call(36,prep);
     CHECK(!pilot_usb_pit_time(ticks));
-    if(!strcmp(mode,"rollback")) {
+    if(!strcmp(mode,"rollback") || !strcmp(mode,"capture-rollback")) {
         CHECK(!pilot_io_device_mmio_bind(0xfec00000,0x1000,dummy));
-        CHECK(pilot_audio_device_lle_open(consume,nullptr));PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+        CHECK(pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:consume,capture));PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
         CHECK(!s.owned && !s.apu_mapping && !s.work_binding);
         CHECK(!pilot_io_device_mmio_bind(0xfe800000,0x80000,dummy));
         CHECK(!pilot_io_device_mmio_bind(0xfe800000,0x80000,nullptr));
         CHECK(!pilot_io_device_mmio_bind(0xfec00000,0x1000,nullptr));
+        if(capture){CHECK(!pilot_audio_device_lle_consumer_attached(capture));CHECK(!pilot_pcm_capture_destroy(capture));}
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
-    CHECK(!pilot_audio_device_lle_open(!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,nullptr));
+    CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(capture)CHECK(!pilot_pcm_capture_bind(capture));
     PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
     CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding && state.gp_held && state.ep_held && state.clock_ticks==60000);
     if(!strcmp(mode,"unknown") || !strcmp(mode,"gap")) {
@@ -82,6 +116,24 @@ int main(int argc,char **argv) {
     memset(guest+va,0,4096);word(va)=pa+256;word(va+4)=0x80000200;
     for(unsigned i=0;i<1024;++i)guest[va+256+i]=uint8_t(i*17);
     access(0xfec00110,4,pa);access(0xfec00115,1,0);
+    if(!strcmp(mode,"capture-full") || !strcmp(mode,"capture-stamps") || !strcmp(mode,"capture-failed") || !strcmp(mode,"capture-closed")) {
+        word(va+4)=0x80000400;for(unsigned i=1024;i<2048;++i)guest[va+256+i]=uint8_t(i*17);
+        access(0xfec0011b,1,0x11);CHECK(!pilot_usb_pit_time(66000));CHECK(!pilot_audio_device_lle_sample());
+        capture_view_check(1024,1,guest+va+256);pilot_audio_device_lle_state(&state);CHECK(state.pcm_words==512 && !state.descriptors);
+        const PilotPcmCaptureStamp *before_stamps=nullptr;pilot_pcm_capture_view(capture,nullptr,nullptr,&before_stamps,nullptr);
+        PilotPcmCaptureStamp before=before_stamps[0];
+        if(!strcmp(mode,"capture-failed"))pilot_pcm_capture_test_fail(capture,1);
+        if(!strcmp(mode,"capture-closed"))CHECK(pilot_pcm_capture_finish(capture,1));
+        CHECK(!pilot_usb_pit_time(72000));CHECK(pilot_audio_device_lle_sample());
+        capture_view_check(1024,1,guest+va+256);pilot_audio_device_lle_state(&state);CHECK(state.pcm_words==512 && !state.descriptors);
+        const PilotPcmCaptureStamp *after_stamps=nullptr;pilot_pcm_capture_view(capture,nullptr,nullptr,&after_stamps,nullptr);
+        CHECK(!memcmp(&before,after_stamps,sizeof(before)));
+        CHECK(pilot_audio_device_lle_close());CHECK(pilot_pcm_capture_destroy(capture));
+        CHECK(pilot_audio_device_lle_consumer_attached(capture));capture_view_check(1024,1,guest+va+256);
+        pilot_pcm_capture_finish(capture,0);CHECK(GetFileAttributesA(destination.c_str())==INVALID_FILE_ATTRIBUTES);
+        capture_readback(destination+".partial",1024,1,1,guest+va+256);
+        puts("PASS production sink rejects full/failed/closed without changing accepted prefix or ACI completion; registered sink retained");return 0;
+    }
     if(!strcmp(mode,"invalid")) {
         access(0xfec00110,4,pa+4092);uint32_t run=0x11;
         CHECK(pilot_audio_device_lle_access(0xfec0011b,1,1,&run));
@@ -103,14 +155,14 @@ int main(int argc,char **argv) {
         CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&state);CHECK(state.owned && state.work_binding);
         puts("PASS consumer rejection/paused descriptor retains terminal owner; no completion");return 0;
     }
-    CHECK(!strcmp(mode,"positive") || !strcmp(mode,"engine-fault"));
+    CHECK(!strcmp(mode,"positive") || !strcmp(mode,"engine-fault") || !strcmp(mode,"capture-engine"));
     // Real raw CPU writes RUN (descriptor DMA inside registered callback),
     // then real original pump advances one ACI interval while CPU loops.
     const uint8_t code[]={0xc6,0x05,0x1b,0x01,0xc0,0xfe,0x11,
         0xc7,0x05,0x20,0x90,0x01,0,1,0,0,0,
         0xb9,0xa0,0x86,0x01,0,0x49,0x75,0xfd,0xc2,4,0};
     memcpy(guest+0x12000,code,sizeof(code));pilot_io_device_thread_bind(body);
-    if(!strcmp(mode,"engine-fault")) {
+    if(!strcmp(mode,"engine-fault") || !strcmp(mode,"capture-engine")) {
         const uint8_t unknown[]={0xc7,0x05,0xfc,0xff,0x83,0xfe,3,0,0,0,0xc2,4,0};
         memcpy(guest+0x12000,unknown,sizeof(unknown));
     }
@@ -119,22 +171,47 @@ int main(int argc,char **argv) {
     uint32_t ref[]={handle,0,0x19004};CHECK(!call(246,ref));uint32_t object=word(0x19004);
     uint32_t priority[]={object,29};call(148,priority);
     uint32_t join[]={object,0,0,0,0};
-    if(!strcmp(mode,"engine-fault")) {
+    if(!strcmp(mode,"engine-fault") || !strcmp(mode,"capture-engine")) {
         uint32_t result=0;CHECK(pilot_io_device_lle(159,guest,join,&result));CHECK(raw_calls==1);
         pilot_audio_device_lle_state(&state);CHECK(!state.dma_reads && !state.pcm_words && !state.descriptors);
         CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&state);
         CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding);
+        if(capture){CHECK(pilot_pcm_capture_destroy(capture));CHECK(pilot_audio_device_lle_consumer_attached(capture));
+            pilot_pcm_capture_finish(capture,0);capture_view_check(0,0,nullptr);CHECK(GetFileAttributesA(destination.c_str())==INVALID_FILE_ATTRIBUTES);}
         puts("PASS actual raw unknown startup guard; terminal engine refuses cleanup; registered owner retained");return 0;
     }
     CHECK(!call(159,join));CHECK(!call(187,&handle));call(250,&object);
     CHECK(raw_calls==1 && clock_calls>1 && word(0x19020)==2);
     pilot_audio_device_lle_state(&state);CHECK(state.dma_reads>=2 && state.pcm_words==512 && state.descriptors==1 && state.gp_held && state.ep_held);
-    CHECK(received.size()==1024 && !memcmp(received.data(),guest+va+256,1024));
+    if(capture)capture_view_check(1024,1,guest+va+256);
+    else CHECK(received.size()==1024 && !memcmp(received.data(),guest+va+256,1024));
     uint32_t mask=0xbf;CHECK(!pilot_usb_pic_port(0x21,1,1,&mask));CHECK(pilot_usb_pic_vector(0)==0x36);
     CHECK(pilot_usb_pic_vector(1)==0x36);
     access(0xfec00116,2,0x1c);uint32_t eoi=0x20;CHECK(!pilot_usb_pic_port(0x20,1,1,&eoi));
     CHECK(pilot_usb_pic_vector(0)==-1);
     access(0xfec0011b,1,0);CHECK(!pilot_audio_device_lle_close());
+    if(capture) {
+        CHECK(!pilot_pcm_capture_finish(capture,1));CHECK(GetFileAttributesA((destination+".partial").c_str())==INVALID_FILE_ATTRIBUTES);
+        capture_readback(destination,1024,1,0,guest+va+256);CHECK(!pilot_pcm_capture_destroy(capture));capture=nullptr;
+        CHECK(pilot_pcm_capture_create(&capture,destination.c_str(),1024,1) && !capture);
+        // Successive empty real-device lifetimes isolate persistence controls
+        // from already-proved raw CPU PCM acceptance. A readable footer in a
+        // failed partial never makes the final destination visible.
+        for(unsigned phase=2;phase<=5;++phase) {
+            std::string path=destination+"-io-"+std::to_string(phase);
+            CHECK(!pilot_pcm_capture_create(&capture,path.c_str(),1024,1));
+            CHECK(!pilot_audio_device_lle_open(pilot_pcm_capture_consume,capture));CHECK(!pilot_pcm_capture_bind(capture));
+            PilotAudioDeviceState fresh;pilot_audio_device_lle_state(&fresh);CHECK(fresh.lifetime_id>state.lifetime_id && fresh.epoch_ticks==66000);
+            CHECK(!pilot_audio_device_lle_close());
+            if(phase<5)pilot_pcm_capture_test_fail(capture,phase);
+            else {FILE *existing=fopen(path.c_str(),"wbx");CHECK(existing);CHECK(fwrite("KEEP",4,1,existing)==1);CHECK(!fclose(existing));}
+            CHECK(pilot_pcm_capture_finish(capture,1));
+            if(phase<5)CHECK(GetFileAttributesA(path.c_str())==INVALID_FILE_ATTRIBUTES);
+            else {FILE *existing=fopen(path.c_str(),"rb");char sentinel[4];CHECK(existing && fread(sentinel,4,1,existing)==1 && !memcmp(sentinel,"KEEP",4));CHECK(!fclose(existing));}
+            capture_readback(path+".partial",0,0,0,nullptr);CHECK(!pilot_pcm_capture_destroy(capture));capture=nullptr;
+        }
+        printf("[AC97 CAPTURE] %s\n",destination.c_str());
+    }
     CHECK(!pilot_io_device_clock_bind(nullptr,nullptr));call(171,&va);
     CHECK(!pilot_io_device_mmio_bind(0xfe800000,0x80000,dummy));CHECK(!pilot_io_device_mmio_bind(0xfe800000,0x80000,nullptr));
     puts("PASS raw CPU registered audio callback + owned DMA + original clock work + shared IRQ + retired cleanup");return 0;

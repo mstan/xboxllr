@@ -63,6 +63,7 @@ public:
     }
     uint64_t completed_descriptors() const { return completed_descriptors_; }
     uint64_t consumed_pcm_words() const { return consumed_pcm_words_; }
+    uint64_t current_frame() const { return frame_; }
 
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - kBase;

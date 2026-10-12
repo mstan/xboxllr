@@ -1986,3 +1986,39 @@ This closes the bounded wiring task `.113.23`, not A05 or the audio family.
 Actual original title startup, GP/EP processing, ISR/DPC, output, timing and
 stop/reuse remain required. A03/A04 hardware-dependent semantics stay deferred
 to the final console batch; no title, GPU, playback or console run was repeated.
+
+## Original AC97 output consumer - 2026-10-12
+
+`XLLE_PILOT_ORIGINAL_PCM_CAPTURE=<new private file>` connects the selected
+original AC97 owner to a bounded PCM16 memory consumer. It copies the actual
+DMA-fetched stereo bytes before descriptor completion and records the device
+lifetime, original PIT epoch, observed shared PIT and actual codec frame. It
+does not add a native buffer, decoder, audio worker or clock. The callback
+performs no allocation, file I/O or CPU-service reentry. The default128MiB byte
+and262144-stamp limits cover ordinary600-second48k stereo output; unusually
+small chunks may exhaust stamps earlier. Any exhausted limit rejects the whole
+chunk without truncation or changing already accepted bytes/stamps.
+
+Capture setup creates an exclusive `.partial` file. Complete publication
+requires the matching device consumer to retire, then successful write, flush
+and close before a non-replacing move to the requested destination. Existing
+files are preserved. Failed or active lifetimes retain explicit partial output
+and any still-registered callback context. A complete-looking footer in a
+failed partial does not certify persistence. Memory acceptance and subsequent
+file persistence are separate contracts; file failure cannot undo an earlier
+genuine descriptor consumption. No destination retains the before-DMA RUN guard.
+
+Fifteen focused controls pass. The real raw CPU/owned DMA/common clock/PIC path
+publishes exactly1024 expected bytes with epoch60000, observed PIT66000 and
+codec-frame11. Byte/stamp capacity, failed/finalized consumption and active
+publication controls preserve an accepted1024-byte prefix, its whole stamp and
+unchanged ACI completion counters. Write/flush/close failures and publication
+races preserve partial evidence and existing destinations. Root verifies31
+frozen/current sources and71 artifact identities, independently reads the
+published bytes/stamp and builds the production library and runtime unit.
+Acceptance: `build/blinx/audio-original-pcm-root-20261012/accepted-root.aot-private.json`,
+SHA256 `109bbd2b68bea463dfe5fb1a20fda428031d64cd9ee05fc25fbafca6a986f1ba`.
+
+This closes bounded consumer task `.113.24`. Original GP/EP startup and active
+FE semantics, actual title ISR/DPC/processing/output, stop/reuse and timing
+remain required. No title, playback, GPU or console run was performed.

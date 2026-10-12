@@ -20,9 +20,12 @@ const char *pilot_audio_device_lle_error(void);
 /* Passive diagnostics remain available after a terminal guard. */
 typedef struct PilotAudioDeviceState {
     uint64_t pcm_words,descriptors,clock_ticks,dma_reads,dma_writes;
+    uint64_t lifetime_id,epoch_ticks,codec_frame;
     unsigned owned,apu_mapping,aci_mapping,work_binding,gp_held,ep_held;
 } PilotAudioDeviceState;
 void pilot_audio_device_lle_state(PilotAudioDeviceState *state);
+/* Passive lifetime check; no locking, services, clock input or device work. */
+int pilot_audio_device_lle_consumer_attached(void *context);
 #ifdef __cplusplus
 }
 #endif
