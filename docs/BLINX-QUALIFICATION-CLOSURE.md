@@ -241,6 +241,22 @@ This closes the concrete calendar admission task `.112.2.18` at fix `1eeadf7`.
 No tests or title runs were repeated for this review. Q03 and both whole-family
 gates remain open while the existing run completes its required lifetimes.
 
+A01's v8 partial census now reaches1,819 accepted calls across201 generations,
+including194 actual mono ADPCM Plays,42 routes at Play (44 configured routes),
+34 accepted bin-volume updates and20 looping Plays using two nonzero regions.
+Sol6.1's bounded audit and root adversarial review bind21 frozen inputs and
+independently recompute the prefix. Existing original packing/send arithmetic,
+ADPCM region/source and A02 default composition cover the reached stage domains;
+no additional VP stage is identified. The84 gain cases are generic arithmetic
+coverage, not a literal-300 fixture; use the56-case source proof containing8
+mono ADPCM cases. Neither post-Play setters nor absent filter/EG entries prove
+hardware-active processing or unreachable raw internal original calls. Original
+loop API completion and downstream bins11/12 graph/output remain in A03-A05.
+Proof `voice-census-v8-20261012/accepted-root.aot-private.json`, SHA256
+`3cfbd0dd7691e14e6c9319e15f984088fe39586c7467585e17352c74e200acf0`.
+No tests or title runs were repeated. Final census/lifetimes and A01 closure
+remain pending; the family count remains4/9 with26 precision deferrals.
+
 The final analyzer explicitly binds required opening lifetimes to actual Play
 not after the declared Start. A fixed600s diagnostic can also reach a later
 opening; it retains that lifetime and its source/ring/census evidence without
@@ -359,9 +375,11 @@ priority and F: temporary/build storage. Only one GPU-heavy run at a time.
 Lower resource use when the owner plays a game; otherwise do not throttle LLE
 merely because it is slow. Keep Beads updates local; no Dolt synchronization.
 
-The Xbox remains stopped after the unexpected SG write readback until the
-outstanding owner inspection/restart confirmation. Do not ping/probe while that
-stop is unresolved. Afterwards use standing read/benign-write authorization,
+Owner update2026-10-12: the Xbox is off. Defer every console operation until the
+final hardware batch, after available offline qualification; do not ping/probe
+or request another hardware session in the meantime. Keep the prior unexpected
+SG write readback recorded and resume only from fresh owner-confirmed probe
+readiness. Existing read/benign-write authorization remains in force, with
 verified owned RAM and recovery copies. Stop after any unexpected WRITE result.
 Avoid dangerous boot/HDD/EEPROM/flash operations. Do not replay failed writes.
 

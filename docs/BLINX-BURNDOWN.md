@@ -72,6 +72,12 @@ gameplay and ADPCM voice creation. Root accepts the bounded integration at proof
 `31c80d58b62eac7909c654b2d4e64f537d211eb08bc3838160303b537773a3bf`;
 calendar task `.112.2.18` is closed, reusing its actual CPU controls without a
 rerun. Movie/scheduling family acceptance still awaits the full lifetimes.
+Sol6.1's partial audio census and root adversarial review now cover194 actual
+ADPCM Plays with custom sends and nonzero loops; existing independent stage
+evidence applies, with full original device/output and final census still open.
+Root proof `3cfbd0dd7691e14e6c9319e15f984088fe39586c7467585e17352c74e200acf0`
+records the acceptance limits. The owner has turned the Xbox off and requested
+all hardware operations deferred until the final batch after offline work.
 The rejected-batch analyzer/gallery waiters run no numeric/title repetition.
 Analyzer `2075d64` retains any later diagnostic opening without
 substituting it for the required two natural and one interrupted lifetimes;
