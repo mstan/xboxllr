@@ -80,7 +80,7 @@ No production fix is needed in this scope. A01's final census can require anothe
 stage only if it identifies an additional reached mode. Actual original audio
 allocation/configuration/ISR/DPC/output remains required in A03/A04/A05.
 
-The Q03 batch `reference-movie-batch-20261011/q03-c32000-v5` uses frozen sources
+The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` uses frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three
 affected checks and the actual original-thread configuration fixture. One accepted-settings
 JSONL census records stable object generations, effective rates, ordered routes,
@@ -91,6 +91,16 @@ up to600 snapshots, enough for the six-hour host batch; v4 was stopped after
 639.781 wall seconds when the previous180-image limit was identified. Its
 short Microsoft checkpoint passes unchanged waveform/video/A-V limits with
 zero source mismatches/rereads. The stopped v4 is not full closing evidence.
+Generation v5 was stopped after841.406 wall seconds: the original scheduling
+launch never bound the host input provider to OHCI, so the planned Start could
+not reach the original controller code. The maintained launch now binds that
+provider without starting the native host-clock worker. Five affected checks
+pass; actual OHCI enumeration and endpoint2 DMA deliver all18 Start/release
+bytes into original-owned RAM, preserve time through host stalls and reject a
+backwards publication. The unbound control fails on the expected Start bytes.
+Proof `reference-input-ohci-20261012/qualified.aot-private.json`, SHA256
+`a3d83229b2a9a3f15e2edb27b34c938f5838697d24ca94dc73973639b7556f94`.
+The restarted generation checks for actual replay initialization immediately.
 Final movie/scheduling acceptance awaits
 the actual two natural openings and subsequent Start/release/reentry evidence.
 

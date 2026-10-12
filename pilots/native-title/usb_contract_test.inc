@@ -129,6 +129,79 @@ static void test_usb_lle(void)
     call_kernel(171,&buffer,1);CHECK(test_write_faults(buffer));
     fprintf(stderr,"PASS: compiled OHCI MMIO, original physical ownership, real descriptor DMA/completion, reset and release\n");
 }
+#if defined(PILOT_INPUT_NATIVE) && defined(PILOT_INPUT_REFERENCE_CLOCK)
+static void usb_replay_time(uint64_t milliseconds)
+{
+    CHECK(!pilot_input_host_reference_time(milliseconds));
+    CHECK(!pilot_usb_pit_time(milliseconds*1125));
+}
+static void usb_replay_control(uint32_t buffer,uint32_t pa,unsigned request,
+    unsigned value,unsigned address,uint64_t milliseconds)
+{
+    memset(memory+buffer+0x100,0,0x200);
+    MEM8(buffer+0x180)=0;MEM8(buffer+0x181)=(uint8_t)request;
+    MEM16(buffer+0x182)=(uint16_t)value;
+    MEM32(buffer+0x100)=address|(64u<<16);
+    MEM32(buffer+0x104)=pa+0x140;MEM32(buffer+0x108)=pa+0x110;
+    MEM32(buffer+0x110)=0xf0000000u;MEM32(buffer+0x114)=pa+0x180;
+    MEM32(buffer+0x118)=pa+0x130;MEM32(buffer+0x11c)=pa+0x187;
+    MEM32(buffer+0x130)=0xf0100000u;MEM32(buffer+0x138)=pa+0x140;
+    usb_test_write(0x20,pa+0x100);usb_test_write(8,2);usb_test_write(4,0x90);
+    usb_replay_time(milliseconds);CHECK(!pilot_usb_lle_tick());
+    CHECK((MEM32(buffer+0x110)>>28)==0 && (MEM32(buffer+0x130)>>28)==0);
+    CHECK((MEM32(buffer+0x108)&~15u)==pa+0x140);
+}
+static void usb_replay_report(uint32_t buffer,uint32_t pa,uint64_t milliseconds,
+    const uint8_t expected[18])
+{
+    memset(memory+buffer+0x200,0,0x100);memset(memory+buffer+0x280,0xcc,20);
+    MEM32(buffer+0x200)=5u|(2u<<7)|(2u<<11)|(32u<<16);
+    MEM32(buffer+0x204)=pa+0x220;MEM32(buffer+0x208)=pa+0x210;
+    MEM32(buffer+0x210)=0xf0140000u;MEM32(buffer+0x214)=pa+0x280;
+    MEM32(buffer+0x218)=pa+0x220;MEM32(buffer+0x21c)=pa+0x293;
+    usb_test_write(0x28,pa+0x200);usb_test_write(8,4);usb_test_write(4,0xb0);
+    usb_replay_time(milliseconds);CHECK(!pilot_usb_lle_tick());
+    CHECK((MEM32(buffer+0x210)>>28)==0);
+    CHECK((MEM32(buffer+0x208)&~15u)==pa+0x220);
+    CHECK(MEM8(buffer+0x280)==0 && MEM8(buffer+0x281)==20);
+    CHECK(!memcmp(memory+buffer+0x282,expected,18));
+}
+static void test_usb_reference_replay(int leave_unbound)
+{
+    input_host_is_keyboard();input_host_keyboard=0;
+    FILE *replay=tmpfile();CHECK(replay);
+    CHECK(fputs("0 000000000000000000000000000000000000\n20 1000ff00000000000000ff7f000000000000\n220 000000000000000000000000000000000000\n",replay)>=0);
+    rewind(replay);CHECK(input_replay_load(replay) && !fclose(replay));
+    install_fault_handler();
+    /* Use the same provider binding as the original-scheduler launch, without
+     * starting the native scheduler's host clock worker. */
+    if(!leave_unbound)usb_host_start();
+    CHECK(usb_test_read(0)==0x10);
+    uint32_t bytes=4096;call_kernel(165,&bytes,1);uint32_t buffer=g_eax;CHECK(buffer);
+    call_kernel(173,&buffer,1);uint32_t pa=g_eax;
+    memset(memory+buffer,0,bytes);usb_test_write(0x18,pa);usb_test_write(0x54,1u<<4);
+    usb_replay_control(buffer,pa,5,5,0,1);
+    usb_replay_control(buffer,pa,9,1,5,2);
+    const uint8_t neutral[18]={0};
+    const uint8_t start[18]={0x10,0,255,0,0,0,0,0,0,0,255,127,0,0,0,0,0,0};
+    usb_replay_report(buffer,pa,19,neutral);
+    usb_replay_report(buffer,pa,20,start);
+    Sleep(80);
+    CHECK(pilot_input_host_reference_time(19)==ERROR_INVALID_PARAMETER);
+    /* No fresh controller frame means no report completion during a host stall. */
+    MEM32(buffer+0x210)=0xf0140000u;MEM32(buffer+0x214)=pa+0x280;
+    MEM32(buffer+0x218)=pa+0x220;MEM32(buffer+0x21c)=pa+0x293;
+    MEM32(buffer+0x208)=pa+0x210;memset(memory+buffer+0x280,0xcc,20);
+    usb_test_write(8,4);CHECK(!pilot_usb_lle_tick());
+    CHECK((MEM32(buffer+0x210)>>28)==15 && MEM8(buffer+0x280)==0xcc);
+    usb_replay_time(21);CHECK(!pilot_usb_lle_tick());
+    CHECK((MEM32(buffer+0x210)>>28)==0 && !memcmp(memory+buffer+0x282,start,18));
+    usb_replay_report(buffer,pa,220,neutral);
+    usb_test_write(8,1);CHECK(physical_find(buffer,bytes)->borrowers==0);
+    call_kernel(171,&buffer,1);CHECK(test_write_faults(buffer));
+    fprintf(stderr,"PASS: reference replay through bound host provider, actual OHCI enumeration/endpoint2 DMA and original physical owner; Start20ms/release220ms, host-stall/backwards-clock guards and reset/free\n");
+}
+#endif
 static void test_original_physical_memory(void)
 {
     install_fault_handler();

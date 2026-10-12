@@ -651,6 +651,11 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"usb-irq")) { test_usb_irq(); return 0; }
         if (!strcmp(argv[1],"usb-irq-clock")) { test_usb_irq_clock(); return 0; }
         if (!strcmp(argv[1],"usb-lle")) { test_usb_lle(); return 0; }
+#if defined(PILOT_INPUT_NATIVE) && defined(PILOT_INPUT_REFERENCE_CLOCK)
+        if (!strcmp(argv[1],"usb-reference-replay") || !strcmp(argv[1],"usb-reference-replay-unbound")) {
+            test_usb_reference_replay(!strcmp(argv[1],"usb-reference-replay-unbound"));return 0;
+        }
+#endif
 #ifdef PILOT_MEMORY_LLE
         if (!strcmp(argv[1],"usb-original-dma-lock-lle") || !strcmp(argv[1],"usb-original-dma-borrowed-free-lle")) {
             test_usb_original_dma_lock_lle(!strcmp(argv[1],"usb-original-dma-borrowed-free-lle"));return 0;

@@ -1192,6 +1192,7 @@ int main(int argc,char **argv)
 #ifndef PILOT_SCHEDULING_LLE
     usb_clock_start();
 #else
+    usb_host_start();
     uint32_t revision=0;const char *usb_error=usb_access(0xfed00000u,0,&revision);
     if(usb_error)stop(usb_error,0xfed00000u);
 #endif
