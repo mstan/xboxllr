@@ -118,6 +118,42 @@ backwards model time and unfinished batches. Proof
 `reference-input-ohci-20261012/analysis-controls-v2/qualified-controls.aot-private.json`,
 SHA256 `f5bbb6d0ddd194e50915816359933cb26aa7aeed0958d9659bd84ecbfa250dbd`.
 
+The first v6 natural opening now reaches picture2263, real Stop after75.567s,
+Destroy and the title transition, with zero ring mismatches or source rereads.
+Its full waveform checkpoint exposed an analyzer error: requested44100 was
+treated as exact44100 instead of original packed pitch-501, whose maintained
+source clock is44098.205613Hz. The original constructor/frequency source and
+A02 expectations establish that pitch independently of the candidate waveform.
+The corrected analyzer applies that fixed conversion to both caller PCM and
+independent nominal media, retaining one alignment per Play, original video
+PTS, the same waveform/A-V tolerances and no fitted rate/gain. Its rational
+approximation adds under0.002 frame of phase error over this full lifetime.
+The retained ideal-rate failure is not erased and does not establish a runtime
+defect. Corrected full-span independent RMSE0.00434/0.00462 and correlation
+0.99983/0.99983 pass; A/V absolute p95 remains bounded by51.87ms. Proof
+`q03-c32000-v6/first-natural-encoded-pitch/review.aot-private.json`, SHA256
+`b8ec74744b90b66390cd7f70d70789bffd28456777abc73eacc3c0fa6744f5df`.
+Five retained analyzer controls also pass unchanged in `analysis-controls-v3`,
+SHA256 `5e593d4fab04f5c32cdbd45c2430255fd08f144afb1523d1c40262165023b836`.
+The final observer freezes the corrected analyzer as a new generation; the
+title executable/run is unchanged. Second-opening and Start/reentry acceptance
+remain required before Q03 or either family closes.
+
+G02's fixed encoder-read preparation is committed in the probe repository at
+`1283882cde262b299d4d83f36e00b4de30e1e47a`. Two404-byte payloads resolve only
+HAL ordinal45 and perform byte reads at slave8A, commandsC4 then6C. Eleven
+focused controls pass; the full offline suite is182 passes plus3 pre-existing
+optional DSP-checker skips. Eight earlier payload variants are byte-identical.
+Root verifies17 source/binary/original/nxdk identities and the unchanged ARM/
+protocol boundary. Preparation closes `.111.1`, not G02 or parent `.111`.
+Root proof `graphics-startup-consumer-20261012/encoder-root-review/accepted-preparation.aot-private.json`,
+SHA256 `46a8e68c4a988afaa4b91b6634ceb7d839dc85a2a1d8fa3136391b783aa7db57`.
+HAL programs its own SMBus controller and synchronization state; the payloads
+request no encoder-register-data or storage write. Legacy-selected status,
+true6C/C4 state and the old warm snapshot's preceding programming remain
+distinct inputs. The prepared read bytes cannot be used to invent them.
+No console operation has run while the recovery hold is pending.
+
 G03's source investigation identifies a required implementation gap. Original
 MMIO already publishes into the same PRAMIN store used by object/DMA/RAMHT
 consumers. The missing behavior is selected-image PGRAPH load/save through

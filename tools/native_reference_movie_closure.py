@@ -12,8 +12,10 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import re
 import struct
+from fractions import Fraction
 from pathlib import Path
 import numpy as np
 from scipy.signal import correlate, resample_poly
@@ -25,6 +27,8 @@ LIMITS = dict(waveform_absolute_rmse_max=.02, waveform_correlation_min=.99,
               audio_anchor_search_seconds=.1, amplitude_gain=1.,
               natural_opening_seconds_min=74., natural_final_frame=2263,
               start_to_stop_seconds_max=1.,
+              source_pitch_rational_phase_error_frames_max=.01,
+              source_pitch_rational_denominator_max=65536,
               ring_byte_mismatches_max=0, repeated_movie_source_bytes_max=0)
 
 
@@ -97,17 +101,35 @@ def match_movies(rows, reference):
     return phases, pins
 
 
+def encoded_playback(samples, requested_frequency, source_sample_rate):
+    # Actual original constructor/SetFrequency packing is independently bound
+    # by native_audio_default_reference.py: 44100 -> -501, 48000 -> 0.
+    # A capture's frequency is the request, not the resulting source clock.
+    # Never estimate a rate from the candidate waveform or realign windows.
+    pitches = {44100: -501, 48000: 0}
+    if requested_frequency not in pitches:
+        raise ValueError('unsupported observed movie DMA frequency')
+    pitch = pitches[requested_frequency]
+    effective = 48000*math.exp2(pitch/4096)
+    ratio = 48000*requested_frequency/(source_sample_rate*effective)
+    rational = Fraction(ratio).limit_denominator(LIMITS['source_pitch_rational_denominator_max'])
+    phase_error = len(samples)*abs(float(rational)-ratio)
+    if phase_error > LIMITS['source_pitch_rational_phase_error_frames_max']:
+        raise ValueError('source-derived resampling ratio exceeds phase bound')
+    converted = samples if rational == 1 else resample_poly(samples, rational.numerator, rational.denominator, axis=0)
+    return converted, dict(requested_frequency=requested_frequency, encoded_pitch=pitch,
+                           encoded_source_rate_hz=effective, source_sample_rate=source_sample_rate,
+                           output_rate=48000,
+                           output_per_input=[rational.numerator,rational.denominator],
+                           maximum_rational_phase_error_frames=phase_error, fitted_rate=False)
+
+
 def align_audio(voice, source, gp):
     if tuple(voice['shape'][:2]) != (2, 16) or len(voice['source_bytes_by_rate']) != 1:
         raise ValueError('movie voice needs one observed stereo PCM16 DMA rate')
     rate = int(next(iter(voice['source_bytes_by_rate'])))
     caller = np.frombuffer(source, dtype='<i2').reshape(-1, 2).astype(np.float64)/32768
-    if rate == 48000:
-        expected = caller
-    elif rate == 44100:
-        expected = resample_poly(caller, 160, 147, axis=0)
-    else:
-        raise ValueError('unsupported observed movie DMA rate')
+    expected, playback = encoded_playback(caller, rate, rate)
     anchor = LIMITS['audio_anchor_second']*48000; width = 48000
     estimate = voice['play_frames'][0]; radius = round(LIMITS['audio_anchor_search_seconds']*48000)
     lo = max(0, estimate+anchor-radius); hi = min(len(gp), estimate+anchor+width+radius)
@@ -119,7 +141,7 @@ def align_audio(voice, source, gp):
     sums = np.r_[0, np.cumsum(hay)]; squares = np.r_[0, np.cumsum(hay*hay)]
     variance = np.maximum(squares[width:]-squares[:-width]-(sums[width:]-sums[:-width])**2/width, 1e-20)
     scores = dots/np.sqrt(variance*np.dot(needle, needle)); best = int(scores.argmax())
-    return lo+best-anchor, expected, float(scores[best]), rate
+    return lo+best-anchor, expected, float(scores[best]), playback
 
 
 def evaluate(folder, reference, output):
@@ -173,11 +195,14 @@ def evaluate(folder, reference, output):
                    consumed_model_seconds=duration, natural=natural,
                    no_source_rereads=voice['repeated_before_another_write_bytes']==0)
         if natural:
-            offset, expected, score, rate = align_audio(voice, sources[voice['id']], gp)
+            offset, expected, score, playback = align_audio(voice, sources[voice['id']], gp)
             # Compare the full independent media span, including the quiet tail.
             # DMA prefetch beyond media EOS is not invented output correctness.
             media_path = reference/'op01.f32'; media_meta = media_path.with_suffix('.json')
             media = np.fromfile(media_path, dtype='<f4').reshape(-1, 2).astype(np.float64)
+            # The independent file is nominal 48000-Hz media. Apply the same
+            # original, source-derived pitch to its nominal source timeline.
+            media, media_playback = encoded_playback(media, playback['requested_frequency'],48000)
             count = len(media)
             if offset < 0 or count > len(expected) or offset+count > stopped or offset+count > len(gp):
                 raise ValueError('full declared media span not present before actual Stop')
@@ -194,7 +219,8 @@ def evaluate(folder, reference, output):
                 raise ValueError('insufficient independently distinctive opening timing samples')
             av95 = float(np.percentile(np.abs(av), 95))
             row.update(fixed_offset_frames=offset, one_anchor_per_play=True, anchor_correlation=score,
-                       actual_dma_rate=rate, compared_frames=count, caller_rmse=rmse, caller_correlation=corr,
+                       playback=playback, independent_media_playback=media_playback,
+                       compared_frames=count, caller_rmse=rmse, caller_correlation=corr,
                        independent_media_rmse=media_rmse, independent_media_correlation=media_corr,
                        independent_media=[identity(media_path), identity(media_meta)], av_absolute_p95_seconds=av95,
                        av_samples=len(av), numeric_pass=max(rmse+media_rmse)<=LIMITS['waveform_absolute_rmse_max'] and

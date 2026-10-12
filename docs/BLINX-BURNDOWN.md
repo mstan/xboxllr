@@ -37,7 +37,14 @@ original-scheduler host-to-OHCI connection is fixed at `99b06b4`: five affected
 checks pass, and its unbound control fails on the actual Start report bytes.
 Frozen Q03 generation v6 is running muted/invisible on two logical CPUs, with
 actual replay initialization confirmed. One final analysis follows that batch;
-it never launches another title or automatically closes a family. G03 now has
+it never launches another title or automatically closes a family. The first
+opening now reaches2263, real75.567s Stop/Destroy and title. Full independent
+waveform and A/V checks pass after correcting the analyzer's ideal44100 rate
+to independently established original packed pitch-501; the failed nominal
+comparison is retained. The title continues unchanged. Fixed encoder-read
+preparation `.111.1` is also root-reviewed and closed, with11 focused controls
+and182 suite passes/3 existing optional skips; actual startup is unresolved.
+G03 now has
 an explicit PGRAPH image load/save mapping dependency, separately from hardware
 RAMFC questions. Retained startup logs do not contain the required same-object
 image/queue; their earlier CX25871 `EN_REG_RD` guard must be resolved before
