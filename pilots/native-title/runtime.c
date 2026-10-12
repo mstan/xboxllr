@@ -14,6 +14,16 @@
 #include "recomp_types.h"
 #include "pilot_image.h"
 #include "guest_cpu_config.h"
+#ifdef PILOT_AUDIO_DEVICE_LLE
+#include "audio_device_lle.h"
+/* Compiled continuations do not borrow the raw engine's lock/DMA capability.
+ * Until that transport is independently admitted, stop before device work. */
+static const char *original_audio_compiled_guard(uint32_t address,unsigned size,int write,uint32_t *value)
+{
+    (void)address;(void)size;(void)write;(void)value;
+    return "compiled original audio MMIO lacks serialized shared-engine dispatch";
+}
+#endif
 
 ptrdiff_t g_xbox_mem_offset;
 int g_force_return;
@@ -934,6 +944,12 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
      * this does not resume or hide an unhandled guest/native fault. */
     if(code==0x406d1388u)return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION) {
+#ifdef PILOT_AUDIO_DEVICE_LLE
+        const char *audio_error=NULL;
+        int audio=pilot_mmio_fault_range(exception,memory,0xfe800000u,0xfe87ffffu,original_audio_compiled_guard,&audio_error);
+        if(!audio)audio=pilot_mmio_fault_range(exception,memory,0xfec00000u,0xfec00fffu,original_audio_compiled_guard,&audio_error);
+        if(audio<0)stop(audio_error,0xfe800000u);
+#endif
 #ifdef PILOT_GPU_LLE
         const char *gpu_error=NULL;
         int gpu=pilot_mmio_fault_range(exception,memory,0xfd000000u,0xfdffffffu,gpu_lle_access,&gpu_error);
@@ -1198,6 +1214,12 @@ int main(int argc,char **argv)
 #endif
 #endif
 #ifdef PILOT_SCHEDULING_LLE
+#ifdef PILOT_AUDIO_DEVICE_LLE
+    /* No output consumer is implied by device selection. A codec RUN stops
+     * before publication until an actual PCM sink is explicitly supplied. */
+    const char *audio_error=pilot_audio_device_lle_open(NULL,NULL);
+    if(audio_error)stop(audio_error,0xfe800000u);
+#endif
     scheduling_lle_run();return 0;
 #endif
     thread_guest_cpu_enter();

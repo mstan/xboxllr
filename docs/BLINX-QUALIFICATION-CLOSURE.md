@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: final hardware batch | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | In progress: offline device wiring; startup/output open | `.113`, `.113.23` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Shared device wiring complete; startup/output open | `.113`, `.113.23` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -93,6 +93,22 @@ not a demonstrated current failure. Root reviewed the source boundaries and
 35 frozen audit inputs; no new title or hardware run was needed. Readiness
 handoff `audio-original-integration-readiness-20261012/handoff.json`, SHA256
 `e40e157d158fb84e787f7ba168351ae76f460ef0290f27778748ebde3b44ff48`.
+
+The bounded `.113.23` wiring implementation now passes nine focused controls.
+An authored raw CPU thread executes registered ACI MMIO, descriptor DMA on
+original allocations, shared clock work and PIC IRQ6 acknowledge/EOI. Its
+consumer receives exactly1024 bytes from one512-word descriptor; GP/EP stay
+held. Unknown reset/FIFO gaps, absent/rejecting consumers, invalid DMA extents,
+partial registration rollback and retained active/faulted owners pass. Root
+review corrected the initial clock origin and overly broad FIFO admission.
+Six actual CMake selection cases and the changed runtime translation unit pass;
+29 frozen source files and50 artifact identities are verified without repeating
+functional tests. Root proof `audio-original-device-20261012/accepted-root.aot-private.json`,
+SHA256 `2ed6a4a206695499d15d4da5e20ba00a1b62323f54ebff20b45a2808c702e7aa`.
+The compatible ORIGINAL profile selects the adapter automatically. Its runtime
+still requires a real output consumer; compiled MMIO without shared-engine
+serialization remains guarded. Actual title startup/processing, original audio
+ISR/DPC, output and stop/reuse remain A05 work. No family is closed by this fixture.
 
 The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` used frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three

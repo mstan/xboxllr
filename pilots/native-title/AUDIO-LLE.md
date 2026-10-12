@@ -1950,3 +1950,39 @@ build/analysis failures are retained separately. This closes the loop-provenance
 task only: submission is not consumption or speaker correctness, and original
 GP/EP, hardware output, continued-call effects-failure semantics and the audio
 family remain open.
+
+## Original audio shared-device adapter - 2026-10-12
+
+The original DirectSound route previously had no complete APU/AC97 mapping in
+the native-title runtime. `PILOT_AUDIO_DEVICE=AUTO` now selects one maintained
+APU/AC97 pair and held GP/EP processors when ORIGINAL audio uses the shared LLE
+memory, scheduling, IO and USB owners. Native and APU_REFERENCE audio exclude
+this adapter; incompatible explicit selections fail configuration. No native
+buffer, decoded source, independent RAM, clock or processor substitutes for
+the selected original devices.
+
+Registered raw CPU MMIO and device work use the engine's synchronous DMA
+capability, existing PIT time and shared PIC IRQ5/6. Only established register
+fields are admitted. Unknown DSP reset/wake/core state and active FE ordering
+remain terminal. ACI creation starts at the current shared clock position;
+stopped/drained teardown removes only this owner's mappings. Active or paused
+descriptors and failed engine unbinding retain the terminal owner. Compiled
+MMIO is guarded until a serialized shared-engine dispatch exists. The runtime
+requires a real whole-chunk PCM consumer before codec RUN; absent consumers
+cannot discard bytes and publish completion.
+
+Nine focused controls include an actual original CPU thread executing registered
+MMIO, original allocation-backed DMA, clock-pumped consumption of512 PCM words,
+exact1024 output bytes, shared IRQ6 acknowledge/EOI and drained cleanup. Unknown
+reset/FIFO gaps, invalid extents, absent/rejecting consumers, paused descriptors,
+partial-open rollback and engine-fault retention pass. The fixture opens no HDD
+or storage initializer. Root reviewed29 frozen sources and50 artifact identities,
+verified six actual build-selection cases and compiled the changed runtime
+translation unit. Source-bound acceptance is
+`build/blinx/audio-original-device-20261012/accepted-root.aot-private.json`,
+SHA256 `2ed6a4a206695499d15d4da5e20ba00a1b62323f54ebff20b45a2808c702e7aa`.
+
+This closes the bounded wiring task `.113.23`, not A05 or the audio family.
+Actual original title startup, GP/EP processing, ISR/DPC, output, timing and
+stop/reuse remain required. A03/A04 hardware-dependent semantics stay deferred
+to the final console batch; no title, GPU, playback or console run was repeated.
