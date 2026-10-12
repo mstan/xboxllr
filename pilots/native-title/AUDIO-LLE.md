@@ -5,9 +5,42 @@ the original-scheduler/GPU startup experiments are not prerequisites. The family
 remains **open**, and the overall burndown remains **4/9 qualified**.
 
 The native title continues to select its real XAudio2/DSP implementation.
-The audio LLE floor still needs remaining envelope curves/filtering, GP transport/completion and
-whole-driver integration before it is a qualified selectable title backend. Existing
+The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driver
+integration before it is a qualified selectable title backend. Processing scope
+follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
+
+## Original defaults through composed voice processing - 2026-10-12
+
+`tools/native_audio_default_reference.py` executes the complete original settings
+and derived voice constructors, ordinary configuration helpers and live headroom
+setter into maintained source DMA, rate conversion, amplitude and ordered sends.
+PCM16 stereo and Xbox ADPCM mono at44100/48000 each pass three fresh device lives.
+Original headroom600 produces independently expected gain10^(-384/1280); the real
+headroom0 setter restores unity scaling. A complete public frequency call proves
+creation44100 versus effective48000 and original frequency0 restoration.
+
+Eight persistent headroom/filter rejection cases preserve RAM/cursor state;
+twelve deliberately wrong gain expectations reject the output. Original Stop0
+retains its actual deferred work node. Real original cancellation, inactive trap,
+unlink and caller-owned detach/rebind retire it before the new source is used.
+Independent negative PCM/ADPCM interiors reject old source/history; actual finite
+drain publishes DONE before the original completion consumer returns. Existing
+tone amplitude/RMS tolerances0.001/0.0003 and finite SRC count tolerance1 frame
+remain unchanged. No production APU correction was required.
+
+Root verifies103 unique artifacts and51 whole original function extents, then
+replays the portable tool once:12 lives,8 guards and12 wrong-gain controls pass
+in0.391s. Private proof:
+`build/blinx/audio-default-composition-20261012/root-portable/qualified-root.aot-private.json`,
+SHA256 `8f5053884eb59c6d931f0f9014375248418bb2768c16e9d5669169653c412a48`.
+
+Assigned voice/source/notifier storage, constructor-zeroed RAM, coherent clock
+and synchronous PIO capacity are explicit component preconditions. Full original
+allocation/configuration emission, ISR/DPC scheduling, GP/EP/AC97 startup and title
+output remain separate closing work. This establishes the ordinary bypass/phase0
+processing contract; the final title census must identify any additional reached
+mode. No new hardware, title/GPU run, audible output or HLE processing change.
 
 ## Executed original PCM positions - 2026-10-11
 

@@ -69,6 +69,17 @@ route/gain/pitch/loop inputs. The already planned final title batch will record
 those configuration events. Generic unobserved filter extensions do not expand
 the closing scope; A02 is one composed defaults/settings-to-processing contract.
 
+A02's ordinary constructor/bypass/phase0 composition passes12 actual original
+PCM16-stereo/ADPCM-mono processing lives at44100/48000,8 persistent guards and
+12 wrong-gain controls. Original headroom600->0, live frequency override,
+Stop/cancel/unlink, detach/rebind and finite completion pass. Root verifies103
+artifact identities and51 original function bodies and replays the portable
+tool once. Proof `audio-default-composition-20261012/root-portable/qualified-root.aot-private.json`,
+SHA256 `8f5053884eb59c6d931f0f9014375248418bb2768c16e9d5669169653c412a48`.
+No production fix is needed in this scope. A01's final census can require another
+stage only if it identifies an additional reached mode. Actual original audio
+allocation/configuration/ISR/DPC/output remains required in A03/A04/A05.
+
 The Q03 batch `reference-movie-batch-20261011/q03-c32000-v5` uses frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three
 affected checks and the actual original-thread configuration fixture. One accepted-settings
