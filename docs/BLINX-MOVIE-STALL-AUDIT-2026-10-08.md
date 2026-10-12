@@ -299,3 +299,68 @@ Closing that bug does not close the movie integration family.
 The whole movie gate remains open for completed composed-original-LLE movie
 execution and pacing. Physical speaker/monitor timing stays separately scoped.
 No new still/ear review, physical Xbox operation or audible playback was needed.
+
+## Composed-original movie observation and consumer replay - 2026-10-11
+
+The rebuilt original profile now runs901.984s to its explicit observation
+deadline without STOP, guard or fault, past the former325.422s interpreter
+allocation failure. Its1,018 accepted-present luma records identify forward
+Microsoft frames3->298, Artoon1->96 and opening0->2119. The opening reaches
+sourcePTS70.704667 over662.271s of captured present wall time. Final picture2263,
+natural voice retirement and the subsequent title transition are not established.
+The deadline is not a completed movie.
+
+All three250s audio windows finish with complete records and zero
+ingress/timeline overflow. Independent PCM witnesses identify the actual
+Microsoft, Artoon and opening lifetimes; reused host pointers and familiar
+ring shapes are not phase identities. Every recorded submission agrees with
+the initialized, caller-owned ring, with zero unknown or mismatched bytes.
+That ownership result does not establish timely replenishment:
+
+| Opening observation | Window2 | Window3 |
+|---|---:|---:|
+| Fresh source progression |28.3632s|27.6898s|
+| Wall time between fresh-source witnesses |247.4068s|248.9518s|
+| Successful bytes resubmitted before another caller write |89.438%|89.987%|
+| Actual consumption |about250s|about250s|
+
+The actual sink advances near44,100frames/s with queued buffers. At the last
+captured opening position it has consumed564.230s since Play, while the latest
+identified caller packet is only at source62.386s. The late windows contain no
+seek, stop or destroy that could explain this as a new lifetime. Current
+post-GP witnesses match their actual submitted stream; they do not remove
+the sustained replay or establish full source/output synchronization. This
+observes a throughput deficit, without proving a decoder or byte-transport
+logic defect. An unchanged longer run could reach EOS but cannot establish
+the missing A/V contract.
+
+Root proof `original-display-pulse-20261011/qualified-observation-v75.aot-private.json`
+has SHA256 `7cdaa89bfb96d22b97145371e40dc4955d747ed0e19bdc4f4eb405add7119cf3`.
+It checks264 unique current/frozen identities, the72-input compiled generation,
+the actual run and all three completed windows. The retained audio report
+`v75-audio-analysis/qualified-v75-audio-v2.aot-private.json` has SHA256
+`ff06fae3997d964a0af58a08a410cec7f2b11b70bff07232ba34c82f2638ec4a`.
+Earlier pointer-join and periodic-alignment drafts remain separate; their
+incorrect associations are superseded by the lifetime-bound final analysis.
+The native repeat/interruption proof above is reused unchanged.
+
+The owner's LLE requirement is correctness, without real-time performance.
+The next task `.123` is therefore coherent reference time, rather than another
+longer playback observation. The original transport already accepts an input
+clock; the maintained machine drives PIT/display/APU from selected machine
+time. This private mixed profile instead supplies wall-derived original time
+and an independently device-paced XAudio2 consumer. A qualification timeline
+must distinguish host observation time from simulated device time and govern
+the original reference clock and its software audio consumer together. It must
+retain original execution, real ring/cursor ownership and genuine completion;
+it must not advance time according to producer writes, fabricate completion,
+discard missed samples or realign separate windows to hide replay.
+
+Use bounded common-time cases with deliberately different host execution
+delays before the next complete original movie lifecycle observation. Keep
+the default HLE live device path performant and reuse its current qualification.
+This does not authorize a canonical machine TSC/replay re-baseline or qualify
+retail GP/EP boot/output. It is software reference-composition work, rather
+than a hardware precision question. `.73` and the whole movie gate remain
+open; `.98` and the bounded allocator correction remain closed. No console
+operation or audible playback occurred.

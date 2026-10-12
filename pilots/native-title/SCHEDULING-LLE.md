@@ -2287,3 +2287,24 @@ reverified engine artifacts. A fresh bounded movie observation is separate
 from these fixture passes; its result must establish original completion.
 The specific HLE ring-cycle/stalled-opening issue `.98` is closed; parent `.73`,
 whole scheduling and the movie family remain open.
+
+The current v75 observation now ends at901.984s with no STOP/guard/fault,
+past the old allocator failure. Forward opening content reaches frame2119
+and PTS70.704667; final2263, retirement and title transition are not established.
+All three finite250s audio windows complete without overflow. The late windows
+identify about28s of fresh caller content while the actual native consumer
+plays about250s. About89-90% of submitted bytes are reread before another caller
+write, despite exact initialized ring ownership. A longer unchanged run cannot
+qualify synchronized original playback.
+
+The next reference-composition task `.123` separates simulated device time
+from host execution cost using a coherent input timeline. The original clock
+provider is already injectable; the selected XAudio2 sink currently runs at
+independent live-device speed. This is not a real-time LLE FPS requirement,
+an excuse to fake cursor/completion progress or a canonical TSC-policy change.
+Root proof `qualified-observation-v75.aot-private.json`, SHA256
+`7cdaa89bfb96d22b97145371e40dc4955d747ed0e19bdc4f4eb405add7119cf3`,
+binds264 verified identities. See the
+[actual original movie and audio evidence](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#composed-original-movie-observation-and-consumer-replay---2026-10-11).
+The completed default-HLE repeat/interruption result is reused; no new build,
+title run or physical request is needed to record this finding.

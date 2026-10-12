@@ -92,6 +92,15 @@ now qualified in four engine checks. Rebuilt profiles with that package pass
 admission shortcut preserving actual IRQ/FP/thread ownership. This is the
 current integration repair; the faulted observation does not pass
 the original movie gate.
+The rebuilt v75 observation now reaches901.984s without STOP/guard/fault,
+with forward opening content through frame2119/PTS70.704667. Three finite
+audio windows complete with zero overflow and exact caller-ring ownership.
+The original producer supplies about28s of fresh audio during250s of real
+sink consumption, which repeatedly laps the ring. This is the remaining
+reference-time composition problem `.123`, rather than a need to make LLE
+real-time or replay the same run longer. Final original completion and
+synchronized lifecycle coverage remain open. See the
+[current source-bound diagnosis](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#composed-original-movie-observation-and-consumer-replay---2026-10-11).
 Integrated attract remains open. HLE incurs no interpreter cache work.
 Earlier filename/open/cache failures retain their separate generations.
 Independent GPU/graphics/audio/movie gates stay open. **4/9 families** and
