@@ -69,13 +69,18 @@ route/gain/pitch/loop inputs. The already planned final title batch will record
 those configuration events. Generic unobserved filter extensions do not expand
 the closing scope; A02 is one composed defaults/settings-to-processing contract.
 
-The Q03 batch `reference-movie-batch-20261011/q03-c32000-v4` is running from
-frozen sources and an isolated8GiB runtime disk copy. Its three affected checks
-and actual original-thread configuration fixture pass. One accepted-settings
+The Q03 batch `reference-movie-batch-20261011/q03-c32000-v5` uses frozen sources
+and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three
+affected checks and the actual original-thread configuration fixture. One accepted-settings
 JSONL census records stable object generations, effective rates, ordered routes,
 gain/headroom and lifetime operations alongside the existing source/output
 capture; it never drives a clock or device. Its32768-event and600-second capture
-bounds cover this planned observation. Final movie/scheduling acceptance awaits
+bounds cover this planned observation. The still-image diagnostic now retains
+up to600 snapshots, enough for the six-hour host batch; v4 was stopped after
+639.781 wall seconds when the previous180-image limit was identified. Its
+short Microsoft checkpoint passes unchanged waveform/video/A-V limits with
+zero source mismatches/rereads. The stopped v4 is not full closing evidence.
+Final movie/scheduling acceptance awaits
 the actual two natural openings and subsequent Start/release/reentry evidence.
 
 Already proven, do not rerun for bookkeeping: actual blocked BlockOnFence and

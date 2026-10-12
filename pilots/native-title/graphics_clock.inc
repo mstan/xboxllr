@@ -267,7 +267,10 @@ static void graphics_capture_present(void)
         if(milliseconds<100 || milliseconds>60000)stop("present capture interval outside range",milliseconds);
         interval=(uint64_t)milliseconds*10000;
     }
-    uint64_t now=dispatch_monotonic();if(sequence>=180 || now<next)return;
+    /* Slow reference execution can take several wall hours to reach the last
+     * replay/reentry phase. Keep the finite still observation alive for the
+     * same six-hour host batch; this limit never drives presentation. */
+    uint64_t now=dispatch_monotonic();if(sequence>=600 || now<next)return;
     unsigned width=graphics_parameters[0],height=graphics_parameters[1];
     unsigned char *pixels=malloc(width*height*4);char path[1024];
     if(!pixels || snprintf(path,sizeof(path),"%s/present-%u.ppm",capture,++sequence)>=(int)sizeof(path))stop("present capture allocation/path",0);
