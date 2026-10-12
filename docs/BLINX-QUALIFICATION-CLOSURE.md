@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Partial: demo census accepted; full batch pending | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: final hardware batch | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: final hardware batch; clear-bit payload ready | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Shared device, PCM consumer and compiled callback transport complete; title startup/output open | `.113`, `.113.23`, `.113.24`, `.113.25` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -92,6 +92,30 @@ allocation, pre-Play region setup, actual Play/loop/Stop/DPC/output together.
 Proof `audio-loop-control-readiness-20261012/accepted-root.aot-private.json`,
 SHA256 `95e5957b43c4fcc8244f23726173e5cf708308480cea821d98abdafe8355abd4`.
 This is readiness evidence; full A01/A05 and audio remain open.
+
+The bounded A03 preparation `.113.26` is implemented in probe commit `bb208df`.
+Seven separate offline payload variants connect the existing owned low-RAM and
+marker prerequisites to the unchanged539-word clear-bit DSP diagnostic. Hold and
+start each end at one reset store's immediate raw readback. RAM preparation changes
+only the8192-byte source and two16-byte signatures; all9216 owned DWORDs and actual
+page ownership are checked. Held samples bind the initial success/error words;
+start rejects stale success or changed markers without clearing them. Running
+samples retain29 raw metadata/descriptor/target fields. Independent P verification
+compares2044 immutable words and preserves the four possible P target results.
+
+Seven focused checks pass across79 extracted-x86 contexts, with zero skips;
+the affected builder follow-up and optional missing-source discovery also pass.
+Root reviews463 artifact/source identities, exact allowed memory changes, all29
+raw fields and13 store/readback cases without repeating functional or DSP tests.
+Root proof `audio-gp-clear-payload-readiness-20261012/root-review/accepted.aot-private.json`,
+SHA256 `bff2759b544ff0215c39afe5aa1e897e73571783988d12f51b224d65aa6cd019`.
+The integration receipt records only line-ending/trailing-whitespace normalization
+of the four probe files after that review. Existing marker, low-RAM, original
+descriptor-builder and DSP proofs are reused. Actual calibration/bootstrap,
+held/quiescent bank context, DMA interpretation, GP/EP startup, active FE ordering
+and title output remain required. This adds no hardware runner or production
+semantics and performs no console operation; audio and the4/9 family count remain
+unchanged.
 
 A05's offline readiness audit found a concrete integration gap: `ORIGINAL`
 already retained original DirectSound execution, but the native-title runtime
