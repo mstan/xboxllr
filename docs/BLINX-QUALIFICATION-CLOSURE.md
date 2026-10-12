@@ -21,21 +21,21 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 
 ## Remaining work and closing evidence
 
-| ID | Owner | Required work / remaining evidence | Passing condition |
-| --- | --- | --- | --- |
-| Q01 | `.123` | Finish reference timestamp ownership; input replay fix is committed at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
-| Q02 | `.123` | Validate relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
-| Q03 | `.73`, `.112` | Complete reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
-| G01 | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
-| G04 | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
-| G05 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
-| A01 | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
-| A02 | `.113` | Required voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | `.113` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| ID | Current status | Owner | Required work / evidence | Passing condition |
+| --- | --- | --- | --- | --- |
+| Q01 | Complete | `.123` | Reference timestamp ownership; input replay fix at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
+| Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
+| Q03 | Running: v8 full lifetimes | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
+| G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
+| G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
+| G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
+| A01 | Partial: demo census accepted; full batch pending | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
+| A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
+| A03 | Open: final hardware batch | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
+| A05 | In progress: offline device wiring; startup/output open | `.113`, `.113.23` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -79,6 +79,20 @@ SHA256 `8f5053884eb59c6d931f0f9014375248418bb2768c16e9d5669169653c412a48`.
 No production fix is needed in this scope. A01's final census can require another
 stage only if it identifies an additional reached mode. Actual original audio
 allocation/configuration/ISR/DPC/output remains required in A03/A04/A05.
+
+A05's offline readiness audit found a concrete integration gap: `ORIGINAL`
+already retains original DirectSound execution, but the native-title runtime
+does not own or map the complete APU/AC97 devices. The shared engine already
+provides synchronous DMA, device work, PIT time and PIC interrupts. Task
+`.113.23` connects these interfaces with one APU/AC97 pair and held GP/EP
+owners, guarded access admission and exclusive build selection. Unknown
+reset/wake, bit9 input and active FE ordering remain A03/A04 dependencies;
+wiring alone cannot qualify original audio startup or output. The older
+original-title stop at ordinal160 predates the current IRQL transport and is
+not a demonstrated current failure. Root reviewed the source boundaries and
+35 frozen audit inputs; no new title or hardware run was needed. Readiness
+handoff `audio-original-integration-readiness-20261012/handoff.json`, SHA256
+`e40e157d158fb84e787f7ba168351ae76f460ef0290f27778748ebde3b44ff48`.
 
 The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` used frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three
