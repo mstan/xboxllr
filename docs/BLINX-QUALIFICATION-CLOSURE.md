@@ -142,6 +142,19 @@ startup-feasibility SHA256
 `c42df222562eca5882a512b0339933c114742d254b94b6d9ca85bfd55555ad1e`,
 under `graphics-startup-consumer-20261012`. No context no-op is admitted.
 
+The retained first-load investigation cannot recover that same-object image.
+Its genuine original startup logs reach the instance/context producers but do
+not contain the full PRAMIN, driver or queued-packet bytes. The latest retained
+startup stops earlier at the CX25871 `EN_REG_RD` guard, with channel0 GET=PUT.
+Neither inspected kernel RAM snapshot binds the live Blinx code/driver owner.
+Proof `graphics-startup-consumer-20261012/first-load-retained/handoff-retained-dependency.aot-private.json`,
+SHA256 `ebfeff06bfebabc963398ce2c502c89257286d888c843a50a3780c1794fe991e`.
+Resolve G02 first, then capture actual `13F26D` return and the first context-load
+request, including the complete0x37F0 image, owner/table/RAMFC, FIFO gates and
+pending packets. Calling that producer on an invented driver object would not
+establish the title's reached contract. No new title run is warranted before
+the earlier startup dependency changes.
+
 Already proven, do not rerun for bookkeeping: actual blocked BlockOnFence and
 full64-slot capacity, original KWAIT/compute-peer progress, real callback FIFO,
 GPU bytes and cleanup across three CPU/GPU lives. Retained66-check proof and
@@ -189,6 +202,23 @@ outstanding owner inspection/restart confirmation. Do not ping/probe while that
 stop is unresolved. Afterwards use standing read/benign-write authorization,
 verified owned RAM and recovery copies. Stop after any unexpected WRITE result.
 Avoid dangerous boot/HDD/EEPROM/flash operations. Do not replay failed writes.
+
+After recovery, keep the hardware work in dependency order rather than repeating
+whole graphics/audio runs between observations:
+
+| Required dependency | Smallest next evidence | What that evidence must not be used to claim |
+| --- | --- | --- |
+| G02 encoder startup | Fixed original-kernel SMBus byte reads of encoder C4 and6C, with raw HAL status and read-mode ambiguity retained | Legacy Status bytes or present dashboard settings do not establish an old warm capture's register state |
+| A03 owned GP mapping | Fresh owned16KiB-aligned SG allocation, physical/alias/pin checks, then one bounded calibration store/readback | The earlier changed address does not establish a complete silicon mask or permit DSP start |
+| A03 original DSP startup | With verified owned mapping, establish B0..B3 and coherent GP/EP reset, C5/CA/D5, wake and bit9 input transport | Diagnostic retired-cycle counters, authored wakes or idle transport do not qualify original output |
+| A04 active FE ordering | A bounded independently observable work item and actual notification consumer | The retained idle token writes do not establish ordering against active audio/DMA work |
+| G03/G04 reached graphics state | Capture the first real context image/queue after G02; resolve only consumed unknown fields and the enabled-noise primitive | A default-only load, method replay or disabled noise cannot replace required state transfer/pixels |
+
+Each observation preserves its own bounded stop conditions and source identity.
+Batching shares setup and retained evidence; it never proceeds beyond an
+unexpected write. Implement the justified semantics before the corresponding
+single connected title run. Read-only preparation and fixtures leave the
+family acceptance gates open.
 
 Close a family only when its complete bounded row set passes and the maintained
 selection executes the service in title. Record source, selection, evidence and

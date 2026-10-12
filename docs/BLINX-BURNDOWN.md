@@ -39,7 +39,11 @@ Frozen Q03 generation v6 is running muted/invisible on two logical CPUs, with
 actual replay initialization confirmed. One final analysis follows that batch;
 it never launches another title or automatically closes a family. G03 now has
 an explicit PGRAPH image load/save mapping dependency, separately from hardware
-RAMFC questions. This is subgate progress, with the whole-family count still4/9.
+RAMFC questions. Retained startup logs do not contain the required same-object
+image/queue; their earlier CX25871 `EN_REG_RD` guard must be resolved before
+another first-load capture. The final hardware sequence is now grouped by these
+required dependencies in the closing checklist. This is subgate progress, with
+the whole-family count still4/9.
 See the fixed [closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
 
 Tracked in `beads-xbox.1.102`; baseline is the committed working attract
