@@ -237,6 +237,9 @@ without repeating unchanged runs. Proof
 `9641e0116acb5be7c964ba6be6c7b8b550c50bfd3b969ea694efe1b0330857da`.
 This accepts the bounded correction. A changed title generation must still
 pass the previously failing second-demo load and remaining Q03 sequence.
+The new test target is scoped to USB LLE because its bound-clock control uses
+the shared PIT. Root configures both USB LLE and USB-off selections to verify
+registration and preserve the existing IO-only build; no functional run repeats.
 
 The v8 second opening has a retained closed visual/caller window: final source
 picture2263, accepted Stop/Release after75.566 modeled seconds, then independently
