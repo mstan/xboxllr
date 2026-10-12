@@ -58,6 +58,8 @@ static uint64_t publication_memo_hits,publication_memo_misses;
 static unsigned mapped_count,published_count;
 static unsigned alias_evictions;
 static int cpu_running,alias_trim_pending;
+static uint32_t translation_retire_pc,translation_reload_cr3;
+static int translation_refresh_pending;
 static void trim_aliases(void);
 static uc_err owned_cpu_read(uc_engine *engine,uint32_t address,void *buffer,size_t bytes);
 static uc_err owned_cpu_write(uc_engine *engine,uint32_t address,const void *buffer,size_t bytes);
@@ -659,6 +661,33 @@ static int guest_rdtsc(uc_engine *engine,void *unused)
     if(status)forbidden(engine,uc_strerror(status));
     return 1; /* Actual RDTSC hook: never also sample the host counter. */
 }
+/* These two hash-bound kernel helpers reload the current CR3. The engine
+ * runs the original instructions unchanged, but our flat host mappings also
+ * cache recursive page-table aliases. Retire the reload before invalidating
+ * those aliases; otherwise later original PTE stores can hit a relocated PFN.
+ * Address-space switches are deliberately not admitted by this contract. */
+static void translation_reload(uc_engine *engine,uint64_t address,uint32_t size,void *unused)
+{
+    (void)size;(void)unused;
+    if(address==0x8001c16fu || address==0x80023587u) {
+        static const unsigned char reload[]={0x0f,0x20,0xd8,0x0f,0x22,0xd8};
+        unsigned char bytes[6];uint32_t ax=0,cr3=0;
+        uc_err error=uc_mem_read(engine,address-3,bytes,sizeof(bytes));
+        if(!error)error=uc_reg_read(engine,UC_X86_REG_EAX,&ax);
+        if(!error)error=uc_reg_read(engine,UC_X86_REG_CR3,&cr3);
+        if(error){forbidden(engine,uc_strerror(error));return;}
+        if(translation_retire_pc || memcmp(bytes,reload,sizeof(bytes)) || ax!=cr3) {
+            forbidden(engine,"device LLE unqualified translation reload");return;
+        }
+        translation_reload_cr3=cr3;translation_retire_pc=(uint32_t)address+3;
+    } else if(translation_retire_pc==(uint32_t)address) {
+        uint32_t cr3=0;uc_err error=uc_reg_read(engine,UC_X86_REG_CR3,&cr3);
+        if(error){forbidden(engine,uc_strerror(error));return;}
+        if(cr3!=translation_reload_cr3){forbidden(engine,"device LLE translation reload changed address space");return;}
+        translation_retire_pc=0;translation_refresh_pending=1;
+        uc_emu_stop(engine);
+    }
+}
 static void initialize(unsigned char *guest)
 {
     guest_memory=guest;
@@ -756,6 +785,8 @@ static void initialize(unsigned char *guest)
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INTR,interrupt,NULL,1,0));
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INSN,guest_cpuid,NULL,1,0,UC_X86_INS_CPUID));
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_BLOCK,code_block,NULL,1,0));
+    IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_CODE,translation_reload,NULL,0x8001c16fu,0x8001c172u));
+    IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_CODE,translation_reload,NULL,0x80023587u,0x8002358au));
     const char *usb_trace=getenv("XLLE_PILOT_ORIGINAL_PROGRESS");
     original_usb_trace_enabled=usb_trace && !strcmp(usb_trace,"1");
     if(original_usb_trace_enabled) {
@@ -1075,12 +1106,31 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
             while(instruction_limit/slice>4096)slice*=2;
             if(slice>instruction_limit)slice=instruction_limit;
         }
+resume_translation:
         alias_trim_pending=0;cpu_running=1;
         uint64_t cpu_cost=original_cost_begin();
         uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,slice);
         original_cost_end(ORIGINAL_COST_CPU,cpu_cost);
         cpu_running=0;
         if(failure)return;
+        if(translation_retire_pc && !error) {
+            uint32_t retired_pc=0;
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&retired_pc));
+            /* An instruction-count slice may end after MOV CR3 but before
+             * its successor's hook. The actual stopped EIP proves retirement;
+             * never carry a stale reload obligation into another service. */
+            if(retired_pc==translation_retire_pc)
+                translation_reload(cpu,retired_pc,0,NULL);
+            if(failure)return;
+        }
+        if(translation_refresh_pending) {
+            if(error){failure=uc_strerror(error);return;}
+            translation_refresh_pending=0;
+            refresh_mappings();if(failure)return;
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&entry));
+            /* Resume the stopped instruction without inventing clock work. */
+            goto resume_translation;
+        }
         if(alias_trim_pending) {
             if(error){failure=uc_strerror(error);return;}
             trim_aliases();if(failure)return;

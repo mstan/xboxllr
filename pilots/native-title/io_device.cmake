@@ -40,6 +40,17 @@ if(PILOT_IO_DEVICE STREQUAL "LLE")
     target_compile_definitions(pilot_io_device_lle PRIVATE PILOT_UNICORN_IRQ_BOUNDARY)
   endif()
   target_link_libraries(pilot_io_device_lle PUBLIC "${PILOT_CALENDAR_UNICORN}/lib/unicorn.lib" bcrypt)
+  add_executable(pilot_publication_relocation_test publication_relocation_test.c)
+  target_include_directories(pilot_publication_relocation_test PRIVATE
+    "$<TARGET_PROPERTY:pilot_io_device_lle,INCLUDE_DIRECTORIES>")
+  target_compile_definitions(pilot_publication_relocation_test PRIVATE
+    "$<TARGET_PROPERTY:pilot_io_device_lle,COMPILE_DEFINITIONS>")
+  target_link_libraries(pilot_publication_relocation_test PRIVATE
+    "$<TARGET_PROPERTY:pilot_io_device_lle,LINK_LIBRARIES>")
+  foreach(case relocate collision reload-guard reload-bytes reload-slice)
+    pilot_add_test(NAME pilot_publication_${case} COMMAND pilot_publication_relocation_test ${case})
+    set_tests_properties(pilot_publication_${case} PROPERTIES TIMEOUT 30)
+  endforeach()
   foreach(target xlle_native_title pilot_contract_test)
     target_compile_definitions(${target} PRIVATE PILOT_IO_DEVICE_LLE)
     target_link_libraries(${target} PRIVATE pilot_io_device_lle)

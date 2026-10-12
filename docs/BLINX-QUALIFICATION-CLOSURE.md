@@ -25,7 +25,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | --- | --- | --- | --- | --- |
 | Q01 | Complete | `.123` | Reference timestamp ownership; input replay fix at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
-| Q03 | Open: v8 stopped; publication fix `.123.1` | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
+| Q03 | Open: publication fix validated; changed title run pending | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
@@ -215,6 +215,28 @@ independent numeric review, but require a corrected complete closing generation.
 Do not suppress the publication/pin guards or rerun unchanged sources.
 Final manifest `reference-movie-batch-20261011/q03-c32000-v8/run.aot-private.json`,
 SHA256 `7410e39eff0a1c22d15fccb7dfd836aed7d46b47bb8d2a7c105be5df9e0b1d69`.
+
+Task `.123.1` reproduces the collision with an actual original constrained
+allocation that relocates a page-table PFN and live user PFNs together. After
+the original same-CR3 reload, the interpreter's flat recursive alias still
+pointed at the old page table, so subsequent original PTE stores used reused
+storage. The correction observes two exact original reload helpers, retires
+their unchanged instructions, stops the engine and refreshes stale interpreter
+mappings before resuming. It leaves PTE/PFN bytes, guest registers and the
+existing publication/pin/collision guards unchanged. Unsupported reload bytes
+or address-space changes reject before refreshing.
+
+Five focused controls pass: genuine combined relocation with retained user
+bytes and original free, live-alias rejection, altered reload bytes, a wrong
+CR3, and both helpers at a one-instruction slice boundary. The last control
+binds a frozen actual PIT input and counts step/provider/device calls; refresh
+adds no clock pump and preserves GPR/flags/CR3. Root verifies114 identities,
+both helper instruction sequences and actual generated test/profile settings,
+without repeating unchanged runs. Proof
+`publication-collision-20261012/root-review/accepted.aot-private.json`, SHA256
+`9641e0116acb5be7c964ba6be6c7b8b550c50bfd3b969ea694efe1b0330857da`.
+This accepts the bounded correction. A changed title generation must still
+pass the previously failing second-demo load and remaining Q03 sequence.
 
 The v8 second opening has a retained closed visual/caller window: final source
 picture2263, accepted Stop/Release after75.566 modeled seconds, then independently
