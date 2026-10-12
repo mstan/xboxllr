@@ -170,6 +170,28 @@ backwards model time and unfinished batches. Proof
 `reference-input-ohci-20261012/analysis-controls-v2/qualified-controls.aot-private.json`,
 SHA256 `f5bbb6d0ddd194e50915816359933cb26aa7aeed0958d9659bd84ecbfa250dbd`.
 
+The maintained analyzer now classifies interruption from actual Start, ordered
+Stop/Destroy, independently identified source truncation and the immediate title
+successor. The subsequent movie may be a known logo; duration alone cannot turn
+a late opening skip into natural completion. Both natural openings require
+their own title transitions. Successful repeated Stop calls retain the first
+playback retirement. No additional title-loading or picture-recency deadline
+is introduced. Root review also found that the real op01/artoon001 references
+omit their final-frame timestamps: the last recorded finite ordered PTS supplies
+only a conservative media-end lower bound, without inventing a final timestamp.
+
+Fifteen affected controls and a distinctive actual reference match pass. Root
+verifies25 artifact identities, retains the original waveform/A-V/source and
+successful-finalization gates, and reuses unchanged parser/ownership checks.
+Proof `q03-analyzer-correction-20261012/accepted-root.aot-private.json`, SHA256
+`e39f6424fd37b1d76534dd74b971b6d94297eb520051729ccd996f21c5ba43e6`.
+The live v8 capture and frozen waiter/analyzer stay unchanged; apply the corrected
+analyzer in a separate retained final review. Its512MiB observer capacity remains
+a risk, not a demonstrated failure. If an observer limit stops the batch, retain
+complete earlier evidence with its cutoff and missing gates; a failed batch does
+not satisfy the current whole-run closing contract. Q03 and both families remain
+open until complete numeric, scene, census and ownership acceptance.
+
 The first v6 natural opening now reaches picture2263, real Stop after75.567s,
 Destroy and the title transition, with zero ring mismatches or source rereads.
 Its full waveform checkpoint exposed an analyzer error: requested44100 was
