@@ -47,20 +47,28 @@ guard (ordinal166, entries0). Its78 finalized artifacts and zero-error capture
 are verified. A one-second CPU fixture reproduced the same guard, and
 `30a6be6` fixes selected workers' contiguous-service transport while preserving
 the root-only guard. Seven focused checks pass across three real original CPU
-lifetimes. Changed generation v7 is now running muted/invisible, with seven
-affected checks and the actual configuration fixture passing before launch.
-Its source/input/executable snapshot is frozen; one final analyzer runs after
-the batch. Analyzer `2075d64` retains any later diagnostic opening without
+lifetimes. Changed generation v7 crosses that actual allocation, then stops
+after3790.953 wall seconds at missing original calendar305 admission. Root
+verifies340 immutable source/artifact identities and zero-error finalization;
+the two corrected-boundary and passive-observer audits are closed, while Q03
+stays open. Three short real original CPU calendar304/305 lives and four
+continuation regressions pass after admitting their unchanged RET8 bodies.
+Remaining title imports are being audited before another changed long batch.
+The rejected-batch analyzer/gallery waiters run no numeric/title repetition.
+Analyzer `2075d64` retains any later diagnostic opening without
 substituting it for the required two natural and one interrupted lifetimes;
 12 analyzer controls pass with target acceptance gates unchanged. Movies and
-scheduling remain open pending this full title observation. Fixed encoder-read
+scheduling remain open pending the full required title lifetimes. Fixed encoder-read
 preparation `.111.1` is also root-reviewed and closed, with11 focused controls
 and182 suite passes/3 existing optional skips; actual startup is unresolved.
 G03 now has
 an explicit PGRAPH image load/save mapping dependency, separately from hardware
 RAMFC questions. Retained startup logs do not contain the required same-object
 image/queue; their earlier CX25871 `EN_REG_RD` guard must be resolved before
-another first-load capture. The final hardware sequence is now grouped by these
+another first-load capture. The passive collector is implemented at `24468bc`,
+with34 compiled ABI controls, two raw observer cases, three disabled-observer
+CPU regressions and root104-pin review. Its real+784 guard remains unchanged;
+actual PGRAPH image transfer is still required. The final hardware sequence is grouped by these
 required dependencies in the closing checklist. This is subgate progress, with
 the whole-family count still4/9.
 See the fixed [closing checklist](BLINX-QUALIFICATION-CLOSURE.md).

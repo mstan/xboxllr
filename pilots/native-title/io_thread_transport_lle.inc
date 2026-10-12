@@ -14,7 +14,11 @@ static unsigned thread_service_arguments(unsigned ordinal)
     case 4:case 14:case 17:case 23:case 37:case 68:case 69:case 98:case 100:case 165:case 171:case 173:case 179:case 180:
     case 124:case 151:case 181:case 277:case 291:case 294:case 301:case 316:case 327:case 328:return 1;
     case 67:case 113:case 143:case 144:case 148:case 198:case 203:case 209:case 217:case 224:case 225:case 231:
-    case 15:case 44:case 47:case 168:case 289:case 290:return 2;
+    case 15:case 44:case 47:case 168:case 289:case 290:
+    /* Original RtlTimeFieldsToTime/RtlTimeToTimeFields both take two
+     * pointers and RET8. Execute their unchanged kernel bodies on this
+     * caller's retained CPU; calendar conversion does not advance time. */
+    case 304:case 305:return 2;
     case 99:case 107:case 108:case 119:case 145:case 178:case 182:case 199:case 215:case 233:case 246:
     case 175:case 279:return 3;
     case 2:case 45:case 50:case 149:case 189:case 204:case 234:return 4;

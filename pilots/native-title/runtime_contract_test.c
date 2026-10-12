@@ -175,6 +175,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_component_pool_contract_test.inc"
 #include "thread_component_physical_owner_contract_test.inc"
 #include "thread_component_contiguous_contract_test.inc"
+#include "thread_calendar_cpu_contract_test.inc"
 #include "thread_component_long_owner_contract_test.inc"
 #include "thread_component_wait_contract_test.inc"
 #if defined(PILOT_FILES_LLE) && defined(PILOT_SCHEDULING_LLE)
@@ -768,6 +769,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-delay-cpu-lle")) { test_thread_delay_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-priority-cpu-lle")) { test_thread_priority_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-cpu-lle")) { test_thread_cpu_lle(); return 0; }
+#ifdef PILOT_SCHEDULING_LLE
+        if (!strcmp(argv[1],"thread-calendar-cpu-lle")) { test_thread_calendar_cpu_lle(); return 0; }
+#endif
         if (!strcmp(argv[1],"thread-child-cpu-lle")) { test_thread_child_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-cpu-lle")) { test_thread_vm_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-alias-cpu-lle")) { test_thread_vm_alias_cpu_lle(); return 0; }

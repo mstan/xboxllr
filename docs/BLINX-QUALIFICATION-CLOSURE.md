@@ -167,6 +167,28 @@ engine transport against v6; accepted proof
 `component-contiguous-20261012/root-review/accepted.aot-private.json`, SHA256
 `f7c4d0effd8ff33f8793977ef0ab6ce013969b77b3a73d43deec42620f628b6d`.
 
+Changed generation v7 now validates that integration: its actual original
+worker completes contiguous allocation82E5C000/1232896 bytes, then stops at
+a different required service, ordinal305, after3790.953 wall seconds.
+Root verifies340 frozen artifact/source identities and the zero-error capture;
+no old166 frame failure remains. Actual first-opening Stop/final Release and
+title-audio restart are retained, but no whole-run numerical/scene acceptance
+is claimed. Proof `q03-c32000-v7/root-terminal-review/accepted-failure.aot-private.json`,
+SHA256 `7e7ed243fa93fe7759946a4759e5f88f2c84858b305c594f743b6f5c58cc9cbb`.
+The analyzer/gallery waiters correctly record incomplete acceptance without
+running another analysis/title. Contiguous route task `.112.2.17` is closed.
+
+Calendar304/305 were absent from the original continuation's argument table.
+Their two-pointer RET8 admission now executes the unchanged original bodies.
+A short pre-fix actual CPU case reproduces305; three corrected original lives
+pass independent1601/1970/leap-day fields and invalid-date output, retained
+ESP/callee GPR/IF/DF/x87/XMM/canaries and exact cleanup. Four existing selected
+contiguous/root-guard/delay/priority cases pass. Candidate proof
+`calendar-transport-20261012/candidate/qualified.aot-private.json`, SHA256
+`141be0cc7470a469b81912eff9b9a0975e932651edb40d3bf47a63ec7cf5beb8`.
+Audit remaining title imports before the next changed Q03 batch; scheduling
+and movies stay open pending their full required lifetimes.
+
 The final analyzer explicitly binds required opening lifetimes to actual Play
 not after the declared Start. A fixed600s diagnostic can also reach a later
 opening; it retains that lifetime and its source/ring/census evidence without
@@ -229,16 +251,19 @@ pending packets. Calling that producer on an invented driver object would not
 establish the title's reached contract. No new title run is warranted before
 the earlier startup dependency changes.
 
-First-context capture preparation is now root-reviewed. Ten authored controls
-cover complete storage, queued/unread packets, actual return/frame provenance,
-incomplete observations and the retained selector guard. The private const-owner
-snapshot candidate is not compiled or integrated; the current DLL lacks its
-export and the current CPU hooks expose only scalar context. The next bounded
-task implements and compiles those passive receivers in an isolated build,
-without a title or hardware run. Preparation proof
-`graphics-startup-consumer-20261012/first-context-capture-preparation/root-review/accepted-preparation.aot-private.json`,
-SHA256 `0672fd9489899e6a87fcf51a295244b62d4655aedaa88ac47d6b3753017837e2`.
-This accepts capture preparation, not a reached image or PGRAPH transfer.
+First-context passive collection is implemented at `24468bc` and root-reviewed:
+34 compiled const-owner snapshot controls, two raw CPU observer cases and
+three matching checks with observation disabled pass. Actual source/return/frame
+and request instructions, complete PRAMIN/channel/PFIFO backing, four prefetched
+parameters and one unread word are retained. The real+784 failure is unchanged;
++788 is absent and authored source mismatches remain incomplete. Default-null
+paths avoid snapshots, files, hashes and additional CPU reads; HLE excludes the
+GPU collector. Root verifies104 immutable identities without repeating checks.
+Proof `graphics-startup-consumer-20261012/first-context-implementation/root-review/accepted-implementation.aot-private.json`,
+SHA256 `7528e050cf020f1d7a92fefa81d84f6d8a24f7c97984cb12581b7fbde7615270`.
+Bounded audit `.116.2.1.4` is closed. Actual first-load collection still requires
+G02 resolution and a separately reviewed original title/input/private-disk
+generation. This accepts passive tooling, not a reached image or PGRAPH transfer.
 
 Already proven, do not rerun for bookkeeping: actual blocked BlockOnFence and
 full64-slot capacity, original KWAIT/compute-peer progress, real callback FIFO,
