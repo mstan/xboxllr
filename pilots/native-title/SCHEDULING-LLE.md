@@ -2192,6 +2192,23 @@ programs and41 artifacts, including the exact-engine red/control and independent
 packing/safepoint source reports. Static review inputs were individually captured;
 the final61-file source freeze separately binds the tested build.
 
+Independent fixed-crop RGB-to-reference-luma matching identifies chronological
+captures1-4 as loading,5/7/8 as black,6 as the Xbox logo and9-31 as forward
+Microsoft intro frames1-138 (sourcePTS0.0334->4.605211 over179.8726822s captured
+wall time). This establishes content advancement, without a cause claim for
+the slow rate or evidence of later Artoon/op01/title/gameplay transitions.
+Current PCM, decoder cursor, retirement and A/V capture were not armed. The
+corrected scene proof is `display-progress-audit-20261011/present-v69-analysis-v2/qualified-offline-v69-scene-progress-v2.aot-private.json`,
+SHA256 `f403d1e0e4ec5a4060ede1f79d1fed66a4f610e7aafdeb6f08426b75eb5cc840`.
+Root verifies all literal identities in
+`original-display-pulse-20261011/qualified-scenes-v69-v2-root.aot-private.json`,
+SHA256 `a504d1eb88c6231398ea808c3b2a9c43b8ff33e9fa6f2c6ce20b97c1e6f53c5f`.
+The earlier lexical filename enumeration assigned incorrect chronology;
+its apparent reset/replay/loading interleave is explicitly excluded, not an
+application finding. Actual filenames and log timestamps establish order.
+Next distinguish original execution cost from wait/cursor ownership using
+bounded state evidence before committing to another long full sequence.
+
 The old USB progress blocker is resolved. Whole scheduling and integrated
 attract acceptance remain open, as do current movie interruption/reentry,
 repetition and composed A/V acceptance. Reuse the established default HLE v62

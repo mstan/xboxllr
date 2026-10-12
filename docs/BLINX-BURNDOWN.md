@@ -77,9 +77,12 @@ idle interrupt stack and default native checks also passing. The earlier v60
 host-handle failure remains retained; current assertions are unchanged.
 Actual muted v69 reaches31 presents and sustained movie/input progress, with
 the late ControlHead store delivered, EP0 requests5->8 and25,468 USB TDs retired.
-It reaches its342.984s observation limit with no STOP/guard/fault. This resolves
-the old main cancel wait; sampled movie progress does not establish integrated
-attract or whole scheduling acceptance. HLE incurs no interpreter cache work.
+It reaches its342.984s observation limit with no STOP/guard/fault. Chronological
+presents9-31 match forward Microsoft intro frames1-138: about4.6s of content
+across180s wall time, with no later publisher/opening transition established.
+This resolves the old main cancel wait; the next bounded investigation separates
+original CPU execution cost from wait/cursor ownership before another long run.
+Integrated attract remains open. HLE incurs no interpreter cache work.
 Earlier filename/open/cache failures retain their separate generations.
 Independent GPU/graphics/audio/movie gates stay open. **4/9 families** and
 **26 precision deferrals** are unchanged.
