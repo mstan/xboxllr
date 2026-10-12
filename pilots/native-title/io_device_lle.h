@@ -175,6 +175,13 @@ const char *pilot_io_device_initialize(unsigned char *guest);
  * clears all mappings. Invalid admission leaves existing owners unchanged. */
 typedef const char *(*PilotIoMmio)(uint32_t address,unsigned size,int write,uint32_t *value);
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback);
+/* Dispatch a sized compiled access to the exact existing registered owner.
+ * Only the same-thread stopped original ISR/DPC continuation is admitted;
+ * idle callers, raw CPU/clock/device work and nested bus callbacks reject.
+ * Uses the sole engine lock and that owner's synchronous DMA capability.
+ * A callback failure poisons this transport; failed reads leave value intact.
+ * Does not execute/pump CPU, clocks or device work. */
+const char *pilot_io_device_compiled_mmio(uint32_t address,unsigned size,int write,uint32_t *value);
 /* Admit one explicit RAM lease capability for this device owner. Generic
  * mappings use synchronous DMA; only the shared OHCI owner admits USB leases. */
 const char *pilot_io_device_mmio_bind_dma(uint32_t first,uint32_t bytes,PilotIoMmio callback,unsigned dma_lease);

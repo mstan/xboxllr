@@ -18,13 +18,6 @@
 #include "audio_device_lle.h"
 #include "audio_device_pcm_capture.h"
 static PilotPcmCapture *original_pcm_capture;
-/* Compiled continuations do not borrow the raw engine's lock/DMA capability.
- * Until that transport is independently admitted, stop before device work. */
-static const char *original_audio_compiled_guard(uint32_t address,unsigned size,int write,uint32_t *value)
-{
-    (void)address;(void)size;(void)write;(void)value;
-    return "compiled original audio MMIO lacks serialized shared-engine dispatch";
-}
 #endif
 
 ptrdiff_t g_xbox_mem_offset;
@@ -955,8 +948,9 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
     if (code == EXCEPTION_ACCESS_VIOLATION) {
 #ifdef PILOT_AUDIO_DEVICE_LLE
         const char *audio_error=NULL;
-        int audio=pilot_mmio_fault_range(exception,memory,0xfe800000u,0xfe87ffffu,original_audio_compiled_guard,&audio_error);
-        if(!audio)audio=pilot_mmio_fault_range(exception,memory,0xfec00000u,0xfec00fffu,original_audio_compiled_guard,&audio_error);
+        int audio=pilot_mmio_fault_range(exception,memory,0xfe800000u,0xfe87ffffu,pilot_io_device_compiled_mmio,&audio_error);
+        if(!audio)audio=pilot_mmio_fault_range(exception,memory,0xfec00000u,0xfec00fffu,pilot_io_device_compiled_mmio,&audio_error);
+        if(audio>0)return EXCEPTION_CONTINUE_EXECUTION;
         if(audio<0)stop(audio_error,0xfe800000u);
 #endif
 #ifdef PILOT_GPU_LLE

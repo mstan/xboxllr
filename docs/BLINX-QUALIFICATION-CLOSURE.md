@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: final hardware batch | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Shared device and PCM consumer complete; title startup/output open | `.113`, `.113.23`, `.113.24` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Shared device, PCM consumer and compiled callback transport complete; title startup/output open | `.113`, `.113.23`, `.113.24`, `.113.25` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -144,6 +144,34 @@ or unchanged functional test is repeated. Root proof
 `109bbd2b68bea463dfe5fb1a20fda428031d64cd9ee05fc25fbafca6a986f1ba`.
 This closes the consumer connection, not A03/A04 or actual title output;4/9
 families remain qualified.
+
+The bounded `.113.25` compiled-MMIO transport now passes four focused processes.
+Only a real saved-context original ISR/DPC continuation receives a same-thread
+scope; nested original execution suspends/restores that scope. Dispatch uses the
+existing engine lock, complete registered owner range and checked DMA capability.
+It adds no device, clock or interpreter invocation. Failed reads publish no value,
+and the first terminal failure survives later callback/context errors. Successful
+runtime fault decoding resumes the compiled instruction.
+
+Actual original IRQ3, nested higher-priority IRQ1 and a queued DPC exercise seven
+native MOV fault resumptions. Two fixture register reads borrow16-byte DMA from
+an actual original contiguous allocation. Wrong-thread, outside-scope, nested
+bus and raw nested-work access reject; compiled reads add no work pump or PIT
+advance. Unknown GP reset3, callback failure and complete-extent DMA failure
+preserve host context and retained owner lifetime. The fixture proves transport,
+not actual title callbacks, active audio or DSP/AC97 output.
+
+The compatible ORIGINAL configuration and changed runtime translation unit build
+pass. Root verifies46 current/frozen source pairs and127 identities, confirms
+native audio backend exclusion and nine unchanged raw-MMIO/DMA/clock/mapping
+functions, and corrects read publication to require no retained failure. No
+unchanged functional/title checks repeat. Root proof
+`audio-compiled-mmio-20261012/root-review/accepted.aot-private.json`, SHA256
+`89b73bec8bb939dcf440f1de8154c0df24bd1f12d28bde656852b619f5afe2ed`.
+Ordinary original title DirectSound runs on the raw CPU; no previously reached
+compiled-title guard is claimed. A03/A04 and actual A05 startup/ISR/DPC/loop/
+output/reuse/timing remain open. Existing held-device and unknown-semantics
+guards remain in force, and the running v9 capture stays frozen.
 
 The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` used frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three

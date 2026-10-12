@@ -123,6 +123,10 @@ static struct {PilotIoDeviceWork callback;unsigned dma_lease;} device_work[8];
  * Only this same thread can borrow it for synchronous validated RAM transfers.
  * Other host threads still acquire the lock normally. */
 static __declspec(thread) unsigned device_bus_borrow,device_bus_dma_lease;
+/* Only the stopped original ISR/DPC dispatcher grants this same-thread scope.
+ * A nested original entry suspends it before CPU/clock/device work starts. */
+struct CompiledMmioScope {uc_context *saved_cpu;unsigned depth;};
+static __declspec(thread) struct CompiledMmioScope *compiled_mmio_scope;
 static volatile LONG current_irql;
 static volatile LONG caller_if=1;
 static unsigned execution_depth;
@@ -1069,7 +1073,7 @@ static void pump_original_clock(void)
     failure="original clock requires the maintained PIT/PIC build";
 #endif
 }
-static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispatcher_object)
+static void run_original_impl(uint32_t entry,size_t instruction_limit,uint32_t dispatcher_object)
 {
     /* Never re-enter uc_emu_start from a hook. At an actual ISR call, stop,
      * run its generated body over shared bytes, then restore this CPU. A
@@ -1249,21 +1253,32 @@ resume_translation:
         check_publications(0);
         InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
         if(!failure) {
+            struct CompiledMmioScope scope={context,execution_depth};
+            struct CompiledMmioScope *previous=compiled_mmio_scope;
+            compiled_mmio_scope=&scope;
             ReleaseSRWLockExclusive(&lock);
             uint64_t callback_cost=original_cost_begin();
             const char *callback_error=(is_dpc?dpc_callback:isr_callback)(routine,regs);
+            compiled_mmio_scope=previous;
             AcquireSRWLockExclusive(&lock);
             original_cost_end(ORIGINAL_COST_CALLBACK,callback_cost);
-            if(callback_error)failure=callback_error;
+            if(callback_error && !failure)failure=callback_error;
         }
         error=uc_context_restore(cpu,context);uc_context_free(context);
-        if(error){failure=uc_strerror(error);return;}
+        if(error){if(!failure)failure=uc_strerror(error);return;}
         if(failure)return;
         check_publications(1);if(failure)return;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],regs+i));
         entry=return_pc;
 
     }
+}
+static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispatcher_object)
+{
+    struct CompiledMmioScope *previous=compiled_mmio_scope;
+    compiled_mmio_scope=NULL;
+    run_original_impl(entry,instruction_limit,dispatcher_object);
+    compiled_mmio_scope=previous;
 }
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result);
 static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
@@ -1703,6 +1718,36 @@ const char *pilot_io_device_mmio_bind_dma(uint32_t first,uint32_t bytes,PilotIoM
 }
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback)
 {return pilot_io_device_mmio_bind_dma(first,bytes,callback,PILOT_IO_DMA_SYNC);}
+const char *pilot_io_device_compiled_mmio(uint32_t address,unsigned size,int write,uint32_t *value)
+{
+    /* Reject from TLS alone before touching shared state or taking a lock:
+     * wrong host threads have no scope, and device work already owns the lock. */
+    struct CompiledMmioScope *scope=compiled_mmio_scope;
+    if(!scope || device_bus_borrow)return "device LLE compiled MMIO outside stopped ISR/DPC continuation";
+    AcquireSRWLockExclusive(&lock);
+    const char *error=failure;
+    if(!error && (!cpu || cpu_running || !scope->saved_cpu || !execution_depth || scope->depth!=execution_depth))
+        error="device LLE compiled MMIO without matching stopped CPU ownership";
+    if(!error && (!value || (size!=1 && size!=2 && size!=4) || (write!=0 && write!=1) ||
+                  (uint64_t)address+size>0x100000000ull))
+        error="device LLE invalid compiled MMIO transaction";
+    unsigned slot=8;
+    for(unsigned i=0;!error && i<8;++i)if(device_mmio[i].callback &&
+        address>=device_mmio[i].first &&
+        (uint64_t)address+size<=(uint64_t)device_mmio[i].first+device_mmio[i].bytes) {slot=i;break;}
+    if(!error && slot==8)error="device LLE compiled MMIO has no registered complete owner";
+    if(!error) {
+        struct DeviceMmio *owner=device_mmio+slot;
+        uint32_t word=*value;
+        device_bus_borrow=1;device_bus_dma_lease=owner->dma_lease;
+        error=owner->callback(address,size,write,&word);
+        device_bus_borrow=0;device_bus_dma_lease=0;
+        if(!error && !failure)*value=word;
+    }
+    if(error && !failure)failure=error;
+    error=failure;
+    ReleaseSRWLockExclusive(&lock);return error;
+}
 const char *pilot_io_device_work_bind_dma(PilotIoDeviceWork callback,unsigned dma_lease)
 {
     if(device_bus_borrow)return "device LLE work binding during device work";
