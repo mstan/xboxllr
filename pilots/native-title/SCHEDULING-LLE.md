@@ -2327,10 +2327,17 @@ GPIO15 high/low transitions remain real. Current90/90 combined checks pass in
 60.43s. The fixture's100-block schedule is bounded external input, not a
 canonical CPU timing model.
 
+The original timeout has also passed with the caller-driven APU/DSP consumer
+on this same input timeline. Both fast and host-delayed cases emit1,680 real
+audio frames in35ms input time, with identical PCM, actual source reads and DSP
+carry. Root proof `reference-clock-audio-20261011/qualified-common-clock.aot-private.json`
+has SHA256 `6e2d5c760998060e7c5d780b907a017cebe70e4a6ce21f3fc88b65be73b80699`.
+This private composition does not select a new full-title clock policy.
+
 Root proof `reference-clock-deadlines-20261011/qualified-clock-seam.aot-private.json`
 has SHA256 `9b2811c451cc3e4224ebe7028ff0933f11fee0e9631e251f463bd27dd5076d23`.
 Fixed-time-jump and automatic next-PIT-deadline pump experiments remain failed
-and excluded. Native compute handoffs, the controlled audio adapter and common
+and excluded. Native compute handoffs, ordinary movie controls and runtime
 capture ownership still require composition. No full-title or movie acceptance
 is inferred from these fixture passes. See the
 [reference consumer foundation](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#controlled-reference-clock-and-audio-consumer-foundation---2026-10-11).

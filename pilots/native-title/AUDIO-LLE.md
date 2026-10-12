@@ -9,6 +9,20 @@ The audio LLE floor still needs remaining envelope curves/filtering, GP transpor
 whole-driver integration before it is a qualified selectable title backend. Existing
 audible HLE output does not remove that requirement.
 
+## Executed original PCM positions - 2026-10-11
+
+`tools/native_audio_position_reference.py` executes public176AB8 and its complete
+original helper chain against actual maintained source CBO/MMIO. All168 cases
+pass for PCM8/16 mono/stereo, rate conversion, full/partial loops and optional
+output pointers. Playing read positions reflect source fetch/prefetch; the
+full-ring write position is `(read + 32 * alignment) % capacity`. No output
+frame counter substitutes for CBO. The stopped branch uses authored saved
+fields and does not qualify the original Stop or finite-completion lifecycle.
+Private generation proof `reference-cursor-contract-20261011/qualified-original-cursor.aot-private.json`
+has SHA256 `5789775b03823bd94138180fc9b2d847126c6af17728eec44fc5abe96dbfddbf`.
+The [shared clock/audio composition](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#original-positions-and-composed-clockaudio---2026-10-11)
+also passes host-delay invariance; full movie integration remains open.
+
 ## Whole native audio under the original CPU owner - 2026-10-11
 
 The selected21 audio bindings now retain actual original address, extent and

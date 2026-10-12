@@ -402,3 +402,27 @@ integration, then actual original movie completion. Native compute handoffs
 and full close/reopen ownership remain to be integrated. No full title was
 rebuilt or run for this foundation. Movies and `.123` remain open;4/9 families
 and26 precision deferrals are unchanged.
+
+## Original positions and composed clock/audio - 2026-10-11
+
+`tools/native_audio_position_reference.py` executes the complete original public
+PCM position chain, including its voice-table lock, actual maintained APU CBO
+read and original byte conversion. All168 cases pass across PCM8/16, mono/stereo,
+rate conversion and full/partial loops. The playing read cursor is actual source
+CBO in bytes; its full-ring write cursor leads by32 source frames modulo capacity.
+Source prefetch is distinct from emitted output. Authored stopped fields qualify
+the returned arithmetic and optional pointers, not original Stop/completion.
+
+The private caller-driven adapter and actual original33ms kernel timeout now
+share one explicit input timeline. Fast and host-delayed cases both retire35
+input steps,39,375 PIT ticks and1,680 actual48kHz output frames. Actual source
+fetches are1,568 frames;52 GP blocks leave16 frames of carry. PCM bytes, source
+read ledger, cursor and DSP state are identical through the added host stalls.
+The CPU is stopped while the consumer advances; clock observation is pure.
+
+Root proof `reference-clock-audio-20261011/qualified-common-clock.aot-private.json`
+has SHA256 `6e2d5c760998060e7c5d780b907a017cebe70e4a6ce21f3fc88b65be73b80699`
+and binds290 verified identities. This is an executed composition foundation,
+not full-title acceptance. The movie's ordinary controls, runtime input/capture
+integration and complete original lifecycle remain required. Default HLE is
+unchanged; movies remain open at4/9 families with26 precision deferrals.
