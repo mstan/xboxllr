@@ -60,7 +60,13 @@ Nine focused checks pass in1.22s, including36 actual helper CALL/RET cases,
 two allocation guards, calendar and four continuation regressions. Event,
 crypto/key, IRP, FP/exception and firmware branches retain named ownership or
 error guards; static call coverage does not claim dynamic unreachability.
-One changed long Q03 generation is next, with the same replay/cadence/bounds.
+Changed Q03 generation v8 is now running from `910b4f1`, with the same
+replay/cadence/capture/six-hour bounds and a verified fresh8GiB disk. Private
+IO/title-only builds reuse12 pinned dependencies; no library/test repetition.
+Initial replay/common-clock/GP capture routes are observed. Four logical CPUs
+at Normal priority are available with the worker idle; Marvel Rivals detection
+reduces allocation to two/BelowNormal. Frozen independent numeric/scene review
+is queued once after successful finalization. Full acceptance remains pending.
 The rejected-batch analyzer/gallery waiters run no numeric/title repetition.
 Analyzer `2075d64` retains any later diagnostic opening without
 substituting it for the required two natural and one interrupted lifetimes;

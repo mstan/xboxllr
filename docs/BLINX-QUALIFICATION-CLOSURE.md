@@ -211,6 +211,24 @@ Q03 batch can now integrate the calendar/helper fixes with unchanged cadence,
 replay and acceptance bounds. Scheduling and movies stay open pending their
 full required title lifetimes.
 
+Changed generation `q03-c32000-v8` is now running at source `910b4f1`.
+Its private build recompiles current IO and51 frozen title units, importing12
+unchanged dependency archives instead of rebuilding those libraries or tests.
+The8GiB runtime disk is a fully verified fresh copy of the original cold disk;
+no v7 runtime disk is reused. Prepared proof SHA256
+`467cf22c19b1e0773bea3261e4da2c948bf6b6796589bbc78b89ee38ae5bf398`,
+executable SHA256
+`a2160023a1ac550c44578cfc577d086c6486dc05ec967855507bde68080c9dd8`.
+Initial original replay delivery, stopped common-clock route and bounded GP
+capture are observed. Cadence32000, Start445000/release446000,600 GP seconds,
+512MiB records and21600 host seconds are unchanged. With the worker idle,
+host allocation uses four logical CPUs at Normal priority; Marvel Rivals
+detection lowers it to two CPUs/BelowNormal without changing guest-clock input.
+Frozen numeric and scene waiters run once after successful finalization and
+skip incomplete runs. The unchanged analyzer and12 independent media files are
+copied and pinned before this observation. No movie/scheduling acceptance or
+Xbox operation is claimed while the run and recovery hold remain pending.
+
 The final analyzer explicitly binds required opening lifetimes to actual Play
 not after the declared Start. A fixed600s diagnostic can also reach a later
 opening; it retains that lifetime and its source/ring/census evidence without
