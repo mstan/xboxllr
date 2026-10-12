@@ -15,7 +15,7 @@ struct ReferenceCapture {
     std::vector<uint8_t> pending;
     std::vector<float> speakers;
     bool enabled=false,epoch_set=false,finished=false,failed=false;
-    static constexpr uint64_t frame_limit=600ull*48000,byte_limit=512ull*1024*1024;
+    static constexpr uint64_t frame_limit=600ull*48000,byte_limit=2048ull*1024*1024;
     static uint64_t qpc() {
         LARGE_INTEGER now,frequency;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&frequency);
         return uint64_t(now.QuadPart/frequency.QuadPart)*10000000+
@@ -30,7 +30,7 @@ struct ReferenceCapture {
         if(snprintf(path,sizeof(path),"%s/engine-%llu.gp.f32",directory,(unsigned long long)id)>=(int)sizeof(path))return false;
         output=fopen(path,"wbx");if(!output)return false;
         pending.reserve(8192);speakers.reserve(48000*6);
-        fprintf(stderr,"[REFERENCE CAPTURE] engine=%llu bounded600s/512MiB; actual DMA bytes and six-channel GP output; separate QPC/PIT epochs\n",(unsigned long long)id);
+        fprintf(stderr,"[REFERENCE CAPTURE] engine=%llu bounded600s/2048MiB; actual DMA bytes and six-channel GP output; separate QPC/PIT epochs\n",(unsigned long long)id);
         return true;
     }
     bool set_epoch(uint64_t ticks) {

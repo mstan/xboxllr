@@ -25,7 +25,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | --- | --- | --- | --- | --- |
 | Q01 | Complete | `.123` | Reference timestamp ownership; input replay fix at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
-| Q03 | Running: v8 full lifetimes | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
+| Q03 | Open: v8 stopped; publication fix `.123.1` | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
@@ -198,12 +198,23 @@ verifies25 artifact identities, retains the original waveform/A-V/source and
 successful-finalization gates, and reuses unchanged parser/ownership checks.
 Proof `q03-analyzer-correction-20261012/accepted-root.aot-private.json`, SHA256
 `e39f6424fd37b1d76534dd74b971b6d94297eb520051729ccd996f21c5ba43e6`.
-The live v8 capture and frozen waiter/analyzer stay unchanged; apply the corrected
-analyzer in a separate retained final review. Its512MiB observer capacity remains
-a risk, not a demonstrated failure. If an observer limit stops the batch, retain
-complete earlier evidence with its cutoff and missing gates; a failed batch does
-not satisfy the current whole-run closing contract. Q03 and both families remain
-open until complete numeric, scene, census and ownership acceptance.
+The frozen v8 capture and waiter/analyzer remain unchanged; apply the corrected
+analyzer in a separate retained review. A failed batch does not satisfy the
+current whole-run closing contract. Q03 and both families remain open until
+complete numeric, scene, census and ownership acceptance.
+
+Generation v8 returned2 after13222.609 wall seconds during second-demo loading:
+`device LLE duplicate physical publication`, ordinal159, entries1183312.
+The conflicting newVA82EA2000 and oldVA07DFD000 both resolve toPA02EA2000.
+Its finalized capture contains16390416 GP frames and764753 DMA records,
+349538196 record bytes, with zero overflow/I/O error and no observer-limit stop.
+The planned subsequent Start/release was not reached. This is required offline
+memory/interpreter integration work under `.123.1`, not a hardware question or
+evidence that the512MiB observer filled. Retain the two completed openings for
+independent numeric review, but require a corrected complete closing generation.
+Do not suppress the publication/pin guards or rerun unchanged sources.
+Final manifest `reference-movie-batch-20261011/q03-c32000-v8/run.aot-private.json`,
+SHA256 `7410e39eff0a1c22d15fccb7dfd836aed7d46b47bb8d2a7c105be5df9e0b1d69`.
 
 The v8 second opening has a retained closed visual/caller window: final source
 picture2263, accepted Stop/Release after75.566 modeled seconds, then independently
@@ -217,6 +228,27 @@ pass with unchanged numerical limits and other analyzer functions. Proof
 window `q03-v8-second-retirement-review/observed-retirement.aot-private.json`,
 SHA256 `bc08bf48b363df9d92096e8361760db16e40fab3214156a4bdee98e361e60d60`.
 The window alone does not qualify DMA voice ownership, waveform/A-V or Q03.
+
+Full retained v8 analysis now passes both completed natural openings. Each lasts
+75.566 modeled seconds, reaches final picture2263 and returns to title, with no
+DMA byte mismatch or movie-source reread. One fixed alignment per actual Play
+compares3626188 frames against caller PCM and independent encoded-rate media;
+independent RMSE is at most0.004625 and correlation at least0.9998287. Absolute
+A/V p95 is51.300ms and52.313ms, within the unchanged two-frame limit. Proof
+`reference-movie-batch-20261011/q03-v8-retained-natural-review/review.aot-private.json`,
+SHA256 `ca5968c816faa596077f5d5cd797092560ac1b9f29c7aa8e8b45d29c9d89bb7a`.
+This closes uncertainty about the completed lifetimes, not the failed batch:
+the publication repair, later Start/release/reentry and complete-generation
+scene/census/ownership review remain required.
+
+The next changed generation raises only the passive DMA-record ceiling from
+512MiB to2GiB. Records remain streamed; the pending/read and output buffers,
+600-second modeled duration, processing and tolerances are unchanged. At v8's
+observed average,600 seconds would already exceed512MiB. Its13222.609 wall
+seconds for341.467 GP seconds also projects beyond the old six-hour host cap;
+the next launcher will declare an eight-hour host allowance. These are bounded
+observation budgets, not a relaxation of LLE correctness or an instruction to
+optimize its speed. The final generation must pin its actual compiled limits.
 
 The first v6 natural opening now reaches picture2263, real Stop after75.567s,
 Destroy and the title transition, with zero ring mismatches or source rereads.
