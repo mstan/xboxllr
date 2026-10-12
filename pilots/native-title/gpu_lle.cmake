@@ -27,6 +27,15 @@ if(PILOT_RENDERER STREQUAL "LLE")
   set_tests_properties(pilot_gpu_lle_transport PROPERTIES TIMEOUT 30)
   if(PILOT_FILES STREQUAL "LLE")
     pilot_add_test(NAME pilot_gpu_thread_cpu_lle COMMAND pilot_contract_test gpu-thread-cpu-lle)
+    pilot_add_test(NAME pilot_gpu_first_context_observer COMMAND pilot_contract_test gpu-first-context-observer)
+    set_tests_properties(pilot_gpu_first_context_observer PROPERTIES TIMEOUT 30)
+    if(TARGET pilot_callback_kernel_lle_test)
+      pilot_add_test(NAME pilot_gpu_first_context_capture_guard COMMAND "${CMAKE_COMMAND}"
+        "-DPROGRAM=$<TARGET_FILE:pilot_callback_kernel_lle_test>"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/first-context-controls"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/first_context_capture_guard.cmake")
+      set_tests_properties(pilot_gpu_first_context_capture_guard PROPERTIES TIMEOUT 30)
+    endif()
     set_tests_properties(pilot_gpu_thread_cpu_lle PROPERTIES TIMEOUT 30)
     pilot_add_test(NAME pilot_gpu_thread_av_lle COMMAND pilot_contract_test gpu-thread-av-lle)
     pilot_add_test(NAME pilot_gpu_thread_av_mode_guard COMMAND pilot_contract_test gpu-thread-av-mode-guard)

@@ -21,9 +21,11 @@ static struct {
     int (*encoder_advance)(void*,uint64_t,unsigned);
     int (*encoder_timing)(void*,uint64_t*,int*);
     int (*scanout)(void*,uint8_t*,uint32_t,uint32_t*,uint32_t*);
+    int (*first_context_snapshot)(void*,uint8_t*,uint32_t,uint32_t*);
     uint64_t origin,field_count;
 } gpu_lle;
 static const char *gpu_lle_sample(void);
+#include "gpu_first_context_observer.inc"
 
 static int gpu_lle_dma(uint32_t pa,void *buffer,size_t bytes,int write)
 {
@@ -81,9 +83,12 @@ static const char *gpu_lle_kernel_mmio(uint32_t address,unsigned size,int write,
      * fully validated RAM borrowing; it never executes another original CPU.
      * Register admission/errors remain the maintained NV2A owner's decision. */
     const char *error=gpu_lle_sample();if(error)return error;
+    if(write && gpu_context_observer.enabled)gpu_context_prewrite(address,size,*value);
     if(write)gpu_lle.write(gpu_lle.device,address,size,*value);
     else *value=gpu_lle.read(gpu_lle.device,address,size);
-    return gpu_lle.error(gpu_lle.device);
+    error=gpu_lle.error(gpu_lle.device);
+    if(write && gpu_context_observer.enabled)gpu_context_postwrite(address,error);
+    return error;
 }
 static const char *gpu_lle_sample(void)
 {
@@ -144,6 +149,7 @@ static void gpu_lle_open(void)
     gpu_lle.bus(gpu_lle.device,gpu_lle_dma_read,gpu_lle_dma_write,pilot_usb_pic_raise);
     const char *error=gpu_lle.error(gpu_lle.device);
     if(error)stop(error,0xfd000000u);
+    gpu_context_observer_open(hex);
     gpu_lle.origin=dispatch_monotonic();
     gpu_lle.field_count=0;
     pilot_io_device_port_bind(0xcf8,0xcff,gpu_lle_port);

@@ -16,6 +16,7 @@
 //   * Writes to unmodelled registers are accepted+logged (a write carries no return value to
 //     get wrong; xemu likewise ignores unknown writes).
 #pragma once
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -282,6 +283,44 @@ public:
         uint32_t parser_get = 0;
         uint32_t parser_put = 0;
     };
+    // Passive diagnostic: the caller retains the stopped emulation owner.
+    // Copy backing state directly; no register read, seam anchor or dispatch.
+    struct FirstContextDiagnosticChannel {
+        uint32_t get,put,dma_instance,method,method_count,subroutine,reference,engines,last_engine;
+        uint32_t subchannel,non_incrementing,subroutine_active,get_initialized;
+    };
+    struct FirstContextDiagnosticRegister { uint32_t offset,value; };
+    struct FirstContextDiagnosticState {
+        std::vector<uint8_t> pramin;
+        std::array<FirstContextDiagnosticChannel,32> channels;
+        std::vector<FirstContextDiagnosticRegister> pfifo;
+        std::vector<PushMethod> pending;
+        uint32_t context_control,context_user,context_table,ffintfc,fifo_access,executing;
+        uint32_t waiting_for_nop,waiting_for_flip,status,intr,intr_en,nsource;
+        uint32_t trapped_addr,trapped_data,pmc_enable;
+    };
+    FirstContextDiagnosticState first_context_diagnostic_snapshot() const {
+        FirstContextDiagnosticState out;
+        out.pramin=pramin_;
+        for(size_t i=0;i<channels_.size();++i) {
+            const auto& c=channels_[i];
+            out.channels[i]={c.get,c.put,c.dma_instance,c.method,c.method_count,c.subroutine,
+                c.reference,c.engines,c.last_engine,c.subchannel,uint32_t(c.non_incrementing),
+                uint32_t(c.subroutine_active),uint32_t(c.get_initialized)};
+        }
+        out.pfifo.reserve(pfifo_regs_.size());
+        for(const auto& entry:pfifo_regs_)out.pfifo.push_back({entry.first,entry.second});
+        std::sort(out.pfifo.begin(),out.pfifo.end(),[](const auto& a,const auto& b){return a.offset<b.offset;});
+        out.pending.assign(pull_queue_.cbegin(),pull_queue_.cend());
+        out.context_control=pgraph_context_control_;out.context_user=pgraph_context_user_;
+        out.context_table=pgraph_context_table_;out.ffintfc=pgraph_ffintfc_;
+        out.fifo_access=uint32_t(pgraph_fifo_access_);out.executing=uint32_t(pgraph_executing_);
+        out.waiting_for_nop=uint32_t(waiting_for_nop_);out.waiting_for_flip=uint32_t(waiting_for_flip_);
+        out.status=pgraph_status();out.intr=pgraph_intr_;out.intr_en=pgraph_intr_en_;
+        out.nsource=pgraph_nsource_;out.trapped_addr=pgraph_trapped_addr_;
+        out.trapped_data=pgraph_trapped_data_;out.pmc_enable=pmc_enable_;
+        return out;
+    }
     uint64_t push_methods() const { return methods_.total(); }
     uint64_t method_count(uint32_t method) const {
         return (method < 0x2000 && !(method & 3u)) ? method_counts_[method >> 2] : 0;

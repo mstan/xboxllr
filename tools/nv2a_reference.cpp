@@ -344,3 +344,41 @@ EXPORT int xlle_nv2a_reference_vector(void* instance, int acknowledge) {
     auto& pic = static_cast<Reference*>(instance)->pic;
     return acknowledge ? pic.acknowledge() : pic.peek();
 }
+
+// Passive host diagnostic wire GFC1/version1, explicit little-endian DWORDs.
+// Caller owns the stopped CPU/Nv2a throughout. Retained guards are untouched.
+EXPORT int xlle_nv2a_reference_first_context_snapshot(void* instance,
+        uint8_t* output,uint32_t capacity,uint32_t* required) {
+    if(!instance || !required)return 0;
+    try {
+        const auto& ref=*static_cast<const Reference*>(instance);
+        const auto state=ref.gpu.first_context_diagnostic_snapshot();
+        if(state.pramin.size()!=0x100000 || state.pending.size()>256 || state.pfifo.size()>8192)return 0;
+        const uint32_t bytes=21*4+32*13*4+uint32_t(state.pfifo.size())*8+
+            uint32_t(state.pending.size())*9*4+uint32_t(state.pramin.size());
+        *required=bytes;
+        if(!output || capacity<bytes)return 0;
+        uint8_t* cursor=output;
+        auto put=[&](uint32_t value) {
+            for(unsigned shift=0;shift<32;shift+=8)*cursor++=uint8_t(value>>shift);
+        };
+        put(0x31434647);put(1);put(uint32_t(state.pramin.size()));put(32);
+        put(uint32_t(state.pfifo.size()));put(uint32_t(state.pending.size()));
+        put(state.context_control);put(state.context_user);put(state.context_table);put(state.ffintfc);
+        put(state.fifo_access);put(state.executing);put(state.waiting_for_nop);put(state.waiting_for_flip);
+        put(state.status);put(state.intr);put(state.intr_en);put(state.nsource);
+        put(state.trapped_addr);put(state.trapped_data);put(state.pmc_enable);
+        for(const auto& c:state.channels) {
+            put(c.get);put(c.put);put(c.dma_instance);put(c.method);put(c.method_count);put(c.subroutine);
+            put(c.reference);put(c.engines);put(c.last_engine);put(c.subchannel);
+            put(c.non_incrementing);put(c.subroutine_active);put(c.get_initialized);
+        }
+        for(const auto& r:state.pfifo){put(r.offset);put(r.value);}
+        for(const auto& p:state.pending) {
+            put(uint32_t(p.seq));put(uint32_t(p.seq>>32));put(p.channel);put(p.subchannel);
+            put(p.object_class);put(p.method);put(p.parameter);put(p.parser_get);put(p.parser_put);
+        }
+        std::memcpy(cursor,state.pramin.data(),state.pramin.size());
+        return 1;
+    } catch(...) {return 0;}
+}

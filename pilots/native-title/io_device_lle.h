@@ -51,6 +51,29 @@ void pilot_io_device_thread_bind(PilotIoThread callback);
 /* Bounded read-only entry/return observation on the original CPU. Selection
  * is diagnostic only; it does not admit a callback or alter guest state. */
 const char *pilot_io_device_thread_trace(uint32_t entry);
+/* Elective passive observer, disabled until an idle hash-bound registration.
+ * ENTRY and RETURN mean real raw-engine execution, never a generated RET site.
+ * A receiver may copy original RAM through diagnostic_read while this same
+ * owner is stopped. It may not call services, clocks, device work or reenter.
+ * The receiver cannot admit execution or change a retained transport guard. */
+enum { PILOT_IO_DIAGNOSTIC_ENTRY=1,PILOT_IO_DIAGNOSTIC_RETURN=2,
+       PILOT_IO_DIAGNOSTIC_MMIO=3 };
+typedef struct PilotIoDiagnosticEvent {
+    uint32_t kind,pc,regs[8],flags,thread,in_kernel;
+    uint32_t entry,entry_sp,caller,driver,address,size,value;
+} PilotIoDiagnosticEvent;
+typedef void (*PilotIoDiagnostic)(const PilotIoDiagnosticEvent *event);
+const char *pilot_io_device_diagnostic_bind(uint32_t entry,uint32_t bytes,
+    const char *sha256,PilotIoDiagnostic receiver);
+/* Borrowed context only inside the actual raw-MMIO callback. The caller
+ * chooses its exact pre-write point after ordinary device sampling. */
+int pilot_io_device_diagnostic_context(PilotIoDiagnosticEvent *event);
+/* Copy-only existing plain engine RAM/native view, or original RAM translation
+ * when no alias is cached. MMIO aliases and ROM are rejected. No publication, fault
+ * admission, guest service, DMA lease, MMIO or transport-failure mutation.
+ * physical!=0 selects actual retail RAM addresses. Valid only in receiver or
+ * raw-MMIO callback on the sole engine owner. Validate entire extent first. */
+int pilot_io_device_diagnostic_read(uint32_t address,void *out,uint32_t bytes,int physical);
 /* Build-selected complete zero-argument helper: EAX result and RET0 only.
  * Bind only reviewed original bytes by SHA256. The retained native worker
  * runs the selected implementation while the same original CPU is stopped.
