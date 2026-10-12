@@ -33,6 +33,10 @@ static RECOMP_TLS uint32_t recent[32], recent_pos;
 static RECOMP_TLS uint64_t entries;
 static uint32_t trace_function;
 static volatile LONG trace_function_hits;
+#ifdef PILOT_USB_LLE
+static int trace_original_usb;
+static unsigned trace_original_usb_count;
+#endif
 static int pilot_verbose=1;
 static unsigned char *memory, *image_bytes;
 static size_t image_size;
@@ -271,6 +275,19 @@ static void thread_finished(void)
 void recomp_trace_enter(const char *name, uint32_t va)
 {
     PILOT_THREAD_CHECKPOINT();
+#ifdef PILOT_USB_LLE
+    if(trace_original_usb && trace_original_usb_count<128 &&
+       (va==0x188247u || va==0x188de9u || va==0x188f41u || va==0x188fc8u || va==0x1890a2u)) {
+        uint32_t controller=va==0x1890a2u?MEM32(g_esp+8):g_ecx;
+        uint32_t head=MEM32(controller+0x42c);
+        uint32_t ed=va==0x188247u?g_edx:head?MEM32(head+0x10):0;
+        fprintf(stderr,"[USB ORIGINAL FLOW] sample=%u va=%08x eax=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x controller=%08x cancel=%08x posted=%08x high=%08x frame=%04x ed=%08x flags=%02x target=%08x count=%u sf_byte=%u\n",
+            ++trace_original_usb_count,va,g_eax,g_ecx,g_edx,g_esi,g_edi,g_ebp,g_esp,controller,head,
+            MEM32(controller+0x438),MEM32(controller+0x418),MEM16(MEM32(controller+8)+0x80),ed,
+            ed?MEM8(ed+0x10):0,ed?MEM32(ed+0x1c):0,ed?MEM8(ed+0x20):0,
+            va==0x188f41u || va==0x188fc8u?MEM8(g_ebp+0xf):0);
+    }
+#endif
     (void)name;
     recent[recent_pos++ & 31] = va;
     ++entries;
@@ -1097,6 +1114,10 @@ int main(int argc,char **argv)
 #endif
     const char *verbose=getenv("XLLE_PILOT_TRACE");
     if(verbose && !strcmp(verbose,"0"))pilot_verbose=0;
+#ifdef PILOT_USB_LLE
+    const char *usb_progress=getenv("XLLE_PILOT_ORIGINAL_PROGRESS");
+    trace_original_usb=usb_progress && !strcmp(usb_progress,"1");
+#endif
     const char *trace=getenv("XLLE_PILOT_TRACE_FUNCTION");
     if(trace && *trace) {char *end;trace_function=strtoul(trace,&end,0);if(*end || !trace_function)stop("invalid trace function address",0);}
     install_fault_handler();

@@ -2132,3 +2132,69 @@ attract still require actual progress. The actual manifest is
 `original-display-pulse-20261011/title-startup-v60.aot-private.json`.
 Movies remain open,4/9 families and26 timing/precision deferrals unchanged.
 No physical Xbox operation or audible playback occurred.
+
+## Resident alias-cache MMIO routing and original movie progress - 2026-10-11
+
+The post-loading main wait is now causal, scoped to `.112.2.15.14`.
+Original18859F stores ControlHead toFED00020 and188275/18827A acknowledge/
+enable SOF atFED0000C/FED00010 with correct original bytes and registers.
+In v66 the late stores did not enter the maintained device callback. A small
+program linked to the identical pinned Unicorn library reproduces the backend
+failure:3902 current regions retain read/write callbacks2/2 and revision10;
+4202 retain only the initial1/1 callbacks and return0. The original callback
+does not supply that0. Unicorn packs a physical-section index into12 low IOTLB
+bits. Its4096-section assertion is disabled in Release, and a higher index
+decodes to the wrong section/offset. The earlier unlimited resident alias cache
+therefore corrupted device routing; stale ED residue was not the cause.
+
+Resident aliases are an interpreter translation cache, separate from actual
+PTE/PFN/publication/pin/DMA ownership. Default retirement now stops at the
+existing pre-instruction block hook at1024 aliases, returns from `uc_emu_start`,
+unmaps down to512, then resumes the exact EIP and complete CPU context. No
+partially executed instruction is retried. A3584-alias admission guard keeps
+the current fixed topology at or below3599 sections even if an unusual block
+needs more pages; exceeding that headroom stops rather than corrupting MMIO.
+The source review establishes block stopping and single-element REP termination,
+without claiming every privileged/helper operand has been qualified. CPU-only
+nested contexts do not restore an obsolete mapping table.
+
+Direct CPU API reads/writes now stream through the same owned page admission
+after retirement. Zero-argument imports avoid a zero-byte read. Interrupt
+frames reserve both possible pages before their actual write, with a quiescent
+pretrim that cannot evict the first frame page while admitting the second.
+Retirement never frees an original allocation or removes its host/DMA owner.
+The native HLE path does not use this interpreter cache handling.
+
+The new regression executes three1536-page original allocations, original REP
+zeroing, per-page CPU writes/reads/checksum, real OHCI ControlHead/revision MOVs,
+event handoff and release/reuse. Each life observes actual cache retirement and
+restores all nine memory/thread/handle baseline fields. The first clockless
+fixture hit the existing instruction guard during6MiB original zeroing; it is
+retained as negative evidence. The accepted fixture uses the existing real
+runtime PIT/PIC clock, preserving production instruction guards. Fourteen
+focused checks pass in19.672s. The coherent current batch passes84/84 in51.343s,
+three rebuilt maintained NV2A bus checks in0.360s, three compute/idle IRQ stack
+checks in1.500s, initial FP in0.094s and three native scheduler/section checks
+in0.829s. Current graphics-ABI assertions are unchanged; the historical v60
+host-handle410->412 failure remains unexplained.
+
+One immutable muted original-title run v69 reaches97 shaders and31 present
+captures. The late18859F store now enters the device owner; EP0 requests advance
+from5 to8, cancellation clears, main proceeds and real periodic input reports
+continue. Its last observation records25,468 retired TDs,25,004 input reports,
+983/1024 resident aliases and29,623 cache retirements. Movie pictures advance.
+The342.984s harness observation timeout returns1 with no STOP/guard/fault;
+this is actual progress beyond the former wait, not a complete attract pass.
+Private proof `original-display-pulse-20261011/qualified-cache-v69.aot-private.json`
+has SHA256 `c0711ac57987bad8c4320206b7bef566372e5648d0325f492efe93aa1850c9ef`,
+binding61 source snapshots, five selected programs/libraries, two rebuilt native
+programs and41 artifacts, including the exact-engine red/control and independent
+packing/safepoint source reports. Static review inputs were individually captured;
+the final61-file source freeze separately binds the tested build.
+
+The old USB progress blocker is resolved. Whole scheduling and integrated
+attract acceptance remain open, as do current movie interruption/reentry,
+repetition and composed A/V acceptance. Reuse the established default HLE v62
+normal opening rather than replaying it for documentation. The family count
+remains4/9 with26 precision deferrals. No physical Xbox request or audible
+playback occurred; the existing hardware inspection stop remains binding.

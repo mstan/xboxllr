@@ -44,6 +44,8 @@ const char *pilot_usb_pit_time(uint64_t ticks);
 /* Read the actual maintained input-clock position and next IRQ0 deadline. */
 const char *pilot_usb_pit_clock(uint64_t *ticks,uint64_t *next_irq);
 const char *pilot_usb_lle_tick(void);
+/* Passive, bounded owner diagnostics. Does not advance time, DMA or IRQs. */
+void pilot_usb_lle_progress(unsigned sample);
 #ifdef __cplusplus
 }
 #endif

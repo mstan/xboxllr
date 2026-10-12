@@ -14,12 +14,12 @@ static struct OriginalThread *thread_retain_created(unsigned ordinal,const uint3
     unsigned i;for(i=0;i<64 && original_threads[i].object;++i){}
     if(i==64){failure="thread LLE ownership capacity at registration";return NULL;}
     uint32_t handle=0,out=SCRATCH+0xe000,status=0,object=0;
-    uc_err error=uc_mem_read(cpu,args[0],&handle,4);
+    uc_err error=owned_cpu_read(cpu,args[0],&handle,4);
     if(error){failure=uc_strerror(error);return NULL;}
     uint32_t ref[]={handle,0,out};thread_owned_execute(246,ref,&status);
     if(failure)return NULL;
     if(status){failure="thread LLE original ownership reference failed";return NULL;}
-    error=uc_mem_read(cpu,out,&object,4);
+    error=owned_cpu_read(cpu,out,&object,4);
     if(error){failure=uc_strerror(error);return NULL;}
     if(!object || thread_object(object) || (expected_object && object!=expected_object)) {
         failure="thread LLE creation handle does not own its actual new object";return NULL;
@@ -51,8 +51,8 @@ static void thread_cpu_birth_prepare(struct OriginalThread *parent,uint32_t *ent
     /* Failed handle creation has a distinct original termination/cleanup
      * route. Keep it guarded until that lifetime is connected and qualified. */
     if((int32_t)status<0){failure="original CPU failed child creation cleanup requires qualification";return;}
-    IO_UC(uc_mem_read(cpu,bp-4,&object,4));
-    IO_UC(uc_mem_read(cpu,bp+8,&output,4));
+    IO_UC(owned_cpu_read(cpu,bp-4,&object,4));
+    IO_UC(owned_cpu_read(cpu,bp+8,&output,4));
     if(output!=parent->call_args[0]){failure="original CPU birth changed its handle output frame";return;}
     uc_context *context=NULL;IO_UC(uc_context_alloc(cpu,&context));
     uc_err error=uc_context_save(cpu,context);
@@ -90,7 +90,7 @@ static void thread_after_call(unsigned ordinal,const uint32_t *args,uint32_t res
         }
     }
     if(ordinal==246 && (int32_t)result>=0) {
-        uint32_t object=0;error=uc_mem_read(cpu,args[2],&object,4);
+        uint32_t object=0;error=owned_cpu_read(cpu,args[2],&object,4);
         if(error)failure=uc_strerror(error);
         struct OriginalThread *thread=thread_object(object);
         if(thread)++thread->refs;

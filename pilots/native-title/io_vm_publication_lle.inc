@@ -3,20 +3,9 @@
 #define VM_UC(command) do {uc_err vm_error=(command);if(vm_error){failure=uc_strerror(vm_error);return;}} while(0)
 static uc_err vm_caller_read(uint32_t address,void *buffer,unsigned bytes)
 {
-    /* Direct Unicorn API reads do not enter the lazy-memory hook. Materialize
-     * the same owned aliases an original instruction would read, including
-     * fresh caller pages and aliases retired by a preceding VM mutation. */
-    if(!bytes || (uint64_t)address+bytes>0x100000000ull)return UC_ERR_READ_UNMAPPED;
-    for(uint64_t page=address&~4095u;page<(uint64_t)address+bytes;page+=4096) {
-        if(page>=SCRATCH && page<(uint64_t)SCRATCH+PILOT_IO_BRIDGE_BYTES)continue;
-        if(service_stack_page((uint32_t)page))continue;
-        unsigned i;for(i=0;i<mapped_count && mapped[i].va!=page;++i){}
-        if(i==mapped_count && !invalid_memory(cpu,UC_MEM_READ_UNMAPPED,page,4,0,NULL)) {
-            fprintf(stderr,"[VM CALLER READ GUARD] address=%08x bytes=%u page=%08x\n",address,bytes,(uint32_t)page);
-            return UC_ERR_READ_UNMAPPED;
-        }
-    }
-    return uc_mem_read(cpu,address,buffer,bytes);
+    /* Stream through the same PTE/owner admission as CPU reads; a large
+     * caller range does not require retaining every alias simultaneously. */
+    return owned_cpu_read(cpu,address,buffer,bytes);
 }
 static int vm_mutation(unsigned ordinal)
 {

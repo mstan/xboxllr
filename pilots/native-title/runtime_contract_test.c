@@ -723,6 +723,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-child-cpu-lle")) { test_thread_child_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-cpu-lle")) { test_thread_vm_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-alias-cpu-lle")) { test_thread_vm_alias_cpu_lle(); return 0; }
+        if (!strcmp(argv[1],"thread-vm-alias-pressure-cpu-lle")) { test_thread_vm_alias_pressure_cpu_lle(); return 0; }
         if (!strcmp(argv[1],"thread-vm-pinned-release-lle")) { test_thread_vm_pinned_release_lle(); return 0; }
         if (!strcmp(argv[1],"thread-files-cpu-lle")) { CHECK(argc==3);test_thread_files_cpu_lle(argv[2]);return 0; }
 #if defined(PILOT_FILES_LLE) && defined(PILOT_SCHEDULING_LLE)

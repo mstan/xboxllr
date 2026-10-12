@@ -22,6 +22,8 @@ std::string failure;
 PilotUsbDmaRelease release_dma;
 uint64_t start_ms;
 bool irq_level;
+bool diagnostic_progress;
+unsigned diagnostic_writes;
 xlle::DualPic pic;
 xlle::Pit8254 pit;
 uint64_t pit_ticks;
@@ -122,6 +124,31 @@ extern "C" void pilot_usb_pic_raise(int line,int level)
 {
     AcquireSRWLockExclusive(&usb_lock);
     pic.raise(line,level!=0);
+    ReleaseSRWLockExclusive(&usb_lock);
+}
+extern "C" void pilot_usb_lle_progress(unsigned sample)
+{
+    AcquireSRWLockExclusive(&usb_lock);
+    diagnostic_progress=true;
+    if(controller) {
+        const auto& master=pic.master();
+        std::fprintf(stderr,"[USB LLE PROGRESS] sample=%u frames=%llu control=%08x hcca=%08x status=%08x enable=%08x irq=%d pic_irr=%02x pic_imr=%02x pic_isr=%02x pic_elcr=%02x eds=%llu tds=%llu retired=%llu done=%llu wdh=%llu ack=%llu last_done=%08x address=%u configuration=%u port=%08x ep0=%zu dropped=%llu\n",
+            sample,(unsigned long long)controller->frames(),controller->control(),controller->hcca(),
+            controller->interrupt_status(),controller->interrupt_enable(),irq_level,
+            master.irr,master.imr,master.isr,master.elcr,
+            (unsigned long long)controller->processed_eds(),(unsigned long long)controller->processed_tds(),
+            (unsigned long long)controller->retired_tds(),(unsigned long long)controller->done_writebacks(),
+            (unsigned long long)controller->wdh_assertions(),(unsigned long long)controller->wdh_w1c_acknowledgements(),
+            controller->last_done_head(),controller->xid_address(),controller->xid_configuration(),
+            controller->port_status(0),controller->ep0_trace_count(),(unsigned long long)controller->ep0_trace_dropped());
+        static size_t reported;
+        for(;reported<controller->ep0_trace_count();++reported) {
+            const auto& t=controller->ep0_trace(reported);
+            std::fprintf(stderr,"[USB LLE EP0] sample=%u index=%zu address=%u type=%02x request=%02x value=%04x index_word=%04x length=%u outcome=%u completions=%u cc=%u bytes=%u td=%08x flags=%08x head=%08x\n",
+                sample,reported,t.address,t.request_type,t.request,t.value,t.index,t.length,
+                (unsigned)t.outcome,t.td_completions,t.last_condition_code,t.data_bytes,t.terminal_td_address,t.terminal_td_flags,t.ed_head_after);
+        }
+    }
     ReleaseSRWLockExclusive(&usb_lock);
 }
 extern "C" const char *pilot_usb_pic_bootstrap(uint16_t mask,uint16_t level)
@@ -305,6 +332,12 @@ extern "C" const char *pilot_usb_lle_access(uint32_t address,int write,uint32_t 
             if(write) {
                 uint32_t old_control=controller->control();
                 controller->mmio_write(address,4,*value);
+                if(diagnostic_progress && diagnostic_writes<512 &&
+                   (address==0xfed00008u || address==0xfed0000cu || address==0xfed00010u ||
+                    address==0xfed00014u || address==0xfed00020u || address==0xfed00024u))
+                    std::fprintf(stderr,"[USB LLE WRITE] sample=%u address=%08x value=%08x frames=%llu status=%08x enable=%08x irq=%d\n",
+                        ++diagnostic_writes,address,*value,(unsigned long long)controller->frames(),
+                        controller->interrupt_status(),controller->interrupt_enable(),irq_level);
                 if(failure.empty() && ((address==0xfed00008u && (*value&1)) ||
                    (address==0xfed00004u && (old_control&0xc0) && !(*value&0xc0))))
                     release_dma(); // The real controller reset discards its schedules.

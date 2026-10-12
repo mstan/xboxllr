@@ -308,7 +308,7 @@ const char *pilot_io_device_sections_start(void)
             /* Original15 already publishes this pool allocation on the shared
              * RAM owner. A direct engine API write cannot create a lazy alias. */
             if(!failure)memcpy(guest_memory+buffer,original_section_file_text,length+1);
-            if(!failure && uc_mem_write(cpu,original_section_file_address,original_section_file_value,8)!=UC_ERR_OK)
+            if(!failure && owned_cpu_write(cpu,original_section_file_address,original_section_file_value,8)!=UC_ERR_OK)
                 failure="original launch filename publication failed";
             if(!failure) {
                 original_section_launch_ready=1;

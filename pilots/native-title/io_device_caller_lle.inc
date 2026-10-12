@@ -68,7 +68,7 @@ static void device_caller_complete(unsigned ordinal,const uint32_t *args,uint32_
     if(ordinal==65 && (int32_t)result>=0) {
         /* The output slot may itself be in an existing device extension.
          * Read the completed kernel view before publishing changed pages. */
-        uint32_t object;IO_UC(uc_mem_read(cpu,args[5],&object,4));
+        uint32_t object;IO_UC(owned_cpu_read(cpu,args[5],&object,4));
         publish_range(object,0x48+args[1]);if(failure)return;
     }
     contiguous_caller_complete(ordinal,args,result);if(failure)return;
@@ -93,7 +93,7 @@ static void device_caller_complete(unsigned ordinal,const uint32_t *args,uint32_
         if(!interrupt_objects[irq])interrupt_objects[irq]=args[0];
     }
     if(ordinal==98 && (result&255)) {
-        uint32_t irq;IO_UC(uc_mem_read(cpu,args[0]+8,&irq,4));
+        uint32_t irq;IO_UC(owned_cpu_read(cpu,args[0]+8,&irq,4));
         if(irq>=16){failure="device LLE connected IRQ out of scope";return;}
         interrupt_objects[irq]=args[0];
     }

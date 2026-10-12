@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unicorn/unicorn.h>
@@ -28,6 +29,8 @@
 #define RETURN_PC (SCRATCH+0x9000u)
 #define INITIAL_MAPPED_PAGES 256u
 #define X86_VIRTUAL_PAGES (1u<<20)
+#define ALIAS_TRIM_AT 1024u
+#define MAX_RESIDENT_ALIASES 3584u
 #define MAX_PUBLISHED (RAM_BYTES/4096)
 static SRWLOCK lock=SRWLOCK_INIT;
 static uc_engine *cpu;
@@ -40,6 +43,11 @@ static struct IoMappedPage *mapped;
 static unsigned mapped_capacity;
 static struct {uint32_t va,pa,pins;} published[MAX_PUBLISHED];
 static unsigned mapped_count,published_count;
+static unsigned alias_evictions;
+static int cpu_running,alias_trim_pending;
+static void trim_aliases(void);
+static uc_err owned_cpu_read(uc_engine *engine,uint32_t address,void *buffer,size_t bytes);
+static uc_err owned_cpu_write(uc_engine *engine,uint32_t address,const void *buffer,size_t bytes);
 /* Exact indices into the owned publication ledger. Device allocations add
  * hundreds of pages; scanning all of them for each cached alias or USB DMA
  * packet turns original interrupt service into quadratic host bookkeeping.
@@ -119,6 +127,8 @@ static uint32_t clock_initialization_ports[3],clock_initialization_values[3];
 #endif
 static const int general_regs[]={UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX,
     UC_X86_REG_EBX,UC_X86_REG_ESP,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI};
+static int original_usb_trace_enabled;
+static void original_usb_instruction(uc_engine *engine,uint64_t address,uint32_t size,void *data);
 /* Bounded diagnostics for an actual execution guard. They never admit code,
  * change registers or supply a failed access. */
 static uint32_t recent_blocks[16],recent_block_count;
@@ -225,6 +235,17 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
             backing=rom+((pa-0xff000000u)&(ROM_BYTES-1));protection=UC_PROT_READ;
         } else backing=physical_backing(pa);
     }
+    /* A QEMU I/O TLB packs its section index into12 page-offset bits.
+     * Keep resident interpreter translations below that backend limit;
+     * original PTEs, PFNs, publications and DMA owners remain independent.
+     * Ordinary pressure stops at the next block, before an instruction.
+     * Direct API admission is already outside CPU execution. */
+    if(!cpu_running && mapped_count>=ALIAS_TRIM_AT) {
+        trim_aliases();if(failure)return false;
+    }
+    if(mapped_count>=MAX_RESIDENT_ALIASES) {
+        failure="device LLE interpreter block exceeded resident alias headroom";return false;
+    }
     if(mapped_count==mapped_capacity) {
         /* This cache records admitted virtual aliases, not physical ownership.
          * A valid title can use more aliases than the old4096-page fixture cap.
@@ -244,6 +265,49 @@ static bool invalid_memory(uc_engine *engine,uc_mem_type type,uint64_t address,
     if(error){failure=uc_strerror(error);return false;}
     mapped[mapped_count++]=(struct IoMappedPage){page,pa,backing};
     return true;
+}
+static void trim_aliases(void)
+{
+    if(cpu_running){failure="device LLE alias retirement during CPU execution";return;}
+    while(mapped_count>ALIAS_TRIM_AT/2) {
+        uc_err error=uc_mem_unmap(cpu,mapped[mapped_count-1].va,4096);
+        if(error){failure=uc_strerror(error);return;}
+        --mapped_count;++alias_evictions;
+    }
+}
+static uc_err owned_cpu_read(uc_engine *engine,uint32_t address,void *buffer,size_t bytes)
+{
+    /* API reads do not invoke the lazy CPU hook. Re-admit each missing
+     * owned page after cache retirement, without retaining alias ownership. */
+    if(!bytes || (uint64_t)address+bytes>0x100000000ull)return UC_ERR_READ_UNMAPPED;
+    unsigned char *out=buffer;
+    while(bytes) {
+        size_t chunk=4096-(address&4095u);if(chunk>bytes)chunk=bytes;
+        uc_err error=uc_mem_read(engine,address,out,chunk);
+        if(error==UC_ERR_READ_UNMAPPED) {
+            if(!invalid_memory(engine,UC_MEM_READ_UNMAPPED,address,1,0,NULL))return error;
+            error=uc_mem_read(engine,address,out,chunk);
+        }
+        if(error)return error;
+        address+=(uint32_t)chunk;out+=chunk;bytes-=chunk;
+    }
+    return UC_ERR_OK;
+}
+static uc_err owned_cpu_write(uc_engine *engine,uint32_t address,const void *buffer,size_t bytes)
+{
+    if(!bytes || (uint64_t)address+bytes>0x100000000ull)return UC_ERR_WRITE_UNMAPPED;
+    const unsigned char *in=buffer;
+    while(bytes) {
+        size_t chunk=4096-(address&4095u);if(chunk>bytes)chunk=bytes;
+        uc_err error=uc_mem_write(engine,address,in,chunk);
+        if(error==UC_ERR_WRITE_UNMAPPED) {
+            if(!invalid_memory(engine,UC_MEM_WRITE_UNMAPPED,address,1,0,NULL))return error;
+            error=uc_mem_write(engine,address,in,chunk);
+        }
+        if(error)return error;
+        address+=(uint32_t)chunk;in+=chunk;bytes-=chunk;
+    }
+    return UC_ERR_OK;
 }
 static void forbidden(uc_engine *engine,const char *reason)
 {failure=reason;uc_emu_stop(engine);}
@@ -269,6 +333,14 @@ static void device_mmio_write(uc_engine *engine,uint64_t offset,unsigned size,ui
         forbidden(engine,"device LLE unqualified MMIO write");return;
     }
     if(device_bus_borrow){forbidden(engine,"device LLE nested MMIO callback");return;}
+    if(original_usb_trace_enabled && owner->first==0xfed00000u) {
+        static unsigned writes;
+        if(writes<128) {
+            uint32_t pc=0;uc_reg_read(engine,UC_X86_REG_EIP,&pc);
+            fprintf(stderr,"[ORIGINAL USB MMIO] sample=%u pc=%08x address=%08x bytes=%u value=%08x\n",
+                ++writes,pc,owner->first+(uint32_t)offset,size,word);
+        }
+    }
     device_bus_borrow=1;device_bus_dma_lease=owner->dma_lease;
     const char *error=owner->callback(owner->first+(uint32_t)offset,size,1,&word);
     device_bus_borrow=0;device_bus_dma_lease=0;
@@ -344,6 +416,9 @@ static uc_err write_interrupt_frame(uc_engine *engine,uint32_t sp,const uint32_t
      * Unicorn has recreated its invalidated alias. uc_mem_write does not run
      * invalid-memory hooks, so materialize those actual aliases explicitly. */
     if((uint64_t)sp+12>0x100000000ull){failure="device LLE interrupt frame wraps address space";return UC_ERR_ARG;}
+    if(!cpu_running && mapped_count>=ALIAS_TRIM_AT-2) {
+        trim_aliases();if(failure)return UC_ERR_WRITE_UNMAPPED;
+    }
     for(uint64_t page=sp&~4095u;page<(uint64_t)sp+12;page+=4096) {
         if(page>=SCRATCH && page<SCRATCH+PILOT_IO_BRIDGE_BYTES)continue;
         if(service_stack_page((uint32_t)page))continue;
@@ -453,6 +528,9 @@ static void interrupt(uc_engine *engine,uint32_t number,void *data)
 static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *data)
 {
     (void)size;(void)data;
+    if(cpu_running && mapped_count>=ALIAS_TRIM_AT) {
+        alias_trim_pending=1;uc_emu_stop(engine);return;
+    }
     recent_blocks[recent_block_count++&15]=(uint32_t)address;
 #ifdef PILOT_USB_LLE
     if(pilot_usb_pic_vector(0)>=0) {
@@ -473,15 +551,15 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
     for(unsigned i=0;i<16;++i)if(interrupt_objects[i]) {
         uint32_t object=interrupt_objects[i],routine=0;
         if(address>=object+0x18 && address<object+0x70)return;
-        if(uc_mem_read(engine,object,&routine,4)==UC_ERR_OK && address==routine && isr_callback) {
+        if(owned_cpu_read(engine,object,&routine,4)==UC_ERR_OK && address==routine && isr_callback) {
             pending_callback=routine;uc_emu_stop(engine);return;
         }
     }
     if(dpc_callback && (kernel_word(0x8003da60u)&255)==2 && kernel_word(0x8003da94u)) {
         uint32_t sp,frame[5],object[7],flags;
         if(uc_reg_read(engine,UC_X86_REG_ESP,&sp)==UC_ERR_OK &&
-           uc_mem_read(engine,sp,frame,sizeof(frame))==UC_ERR_OK &&
-           uc_mem_read(engine,frame[1],object,sizeof(object))==UC_ERR_OK &&
+           owned_cpu_read(engine,sp,frame,sizeof(frame))==UC_ERR_OK &&
+           owned_cpu_read(engine,frame[1],object,sizeof(object))==UC_ERR_OK &&
            uc_reg_read(engine,UC_X86_REG_EFLAGS,&flags)==UC_ERR_OK &&
            (frame[0]==0x8001f68fu || frame[0]==0x8001e461u) && (object[0]&0xffffff)==0x13 &&
            object[3]==address && object[4]==frame[2] && (flags&0x600)==0x200) {
@@ -610,6 +688,12 @@ static void initialize(unsigned char *guest)
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INTR,interrupt,NULL,1,0));
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_INSN,guest_cpuid,NULL,1,0,UC_X86_INS_CPUID));
     IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_BLOCK,code_block,NULL,1,0));
+    const char *usb_trace=getenv("XLLE_PILOT_ORIGINAL_PROGRESS");
+    original_usb_trace_enabled=usb_trace && !strcmp(usb_trace,"1");
+    if(original_usb_trace_enabled) {
+        IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_CODE,original_usb_instruction,NULL,0x187f6du,0x188284u));
+        IO_UC(uc_hook_add(cpu,&hook,UC_HOOK_CODE,original_usb_instruction,NULL,0x188565u,0x1885a1u));
+    }
     fprintf(stderr,"[IO DEVICE LLE] original kernel; initialized capture %s; no replaced callees\n",hex);
 }
 /* Publish only actual object allocations, leaving the captured namespace and
@@ -813,6 +897,7 @@ static void publish_idle_callback_stack(uint32_t sp,unsigned frame_bytes)
         frame_bytes==20?"DPC":"ISR",idle_stack.object,idle_stack.base,idle_stack.top,pages,sp);
 }
 #include "io_thread_transport_lle.inc"
+#include "io_progress_lle.inc"
 static void pump_original_clock(void)
 {
     if(!clock_provider)return;
@@ -858,14 +943,22 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
         device_irq_pending=0;
 #endif
         pump_original_clock();if(failure)return;
+        original_progress(entry);if(failure)return;
         size_t slice=instruction_limit;
         if(clock_provider) {
             slice=4096;
             while(instruction_limit/slice>4096)slice*=2;
             if(slice>instruction_limit)slice=instruction_limit;
         }
+        alias_trim_pending=0;cpu_running=1;
         uc_err error=uc_emu_start(cpu,entry,RETURN_PC,0,slice);
+        cpu_running=0;
         if(failure)return;
+        if(alias_trim_pending) {
+            if(error){failure=uc_strerror(error);return;}
+            trim_aliases();if(failure)return;
+            IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&entry));continue;
+        }
         if(pending_cpu_service && (error==UC_ERR_OK || error==UC_ERR_FETCH_UNMAPPED)) {
             struct OriginalThread *thread=pending_cpu_service;
             thread_cpu_service_prepare(thread,&entry);if(failure)return;
@@ -927,7 +1020,7 @@ static void run_original(uint32_t entry,size_t instruction_limit,uint32_t dispat
         int is_dpc=pending_dpc;
         struct OriginalThread *thread=pending_thread;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],regs+i));
-        IO_UC(uc_mem_read(cpu,regs[4],&return_pc,4));
+        IO_UC(owned_cpu_read(cpu,regs[4],&return_pc,4));
         int idle_dpc=is_dpc && kernel_word(0x8003da64u)==idle_stack.object &&
             regs[4]>=idle_stack.base && (uint64_t)regs[4]+20<=idle_stack.top;
         if(idle_dpc) {
@@ -1208,6 +1301,15 @@ const char *pilot_io_device_alias_cache_info(unsigned *count,unsigned *capacity)
     if(!error){*count=mapped_count;*capacity=mapped_capacity;}
     ReleaseSRWLockShared(&lock);return error;
 }
+const char *pilot_io_device_alias_cache_retired(unsigned *retired)
+{
+    if(device_bus_borrow)return "device LLE alias observation during device work";
+    AcquireSRWLockExclusive(&lock);
+    const char *error=failure;
+    if(!error && (!cpu || execution_depth || !retired))error="device LLE alias observation outside idle transport";
+    if(!error)*retired=alias_evictions;
+    ReleaseSRWLockExclusive(&lock);return error;
+}
 const char *pilot_io_device_clock_bind(PilotIoClock provider,void *context)
 {
     AcquireSRWLockExclusive(&lock);
@@ -1268,8 +1370,13 @@ const char *pilot_io_device_clock_start(void)
     if(!error)error=uc_reg_write(cpu,UC_X86_REG_ESP,&sp);
     if(!error)error=uc_reg_write(cpu,UC_X86_REG_EFLAGS,&flags);
     if(!error) {
+        if(mapped_count>=ALIAS_TRIM_AT){trim_aliases();if(failure)error=UC_ERR_RESOURCE;}
+    }
+    if(!error) {
         clock_initializing=1;clock_initialization_writes=0;++execution_depth;
+        cpu_running=1;
         error=uc_emu_start(cpu,0x800786d4u,RETURN_PC,0,128);
+        cpu_running=0;
         --execution_depth;clock_initializing=0;
     }
     uint32_t observed_sp=0;

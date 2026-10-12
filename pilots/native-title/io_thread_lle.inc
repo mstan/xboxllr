@@ -200,7 +200,7 @@ static int thread_admit(uc_engine *engine,uint32_t address)
     if(thread->started || address!=thread->entry)return 0;
     uint32_t sp,frame[3],flags;
     if(uc_reg_read(engine,UC_X86_REG_ESP,&sp)!=UC_ERR_OK ||
-       uc_mem_read(engine,sp,frame,sizeof(frame))!=UC_ERR_OK ||
+       owned_cpu_read(engine,sp,frame,sizeof(frame))!=UC_ERR_OK ||
        uc_reg_read(engine,UC_X86_REG_EFLAGS,&flags)!=UC_ERR_OK)return 0;
     if(frame[0]!=(thread->arguments==1?0x80025196u:0x80020134u) ||
        frame[1]!=thread->context[0] || (thread->arguments==2 && frame[2]!=thread->context[1]) ||

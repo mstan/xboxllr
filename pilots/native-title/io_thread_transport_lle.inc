@@ -117,11 +117,11 @@ static void thread_cpu_service_prepare(struct OriginalThread *thread,uint32_t *e
        sp<thread->stack || (uint64_t)sp+(count+1)*4>(uint64_t)thread->stack+thread->stack_bytes) {
         failure="original CPU service frame outside executing original thread";return;
     }
-    IO_UC(uc_mem_read(cpu,sp,&return_pc,4));
+    IO_UC(owned_cpu_read(cpu,sp,&return_pc,4));
     if(return_pc<0x10000u || return_pc>=0x80000000u || !guest_page(return_pc&~4095u)) {
         failure="original CPU service return outside resident caller";return;
     }
-    IO_UC(uc_mem_read(cpu,sp+4,thread->call_args,count*4));
+    if(count)IO_UC(owned_cpu_read(cpu,sp+4,thread->call_args,count*4));
     /* ObfDereferenceObject is fastcall: its object is in the real ECX, not
      * an absent stack argument or a previous service's retained argument. */
     if(thread->call_ordinal==160 || thread->call_ordinal==161 || thread->call_ordinal==250)
@@ -254,7 +254,7 @@ static void thread_handoff(struct OriginalThread *thread,int start,uint32_t *ent
                original_components[thread->component_index].stack_bytes) {
             failure="selected helper completion outside its original CPU owner";return;
         }
-        IO_UC(uc_mem_read(cpu,thread->component_before[4],&return_pc,4));
+        IO_UC(owned_cpu_read(cpu,thread->component_before[4],&return_pc,4));
         if(return_pc!=thread->component_return) {
             failure="selected helper changed original return frame";return;
         }
@@ -315,7 +315,7 @@ static void thread_component_prepare(struct OriginalThread *thread,uint32_t *ent
     if(memcmp(guest_memory+component->entry,component->code,component->bytes)) {
         failure="selected helper original bytes changed after binding";return;
     }
-    IO_UC(uc_mem_read(cpu,sp,&thread->component_return,4));
+    IO_UC(owned_cpu_read(cpu,sp,&thread->component_return,4));
     if(thread->component_return<0x10000u || thread->component_return>=0x80000000u ||
        !guest_page(thread->component_return&~4095u)) {
         failure="selected helper return outside resident original caller";return;

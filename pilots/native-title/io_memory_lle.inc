@@ -52,7 +52,7 @@ const char *pilot_io_device_vm(unsigned ordinal,unsigned char *guest,
     ++execution_depth;
     const uint32_t slots=SCRATCH+0x2000;
     uint32_t words[]={inputs[0],inputs[1],0xdeadbeef},args[5],count;
-    uc_err error=uc_mem_write(cpu,slots,words,sizeof(words));
+    uc_err error=owned_cpu_write(cpu,slots,words,sizeof(words));
     if(error){failure=uc_strerror(error);goto finish;}
     if(ordinal==184) {
         args[0]=slots;args[1]=inputs[4];args[2]=slots+4;args[3]=inputs[2];args[4]=inputs[3];count=5;
@@ -69,18 +69,18 @@ const char *pilot_io_device_vm(unsigned ordinal,unsigned char *guest,
     if(!failure && *status)fprintf(stderr,"[MEMORY LLE RESULT] ordinal=%u base=%08x bytes=%u type=%x status=%08x\n",
         ordinal,inputs[0],inputs[1],inputs[2],*status);
     if(!failure) {
-        error=uc_mem_read(cpu,ordinal==217?slots+32:slots,outputs,ordinal==217?28:12);
+        error=owned_cpu_read(cpu,ordinal==217?slots+32:slots,outputs,ordinal==217?28:12);
         if(error)failure=uc_strerror(error);
     }
     if(!failure && *status==0xc0000017u) {
         /* Record real original counters on allocation failure, after saving
          * caller outputs. This diagnostic cannot change the returned status. */
         uint32_t statistics[9]={36},address=slots+64,queried=0;
-        error=uc_mem_write(cpu,address,statistics,sizeof(statistics));
+        error=owned_cpu_write(cpu,address,statistics,sizeof(statistics));
         if(error)failure=uc_strerror(error);
         else execute(181,&address,&queried);
         if(!failure && !queried) {
-            error=uc_mem_read(cpu,address,statistics,sizeof(statistics));
+            error=owned_cpu_read(cpu,address,statistics,sizeof(statistics));
             if(error)failure=uc_strerror(error);
             else fprintf(stderr,"[MEMORY LLE EXHAUSTED] available=%u committed=%u reserved=%u cache=%u pool=%u stack=%u image=%u published=%u\n",
                 statistics[2],statistics[3],statistics[4],statistics[5],statistics[6],statistics[7],statistics[8],published_count);
