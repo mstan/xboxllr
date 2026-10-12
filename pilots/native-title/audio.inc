@@ -57,6 +57,7 @@ struct PilotAudioBuffer {
     int locked;
 };
 static struct PilotAudioBuffer audio_buffers[256];
+#include "audio_configuration_capture.inc"
 static void *audio_pointer(uint32_t address,uint32_t bytes)
 {
     if(!address || (uint64_t)address+bytes>0x100000000ull)stop("invalid audio guest range",address);
@@ -294,6 +295,8 @@ void pilot_audio_dispatch(unsigned entry)
     const uint32_t *a=audio_pointer(g_esp+4,pilot_audio_calls[entry].stack_bytes);
     int32_t result=0;
     AcquireSRWLockExclusive(&audio_lock);
+    int configuration=audio_configuration_enabled();
+    struct PilotAudioBuffer before_release;unsigned configuration_slot=0;
     if(pilot_verbose){fprintf(stderr,"[AUDIO] %s return=%08x",pilot_audio_calls[entry].name,MEM32(g_esp));
     for(unsigned i=0;i<pilot_audio_calls[entry].stack_bytes/4;++i)fprintf(stderr," %08x",a[i]);
     fprintf(stderr,"\n");}
@@ -334,6 +337,9 @@ void pilot_audio_dispatch(unsigned entry)
 #endif
     } else {
         struct PilotAudioBuffer *b=audio_buffer(a[0]);
+        if(configuration && entry==PILOT_AUDIO_IDirectSoundBuffer_Release) {
+            before_release=*b;configuration_slot=(unsigned)(b-audio_buffers);
+        }
         if(entry==PILOT_AUDIO_IDirectSoundBuffer_Release)result=audio_ref(b->base,0);
         else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetBufferData)result=audio_set_data(b,a[1],a[2]);
         else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetMixBins)result=audio_set_mix(b,a[1],0);
@@ -407,6 +413,16 @@ void pilot_audio_dispatch(unsigned entry)
                 if(result>=0)b->locked=0;break;
             default:stop("unqualified native audio service",entry);
             }
+        }
+    }
+    if(configuration && result>=0) {
+        if(entry==PILOT_AUDIO_IDirectSound_CreateSoundBuffer) {
+            struct PilotAudioBuffer *b=audio_buffer(MEM32(a[2]));
+            audio_configuration_event(b,(unsigned)(b-audio_buffers),entry,a,result,MEM32(a[1]+4));
+        } else if(audio_configuration_selected(entry)) {
+            struct PilotAudioBuffer *b=entry==PILOT_AUDIO_IDirectSoundBuffer_Release?&before_release:audio_buffer(a[0]);
+            unsigned slot=entry==PILOT_AUDIO_IDirectSoundBuffer_Release?configuration_slot:(unsigned)(b-audio_buffers);
+            audio_configuration_event(b,slot,entry,a,result,0);
         }
     }
     ReleaseSRWLockExclusive(&audio_lock);
