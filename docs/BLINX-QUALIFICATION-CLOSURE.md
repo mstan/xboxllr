@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: owned mapping/marker physically pass; RESET 0 bank prerequisite fails | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: fresh program loads; physical result disagrees with offline execution | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,35 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Fresh GP execution exposes a diagnostic mismatch - 2026-10-13
+
+A separately allocated, never-installed nine-page source passed preparation and
+full preflight. Its SG installation and RESET 3 start returned the exact requested
+values. This candidate reused the earlier bounded marker/STOP and full-P ownership
+evidence while preserving the old allocation; it did not rely on RESET 0 bank
+contents. Eight focused offline tests and three checks using the actual reserved
+witness passed, including six maintained DSP instruction paths.
+
+The physical capture contains all 38 raw fields and an independent comparison of
+all 2,044 immutable P words. All eight unique witness words and phase 2 appeared,
+but the original status, success/error and descriptor fields were all zero, and
+none of the target banks matched either source signature. The acceptance helper
+correctly rejects this result despite the matching witnesses. Loaded code and a
+final witness do not establish correct guards, DMA completion or bit9 semantics.
+
+The offline audit found a diagnostic flaw: after a guard failure, a synthetic
+resume from STOP enters the adjacent final-witness block without DMA activity.
+The probe now gives each terminal STOP a branch back to itself. The frozen old
+image fails the resume regression; the corrected image passes. Eight focused
+tests cover thirteen DSP paths, including repeated resumes after success and
+failure. This fixes the diagnostic, without establishing the physical wake cause
+or changing the production DSP model. A new hardware run is still required.
+
+No automatic retry, reset, restoration
+or free followed the capture; both owners remain pinned. HLE behavior is unchanged
+and the family count remains six of nine. Private evidence is under probe
+`results/qualification-20261013-fresh/physical-assessment.aot-private.json`.
 
 ## Hardware resumed: owned GP bootstrap passes - 2026-10-13
 

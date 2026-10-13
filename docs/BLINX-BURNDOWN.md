@@ -24,10 +24,13 @@ evidence is on F: under `build/blinx/q03-final-20261013`; root proof SHA256
 `aee59a1cab5ee2e8e26d6d818f5ddad010b87150cf2e98c0b4bdfc0d2d301ea7`.
 See [closing evidence](BLINX-QUALIFICATION-CLOSURE.md#movies-scheduling-and-final-census-closed---2026-10-13).
 Hardware resumed on 2026-10-13: fresh owned GP mapping/calibration and the actual
-marker/bootstrap pass. RESET 0 bank reads fail the next clear-bit prerequisite;
-no further GP write followed. Read-only kernel evidence also distinguishes live
-encoder selection D4 from retained 8A. See the [physical milestone and next
-prerequisites](BLINX-QUALIFICATION-CLOSURE.md#hardware-resumed-owned-gp-bootstrap-passes---2026-10-13).
+marker/bootstrap pass. A separate fresh source now also passes physical preparation,
+installation and loaded-program verification. Its unique execution witnesses
+appear, but status/descriptor/target results disagree with the offline model.
+An offline reproduction exposed and fixed fallthrough after a diagnostic STOP;
+DMA acceptance still requires a fresh hardware run. Read-only kernel
+evidence also distinguishes live encoder selection D4 from retained 8A. See the
+[physical result and next task](BLINX-QUALIFICATION-CLOSURE.md#fresh-gp-execution-exposes-a-diagnostic-mismatch---2026-10-13).
 Read/benign-write authorization remains in force. Earlier dated progress notes
 below retain their historical family counts.
 
