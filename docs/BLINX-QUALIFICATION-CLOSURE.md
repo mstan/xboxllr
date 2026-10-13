@@ -27,13 +27,13 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: live D4 selection differs from retained 8A; startup state unresolved | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: final hardware batch; clear-bit payload ready | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: owned mapping/marker physically pass; RESET 0 bank prerequisite fails | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,58 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Hardware resumed: owned GP bootstrap passes - 2026-10-13
+
+The owner restored the probe and the final hardware batch resumed. Thirty-nine
+fixed display/APU reads completed. A fresh nine-page, 16KiB-aligned owned low-RAM
+allocation passed physical/protection/extent/pinning checks, independent original
+SG inspection and exact SG calibration. The authored six-word GP program produced
+its marker; an independent observer compared all 2,048 loaded P words. This closes
+the owned-mapping/marker prerequisites, not A03 or the audio family.
+
+The prospective hold requested RESET 0 and read back exactly 0. Subsequent control
+reads retained the quiet floor, but P0000 returned the previous marker instead of
+the verified instruction. Five further distinct X/Y/P addresses returned that same
+marker while RESET remained 0. These observations suggest an inaccessible or stale
+host aperture; they do not establish actual bank contents, erasure or aliasing.
+The held success/error reads also both equal the success token, so they cannot
+supply the clear-start binding. No source replacement, clear-bit start, recovery
+write, restoration or free/unlock followed. The allocation remains pinned until
+ordinary owner restart. Do not guess RESET 1/2 or reuse these held-marker reads.
+
+A bounded original DirectSound audit shows source preparation before its RESET1,
+control setup and RESET3 sequence, with no X/Y/P host reads between those stores.
+Readable held banks are therefore a requirement of this diagnostic, not an
+established requirement of the title route. The next preparation should use a
+separate fresh owned-source lifetime: verify source/SG/guards before pointer
+installation and first start, let the DSP initialize its own results, and bind a
+nonrecycled execution witness to actual loaded P, descriptor/status and target
+observations in the supported running/STOP context. Sole ownership/quiescence and
+freshness still need explicit proof; a token alone or a guessed reset sequence
+cannot supply them. The successful marker/bootstrap evidence is reusable and
+need not become a repeated prelude. This is the next design, not DMA acceptance
+or a recovery write in the current session.
+
+The first prepared encoder 8A/C4 HAL read returned C0000185
+(STATUS_IO_DEVICE_ERROR); 6C was not sent and the failed read was not repeated.
+The live kernel version is 1.0.4983.6. A bounded export lookup, mapped-window checks
+and 26 exact selected AV code DWORDs establish the live cached encoder-slave
+address. Its BYTE is D4; the source-bound retained snapshot's BYTE is 8A.
+This establishes different cached encoder selection, not a chip identification.
+Neither the HAL status alone nor this console's current encoder state supplies
+the retained Conexant EN_REG_RD/6C/C4 startup state. Resolve the original producer
+or a matching independently supported context; do not transplant live D4 values.
+
+Private physical acceptance in the probe worktree is
+`results/qualification-20261013-resume1/accepted-hardware-milestone.aot-private.json`,
+SHA256 `b51c314777dc714d5611d7ed8bf7bbbcc7c9f089e00ba5e1f0be8965467da16c`.
+The adjacent source review preserves live/retained identity and reset-access limits.
+No unexpected write readback, storage/boot/EEPROM/flash operation, new title run,
+unchanged test rerun or production/HLE change occurred. The earlier unrelated
+unexpected SG write was not retried. **6/9 families remain qualified**, with 26
+precision deferrals unchanged; the remaining work now has these narrower physical
+boundaries rather than a console-availability blocker.
 
 ## Movies, scheduling and final census closed - 2026-10-13
 
@@ -90,9 +142,9 @@ CPU-cycle claim. No HLE runtime/performance change is introduced here.
 
 **6/9 families are qualified; audio, GPU and graphics remain open.** G02-G05 and
 A03-A05 are the remaining required dependency chain. The 26 accepted precision
-deferrals are unchanged. Xbox operations await owner-confirmed probe readiness
-for the final hardware batch. Earlier progress entries below preserve their
-then-current counts and acceptance limits.
+deferrals are unchanged. Hardware resumed after owner-confirmed probe readiness;
+the current physical findings and remaining prerequisites are recorded above.
+Earlier progress entries preserve their then-current counts and acceptance limits.
 
 Q01 passes in the maintained reference selection:18 affected checks, six native
 checks and actual unbound/failure controls. Three real original CPU thread lives
