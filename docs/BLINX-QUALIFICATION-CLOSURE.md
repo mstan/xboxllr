@@ -28,7 +28,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: live D4 selection differs from retained 8A; startup state unresolved | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
@@ -41,6 +41,56 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Offline frontier and final hardware dependencies - 2026-10-13
+
+The owner renewed the full qualification goal with real-console work last.
+This is the end of the presently identified *independent* offline tasks, not
+completion of the remaining implementations. Once observations establish the
+missing contracts, their implementation and connected title checks still follow.
+Do not count a probe improvement, source audit, or prepared capture as another
+qualified family. The count remains **6/9**, with the same 26 precision deferrals.
+
+| Gate | Offline work already available | Required next evidence / implementation |
+| --- | --- | --- |
+| G02 | Original AV producer chronology, encoder controls/timing and disabled-caption C4 contract | Establish the supported startup context and display activation. The live D4 encoder selection cannot supply the retained 8A Conexant state; preserve that profile distinction. Then execute the original route without warm seeds. |
+| G03 | Passive original producer/first-transfer capture is integrated at `24468bc`; independently sourced internal/RDI packing is now recorded below | Bind saved-instance byte offsets and save/restore semantics to actual consumer state, including required RAMFC/ownership fields. Internal lane packing alone does not establish that map. Capture the real first request after G02; never replace it with an invented image or successful no-op. |
+| G04 | Guarded diagnostic GPU bootstrap and paired noise capture preparation | Obtain the required reached enabled-noise primitive and independently establish its supported sampling behavior. Preserve the existing enable guard until then. |
+| G05 | Existing representative state, lifetime, scene and producer evidence | Run the connected original graphics route after G02-G04, retaining real completion/reentry/teardown and affected representative comparisons. Reuse unchanged evidence; exhaustive scene-pixel composition remains deferred. |
+| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; corrected fresh-source diagnostic | Establish B0-B3 producer/configuration, reset/wake/control context and required bit9 input semantics. Corrected terminal STOP behavior is offline-tested; its new physical outcome is unknown. Implement the established contract before admitting original startup. |
+| A04 | Idle FE publication and guarded original-DPC reproducer | Establish active-work ordering and initial control provenance, then connect publication to genuine completed work. Restoring idle register values cannot discard prior work history. |
+| A05 | Shared original-device adapter, compiled/raw MMIO route and real PCM capture consumer | Connect admitted GP/EP/VP work to the shared-clock owner after A03/A04. The current work callback advances the codec while DSPs remain held; wiring complete does not mean original DSP scheduling/output is complete. Then run actual output/ISR/DPC/stop/reuse/timing acceptance. |
+
+The old G03 preparation handoff is superseded by its accepted maintained
+implementation. This sweep reverified 103 unique retained artifact identities
+(146,443,908 bytes), with no mismatch, and reused the existing 34 snapshot ABI,
+two raw-hook and three disabled-observer controls. No replacement capture API,
+unchanged build or title run is needed merely to re-establish that milestone.
+
+Pinned envytools `f102b82381f3f11cee113d16374c87091db039d9` supplies more
+specific evidence than the earlier context-documentation review:
+
+- [`nvhw/pgraph_kelvin.c`](https://github.com/envytools/envytools/blob/f102b82381f3f11cee113d16374c87091db039d9/nvhw/pgraph_kelvin.c#L601)
+  maps Kelvin upload words to internal XFPR storage as
+  `[u3, u2, u1 & 0x0fffffff, 0]`; its constant-load helper retains component order.
+- [`hwtest/pgraph_state.cc`](https://github.com/envytools/envytools/blob/f102b82381f3f11cee113d16374c87091db039d9/hwtest/pgraph_state.cc#L2214)
+  gives matching RDI load/dump order: XFPR lanes retain order; XFCTX and VAB
+  reverse four-lane order. Lighting storage has explicit 22-bit packing and inverse.
+
+These are internal/RDI representation contracts, not proof of saved-PRAMIN
+offsets, NV2A context-transfer effects, or new physical test results. The bounded
+`hwtest/` and `nvhw/` search found no Kelvin/NV2A saved-image serializer; the
+`400784` match belongs to G80. Do not substitute another GPU generation's map.
+The private source-pinned supplement is
+`build/blinx/graphics-startup-consumer-20261012/envytools-packing-supplement-20261013.aot-private.json`,
+SHA256 `8ce4d5000b5d04edbfbc9f185bd33ae78998387e67dd91118531bce61a699aa5`.
+
+The final console phase remains gated by inspection/restart after the last
+unexpected GP execution result. Probe `99bd14e` adds an offline-tested software
+self-restart and preserves cold-boot configuration, but is not installed or
+hardware-qualified; it does not satisfy that recovery prerequisite. New hardware
+requests must use fresh owner/context provenance. Do not rerun the completed
+marker prelude or earlier failed write automatically.
 
 ## Fresh GP execution exposes a diagnostic mismatch - 2026-10-13
 
