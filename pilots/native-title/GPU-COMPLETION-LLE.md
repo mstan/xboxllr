@@ -1,7 +1,7 @@
 # GPU completion, callbacks and visibility LLE
 
 Family `beads-xbox.1.109`, after qualified filesystem `.108`. Burndown:
-**4/9 complete, 5 open**. Original reference execution and the selectable title
+**6/9 complete, 3 open as of 2026-10-13**. Original reference execution and the selectable title
 transport now exist. The title selection still stops during device initialization;
 it is not yet a working renderer or a qualified title completion route.
 
@@ -13,6 +13,8 @@ The hardware observations below preserve this partial floor and open startup
 guard; they do not close dependent integration. Historical next-step entries
 describe GPU dependencies. Independent scheduling/audio/graphics work remains
 available; no unobserved behavior is waived or counted as qualified.
+Earlier dated sections retain their historical family counts; the current
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) governs acceptance.
 
 ## Executed floor
 
@@ -1826,3 +1828,27 @@ and the original page-table translation are verified in
 Original AV initialization, handshake/activation, encoder output and full title
 integration remain required. These launch dependencies are not precision
 deferrals; the family count remains4/9 with26 safe precision deferrals.
+
+## C4 selectors with caption encoding disabled - 2026-10-13
+
+The original AV caption-disable operation clears C4 bits 4 and 5 while preserving
+its readback selectors and caption gate. The maintained control model previously
+rejected every bit except EN_OUT, including those preserved fields. Conexant
+100381B table 2-5 (2-15/2-16) defines ESTATUS[1:0] as writable legacy-read selectors
+and ECCGATE as a constraint on enabled caption encoding. Section 2.4 defines
+standard reads by register address. The model now preserves those latches while
+both caption fields are disabled; unknown warm/reset state stays unknown.
+
+No legacy response is defined here, including for selector 11. Standard readback
+of the writable selector field follows the addressed-register contract; it does
+not establish a fourth legacy mode. Enabled captions, color bars and chroma
+suppression remain guarded. This change does not seed startup, qualify encoded
+output or alter HLE rendering.
+
+The focused test covers all selector/gate/output combinations, rejected-write
+atomicity, unknown state and preserved timing. The old implementation fails that
+test. The affected SMBus AV suite passes after replacing its obsolete assumption
+that selector 01 is unsupported with a DCHROMA rejection. Root evidence is under
+`build/blinx/encoder-c4-root-20261013/root-review.aot-private.json`. No title run or
+hardware check was repeated. G02's original initialization and activation
+dependencies remain open, and the current family count stays6/9.

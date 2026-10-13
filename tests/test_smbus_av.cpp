@@ -216,7 +216,8 @@ static void encoder_clocks() {
         CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
         write(0xa0,0);write(0x9c,0);write(0x9e,0);
         CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
-        CHECK(!encoder.write_byte(0xc4,0x40) && !fault.empty());fault.clear();
+        write(0xc4,0x40); // ESTATUS is a writable readback selector, not a clock mode
+        CHECK(!encoder.write_byte(0xc4,2) && !fault.empty());fault.clear(); // DCHROMA remains guarded
         write(0xba,0x80);CHECK(encoder.clocks(clocks));
         CHECK(!clocks.clko_driven && equals(clocks.encoder,numerator,2048));
         CHECK(fault.empty());

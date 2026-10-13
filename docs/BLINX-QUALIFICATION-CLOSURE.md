@@ -44,6 +44,13 @@ to the final hardware batch; precision questions remain deferred.
 
 ## Fresh GP execution exposes a diagnostic mismatch - 2026-10-13
 
+Independent G02 work now admits documented C4 readback selectors and the caption
+gate with both caption fields disabled, matching the fields preserved by the
+original AV disable operation. Focused positive/negative and affected SMBus checks
+pass; startup state, enabled captions and legacy transport remain guarded. See
+the [bounded C4 contract](../pilots/native-title/GPU-COMPLETION-LLE.md#c4-selectors-with-caption-encoding-disabled---2026-10-13).
+This removes a control-register limitation without closing G02 or changing HLE.
+
 A separately allocated, never-installed nine-page source passed preparation and
 full preflight. Its SG installation and RESET 3 start returned the exact requested
 values. This candidate reused the earlier bounded marker/STOP and full-P ownership

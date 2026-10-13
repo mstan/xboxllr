@@ -122,8 +122,13 @@ public:
         }
         if (reg == 0x3a && (value & ~0x0c))
             return reject("CX25871 alternate crystal/clock configuration remains unqualified");
-        if (reg == 0xc4 && (value & ~1u))
-            return reject("CX25871 non-enable output/status controls remain unqualified");
+        // Table 2-5 (2-16): ESTATUS[1:0] are writable legacy readback
+        // selectors, not status returned in this register. Standard readback
+        // exposes their latch. ECCGATE may stay set when both caption fields
+        // are disabled (the original AV disable option clears only 0x30).
+        // Neither selector nor an inactive caption gate changes timing.
+        if (reg == 0xc4 && (value & 0x36))
+            return reject("CX25871 chroma/color-bar/enabled-caption controls remain unqualified");
         if (reg == 0xc6 && value!=0x9c && value!=0xbc)
             return reject("CX25871 digital interface control outside qualified timing profile");
         // 6C=46 selects standard readback; C6 additionally strobes timing reset.

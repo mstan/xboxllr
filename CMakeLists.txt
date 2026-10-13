@@ -469,6 +469,10 @@ add_executable(test_smbus_av tests/test_smbus_av.cpp src/machine/smbus.cpp)
 target_include_directories(test_smbus_av PRIVATE ${XLLE_INCLUDES})
 add_test(NAME smbus_av COMMAND test_smbus_av)
 
+add_executable(test_cx25871_c4 tests/test_cx25871_c4.cpp)
+target_include_directories(test_cx25871_c4 PRIVATE ${XLLE_INCLUDES})
+add_test(NAME cx25871_c4 COMMAND test_cx25871_c4)
+
 add_executable(test_ohci tests/test_ohci.cpp src/machine/ohci.cpp)
 target_include_directories(test_ohci PRIVATE ${XLLE_INCLUDES})
 add_test(NAME ohci COMMAND test_ohci)
