@@ -2422,3 +2422,34 @@ has SHA256 `81cbe843cfe9ed4c5486d9b0213ad7b1908cb9d0f89e58d4e2119f74eb1979ac`.
 This completes Q01 of the bounded closing checklist. Relative device/execution
 cadence and actual movie completion remain required; a component pass does not
 close `.123`, scheduling or the movie family.
+
+## Bounded attract family closure - 2026-10-13
+
+Scheduling family `.112` and integration `.112.2` now qualify for the declared
+NTSC attract route. Full changed Q03 integrates the already accepted original
+thread/IRQ0/preemption, blocked GPU/full64 capacity, KDPC FIFO/callback ownership,
+FP/P6 transport and common-clock contracts through two complete movie lifetimes,
+second-demo loading, actual interruption and fresh demo reentry. This supplies
+the missing title evidence; no component checks were repeated for closure.
+
+Root proof `build/blinx/q03-final-20261013/qualified-root.aot-private.json`, SHA256
+`aee59a1cab5ee2e8e26d6d818f5ddad010b87150cf2e98c0b4bdfc0d2d301ea7`, binds the retained component proofs, matching
+HLE contracts, frozen source/profile and actual 600-GP-second title result.
+Frozen `a3f0388` passed all numeric gates; selected-path compatibility to
+maintained `3e43614` is reviewed, not claimed as a freshly executed binary.
+The corrected physical-publication collision also passes its formerly failing
+second-demo boundary and the remaining sequence.
+
+The 32,000-block cadence is an explicit schedule, not a physical-cycle claim.
+Actual RDTSC/helper/PIT/device ownership follows the accepted shared timeline;
+host speed is not an accuracy condition. The diagnostic host stop is not natural
+guest shutdown, an application-wide leak baseline or unbounded endurance proof.
+Original audio/GPU/graphics and general CPU completeness remain outside this
+family result. Existing HLE selection stays performant and unchanged by this
+closure. Historical guarded-startup entries above retain their original scope.
+
+Static preflight `.112.2.16` also closes after independent raw-thunk/ABI/site
+review: 115 imports (105 functions/10 data), historical 74 admitted/31 guarded,
+and 88 instruction-aligned missing direct sites. Imported is not executed;
+whole native APIs may bypass internal imports. This inventory is not a current
+admission count or permission to implement unrelated imports speculatively.

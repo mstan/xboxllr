@@ -494,3 +494,34 @@ No idle-loop acceleration is required for this qualification. Complete original
 movie lifecycle acceptance remains open; existing successful HLE playback is
 unchanged. Prefix feedback is retained under `c8000-v1/preview-first` and
 `c8000-v1/preview-audio-first`.
+
+## Bounded movie family closure - 2026-10-13
+
+The composed original-scheduling/reference-APU Q03 gate now passes, completing
+movie family `.73` with the retained matching default-HLE repeat/interruption
+proof. Root acceptance is `build/blinx/q03-final-20261013/qualified-root.aot-private.json`,
+SHA256 `aee59a1cab5ee2e8e26d6d818f5ddad010b87150cf2e98c0b4bdfc0d2d301ea7`. Earlier entries saying this composed gate is open are historical.
+
+The single changed run completed 600 GP seconds with no capture overflow or
+runtime stop/fault. Both op01 lifetimes reach distinctive source frame 2263,
+actual Stop/Destroy and title return after 75.566/75.567 seconds. Full-lifetime
+independent-media RMSE <=0.004625 and correlation >=0.999828 pass the frozen
+0.02/0.99 bounds; A/V p95 52.296/52.269 ms passes 66.800 ms. One alignment per
+actual Play includes the quiet tail. Exact movie ring-byte provenance and zero
+movie rereads-before-write pass across the retained movie lives.
+
+Actual Start at 445 seconds interrupts Artoon voice 731, which stops/destroys at
+445.014; release arrives at 446. Root identifies title 339, loading 349 and fresh
+3D Blinx demo gameplay 393 in the retained 12-image sheet. This differs from the
+retained default-HLE run's interrupted third op01; both satisfy the declared
+active-movie interruption contract. The later diagnostic voice 1094 remains
+playing at cutoff and is not counted as completed teardown.
+
+The original run manifest, frozen analyzer and raw reports remain unchanged.
+Independent exit observation confirms host termination after successful bounded
+capture; no runner adjudication or title rerun was needed. Matching default-HLE
+proof `movie-repeat-20261011/qualified-native-repeat-final.aot-private.json`
+(SHA256 `053fd458bbdff57e4b7487ef6c6c5ec58c7a0c79b69145968ee361f135519698`)
+is reused. This closes the bounded movie contract without asserting physical
+speaker/display timing, indefinite endurance or original audio/GPU/graphics
+family acceptance. No default-HLE runtime change is introduced by closure.

@@ -2022,3 +2022,27 @@ SHA256 `109bbd2b68bea463dfe5fb1a20fda428031d64cd9ee05fc25fbafca6a986f1ba`.
 This closes bounded consumer task `.113.24`. Original GP/EP startup and active
 FE semantics, actual title ISR/DPC/processing/output, stop/reuse and timing
 remain required. No title, playback, GPU or console run was performed.
+
+## Final attract voice census A01 - 2026-10-13
+
+A01 (`.113.21`) closes for the completed 600-GP-second Q03 window. Root acceptance
+`build/blinx/q03-final-20261013/qualified-root.aot-private.json`, SHA256
+`aee59a1cab5ee2e8e26d6d818f5ddad010b87150cf2e98c0b4bdfc0d2d301ea7`, binds the immutable journal, independent
+Sol 6.1 parser/review and existing stage evidence. There are 10,348 complete
+accepted records, 1,094 generations, 1,077 played mono ADPCM generations,
+112 configured send vectors, 65 Play vectors and 84 nonzero-looping Plays.
+New scalar/vector/loop combinations reuse the qualified codec, source and
+arbitrary-bin gain stages; no newly reached uncovered stage was found.
+
+The 1,090 terminal releases are observed zero-reference releases. Four buffers
+remain at cutoff: two stopped, one never played, and the final diagnostic op01
+still playing. No teardown is invented. All recorded loop setters precede their
+own generation's first Play and nonzero extents are aligned/in owned source.
+Constructor flags are not raw APU flags; absence of mapped filter calls is not
+proof that all internal original processing is unreachable.
+
+A02 ordinary/default composition evidence is reused. Downstream DSP graph and
+bins 11/12 output still belong to A03/A05. Original initial SECTL, GP/EP/reset/wake/
+B0-B3/bit9, active FE ordering and actual original output/lifetimes/timing remain
+required under A03-A05. **The audio family remains open.** No test, build, title
+or hardware run was added for census closure.

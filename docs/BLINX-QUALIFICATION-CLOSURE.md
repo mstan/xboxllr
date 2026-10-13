@@ -2,9 +2,9 @@
 
 Owner-approved finishing plan, 2026-10-11. Parent `beads-xbox.1.102`.
 This checklist governs the current NTSC attract path. It replaces open-ended
-component validation with explicit family closing conditions. Four of nine
-families are qualified: input, display, memory and files. Calendar belongs to
-scheduling and is not a tenth family.
+component validation with explicit family closing conditions. Six of nine
+families are qualified: input, display, memory, files, scheduling and movies.
+Calendar belongs to scheduling and is not a tenth family.
 
 LLE may be slow. HLE remains the performant default. Each closed family needs
 a documented shared caller contract, maintained build-time selection, actual
@@ -25,13 +25,13 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | --- | --- | --- | --- | --- |
 | Q01 | Complete | `.123` | Reference timestamp ownership; input replay fix at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
-| Q03 | Full v9 restarted on Z:; short checkpoint reused; running without load pauses | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
+| Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
-| A01 | Partial: demo census accepted; full batch pending | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
+| A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: final hardware batch; clear-bit payload ready | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
@@ -41,6 +41,58 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Movies, scheduling and final census closed - 2026-10-13
+
+Q03 passes all seven frozen numeric gates after the full 600 GP seconds
+(28,800,000 frames), with zero capture errors or runtime stop/fault lines.
+Both natural op01 lifetimes reach source picture 2263, actual Stop/Destroy and
+title return. Their real Play durations are 75.566/75.567 seconds. Independent
+media waveform RMSE is at most 0.004625, correlation at least 0.999828,
+and A/V absolute p95 is 52.296/52.269 ms against the declared 66.800 ms bound.
+Each comparison uses one fixed alignment per actual Play, includes the quiet
+tail, and derives pitch from the source rather than fitting its rate.
+
+The later Start at 445 seconds interrupts the actual Artoon movie (voice 731),
+with Stop/Destroy at 445.014 and release at 446. Root reviewed all 12 retained
+scene witnesses: title 339, loading 349 and fresh 3D Blinx demo gameplay 393
+establish the required return/reentry. The final diagnostic opening remains
+playing at cutoff and is not substituted for a required completed lifetime.
+
+Retained original thread/IRQ/KDPC/FP/clock and matching default-HLE proofs are
+reconciled with this changed integrated title result. The full run also passes
+the corrected second-demo physical-publication boundary. Movies `.73` and
+scheduling `.112`, including the coherent-clock and display-ownership integration
+tasks, are qualified for this bounded attract contract. The independent static
+import audit closes only its historical inventory, not every imported branch.
+
+A01 closes with 10,348 complete accepted records, 1,094 generations, 1,077 played
+ADPCM generations and 1,090 actual terminal releases. Four objects legitimately
+remain at cutoff. New send vectors/loop extents reuse qualified processing
+stages; downstream original DSP graph/output remains required under A03-A05.
+Root reviewed the Sol 6.1 census/static proofs and their independent parsers.
+
+Durable root acceptance is
+`build/blinx/q03-final-20261013/qualified-root.aot-private.json`, SHA256
+`aee59a1cab5ee2e8e26d6d818f5ddad010b87150cf2e98c0b4bdfc0d2d301ea7`.
+The unchanged bulk retention index binds 552 byte-verified files / 2,274,098,392
+bytes on F:; the root proof separately binds the retained selected configuration.
+Original Z: paths resolve through that index. Raw reports retain their historical
+pending-review flags; the root proof supplies the final acceptance.
+
+The title took 27,843.141 host seconds. Return code 1 is the independently
+observed host termination after successful bounded capture, not guest teardown.
+The deadline guardian never intervened. No test, title or hardware rerun was
+needed for closure. The executed source is frozen `a3f0388`, with selected-path
+compatibility to maintained runtime `3e43614` reviewed; current HEAD execution
+is not asserted. Cadence 32,000 is an explicit execution schedule, not a physical
+CPU-cycle claim. No HLE runtime/performance change is introduced here.
+
+**6/9 families are qualified; audio, GPU and graphics remain open.** G02-G05 and
+A03-A05 are the remaining required dependency chain. The 26 accepted precision
+deferrals are unchanged. Xbox operations await owner-confirmed probe readiness
+for the final hardware batch. Earlier progress entries below preserve their
+then-current counts and acceptance limits.
 
 Q01 passes in the maintained reference selection:18 affected checks, six native
 checks and actual unbound/failure controls. Three real original CPU thread lives
@@ -702,8 +754,8 @@ runtime script was changed or title restarted. A separate read-only Windows
 process handle retains exact title exit independently. Preserve the original
 runner result and explicitly adjudicate any classification issue against final
 capture/error evidence; never rerun or promote a failed capture for bookkeeping.
-The prelaunch watcher-JSON race did not occur. Families remain4/9 until actual
-closing evidence passes. The durable launch receipt is under
+The prelaunch watcher-JSON race did not occur. The completed batch and root
+acceptance are recorded above. The durable launch receipt is under
 `reference-movie-batch-20261011/z-restart-launch-20261012`.
 The initial gaming detector misclassified the owner's Side7StartupTests
 `-Side7DevHarness` process as gameplay and selected two CPUs/BelowNormal.
@@ -713,17 +765,12 @@ that explicit test launch, still reduces allocation for actual Marvel Rivals
 or ordinary Evo game launches, and records every allocation change. The frozen
 title/runner manifest is unchanged.
 
-The slow live run now has a separately reviewed host deadline guardian, PID16496.
-It is armed, observing exact title/supervisor process handles; no suspension has
-occurred. If still needed at28500 wall seconds, it holds only the original
-supervisor before its eight-hour timeout while the title continues. Incremental
-failure and capture-extent checks remain active. It resumes the supervisor on
-finalization, failure, exit, error or a finite twelve-hour total wall bound.
-Cadence,600 GP seconds,2GiB, guest execution and all acceptance criteria stay
-unchanged. Original receipts remain authoritative; classification races still
-require explicit adjudication and the unchanged final reviews. A mocked logic
-check passes; live suspend/resume is untested, and hard-kill/crash recovery must
-verify identity and suspension ownership before resuming. Root review
+The separately reviewed host deadline guardian completed without intervening:
+the title finished at 27,843.141 seconds, before the 28,500-second trigger.
+Its final receipt records no actions and no owned suspension. The prepared
+supervisor-only extension and mocked controls remain retained; live suspend/
+resume was never exercised. Original runner classification and independent
+exit observation agree. Root review
 `z-restart-launch-20261012/host-deadline-guardian/deadline-guardian-root-review.aot-private.json`,
 SHA256 `da095bb6ff52e75cf016df8d339aa6a79165ed423db4e840a9bd1f1621f97f7d`.
 
