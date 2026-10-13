@@ -7,6 +7,21 @@ now governs remaining work and family acceptance. Exhaustive scene numerical
 proof stays deferred; working LLE routing/processing and connected title evidence
 remain required. Existing blocked-fence/full64-slot evidence is reused.
 
+**Active batch, 2026-10-12 22:30 PDT:** frozen Q03 v9 is running from a verified
+fresh disk on temporary Z: storage. Its accepted short checkpoint is reused;
+the capture still requires two natural openings, the later Start/release movie
+interruption and fresh demo reentry. Owner-requested host-load pauses are removed.
+Four logical CPUs at Normal priority are available; actual gameplay reduces
+allocation without pausing. The explicit Side7StartupTests DevHarness launch is
+excluded from gaming detection. Unchanged numeric analysis, the retained scene
+selector and a reviewed portable final voice census share this single capture.
+The post-review waiter is bound to the existing supervisor process; it never
+starts another title or closes a family. Root scene/stage/ownership review is
+still required. Durable launch and post-review preparation are under
+`build/blinx/reference-movie-batch-20261011/z-restart-launch-20261012`.
+The whole-family count remains **4/9**, with **26 precision deferrals**;
+all console operations remain deferred until the final hardware batch.
+
 **Current reference-movie continuation, 2026-10-11:** the maintained caller-driven
 APU/DSP selection now shares controlled PIT time with original scheduling,
 display, USB SOF and XGSCNT. Twenty focused profile checks, strengthened SOF
