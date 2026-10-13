@@ -12,6 +12,7 @@ extern "C" {
 #include <string>
 #include <new>
 #include <limits>
+#include <cstdio>
 
 namespace {
 std::string failure;
@@ -178,7 +179,16 @@ extern "C" const char *pilot_audio_device_lle_access(uint32_t address,unsigned s
     const bool aci=address>=xlle::McpxAci::kBase && address<xlle::McpxAci::kBase+xlle::McpxAci::kSize;
     if((!apu && !aci) || (apu && !apu_admitted(address-xlle::McpxApu::kBase,size,write)) ||
        (aci && !aci_admitted(address-xlle::McpxAci::kBase,size,write,*value)))
-        return fail("original audio device access outside qualified semantics (reset/wake/FE context remain guarded)");
+    {
+        char diagnostic[256];
+        if(write)std::snprintf(diagnostic,sizeof(diagnostic),
+            "original audio device access outside qualified semantics (reset/wake/FE context remain guarded): address=%08x width=%u write value=%08x",
+            address,size,*value);
+        else std::snprintf(diagnostic,sizeof(diagnostic),
+            "original audio device access outside qualified semantics (reset/wake/FE context remain guarded): address=%08x width=%u read",
+            address,size);
+        return fail(diagnostic);
+    }
     if(aci && write && address==xlle::McpxAci::kBase+0x11b && (*value&1) && !(*value&2) && !owner->pcm)
         return fail("original audio device requires a real PCM consumer");
     Busy busy;

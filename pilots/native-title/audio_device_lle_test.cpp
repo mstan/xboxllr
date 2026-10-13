@@ -104,10 +104,15 @@ int main(int argc,char **argv) {
     if(capture)CHECK(!pilot_pcm_capture_bind(capture));
     PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
     CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding && state.gp_held && state.ep_held && state.clock_ticks==60000);
-    if(!strcmp(mode,"unknown") || !strcmp(mode,"gap")) {
+    if(!strcmp(mode,"unknown") || !strcmp(mode,"unknown-read") || !strcmp(mode,"gap")) {
         // Actual original setup records GP reset=3 at FE83FFFC. Recording
         // that write did not qualify its device semantics.
-        uint32_t value=3;const char *error=pilot_audio_device_lle_access(!strcmp(mode,"gap")?0xfe803030:0xfe83fffc,4,1,&value);CHECK(error);
+        const bool read=!strcmp(mode,"unknown-read");
+        uint32_t value=read?0xa5a55a5a:3;const char *error=pilot_audio_device_lle_access(!strcmp(mode,"gap")?0xfe803030:0xfe83fffc,read?2:4,!read,&value);CHECK(error);
+        CHECK(strstr(error,!strcmp(mode,"gap")?"address=fe803030":"address=fe83fffc"));
+        CHECK(strstr(error,read?"width=2":"width=4"));
+        CHECK(strstr(error,read?" read":" write value=00000003"));
+        if(read){CHECK(!strstr(error,"value="));CHECK(value==0xa5a55a5a);}
         CHECK(pilot_audio_device_lle_access(0xfe800000,4,1,&value)==error);
         pilot_audio_device_lle_state(&state);CHECK(!state.dma_reads && !state.dma_writes && !state.pcm_words);
         CHECK(!pilot_audio_device_lle_close());puts("PASS unknown reset/FIFO gap before mutation; persistent first failure");return 0;
@@ -173,6 +178,8 @@ int main(int argc,char **argv) {
     uint32_t join[]={object,0,0,0,0};
     if(!strcmp(mode,"engine-fault") || !strcmp(mode,"capture-engine")) {
         uint32_t result=0;CHECK(pilot_io_device_lle(159,guest,join,&result));CHECK(raw_calls==1);
+        const char *first=pilot_audio_device_lle_error();CHECK(first);
+        CHECK(strstr(first,"address=fe83fffc width=4 write value=00000003"));
         pilot_audio_device_lle_state(&state);CHECK(!state.dma_reads && !state.pcm_words && !state.descriptors);
         CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&state);
         CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding);

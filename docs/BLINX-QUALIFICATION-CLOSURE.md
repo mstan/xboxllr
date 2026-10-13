@@ -25,7 +25,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | --- | --- | --- | --- | --- |
 | Q01 | Complete | `.123` | Reference timestamp ownership; input replay fix at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
-| Q03 | Running: corrected v9 title; short checkpoint passed | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
+| Q03 | Full v9 stopped by owner; short checkpoint passed; Z: build ready, resource hold | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: final hardware batch; clear-bit payload ready | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Shared device, PCM consumer and compiled callback transport complete; title startup/output open | `.113`, `.113.23`, `.113.24`, `.113.25` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -195,7 +195,44 @@ unchanged functional/title checks repeat. Root proof
 Ordinary original title DirectSound runs on the raw CPU; no previously reached
 compiled-title guard is claimed. A03/A04 and actual A05 startup/ISR/DPC/loop/
 output/reuse/timing remain open. Existing held-device and unknown-semantics
-guards remain in force, and the running v9 capture stays frozen.
+guards remain in force; the independent v9 capture generation is unchanged.
+
+The current integrated ORIGINAL startup boundary is now established by `.113.27`.
+One hidden, silent Z: attempt on CPUs12/13 returned naturally with code2 after
+55.375s. Actual original USB initialization precedes the retained audio-device
+admission guard at log873; there are no actual draw submissions. The112-byte
+AC97 partial contains a failed header/footer with zero PCM bytes and zero stamps.
+The generic error does not identify the guarded transaction, so register-specific
+attribution requires a diagnostic improvement before another bounded attempt.
+This is a current startup-boundary result, not A03/A04/A05 or audio acceptance.
+Root verifies the execution, manifest, log and empty failed capture and preserves
+the small evidence set on F: under
+`audio-original-title-startup-20261012/z-startup-root/accepted-root.aot-private.json`,
+SHA256 `2ce0592389a90b90dc9f1f4cc19420529006852e670e652456e6e8666b007e5b`.
+Temporary Z: staging changes only generated runtime paths and relinks the accepted
+objects/libraries. The fresh disk matches the original8GiB seed before launch;
+post-title disk contents are unmeasured and cannot be reused as a fresh seed.
+
+Follow-up `.113.28` adds address/width/direction and write-value diagnostics
+before the unchanged admission guard. Four focused controls pass, including
+failed-read value preservation and raw-engine first-failure transport. One
+changed diagnostic title naturally returns2 after57.890s at a DWORD READ of
+SECTL `FE802000`; no read value, actual instruction PC, draw or PCM is claimed.
+The independently hashed post-prior-run disk is a distinct diagnostic input,
+not a fresh seed. Root verifies the small retained result and build provenance,
+including a corrected private-project CMake regeneration mistake, without
+repeating functional tests. Durable proof
+`audio-original-title-startup-20261012/guard-attribution-root/accepted-root.aot-private.json`,
+SHA256 `7753d1811dde6a0fb8457850d690cbe0c75f7ce55e5133e08f20304efd1cce78`.
+
+SECTL's generic zero/last-written model fallback is not an independently
+established startup state. The accepted SECTL7 observation belongs to an
+explicit captured idle probe context. Original helper17BC9E preserves bits
+from a SECTL read; original code17C1EF tests bits0x18. Neither establishes the
+initial value of this title's context. Keep the read guarded and add initial
+SECTL/control context to A03/A04's existing final hardware batch. Do not rerun
+the unchanged audio title until that dependency changes. This closes the
+diagnostic attribution task, not the audio family.
 
 The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` used frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three
@@ -327,8 +364,8 @@ the v9 launcher declares an eight-hour host allowance. These are bounded
 observation budgets, not a relaxation of LLE correctness or an instruction to
 optimize its speed. The final generation must pin its actual compiled limits.
 
-Generation v9 is built from `a3f03889488828e7018d4dd198ea67f56f013c3f` and
-running in its private directory. All three isolated IO/audio/title builds pass;
+Generation v9 was built from `a3f03889488828e7018d4dd198ea67f56f013c3f` and
+launched in its private directory. All three isolated IO/audio/title builds pass;
 root verifies the prepared executable and source/build/receipt identities.
 Prepared manifest SHA256
 `c93173acc41e29c1434d4b4b85e666b9bf2b14171bd58693c75ab05f873f8de0`, executable
@@ -341,8 +378,8 @@ while Marvel Rivals runs. Frozen numeric and scene waiters observe this single
 generation. Old failure-site passage and complete Q03 acceptance are pending;
 no Xbox operation or additional title is started.
 
-The v9 short checkpoint now passes from retained complete-record prefixes of
-this same live run. Actual Microsoft voice4 has Stop/destroy and the next
+The v9 short checkpoint passes from retained complete-record prefixes of
+that run. Actual Microsoft voice4 has Stop/destroy and the next
 independently identified artoon phase. One fixed alignment compares456000 GP
 frames exactly against caller PCM; independent media RMSE is0.007314/0.007018
 and correlation0.996618/0.996390. Absolute A/V p95 is49.533ms, with source
@@ -361,6 +398,27 @@ retained-prefix recomputation agrees on194 ADPCM Plays,20 nonzero ADPCM loops,
 44 configuration routes,42 Play routes and140 gain levels. The frozen corrected
 collector is in `q03-c32000-v9/final-census-wait-v2`, SHA256
 `6fde2c28c51b3f69d0aeaf112705e5522903a41d8dbefc444795bb8c18d451fa`.
+
+Owner stop2026-10-12 terminated the full v9 title, supervisor and downstream
+waiters. Last supervisor progress recorded8207872 GP frames (about171 seconds),
+not the required600-second capture. Partial artifacts and the passing short
+checkpoint are retained; there is no full-run finalization or family pass.
+The owner subsequently authorized resource-bounded continuation and temporary
+Z: staging. A fresh Q03 run is being prepared from the same frozen generation;
+path relocation does not justify repeating unchanged component tests. Final
+capture analysis still has to prove the complete closing sequence.
+
+Temporary Z: relocation now builds successfully with zero warnings/errors:
+one frozen IO translation unit is rebuilt for generated path changes, and51
+accepted-generation title objects plus the existing reference-audio archive are
+relinked. No component tests repeat. The title has not launched: the restartable
+fresh-seed copy stopped twice when physical memory fell below8GiB. Both partial
+copy receipts are retained; a full-size destination alone is not a verified
+disk image. Resume the copy in a stable resource window, verify its exact seed
+identity on Z:, then freeze the runner/manifest before the full observation.
+Durable preparation receipt
+`reference-movie-batch-20261011/z-restart-preparation-20261012/accepted-preparation.aot-private.json`,
+SHA256 `8166fe3941b8ef8af4e709cd4b5e5727c65931cfcb8ec56ec8c840225aadd35b`.
 
 The first v6 natural opening now reaches picture2263, real Stop after75.567s,
 Destroy and the title transition, with zero ring mismatches or source rereads.
@@ -615,7 +673,10 @@ contract; otherwise append evidence and reopening triggers to the existing queue
 ## Resources, hardware and final disposition
 
 Primary plus at most one authorized worker, two logical CPUs each, Normal
-priority and F: temporary/build storage. Only one GPU-heavy run at a time.
+priority. The owner now permits temporary build/run staging on Z: to avoid
+F: disk contention; source repositories and durable evidence remain on F:.
+Retain owned temporary artifacts until needed results are preserved, then clean
+only the owned staging tree. Only one GPU-heavy run at a time.
 Lower resource use when the owner plays a game; otherwise do not throttle LLE
 merely because it is slow. Keep Beads updates local; no Dolt synchronization.
 
@@ -634,7 +695,7 @@ whole graphics/audio runs between observations:
 | --- | --- | --- |
 | G02 encoder startup | Fixed original-kernel SMBus byte reads of encoder C4 and6C, with raw HAL status and read-mode ambiguity retained | Legacy Status bytes or present dashboard settings do not establish an old warm capture's register state |
 | A03 owned GP mapping | Fresh owned16KiB-aligned SG allocation, physical/alias/pin checks, then one bounded calibration store/readback | The earlier changed address does not establish a complete silicon mask or permit DSP start |
-| A03 original DSP startup | With verified owned mapping, establish B0..B3 and coherent GP/EP reset, C5/CA/D5, wake and bit9 input transport | Diagnostic retired-cycle counters, authored wakes or idle transport do not qualify original output |
+| A03 original DSP startup | With verified owned mapping, establish title-relevant initial SECTL/control context, B0..B3 and coherent GP/EP reset, C5/CA/D5, wake and bit9 input transport | Diagnostic retired-cycle counters, authored wakes, generic zero/last-written SECTL or unrelated captured idle state do not qualify original startup/output |
 | A04 active FE ordering | A bounded independently observable work item and actual notification consumer | The retained idle token writes do not establish ordering against active audio/DMA work |
 | G03/G04 reached graphics state | Capture the first real context image/queue after G02; resolve only consumed unknown fields and the enabled-noise primitive | A default-only load, method replay or disabled noise cannot replace required state transfer/pixels |
 
