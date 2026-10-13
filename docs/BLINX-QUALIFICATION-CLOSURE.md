@@ -25,7 +25,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | --- | --- | --- | --- | --- |
 | Q01 | Complete | `.123` | Reference timestamp ownership; input replay fix at `784c1fd` | Original RDTSC and compiled helper observe one stopped common timeline; repeated reads/host stalls do not advance it; failure stops before fabricated GPR output |
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
-| Q03 | Full v9 stopped by owner; short checkpoint passed; Z: build ready, resource hold | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
+| Q03 | Full v9 restarted on Z:; short checkpoint reused; running without load pauses | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: final hardware batch | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: first-load tooling ready; needs G02 | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
@@ -679,6 +679,39 @@ Retain owned temporary artifacts until needed results are preserved, then clean
 only the owned staging tree. Only one GPU-heavy run at a time.
 Lower resource use when the owner plays a game; otherwise do not throttle LLE
 merely because it is slow. Keep Beads updates local; no Dolt synchronization.
+
+Later owner update2026-10-12 supersedes the resource hold: keep competing for
+resources and do not pause for host load. Memory/disk measurements are now
+observations, not admission floors or automatic stop conditions. The movie
+seed copy finished and its exclusive Z:-only hash matches the original8GiB
+seed. When working solo the title uses all four authorized logical CPUs12-15
+at Normal priority. Game-aware
+reduction remains. Identity checks, actual correctness failures and declared
+capture bounds still apply; no Xbox operation is enabled by this resource change.
+
+The frozen v9 batch resumed at2026-10-12 22:30:14 PDT in temporary
+`Z:/xboxlle-temp/qualification-20261012/movies/run1`, title PID46764,
+prepared SHA256 `41b096f2ebad23de73bffed4ddb4cf132cbcaf113afdd9ae3fddf0acd4ffed6a`.
+The executable changes only generated runtime paths for Z: storage. Cadence32000,
+Start445000/release446000,600 GP seconds and the2GiB record cap are unchanged;
+the accepted short checkpoint is reused. Numeric analysis follows finalized
+capture once, with final scene/census/ownership review still required. Sol6.1's
+runner review found possible finalization-classification and receipt-cleanup
+races, not a title correctness defect. The batch had already launched, so no
+runtime script was changed or title restarted. A separate read-only Windows
+process handle retains exact title exit independently. Preserve the original
+runner result and explicitly adjudicate any classification issue against final
+capture/error evidence; never rerun or promote a failed capture for bookkeeping.
+The prelaunch watcher-JSON race did not occur. Families remain4/9 until actual
+closing evidence passes. The durable launch receipt is under
+`reference-movie-batch-20261011/z-restart-launch-20261012`.
+The initial gaming detector misclassified the owner's Side7StartupTests
+`-Side7DevHarness` process as gameplay and selected two CPUs/BelowNormal.
+A host-only allocation controller corrected both supervisor and title to four
+CPUs/Normal at22:33:51 PDT without restarting or altering guest state. It excludes
+that explicit test launch, still reduces allocation for actual Marvel Rivals
+or ordinary Evo game launches, and records every allocation change. The frozen
+title/runner manifest is unchanged.
 
 Owner update2026-10-12: the Xbox is off. Defer every console operation until the
 final hardware batch, after available offline qualification; do not ping/probe
