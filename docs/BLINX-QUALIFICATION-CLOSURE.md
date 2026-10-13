@@ -713,6 +713,20 @@ that explicit test launch, still reduces allocation for actual Marvel Rivals
 or ordinary Evo game launches, and records every allocation change. The frozen
 title/runner manifest is unchanged.
 
+The slow live run now has a separately reviewed host deadline guardian, PID16496.
+It is armed, observing exact title/supervisor process handles; no suspension has
+occurred. If still needed at28500 wall seconds, it holds only the original
+supervisor before its eight-hour timeout while the title continues. Incremental
+failure and capture-extent checks remain active. It resumes the supervisor on
+finalization, failure, exit, error or a finite twelve-hour total wall bound.
+Cadence,600 GP seconds,2GiB, guest execution and all acceptance criteria stay
+unchanged. Original receipts remain authoritative; classification races still
+require explicit adjudication and the unchanged final reviews. A mocked logic
+check passes; live suspend/resume is untested, and hard-kill/crash recovery must
+verify identity and suspension ownership before resuming. Root review
+`z-restart-launch-20261012/host-deadline-guardian/deadline-guardian-root-review.aot-private.json`,
+SHA256 `da095bb6ff52e75cf016df8d339aa6a79165ed423db4e840a9bd1f1621f97f7d`.
+
 Owner update2026-10-12: the Xbox is off. Defer every console operation until the
 final hardware batch, after available offline qualification; do not ping/probe
 or request another hardware session in the meantime. Keep the prior unexpected
