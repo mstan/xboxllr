@@ -129,7 +129,9 @@ static void queued_lifetimes() {
         CHECK(f.write(ep,0xffffd6,4) && f.write(ep,0xffffd6,1) && f.apu.service_dsp_dma(f.kind(ep),2));
         CHECK(!f.read(ep,0xffffd6) && f.read(ep,0xffffc5)==0x80 && f.nodes(ep)==1);
         CHECK(*f.word(ep,0x200)==0x123456 && *f.word(ep,0x201)==0x123457 && f.ram==ram);
-        CHECK(f.write(ep,0xffffc5,0x80) && !f.read(ep,0xffffc5));
+        CHECK(f.write(ep,0xffffc5,0x80));
+        if(ep)CHECK(f.apu.service_dsp_acknowledgements(f.kind(ep),2));
+        CHECK(!f.read(ep,0xffffc5));
         // A later linked-node failure retains the actual completed first node,
         // never manufactures whole-list completion or a second destination.
         f.node(ep,0x20,0x30,0x59e0,2,0x200,0x2ffd);f.node(ep,0x30,0x4000,0x5be1,2,0x210,0x2ffd);

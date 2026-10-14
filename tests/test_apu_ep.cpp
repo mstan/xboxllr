@@ -262,7 +262,7 @@ static void event_clock_and_ownership() {
             CHECK(f.events(true)==0x102 && f.apu.ep_frame_events()==1 && !f.events(false));
             f.apu.set_frame(5);CHECK(f.apu.ep_frame_events()==1);
             reach(next_control);
-            CHECK(*f.apu.ep_word(0x100)==0x102 && *f.apu.ep_word(0x101)==0x102 && f.events(true)==0x102);
+            CHECK(*f.apu.ep_word(0x100)==0x102 && *f.apu.ep_word(0x101)==0x102 && f.events(true)==0x100);
             reach(second_wait);CHECK(f.events(true)==0x100);
             f.apu.set_time(7*18000,3375000);
             for(unsigned i=0;i<100;++i)CHECK(f.events(true)==0x100);
@@ -289,12 +289,43 @@ static void event_clock_and_ownership() {
     CHECK(busy.apu.faulted() && busy.apu_error.find("overlaps unqualified DMA")!=std::string::npos);
     CHECK(!busy.apu.ep_frame_events() && !busy.apu.ep_dma_nodes() && busy.ram==ram);
 }
-static void physical_events(const char* image,const char* observations) {
-    std::vector<uint32_t> p(4096),values(34);
+static void acknowledgement_ownership() {
+    for(unsigned failure=0;failure<6;++failure) {
+        Fixture f;std::unique_ptr<xlle::ApuEpProcessor> owner;
+        f.boot(true,{0x87});
+        if(failure>=3) {
+            owner=std::make_unique<xlle::ApuEpProcessor>(f.apu,[&](const std::string& s){f.fault(s);});
+            CHECK(owner->bootstrap_from_scratch());
+        }
+        f.descriptor(true,0x20,0x4000,0x59e0,1,0x200,0x2ffd);
+        CHECK(f.apu.ep_write(0xffffd4,0x20) && f.apu.ep_write(0xffffd6,1));
+        CHECK(f.apu.service_dsp_dma(xlle::ApuDspKind::Ep,2) && f.apu.ep_write(0xffffc5,0x80));
+        const auto ram=f.ram;const std::vector<uint32_t> banks(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+        CHECK(f.events(true)==0x80 && !f.apu.dsp_dma_pending(xlle::ApuDspKind::Ep));
+        if(failure==0)CHECK(!f.apu.service_dsp_acknowledgements(xlle::ApuDspKind::Ep,4097));
+        if(failure==1)CHECK(!f.apu.ep_write(0xffffc5,0x80));
+        if(failure==2) {
+            xlle::ApuEpProcessor blocked(f.apu,[&](const std::string& s){f.fault(s);});
+            CHECK(blocked.phase()==xlle::ApuEpPhase::Failed && !blocked.bootstraps());
+        }
+        if(failure==3)CHECK(!owner->reset_cpu());
+        if(failure==4){owner.reset();CHECK(f.apu.faulted());}
+        if(failure==5) {
+            CHECK(f.apu.ep_write(0xffffd4,0x20) && f.apu.ep_write(0xffffd6,1));
+            CHECK(!f.apu.service_dsp_dma(xlle::ApuDspKind::Ep,4096));
+        }
+        CHECK(f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.apu.ep_dma_nodes()==1);
+        CHECK(f.ram==ram && std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)));
+    }
+}
+static void physical_events(const char* image,const char* observations,bool delayed_ack=false) {
+    const unsigned frames=delayed_ack?2:8;
+    std::vector<uint32_t> p(4096),values(delayed_ack?37:34);
     FILE* file=std::fopen(image,"rb");CHECK(file);CHECK(std::fread(p.data(),4,p.size(),file)==p.size() && std::fgetc(file)==EOF);std::fclose(file);
     file=std::fopen(observations,"rb");CHECK(file);CHECK(std::fread(values.data(),4,values.size(),file)==values.size() && std::fgetc(file)==EOF);std::fclose(file);
-    CHECK(values[8]==8 && values[9]==0x102 && values[10]==0x455057 && values[11]==0 && values[12]==2);
-    CHECK(values[22]==9 && values[23]==8 && values[24]==0x102 && values[25]==0x100);
+    CHECK(values[8]==frames && values[9]==0x102 && values[10]==0x455057 && values[11]==0 && values[12]==2);
+    CHECK(values[22]==frames+1 && values[23]==frames && values[24]==(delayed_ack?0x100u:0x102u) && values[25]==0x100);
+    if(delayed_ack)CHECK(values[34]==0x102 && values[35]==0x100 && values[36]==0x100);
     Fixture f;f.boot(true,std::vector<uint32_t>(p.begin(),p.begin()+2048));
     xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
     const auto ram=f.ram;const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
@@ -302,7 +333,7 @@ static void physical_events(const char* image,const char* observations) {
     xlle::ApuEpRun r;CHECK(ep.run(1000,r) && !r.power && !r.sp && !f.events(true));
     CHECK(*f.apu.ep_word(0x201)==1 && !*f.apu.ep_word(0x108));
     f.reg(0x1100,0x7930f);f.reg(0x2000,15);
-    for(unsigned frame=1;frame<=8;++frame) {
+    for(unsigned frame=1;frame<=frames;++frame) {
         // Clock owns events; the CPU executes its actual polling/ack/C4 code.
         // This bounded control-flow check intentionally does not claim an
         // exact DSP clock budget, B3 epoch or 708000 processing threshold.
@@ -312,7 +343,7 @@ static void physical_events(const char* image,const char* observations) {
         CHECK(*f.apu.ep_word(0x108)==frame && *f.apu.ep_word(0x202)==frame && *f.apu.ep_word(0x201)==frame+1);
         CHECK(f.events(true)==0x100 && !*f.apu.ep_word(0x10b));
     }
-    f.reg(0x2000,7);f.apu.set_frame(9);CHECK(f.apu.ep_frame_events()==8);
+    f.reg(0x2000,7);f.apu.set_frame(frames+1);CHECK(f.apu.ep_frame_events()==frames);
     unsigned slot=0;
     for(unsigned i=0x100;i<0x10d;++i)expected[i]=values[slot++];
     for(unsigned i=0x110;i<0x118;++i)expected[i]=values[slot++];
@@ -320,14 +351,15 @@ static void physical_events(const char* image,const char* observations) {
     for(unsigned i=0x400;i<0x404;++i)expected[i]=values[slot++];
     for(unsigned i=0x1840;i<0x1844;++i)expected[i]=values[slot++];
     CHECK(slot==34);
+    if(delayed_ack){expected[0x300]=values[34];expected[0x310]=values[35];expected[0x311]=values[36];}
     for(unsigned i=0;i<expected.size();++i) {
-        if((i>=0x100 && i<0x108) || i==0x200)continue; // Nine timer samples, separately open.
+        if((i>=0x100 && i<0x100+frames) || i==0x200)continue; // Timer samples, separately open.
         if(expected[i]!=*(f.apu.ep_word(0)+i))std::fprintf(stderr,"EP event observer bank%04x expected%06x actual%06x\n",i,expected[i],*(f.apu.ep_word(0)+i));
         CHECK(expected[i]==*(f.apu.ep_word(0)+i));
     }
     CHECK(std::equal(p.begin(),p.begin()+2048,f.apu.ep_word(0x2800)) && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
     CHECK(f.ram==ram && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes() && f.apu_error.empty() && f.owner_error.empty());
-    std::puts("Frozen EP event observer:8 clock-owned events,25 exact control/canary fields,2048 P words, other EP/GP banks and RAM preserved;9 timer samples/clock budget remain unqualified");
+    std::printf("Frozen EP event observer:%u clock-owned events,%u exact control/canary/ACK fields,2048 P words, other EP/GP banks and RAM preserved;%u timer samples/clock budget remain unqualified\n",frames,delayed_ack?34:25,frames+1);
 }
 static void physical_configuration(const char* image,const char* observations,bool c4=false) {
     std::vector<uint32_t> p(4096),values(34);
@@ -455,10 +487,11 @@ static void cpu_guard(const std::string& mode,const char* path) {
 }
 int main(int argc,char** argv) {
     if(argc==4 && std::string(argv[1])=="--physical-events"){physical_events(argv[2],argv[3]);return 0;}
+    if(argc==4 && std::string(argv[1])=="--physical-ack"){physical_events(argv[2],argv[3],true);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-config"){physical_configuration(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-c4"){physical_configuration(argv[2],argv[3],true);return 0;}
     if(argc==3){cpu_guard(argv[1],argv[2]);return (std::string(argv[1])=="--original-entry" || std::string(argv[1])=="--original-config-tail" || std::string(argv[1])=="--original-bit9")?0:1;}
     if(argc==2){cpu_guard(argv[1],nullptr);return 1;}
-    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();event_clock_and_ownership();
+    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();event_clock_and_ownership();acknowledgement_ownership();
     std::puts("APU EP:30 real VP/GP/scratch/EP/FIFO PCM packets;3 clock/C4/C5 lifetimes, disabled/held clock and DMA guards, exact RAM/banks and retained ownership passed; connected cadence/AC97/reset remain open");
 }

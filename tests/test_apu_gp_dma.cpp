@@ -140,9 +140,12 @@ static void observed_ep_linear_inputs() {
                 (i>=target && i<target+24?(transfer?0x87:expected[i-target]):before[i]));
             CHECK(f.ram==ram && !f.transfers && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
             CHECK(f.apu.ep_program_revision()==revision+(target==0x2c00?transfer+1:0));
-            // Existing nominal acknowledgement permits the second transfer.
-            // Physical immediate80/late0 ordering is separately unqualified.
             CHECK(f.apu.ep_write(0xffffc5,0x80));
+            for(unsigned i=0;i<100;++i)CHECK(f.apu.ep_read(0xffffc5,value) && value==0x80);
+            CHECK(f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && !f.apu.dsp_dma_pending(xlle::ApuDspKind::Ep));
+            CHECK(f.apu.service_dsp_acknowledgements(xlle::ApuDspKind::Ep) && f.apu.ep_read(0xffffc5,value) && value==0x80);
+            CHECK(f.apu.service_dsp_acknowledgements(xlle::ApuDspKind::Ep) && f.apu.ep_read(0xffffc5,value) && value==0);
+            CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep));
         }
     }
 }

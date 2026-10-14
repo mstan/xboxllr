@@ -15,7 +15,7 @@ ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuD
         {fail("GP counter profile requires its retained CPU owner; warm rebind is unqualified");return;}
     if(!policy_.retired_instructions_per_quantum || policy_.retired_instructions_per_quantum>4096)
         {fail("invalid GP nominal DMA dispatch policy");return;}
-    if(apu_.dsp_work_active() || apu_.dsp_dma_pending(kind_))
+    if(apu_.dsp_work_active() || apu_.dsp_work_pending(kind_))
         {fail("GP CPU owner requires idle DMA ownership");return;}
     core_=kind_==ApuDspKind::Gp?
         xlle_dsp_core_create(apu_.gp_word(0x2800),apu_.gp_word(0),apu_.gp_word(0x1800),apu_.gp_word(0x1400),this,read,write,core_fault):
@@ -61,7 +61,7 @@ bool ApuDspProcessor::reset_cpu() {
     if(phase_==ApuGpPhase::Failed)return false;
     if(apu_.faulted())return fail("GP CPU reset on a faulted APU");
     if(executing_ || working_ || apu_.dsp_work_active())return fail("reentrant GP CPU reset");
-    if(apu_.dsp_dma_pending(kind_))return fail("GP CPU reset with pending DMA remains unqualified");
+    if(apu_.dsp_work_pending(kind_))return fail("GP CPU reset with pending peripheral work remains unqualified");
     if(kind_==ApuDspKind::Gp && apu_.gp_frame_outstanding())return fail("GP CPU reset with an outstanding frame remains unqualified");
     if(counter_profile_.touched())return fail("GP CPU reset after counter configuration remains unqualified");
     if(kind_==ApuDspKind::Ep && apu_.ep_control_written_)
@@ -94,6 +94,10 @@ void ApuDspProcessor::invalidate_publication() {
     }
 }
 bool ApuDspProcessor::dispatch_work() {
+    // ACK ordering is independent of the selectable DMA transfer quantum.
+    // Every real retired instruction supplies one nominal peripheral tick.
+    working_=true;const bool acknowledged=apu_.service_dsp_acknowledgements(kind_);working_=false;
+    if(!acknowledged)return fail("GP queued acknowledgement work failed");
     if(!apu_.dsp_dma_pending(kind_)){retired_work_instructions_=0;return true;}
     if(++retired_work_instructions_<policy_.retired_instructions_per_quantum)return true;
     retired_work_instructions_=0;working_=true;
@@ -200,16 +204,19 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
             // Hardware executes subsequent instructions with C5 still zero.
             // C4=1 is a control publication, not a DSP power/halt operation.
             // Let the original C5 polling instructions wait for a real event.
+            if((owner.apu_.ep_frame_status_&2u) && !(owner.apu_.ep_ack_mask_&2u)) {
+                owner.fail("EP ready control with an unacknowledged event remains unqualified");std::abort();
+            }
             owner.apu_.ep_control_value_=value;owner.apu_.ep_control_written_=true;
-            owner.apu_.ep_frame_status_&=~2u;owner.apu_.ep_frame_requested_=true;
+            owner.apu_.ep_frame_requested_=true;
             owner.initializing_=false;return;
         }
         xlle_dsp_core_set_halted(owner.core_,1);return;
     }
     if(owner.kind_==ApuDspKind::Ep && address==0xffffc5 && value==2) {
-        // Hardware retains102 after this original command. C4, not this
-        // write, clears the frame bit. The command cannot consume DMA EOL
-        // or manufacture an event; clock publication is a separate owner.
+        // Hardware retains102 immediately, then reads100 before another C4,
+        // also when no immediate read occurred. Queue the acknowledgement on
+        // the existing peripheral-work owner, independent of ready publication.
         uint32_t events=0;
         if(!owner.executing_ || !owner.apu_.ep_control_written_ || owner.initializing_ ||
            owner.phase_==ApuGpPhase::Failed ||
@@ -217,7 +224,7 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
            !owner.apu_.ep_read(address,events) || (events&~0x102u)) {
             owner.fail("EP frame command requires idle control ownership and observed event bits");std::abort();
         }
-        if(!owner.apu_.ep_write(address,0)) {
+        if(!owner.apu_.queue_ep_ack(2)) {
             owner.fail("EP frame command failed");std::abort();
         }
         return;

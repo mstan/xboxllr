@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: EP X/P input pairs observed; original first event completes seven exact transfers; output, two selector descriptors, ACK causality, reset/timer remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: EP input and delayed ACK observed; original first event completes seven exact transfers; output, two selector descriptors, exact timing, reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,47 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## EP delayed acknowledgement ownership - 2026-10-14
+
+Two physical frame events isolate C5 acknowledgement from subsequent C4 writes.
+After the first C5=2, immediate C5 was102 and the read after64 actual NOPs
+was100. After the second C5=2, there was no immediate read: the first read,
+after64 NOPs, was100. No C4 occurred between acknowledgement and either delayed
+sample, and there was no final C4. Thus acknowledgement clears bit1 without
+another ready request or an immediate read; the former C4-clear interpretation
+is superseded. This does not establish C4's behavior on an unacknowledged event.
+
+The DSP completed both events, but the CPU's final control-context guard stopped
+before the SE-stop write. A later fixed read found the expected five controls;
+the exact transient member that failed was not retained, so it remains unknown.
+Only read-only follow-up occurred:34 fields, three ACK samples,2048 P words,
+witnesses/canaries and the owned timing capture passed. Raw FF10 was0 in that
+later context; it is not assigned a universal register meaning. Separate
+DASH/SMC/single remote launch and fresh PING/INFO retired the owner without
+human intervention. Future probes retain the five raw final guard inputs.
+
+The existing APU now owns one queued EP acknowledgement mask for frame and DMA
+flags. Reads cannot drain it. The sole DSP CPU advances acknowledgement work
+at each retired instruction, independently of its selectable DMA dispatch rate.
+C4 requests readiness and cannot silently consume an unacknowledged event.
+Pending ACK work prevents reset/rebind, silent detach, idle FE acceptance and
+new event publication; explicit DMA work cannot overtake an old queued ACK and
+let it erase a newer completion. Empty startup acknowledgements remain no-ops.
+
+Two nominal work quanta preserve the observed immediate/late ordering. They
+are not a measurement of silicon bus latency or halted-CPU progress. Exact
+latency, intermediate busy visibility and common-clock integration remain
+required until their effect on the supported original processing is resolved.
+There is no additional precision deferral at this checkpoint.
+
+The frozen two-event program matches34 non-timer control/canary/ACK fields and
+2048 P words through the actual maintained CPU; a wrong late-ACK golden rejects.
+The older eight-event sequence still matches its25 non-timer fields. Actual
+packet, DMA policy1/2/4, pending-ACK lifecycle and original seven-input-transfer
+checks pass. No output profile or reset guard was relaxed. Evidence:
+`build/blinx/audio-ep-ack-delay-20261014/`, probe
+`results/ep-ack-delay-20261014/`. HLE is unchanged; count6/9, precision27.
 
 ## EP input transport and real program reload - 2026-10-14
 
@@ -80,10 +121,10 @@ Hardware also exposes a timing qualification gap: C5=80 acknowledgement reads
 D4/START or C4 causing that clearance. Immediate START D6 read0; terminal D6
 read0. The existing nominal DMA service/ACK floor is not physically exact for
 these intermediate observations. This change admits data transport only;
-ACK/busy timing remains required. The earlier frame-event sequence likewise
-does not prove C4 causes clearance: C5=2 must be observed after a delay and
-before another C4. Preserve the raw earlier observations while treating that
-causal interpretation, and its current implementation, as unresolved.
+ACK/busy timing remains required. This checkpoint also identified that the
+earlier frame-event sequence did not establish C4 causality. The later isolated
+ACK observation and correction above resolve that causal question while
+preserving the raw earlier observations.
 
 Evidence: `build/blinx/audio-ep-dma-admission-20261014/`; physical probe:
 `results/ep-dma-qualified-20261014/`. Probe tests include56 actual-DSP synthetic
@@ -97,8 +138,9 @@ empty. Successive QPC intervals were17996..18007 ticks at3375000 Hz, about
 5.333 ms; successive B3 deltas were710998..711002. The initial event's phase
 was measured separately and is not treated as a complete period. DSP C5 read102
 at the event and still read102 immediately after C5=2. A read following C4=1
-observed100 before the next actual polling loop. C4 causality is unresolved
-because delayed C5 acknowledgement was not isolated. The meaning of background
+observed100 before the next actual polling loop. This sequence alone did not
+isolate delayed C5 acknowledgement; the later ACK section supersedes its former
+C4-clear interpretation. The meaning of background
 bit8 and general CPU/DSP register aliases remain unassigned.
 
 The bounded batch stopped SE successfully with exact readback, then verified
@@ -110,8 +152,8 @@ all prior allocation addresses are retired. No user intervention was needed.
 
 The maintained APU now publishes EP events through its existing absolute
 setup-frame clock, gated by SE/FE and the retained, running EP CPU. Executed
-C4 requests the next event and currently clears bit1; C5=2 currently retains
-it. That causal model is under review after the input ACK finding above. Register reads
+C4 requests the next event. The later ACK correction above replaces the original
+implementation's C4-based clear with queued C5 acknowledgement. Register reads
 cannot advance this clock. CPU teardown clears the callback while retaining
 device control/event history; warm rebind remains guarded. Pending DMA cannot
 be silently completed or bypassed by frame publication. The same real CPU

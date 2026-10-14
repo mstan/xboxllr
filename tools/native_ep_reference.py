@@ -73,8 +73,9 @@ def check(image, processor, output):
                          'empty-list/D7 setup and its empty event2 acknowledgement to C5 polling. '
                          'The exact linear X/P input profile is admitted from separate physical evidence. '
                          'The helper check copies32 words, preserving source RAM, GP banks and FIFO cursor. '
-                         'Count32 is an offline extent regression; hardware used24. ACK/busy timing '
-                         'and frame-ACK causality remain open. Full spill/refill is not implemented. '
+                         'Count32 is an offline extent regression; hardware used24. Delayed frame '
+                         'acknowledgement is queued independently of C4; exact ACK/busy timing '
+                         'remains open. Full spill/refill is not implemented. '
                          'The helper caller is authored; dynamic code/table blocks are not '
                          'substituted. Full original DMA/configuration chain, resets, '
                          'EP frame admission/cadence, AC97 and full graph/output remain open.')

@@ -199,7 +199,7 @@ def check(image, output, observer=None, ep_event_observer=None):
     if ep_event_observer:
         data.update(issue='beads-xbox.1.113.9',ep_event_observer_sha256=sha(ep_event_observer.read_bytes()),
             scope='Actual unchanged driver tables and mapped EP startup perform seven exact input transfers through the sole maintained CPU, including original P reload and execution.',
-            limits='Explicit offline caller/kernel allocation/settings and observed empty-list clock profile. Reset/core MMIO is recorded, not dispatched. Selector2 reaches an unqualified linear output profile; selectors0/1 reach an unresolved original descriptor. ACK/busy timing and frame-ACK causality remain open. These next-boundary records are not completed processing or title/output/reset qualification. The older transport observer, if selected, retains its separately recorded historical B2 scope.')
+            limits='Explicit offline caller/kernel allocation/settings and observed empty-list clock profile. Reset/core MMIO is recorded, not dispatched. Selector2 reaches an unqualified linear output profile; selectors0/1 reach an unresolved original descriptor. Delayed acknowledgement is queued independently of C4; exact ACK/busy timing remains open. These next-boundary records are not completed processing or title/output/reset qualification. The older transport observer, if selected, retains its separately recorded historical B2 scope.')
     report=output/'original-ep-startup-reference.aot-private.json'
     report.write_text(json.dumps(data, indent=2)+'\n', newline='\n')
     print(f'PASS: {len(records)} original driver startup lifetimes; {report}')

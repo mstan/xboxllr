@@ -211,6 +211,7 @@ public:
     }
     bool ep_write(uint32_t address,uint32_t value) {
         fe_context_known_=false;fe_state_used_=true;
+        if(!faulted_ && address==0xffffc5 && !(value&~0x80u))return queue_ep_ack(value);
         return !faulted_ && ep_dma_.write(address,value);
     }
     // Retained DSP-side C4 publication. No CPU MMIO alias/reset value is
@@ -222,10 +223,29 @@ public:
     uint64_t ep_frame_events()const{return ep_frame_events_;}
     uint64_t ep_dma_nodes()const{return ep_dma_.nodes();}
     bool dsp_dma_pending(ApuDspKind kind)const{return kind==ApuDspKind::Gp?gp_dma_.work_pending():ep_dma_.work_pending();}
+    bool dsp_work_pending(ApuDspKind kind)const{return dsp_dma_pending(kind) || (kind==ApuDspKind::Ep && ep_ack_mask_);}
     bool dsp_work_active()const{return gp_dma_working_ || ep_dma_working_;}
+    bool service_dsp_acknowledgements(ApuDspKind kind,uint32_t quanta=1) {
+        if(faulted_)return false;
+        if(kind!=ApuDspKind::Ep)return true;
+        if(dsp_work_active() || quanta>4096){device_fault("invalid EP acknowledgement work dispatch");return false;}
+        ep_dma_working_=true;bool done=true;
+        for(uint32_t i=0;i<quanta && ep_ack_mask_;++i)if(--ep_ack_quanta_==0) {
+            const auto mask=ep_ack_mask_;ep_ack_mask_=0;
+            done=ep_dma_.write(0xffffc5,mask&0x80u);
+            if(done)ep_frame_status_&=~(mask&2u);
+        }
+        ep_dma_working_=false;return done && !faulted_;
+    }
     bool service_dsp_dma(ApuDspKind kind,uint32_t quanta=1) {
         if(faulted_)return false;
         if(dsp_work_active()){device_fault("reentrant DSP DMA device work");return false;}
+        if(kind==ApuDspKind::Ep && ep_ack_mask_ && ep_dma_.work_pending()) {
+            // The CPU orders acknowledgement retirement before new transfer
+            // work. An explicit caller cannot erase a newer EOL by reversing
+            // that order with an old queued acknowledgement.
+            device_fault("EP DMA dispatch overlaps pending acknowledgement");return false;
+        }
         bool& working=kind==ApuDspKind::Gp?gp_dma_working_:ep_dma_working_;
         working=true;
         const bool done=kind==ApuDspKind::Gp?gp_dma_.service(quanta):ep_dma_.service(quanta);
@@ -239,7 +259,7 @@ public:
     }
     void unbind_ep_program_owner(void* owner) {
         if(ep_program_owner_==owner){
-            if(ep_dma_.work_pending() && !faulted_)device_fault("EP CPU owner removed with pending DMA");
+            if(dsp_work_pending(ApuDspKind::Ep) && !faulted_)device_fault("EP CPU owner removed with pending peripheral work");
             ep_program_owner_=nullptr;ep_program_guard_={};ep_frame_owner_={};
         }
     }
@@ -279,6 +299,19 @@ public:
     // A successful real VP transaction owns MIX until that CPU actually yields.
 private:
     friend class ApuDspProcessor;
+    bool queue_ep_ack(uint32_t mask) {
+        uint32_t status=0;
+        if(faulted_ || !ep_read(0xffffc5,status))return false;
+        mask&=status;
+        if(!mask)return true;
+        if(ep_ack_mask_){device_fault("overlapping EP acknowledgements remain unqualified");return false;}
+        ep_ack_mask_=mask;
+        // Physical EP retains the flag at the next instruction's read and
+        // clears it by a later observation, even with no intervening C4/read.
+        // Two explicit work quanta are a nominal ordering floor, not measured
+        // bus latency. The sole CPU supplies retirement; register reads do not.
+        ep_ack_quanta_=2;return true;
+    }
     bool bind_gp_frame_owner(void* owner,std::function<bool()> startup_clear) {
         if(!owner || owner!=gp_program_owner_ || !startup_clear || gp_frame_owner_)return false;
         gp_frame_owner_=owner;gp_startup_clear_=std::move(startup_clear);return true;
@@ -636,7 +669,7 @@ private:
     static constexpr uint32_t kObservedIdleFectl=0x00071f8f, kObservedIdleSectl=7;
     bool fe_work_idle()const {
         return !processing_quantum_ && !gp_mix_admitting_ && !gp_frame_outstanding() &&
-               !dsp_work_active() && !gp_dma_.work_pending() && !ep_dma_.work_pending() &&
+               !dsp_work_active() && !gp_dma_.work_pending() && !dsp_work_pending(ApuDspKind::Ep) &&
                !gp_program_owner_ && !gp_frame_owner_ && !ep_program_owner_ &&
                !gp_program_revision_ && !ep_program_revision_ &&
                reg32(0x3fffc)==0 && reg32(0x5fffc)==0;
@@ -981,10 +1014,10 @@ private:
         }
         // The existing absolute setup-engine clock owns EP event production.
         // Hardware produces102 at 256/48000s with GP held and empty voices.
-        // C5=2 leaves it pending; a subsequent executed C4 requests the next
-        // event and clears bit1 while retaining observed background bit8.
+        // C4 requests the next event; delayed C5 acknowledgement clears the
+        // previous flag independently while retaining background bit8.
         if(ep_frame_requested_ && ep_program_owner_ && ep_frame_owner_ && ep_frame_owner_()) {
-            if(dsp_work_active() || ep_dma_.work_pending()) {
+            if(dsp_work_active() || dsp_work_pending(ApuDspKind::Ep)) {
                 device_fault("EP frame publication overlaps unqualified DMA work");return;
             }
             ep_frame_requested_=false;ep_frame_status_=0x102;++ep_frame_events_;
@@ -1025,6 +1058,7 @@ private:
     uint32_t ep_control_value_=0;
     bool ep_frame_requested_=false;
     uint32_t ep_frame_status_=0;
+    uint32_t ep_ack_mask_=0,ep_ack_quanta_=0;
     uint64_t ep_frame_events_=0;
     uint64_t gp_program_revision_=0;
     void* gp_program_owner_=nullptr;
