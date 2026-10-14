@@ -17,7 +17,7 @@ struct Fixture {
     std::vector<unsigned char> ram,registers,map,before,expected_ram;
     std::vector<unsigned> program;
     std::string device_error,owner_error;
-    unsigned writes=0,reads=0,output_nodes=0,fifo_cursor=0,last_pc=0;bool expect_boundary=false,revoke=false,has_lookup=false;
+    unsigned writes=0,reads=0,output_nodes=0,fifo_cursor=0,fifo1_cursor=0,last_pc=0;bool expect_boundary=false,revoke=false,has_lookup=false;
     std::vector<std::vector<unsigned>> completed;
     xlle::McpxApu apu{[this](const std::string& s){device_error=s;}};
     static unsigned word(const std::vector<unsigned char>& bytes,unsigned at) {
@@ -54,20 +54,14 @@ struct Fixture {
         }
         for(unsigned i=0;i<2048;++i)program.push_back(word(ram,physical(i*4))&0xffffff);
         CHECK(program[0x100]==0x24 && program[0x101]==6 && program[0x114]==0x1cfe && program[0x115]==24);
-        fifo_cursor=reg(0xfe80402c);CHECK(!apu.faulted());
+        fifo_cursor=reg(0xfe80402c);fifo1_cursor=reg(0xfe80403c);CHECK(!apu.faulted());
     }
     void fault(const std::string& why) {
         owner_error=why;if(!expect_boundary)return;
-        if(!has_lookup) {
-            CHECK(why=="unmapped DSP read at 000fc9" && device_error.empty() && last_pc==0x31e);
-            CHECK(completed.size()==10 && output_nodes==2 && writes==2);
-            CHECK(*apu.ep_word(0x29a3)==0x5be0 && *apu.ep_word(0x29a4)==0x862);
-        } else {
-            CHECK(why=="EP queued DMA work failed" && device_error.find("unqualified EP DMA descriptor format/extent")!=std::string::npos && last_pc==0x2d5);
-            CHECK(completed.size()==33 && output_nodes==15 && writes==18);
-            const unsigned next[]={0x41a2,0x4622,0x5da,0x401f};
-            for(unsigned i=0;i<4;++i)CHECK(*apu.ep_word(0x29a2+i)==next[i]);
-        }
+        CHECK(!has_lookup);
+        CHECK(why=="unmapped DSP read at 000fc9" && device_error.empty() && last_pc==0x31e);
+        CHECK(completed.size()==10 && output_nodes==2 && writes==2);
+        CHECK(*apu.ep_word(0x29a3)==0x5be0 && *apu.ep_word(0x29a4)==0x862);
         std::fprintf(stderr,"last original PC=%x\n",last_pc);
         report("original-first-event-next-boundary");
         std::fflush(stdout);std::fprintf(stderr,"original EP boundary: %s; %s\n",why.c_str(),device_error.c_str());std::exit(2);
@@ -90,22 +84,24 @@ struct Fixture {
     void verify_transfers() {
         if(apu.ep_dma_nodes()==completed.size())return;
         CHECK(apu.ep_dma_nodes()==completed.size()+1);
-        const bool fifo=*apu.ep_word(0x29a3)==0x400603;
+        const bool stereo=*apu.ep_word(0x29a3)==0x400603,fifo1=*apu.ep_word(0x29a3)==0x4622,fifo=stereo || fifo1;
         std::vector<unsigned> node(fifo?4:5);
         for(unsigned i=0;i<node.size();++i)node[i]=*apu.ep_word(0x29a2+i);
         CHECK(node[0]==0x41a2 && (node[1]==0x5be0 || node[1]==0x5be2 || fifo));
         if(fifo) {
-            CHECK(node[2]==0x1001 && node[3]+512<=0xc00);
-            const unsigned base=reg(0xfe804024),end=reg(0xfe804028);
-            CHECK(base<end && fifo_cursor>=base && fifo_cursor<end);
-            for(unsigned i=0;i<1024;++i) {
-                const unsigned at=fifo_physical(fifo_cursor);
-                const unsigned value=*apu.ep_word(node[3]+(i/2%2)*256+i/4);
+            if(stereo)CHECK(node[2]==0x1001 && node[3]+512<=0xc00);
+            else CHECK(node[2] && node[2]<=4096 && !(node[2]&1) && (node[3]==0x401f || node[3]+node[2]<=0xc00));
+            const unsigned ring=0xfe804024+(fifo1?16:0),base=reg(ring),end=reg(ring+4),bytes=stereo?1024:node[2]*2;
+            unsigned& cursor=fifo1?fifo1_cursor:fifo_cursor;
+            CHECK(base<end && cursor>=base && cursor<end);
+            for(unsigned i=0;i<bytes;++i) {
+                const unsigned at=fifo_physical(cursor);
+                const unsigned value=node[3]==0x401f?0:*apu.ep_word(node[3]+(stereo?(i/2%2)*256+i/4:i/2));
                 const unsigned char byte=static_cast<unsigned char>(value>>(8+8*(i%2)));
                 CHECK(ram[at]==byte);expected_ram[at]=byte;
-                if(++fifo_cursor==end)fifo_cursor=base;
+                if(++cursor==end)cursor=base;
             }
-            CHECK(apu.RegFileMmio::mmio_read(0xfe80402c,4)==fifo_cursor);++output_nodes;
+            CHECK(apu.RegFileMmio::mmio_read(ring+8,4)==cursor);++output_nodes;
         } else if(node[1]==0x5be2) {
             CHECK(node[2] && node[2]<=4096);
             for(unsigned i=0;i<node[2];++i) {
@@ -150,7 +146,8 @@ int main(int argc,char** argv) {
     for(unsigned i=0;i<(f.has_lookup?1000000u:200000u);++i){
         f.last_pc=r.pc;CHECK(ep.run(1,r));f.verify_transfers();
         if(f.completed.size()>=8 && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power) {
-            if(!f.has_lookup)CHECK(f.completed.size()==8 && f.output_nodes==1 && f.writes==1);
+            if(f.has_lookup && f.completed[1][2]==754)CHECK(f.completed.size()==36 && f.output_nodes==18 && f.writes==22);
+            else CHECK(f.completed.size()==8 && f.output_nodes==1 && f.writes==1);
             CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.device_error.empty() && f.owner_error.empty());
             unsigned events=0,control=0;CHECK(f.apu.ep_read(0xffffc5,events) && events==0x100);
             CHECK(f.apu.ep_control_publication(control) && control==1);

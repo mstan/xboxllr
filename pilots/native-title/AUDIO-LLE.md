@@ -7,8 +7,9 @@ observations retain their historical counts. Hardware access has resumed after
 the dashboard migration. Physical EP input/output and delayed acknowledgement
 now admit the original input, linear output and interleaved stereo FIFO0 routes.
 Selectors0/1 complete their first event and return naturally to the original
-poll after eight transfers. With the privately captured EP high-Y image,
-selector2 reaches33 verified transfers then guards FIFO1 source401F. Without
+poll after eight transfers. With the privately captured EP high-Y image and
+physically matched FIFO1 source401F route, selector2 now also returns after36
+verified transfers. Without
 that image it retains the ten-transfer Y:0FC9 stop. The earlier malformed-descriptor diagnosis was wrong:
 400603/1001 is an intentional packed stereo FIFO descriptor. See the bounded
 closing checklist for the current evidence and timing/reset requirements.
@@ -18,6 +19,30 @@ The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driv
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
+
+## Physical FIFO1 source and first-event completion - 2026-10-14
+
+Ordinary FIFO1 control4622/source001F copies24 distinct samples. Source401F
+produces zeros despite distinct X data at the low address; source441F also
+produces zeros, rejecting literal-value packing. The exact original1498-sample
+source401F transfer is physically matched, including its2996-byte CUR advance,
+untouched alternate destination/FIFO0, source/canaries, allocation and bootstrap.
+All four hardware owners are retired through separately authorized recovery.
+
+The maintained DMA uses its existing packing/FIFO/failure owners for ordinary
+FIFO1 X output and the measured401F zero route. The broader flagged source map
+remains unknown and guarded. Three physical programs match on policies1/2/4;
+wrong-output controls reject, and ring-wrap/partial-write/bank-edge/adjacent-mode
+checks preserve ownership. No HLE change or synthetic completion is introduced.
+
+With the private Y image, all three original settings complete their first
+event and return naturally to the real poll. Selectors0/1 complete8 transfers;
+selector2 completes36, with18 output nodes and22 RAM writes. Its final nodes
+are1498 zero FIFO1 samples,220 ordinary FIFO1 samples and128 linear output
+words. SP0, acknowledged frame, C4=1, no pending work and later unchanged
+polling are checked. Sustained events, independent codec numerics, shared
+clock/reset/SECTL, active FE and connected title output remain required.
+Evidence: `build/blinx/audio-ep-fifo-source-20261014/`; count6/9 remains.
 
 ## Physical EP high-Y lookup - 2026-10-14
 

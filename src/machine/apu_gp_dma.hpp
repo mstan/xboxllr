@@ -101,7 +101,7 @@ private:
         uint32_t node[7]{};
         uint32_t* fields[7]{};
         std::vector<uint32_t*> words;
-        bool end=false,linear=false,circular=false,output=false;
+        bool end=false,linear=false,circular=false,output=false,zero_source=false;
         uint32_t format=0,buffer=0,count=0;
     };
     uint32_t bank_end(uint32_t address)const{return apu_dsp_bank_end(kind_,address);}
@@ -143,6 +143,14 @@ private:
             const bool ep_stereo_fifo=kind_==ApuDspKind::Ep &&
                 (node[1]==0x400403u || node[1]==0x400603u) &&
                 node[2]==0x1001u && node[3]<0xc00;
+            // Physical FIFO1 control4622 copies ordinary X data. Source401F
+            // instead emits zeros at counts24/1498 despite nonzero X001F.
+            // Source441F also emits zero, disproving literal-value packing,
+            // but the broader source map is unknown. Admit the reached401F
+            // route without masking it into writable RAM or extending a bank.
+            const bool ep_fifo1=kind_==ApuDspKind::Ep && node[1]==0x4622u &&
+                (node[3]<0xc00 || node[3]==0x401f);
+            job.zero_source=ep_fifo1 && node[3]==0x401f;
             const uint32_t count=interleaved ? (node[2]>>4)*((node[2]&15)+1) : node[2];
             const bool output=(node[1]&2)!=0;
             job.output=output;job.count=count;
@@ -167,7 +175,7 @@ private:
             const bool qualified_bit9_profile=kind_==ApuDspKind::Gp ?
                 (node[1]==0x5be0u || node[1]==0x4bd0u || node[1]==0x4bd2u) :
                 ((node[1]==0x5be0u && ep_input_bank) ||
-                 (node[1]==0x5be2u && node[3]<0xc00) || ep_stereo_fifo);
+                 (node[1]==0x5be2u && node[3]<0xc00) || ep_stereo_fifo || ep_fifo1);
             if((node[0]&~0x7fffu) || (node[1]&0x200c) ||
                (interleaved && !ep_stereo_fifo) ||
                ((node[1]&0x200) && !qualified_bit9_profile) ||
@@ -176,12 +184,14 @@ private:
                (format!=1 && format!=2 && format!=6) || !count || count>4096 ||
                (format==1 && (count&1)))
                 return fail("unqualified GP DMA descriptor format/extent");
-            job.words.resize(count);auto& words=job.words;
-            if(uint64_t(node[3])+count>bank_end(node[3]))return fail("GP DMA samples cross memory bank");
-            for(unsigned i=0;i<count;++i) {
-                const unsigned offset=interleaved ? (i%2)*(node[1]>>14)+i/2 : i;
-                words[i]=word_(node[3]+offset);
-                if(!words[i])return fail("GP DMA sample outside memory banks");
+            if(!job.zero_source) {
+                job.words.resize(count);auto& words=job.words;
+                if(uint64_t(node[3])+count>bank_end(node[3]))return fail("GP DMA samples cross memory bank");
+                for(unsigned i=0;i<count;++i) {
+                    const unsigned offset=interleaved ? (i%2)*(node[1]>>14)+i/2 : i;
+                    words[i]=word_(node[3]+offset);
+                    if(!words[i])return fail("GP DMA sample outside memory banks");
+                }
             }
             // The VP/host/input-DMA bank publisher cannot take a GP frame's
             // leased MIX. Check before any physical input or FIFO cursor work.
@@ -200,7 +210,7 @@ private:
             const uint32_t size=node[6]+1,width=format==1?2:4;uint32_t offset=node[4];
             std::array<uint8_t,4096*4> packed{};
             for(unsigned i=0;i<count;++i) {
-                uint32_t sample=output?(*words[i]&0xffffff):0;
+                uint32_t sample=output && !job.zero_source?(*words[i]&0xffffff):0;
                 if(output && format==2)sample<<=8;
                 if(output && format==1)sample>>=8;
                 for(unsigned b=0;b<width;++b)packed[i*width+b]=uint8_t(sample>>(b*8));
