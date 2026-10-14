@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: fresh program loads; physical result disagrees with offline execution | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: corrected diagnostic entry verified; startup/DMA completion absent | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,43 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Corrected GP diagnostic on the restarted console - 2026-10-13
+
+The owner confirmed a restart and the final hardware phase resumed using the
+installed v0.4.0 probe. Identity and sixteen fixed control/mapping reads matched
+the required quiet floor. A fresh nine-page allocation and a new durable-ledger
+signature bound the corrected 734-word diagnostic to this session. Three focused
+owner-specific checks passed, including thirteen DSP instruction paths; unchanged
+broader preparation proofs were reused. All 55 source/context/payload identities
+were checked before the separately reviewed hardware phases.
+
+Preparation, full preflight, SG installation and RESET 3 returned exactly the
+requested results. The physical capture retained all 38 raw fields and verified
+all 2,044 immutable program words. Entry witnesses matched and phase was 1;
+completion witnesses, metadata and descriptors were zero. X/Y targets remained
+zero and P targets remained STOP. The acceptance helper rejects finalization.
+The corrected run no longer reports the earlier false completion, but does not
+establish DMA, bit9, the hardware wake cause or an exact stopped instruction.
+
+This narrows the next investigation to original startup/peripheral read context.
+The authored D6-equals-32 guard was explicitly an offline starting assumption,
+not independently established silicon state. Preserve the failed result and
+resolve its provenance before any further device write. No automatic retry,
+reset, restoration, allocation free or storage operation followed the capture.
+Private evidence is under probe `results/qualification-20261013-resume2/`.
+Families remain **6/9**, with 26 accepted precision deferrals; no HLE behavior
+changed.
+
+The subsequent original bootstrap audit found explicit STOP/FREEZE initialization
+before descriptor publication, followed by UNFREEZE/START in its transfer helper.
+It tests RUNNING bit 4 and FROZEN bit 3, with no initial whole-register-equals-32
+requirement. The independently prepared peripheral-read program compares C5/D6
+absolute loads with MOVEP reads, recording every value without DMA or peripheral
+writes by the DSP. Eleven offline tests pass, including unchanged fresh-diagnostic
+contracts, actual x86 transport and three maintained-DSP input cases with stable
+terminal resumes. It has not run on hardware; no production DMA reset default,
+descriptor guard or HLE behavior changed. See probe `docs/GP-PERIPHERAL-READ.md`.
 
 ## Offline frontier and final hardware dependencies - 2026-10-13
 
