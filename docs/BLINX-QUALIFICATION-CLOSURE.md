@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: GP bit9 and GP/EP passive profiles pass; EP stack/events and wake/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: GP bit9, GP/EP passive profiles and resident EP stack pass; EP events and wake/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -106,14 +106,33 @@ wake/cadence and full output remain open. Probe evidence:
 The existing EP CPU now owns that exact passive B2/B0/B1 profile, with a
 separate retained lifetime marker from GP. Nine focused checks pass, including
 both frozen observers, independent reset/rebind guards and GP regression. The
-unchanged original EP entry advances to its first unsupported mode at P0017:
-`BSET #20,OMR` enables DSP stack extension. The mode guard remains terminal;
-the later C5 event operation has not yet been reached by the full entry.
+unchanged original EP entry initially advanced to its first unsupported mode
+at P0017: `BSET #20,OMR` enables DSP stack extension. That retained failure
+motivated the bounded resident-stack implementation below.
 This closes the bounded EP profile producer, not EP startup, cadence or its
 708000 threshold contract. Evidence and 53-pin root review are in
-`build/blinx/audio-ep-counter-profile-20261014/`. Hardware is deferred at the
-owner's request; stack-extension work continues offline. Family count remains
-6/9, with 27 accepted precision deferrals and no HLE processing change.
+`build/blinx/audio-ep-counter-profile-20261014/`.
+
+The maintained donor preparation now supports SEN only while the hardware
+stack holds all entries: SP=SC, depths0..14, within SZ, with no extension history
+or interrupt. The unchanged original EP prefix reaches its actual C5=FFF write
+at P02EF, with maximum depth3 and SP=SC2. Its30 P-context words are cleared,
+saved directory fields and startup P1..5 are exact, and X/Y extension memory,
+GP banks and source RAM remain unchanged. The real production EP owner stops
+at that C5 operation; no acknowledgement or yield is supplied. Spill/refill,
+task switching, explicit stack ports, early loop abort and interrupts stay
+guarded. This removes the reached stack blocker without claiming full SEN.
+
+Six resident-stack tests,30 single/block negative executions,24 existing
+non-SEN regressions and the maintained EP packet/guard checks pass. The actual
+original GP effects frame still performs60 DMA nodes, loads1712 exact parameter
+words and leaves RAM byte-identical to its accepted capture. Root verified
+72 handoff pins and independently regenerated all8 prepared Rust files.
+Evidence: `build/blinx/audio-ep-stack-extension-20261014-worker/handoff.aot-private.json`
+and `build/blinx/audio-ep-stack-extension-20261014-root/`.
+Hardware remains deferred at the owner's request. EP C5/CA/D5, wake/reset,
+cadence and the708000 threshold remain required; families stay6/9, with27
+accepted precision deferrals and no HLE processing change.
 
 ## Hardware-session tooling and GP observations - 2026-10-14
 
@@ -1146,7 +1165,9 @@ F: disk contention; source repositories and durable evidence remain on F:.
 Retain owned temporary artifacts until needed results are preserved, then clean
 only the owned staging tree. Only one GPU-heavy run at a time.
 Lower resource use when the owner plays a game; otherwise do not throttle LLE
-merely because it is slow. Keep Beads updates local; no Dolt synchronization.
+merely because it is slow. The current global agent instructions supersede the
+earlier local-only Beads rule: use the central sync helper after durable issue
+updates and allow its own integrity/transfer deadlines to complete.
 
 Later owner update2026-10-12 supersedes the resource hold: keep competing for
 resources and do not pause for host load. Memory/disk measurements are now

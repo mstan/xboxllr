@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+from native_dsp_sen import FILES as SEN_FILES, patch as resident_sen_patch
 
 PIN = 'c60aeedb6a6014850204c71e53bc0cf5b3104222'
 GIT = 'C:/Program Files/Git/cmd/git.exe'
@@ -33,7 +34,7 @@ def guarded(name, text):
         if text.count(old) != 1:
             raise ValueError('donor guard no longer matches: ' + name)
         text = text.replace(old, new)
-    return text
+    return resident_sen_patch(name, text)
 
 
 def prepare(donor, output, cargo):
@@ -53,7 +54,7 @@ def prepare(donor, output, cargo):
         # Copy tracked source only; .git and build products never cross over.
         blob = (donor / name).read_bytes()
         hashes[name] = hashlib.sha256(blob).hexdigest()
-        if name in ('crates/emu/src/core.rs', 'crates/emu/src/emit/mod.rs'):
+        if name in SEN_FILES:
             blob = guarded(name, blob.decode()).encode()
             patched[name] = hashlib.sha256(blob).hexdigest()
         path = output / name
@@ -68,7 +69,7 @@ def prepare(donor, output, cargo):
     record = dict(repository='https://github.com/mborgerson/dsp56300', revision=PIN,
                   license='MIT', sources=hashes, guarded=patched,
                   dependencies=dependencies,
-                  policy='Unsupported arithmetic/memory modes and RESET/DEBUG/WAIT stop; cache/bus timing is outside the batch effects contract.')
+                  policy='Bounded hardware-resident SEN supports logical SP=SC depths0..14 without extension-memory access; spill/refill/underflow, direct task/configuration writes, explicit stack ports, early loop abort and interrupts stop. Other unsupported arithmetic/memory modes and RESET/DEBUG/WAIT stop; full stack extension and cache/bus timing remain unqualified.')
     (output / 'donor.json').write_text(json.dumps(record, indent=2)+'\n', newline='\n')
     from native_dsp_notices import prepare as prepare_notices
     prepare_notices(output, cargo)

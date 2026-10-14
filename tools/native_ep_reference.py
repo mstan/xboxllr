@@ -2,7 +2,7 @@
 """Bind original EP bootstrap/helpers to explicit maintained EP guards.
 
 Original bytes remain private under build/. The actual original entry stops on
-its unsupported stack-extension mode. An authored caller executes the unchanged
+its unsupported C5 event-clear operation after the resident SEN prefix. An authored caller executes the unchanged
 original linear builder/transfer helper and stops on its unknown descriptor bit9.
 Neither result claims an original EP boot, graph, cadence or audible output pass.
 """
@@ -50,20 +50,15 @@ def check(image, processor, output):
     boot = output/'original-ep-mapped-source.aot-private.bin'
     boot.write_bytes(boot_data)
     runs = []
-    for mode, guard in (('--original-entry', 'Unqualified Xbox DSP mode: SR=c00300, OMR=100300'),
+    for mode, guard in (('--original-entry', 'at ffffc5'),
                         ('--original-bit9', 'unqualified EP DMA descriptor format')):
         run = subprocess.run([str(processor), mode, str(boot)],
                              capture_output=True, text=True, timeout=20)
         log = output/f'original-ep-{mode[2:]}.aot-private.log'
         log.write_text(run.stdout+run.stderr, newline='\n')
-        if mode == '--original-entry':
-            # The pinned Rust FFI mode guard aborts rather than invoking the
-            # C++ device callback. Do not claim callback preservation checks.
-            passed = run.returncode != 0 and guard in run.stderr
-        else:
-            passed = (run.returncode == 2
-                      and 'expected EP guard before sample/node/output publication' in run.stderr
-                      and guard in run.stderr)
+        passed = (run.returncode == 2
+                  and 'expected EP guard before sample/node/output publication' in run.stderr
+                  and guard in run.stderr)
         runs.append(dict(mode=mode, exit=run.returncode, expected_result=passed,
                          expected_guard=guard, log_sha256=sha(log)))
     record = dict(image_sha256=IMAGE_SHA256, source_parts=source_parts,
@@ -72,9 +67,10 @@ def check(image, processor, output):
                   original_boot_qualified=False, original_output_qualified=False,
                   scope='Actual original EP entry plus unchanged 0276 linear builder and '
                         '02E1 transfer/control helper on the distinct EP CPU/banks.',
-                  limits='Exact passive B0-B3 profile is admitted; original P0017 stack '
-                         'extension and descriptor bit9 stay guarded. No C5 reachability '
-                         'or memory-preservation claim follows from the mode abort. '
+                  limits='Exact passive B0-B3 profile and hardware-resident SEN prefix '
+                         'are admitted; C5 event-clear and descriptor bit9 stay guarded. '
+                         'Both callbacks check unchanged source RAM, GP MIX and FIFO cursor '
+                         'with no EP DMA publication. Full spill/refill is not implemented. '
                          'The helper caller is authored; dynamic code/table blocks are not '
                          'substituted. Full original DMA/configuration chain, resets, '
                          'EP frame admission/cadence, AC97 and full graph/output remain open.')

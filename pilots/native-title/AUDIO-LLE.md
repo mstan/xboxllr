@@ -2,7 +2,9 @@
 
 Tracked by `beads-xbox.1.113`. Audio is the active independent offline family;
 the original-scheduler/GPU startup experiments are not prerequisites. The family
-remains **open**, and the overall burndown remains **4/9 qualified**.
+remains **open**, and the overall burndown is **6/9 qualified**. Earlier dated
+observations retain their historical counts. Hardware is currently deferred;
+the latest offline result is the resident EP stack checkpoint below.
 
 The native title continues to select its real XAudio2/DSP implementation.
 The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driver
@@ -2266,7 +2268,7 @@ verified53 handoff pins and reviewed callback/ownership boundaries. Maintained
 CTest targets cover the new EP contract and terminal guards. Private evidence:
 `build/blinx/audio-ep-counter-profile-20261014/handoff.aot-private.json`.
 
-The unchanged full EP entry now reaches P0017 (`BSET #20,OMR`) and stops at
+At this checkpoint, unchanged full EP entry reached P0017 (`BSET #20,OMR`) and stopped at
 the retained unsupported stack-extension mode guard, SR=C00300/OMR=100300.
 This is earlier than the first unsupported peripheral operation C5=FFF at
 P02EF. The original-entry check asserts that actual boundary; it does not
@@ -2276,3 +2278,46 @@ admitted. AUDIO-D08 remains GP-only. The observed raw hardware FF14=100 is
 not normalized or assigned a meaning. Hardware remains deferred at the owner's
 request while documented stack semantics are investigated offline. HLE is
 unchanged; the family total remains6/9 with27 accepted precision deferrals.
+
+## Resident EP stack startup - 2026-10-14
+
+`native_dsp_donor.py` now applies a maintained, pinned-source patch from
+`native_dsp_sen.py`. The [DSP56300 family manual](https://www.nxp.com/docs/en/reference-manual/DSP56300FM.pdf),
+sections5.4.2/5.4.3 and restrictionsA.3.2/A.3.9/A.3.10, supplies the resident
+stack contract and the boundaries deliberately left guarded. SEN is admitted
+only at SP=SC, depths0..14 within SZ, with no extension status/history or pending
+interrupt. Ordinary nested calls and natural DOR completion use the existing
+hardware stack. Spill/refill, direct task/configuration changes, explicit SSH/SSL,
+early loop abort and interrupts stop. Empty mode transitions are validated;
+double-push/pop operations preflight before stack, LC or SR changes. Already
+retired instruction PC movement is not rolled back on a later guard.
+
+The unchanged original EP entry now reaches P02EF's C5=FFF attempt through the
+actual production EP owner. Maximum stack depth is3, final SP=SC2, EP=BE0 and
+SZ=32. Original P1..5 startup values, saved directory fields P19E/19F and30 cleared
+P122..13F context words match exactly. X/Y, including the proposed extension
+tail, remain untouched; GP banks and source RAM are preserved. This result
+supersedes the preceding SEN abort as the current original-entry boundary.
+No C5 acknowledgement, event, yield, DMA completion or frame is manufactured.
+
+Validation passes6 Rust resident tests,30 single/block terminal negatives,
+2 empty transitions, both original-prefix checkers, and24 existing non-SEN
+stack/control/DOR regressions. The maintained CMake guard wrapper and ordinary
+EP packet/guard regression also pass with the rebuilt backend. Root's one
+actual original GP effects frame performs60 DMA nodes, loads all1712 initial
+parameter words correctly, and reproduces accepted RAM and device writes byte
+for byte. Frozen producer inputs were reused; no title or audible test ran.
+
+Private worker proof is
+`build/blinx/audio-ep-stack-extension-20261014-worker/handoff.aot-private.json`;
+root independently verified72 pins and regenerated all8 patched Rust sources.
+Root proof and the updated original-entry/bit9 checks are in
+`build/blinx/audio-ep-stack-extension-20261014-root/`. Maintained DSP builds expose
+`pilot_dsp_sen_guards`; original EP image checks require explicit private input.
+Use fresh donor/Cargo directories so earlier evidence keeps its backend identity.
+
+Full stack extension is unimplemented, but is not a new family gate unless the
+supported title route reaches it. C5/CA/D5 event behavior, wake/reset, cadence,
+EP708000 threshold, active FE ordering and connected output remain required.
+Hardware stays deferred, HLE processing is unchanged, and the total stays6/9
+with27 accepted precision deferrals.

@@ -1,5 +1,12 @@
 # Native title reference pilot
 
+Current bounded Blinx qualification is **6/9 families**: input, display,
+memory, files, scheduling and movies pass. Audio, GPU and graphics remain open;
+hardware work is currently deferred by the owner. Use the
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) for current gates
+and [audio evidence](AUDIO-LLE.md) for the latest GP/EP milestones. The earlier
+component observations below retain their original scope and limitations.
+
 USB/PIC LLE now requires the reviewed
 [source-built Unicorn IRQ-boundary package](unicorn-engine/README.md).
 Original scheduling has bounded no-peer idle-clock and integer compute
@@ -53,8 +60,9 @@ Whole title scheduling remains unqualified. See
 
 The independent GP owner now carries actual selected events, callback-safe
 yield/resume and a real VP MIX lease. Fifteen focused APU checks and two fresh
-optional pilot frame checks pass. Unchanged original helper calls pass; whole
-firmware bootstrap stops at its next guarded timer setup, FFFFB2=FFFFFF.
+optional pilot frame checks pass. Unchanged original helper calls pass. That
+initial firmware check stopped at FFFFB2=FFFFFF; later bounded GP/EP passive
+configuration producers are documented in AUDIO-LLE.md.
 Linear buffer15 scratch additionally passes16 focused checks and a fresh
 optional pilot check. Unchanged builders and control/parameter helpers execute
 15 real SGE transfers across three lifetimes; five-word descriptor ownership,
@@ -3063,7 +3071,9 @@ py -3 tools/native_dsp_donor.py --donor <pinned-donor> --output build/dsp-donor
 & "$env:USERPROFILE/.cargo/bin/cargo.exe" build --release --locked -p dsp56300-emu-ffi --manifest-path build/dsp-donor/Cargo.toml --target-dir build/dsp56300
 ```
 
-Set `PILOT_DSP_SOURCE` to the prepared directory and `PILOT_DSP_LIBRARY` to
+For a new qualification generation, choose fresh prepared-source and Cargo
+target directories so earlier accepted binaries and source identities remain
+available. Set `PILOT_DSP_SOURCE` to the prepared directory and `PILOT_DSP_LIBRARY` to
 `build/dsp56300/release/dsp56300_emu_ffi.lib`. Rerun `native_audio_binding.py`
 to add reviewed decoder/location metadata to an existing generation. Whole
 `PILOT_AUDIO=ORIGINAL` remains available; backends never switch during execution.

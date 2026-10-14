@@ -172,6 +172,16 @@ if(pilot_audio_dsp)
   add_library(pilot_dsp STATIC audio_dsp.c)
   target_include_directories(pilot_dsp PRIVATE "${PILOT_DSP_SOURCE}/crates/emu-ffi/include")
   target_link_libraries(pilot_dsp PUBLIC "${PILOT_DSP_LIBRARY}" ntdll userenv ws2_32 bcrypt)
+  add_executable(pilot_dsp_sen_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_dsp_sen.cpp")
+  target_include_directories(pilot_dsp_sen_test PRIVATE "${PILOT_DSP_SOURCE}/crates/emu-ffi/include")
+  target_link_libraries(pilot_dsp_sen_test PRIVATE "${PILOT_DSP_LIBRARY}" ntdll userenv ws2_32 bcrypt)
+  pilot_add_test(NAME pilot_dsp_sen_guards COMMAND "${CMAKE_COMMAND}"
+    "-DPROGRAM=$<TARGET_FILE:pilot_dsp_sen_test>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/dsp_sen_guards.cmake")
+  set_tests_properties(pilot_dsp_sen_guards PROPERTIES TIMEOUT 120)
+  # Original EP image is supplied explicitly; never run private assets by default.
+  add_executable(pilot_dsp_sen_owner_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_dsp_sen_owner.cpp")
+  target_link_libraries(pilot_dsp_sen_owner_test PRIVATE xlle_apu_gp_processor)
   add_executable(pilot_gp_processor_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_gp_processor.cpp")
   target_link_libraries(pilot_gp_processor_test PRIVATE xlle_apu_gp_processor)
   pilot_add_test(NAME pilot_gp_processor_contract COMMAND pilot_gp_processor_test)
