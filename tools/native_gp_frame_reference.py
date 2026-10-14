@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind real original GP helper execution and preserve the next whole-boot guard.
+"""Bind real original GP helper execution and record the bounded prefix continuation.
 
 All original firmware bytes and execution reports remain private under build/.
 Helper qualification uses authored callers of unchanged original functions;
@@ -30,40 +30,46 @@ def check(image, processor, output):
     section = next(s for s in parse_xbe(blob)['sections']
                    if s['address'] <= address and address+size <= s['address']+s['raw_size'])
     offset = section['raw_offset']+address-section['address']
-    output.mkdir(parents=True, exist_ok=True)
-    boot = output/'original-gp-frame-source.aot-private.bin'
+    output.mkdir(parents=True, exist_ok=False)
+    boot = output/'original-gp-frame-prefix.aot-private.bin'
     boot.write_bytes(blob[offset:offset+size])
     runs = []
     for mode in ('--original-helpers', '--original-boot'):
         run = subprocess.run([str(processor), mode, str(boot)],
                              capture_output=True, text=True, timeout=20)
-        log = output/f'original-gp-frame-{mode[2:]}.aot-private.log'
+        log = output/f'original-gp-frame-current-{mode[2:]}.aot-private.log'
         log.write_text(run.stdout+run.stderr, newline='\n')
         if mode == '--original-helpers':
             passed = run.returncode == 0 and 'original GP helpers155/D2/160' in run.stdout
         else:
-            passed = (run.returncode == 2 and 'expected frame guard' in run.stderr and
-                      'unqualified GP peripheral write' in run.stderr and
-                      'at ffffb2' in run.stderr)
+            records = [json.loads(line) for line in run.stdout.splitlines() if line.startswith('{')]
+            expected = dict(boundary='first-C4-yield', pc=0x2b, power=0, yielded=True,
+                            dma_nodes=0, frame_outstanding=False, ram_unchanged=True,
+                            original_prefix_loaded=True)
+            passed = run.returncode == 0 and records == [expected]
         runs.append(dict(mode=mode, exit=run.returncode, expected_result=passed,
                          log_sha256=sha(log)))
     record = dict(image_sha256=IMAGE_SHA256, data_address=hex(address), data_size=size,
                   data_sha256=sha(boot), processor_sha256=sha(processor),
                   tool_sha256=sha(Path(__file__)), runs=runs,
                   original_helpers_qualified=runs[0]['expected_result'],
+                  original_prefix_continuation_verified=runs[1]['expected_result'],
+                  observed_prefix=records, original_full_frame_qualified=False,
+                  gp_profile_precision_deferred=True,
                   original_boot_qualified=False,
-                  boundary='Unchanged original entry reaches unowned FFFFB2=FFFFFF clock '
-                           'configuration after actual startup clear, memory initialization '
-                           'and DMA context setup. No clock behavior is substituted.',
+                  boundary='Unchanged original entry reaches first C4 yield PC002B '
+                           'after the exact supported GP composite profile. '
+                           'No original frame wake/resume or output is fabricated.',
                   limits='Isolated unchanged helpers155/D2/160 and actual authored-caller '
                          'yield; mapped8KiB bootstrap profile, not hardware bootstrap, '
-                         'original full scratch/graph, timer producer, cadence or EP/output.')
-    (output/'original-gp-frame-reference.aot-private.json').write_text(
+                         'original full scratch/graph, precise profiling clock, cadence or EP/output.')
+    (output/'original-gp-frame-continuation.aot-private.json').write_text(
         json.dumps(record, indent=2)+'\n', newline='\n')
     if not all(r['expected_result'] for r in runs):
-        raise RuntimeError('original helper/guard changed; inspect preserved private evidence')
+        raise RuntimeError('original helper/prefix boundary changed; inspect preserved private evidence')
     return dict(original_helpers_qualified=True, original_boot_qualified=False,
-                guarded_address='0xffffb2', data_bytes=size)
+                original_prefix_continuation_verified=True, original_full_frame_qualified=False,
+                boundary_pc=0x2b, data_bytes=size)
 
 
 if __name__ == '__main__':

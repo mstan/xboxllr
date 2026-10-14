@@ -2153,3 +2153,38 @@ scenarios passed. Private summary and21 source snapshots are probe
 This resolves whether the exact original GP configuration can produce changing
 B3 samples in this bounded program. Runtime producer/lifecycle admission and
 the corresponding EP questions remain in A03; no full audio pass is claimed.
+
+## GP configuration producer and original first yield - 2026-10-14
+
+The existing serialized GP CPU now owns the exact composite profile
+B2=FFFFFF,B0=1,B1=1. B3 passively observes actual retired core progress; its
+nominal epoch begins only after the successful B1 instruction retires. Callback
+reads use the pre-instruction boundary cached outside the callback, with no FFI
+reentry or read-driven progress. The isolated policy is `apu_gp_counter.hpp`.
+Unsupported values/order, repeated configuration and configuration-register
+reads remain terminal; EP retains its prior guard.
+
+All11 focused tests pass in5.34s using cached backend libraries. They cover
+passive reads, instruction budgets, partial/complete profile lifetimes, five
+terminal negatives, the unchanged physical observer and the actual original
+371-word GP entry. The observer reproduces0/0/0/0/0/20/280 with exact witnesses,
+P and source RAM. Original entry reaches its first C4 yield at PC002B without
+manufactured wake, DMA, frame or output. Root independently checked all25
+handoff pins, ownership, callback boundaries and core cycle accounting.
+
+Partial/active profile reset and detach/rebind remain explicitly unsupported.
+A retained APU lifetime marker prevents a new CPU from silently recreating
+unconfigured counter state. Untouched CPU reset remains supported. Original
+GP profiling branches reconverge after the same required output calls; their
+clock identity/rate/epoch/halt/yield/wrap precision is accepted deferral AUDIO-D08.
+EP is excluded because its threshold can writeBBBBBB and spin permanently.
+Warm reset, actual wake/cadence, EP and connected title output remain active
+work. HLE processing is unchanged;6/9 families remain qualified with27 accepted
+precision questions. Private evidence and root review are in
+`build/blinx/audio-gp-counter-profile-20261014/`.
+
+The independent probe app-entry snapshot also records GP reset0, EP reset1,
+FECTL071F8F and SECTL7 before video/network, on kernel1.0.4983.6. The retained
+owned kernel's export324 reports the same version. This strengthens launch
+context investigation without proving original Blinx entry or authorizing a
+guessed initial register value. Initial SECTL context remains an A05 gate.

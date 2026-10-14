@@ -216,18 +216,27 @@ static void original_helpers(const char* path) {
 }
 static void guarded_cpu(const std::string& mode,const char* path) {
     Fixture f;std::vector<uint32_t> p;
-    if(mode=="--original-boot"){p=original(path);f.expected_guard="unqualified GP peripheral write";}
+    if(mode=="--original-boot"){p=original(path);}
     else if(mode=="yield-mask"){p={0x08f484,2};f.expected_guard="unused";}
     else {p={0x08f484,1,0x08f485,0xfff};f.expected_guard="unqualified GP event acknowledgement mask";}
     f.boot(p);xlle::ApuGpProcessor gp(f.apu,[&](const std::string& s){
         if(mode=="yield-mask"){CHECK(s.find("vendor yield control")!=std::string::npos);std::fprintf(stderr,"expected frame guard: %s\n",s.c_str());std::exit(2);}f.fault(s);
     });CHECK(gp.bootstrap_from_scratch());f.guarded_p.assign(f.apu.gp_word(0x2800),f.apu.gp_word(0x2800)+4096);f.exit_guard=true;xlle::ApuGpRun r;
+    if(mode=="--original-boot") {
+        const auto ram=f.ram;f.exit_guard=false;
+        CHECK(gp.run(20000,r) && r.yielded && r.pc==0x2b && r.power==0 && !r.sp);
+        CHECK(!f.apu.gp_dma_nodes() && !f.apu.gp_frame_outstanding() && f.ram==ram);
+        CHECK(std::equal(p.begin(),p.end(),f.apu.gp_word(0x2800)));
+        CHECK(f.owner_error.empty() && f.apu_error.empty());
+        std::puts("{\"boundary\":\"first-C4-yield\",\"pc\":43,\"power\":0,\"yielded\":true,\"dma_nodes\":0,\"frame_outstanding\":false,\"ram_unchanged\":true,\"original_prefix_loaded\":true}");
+        return;
+    }
     if(mode=="startup-late"){CHECK(gp.run(100,r) && r.yielded);xlle::ApuVoiceQuantum q;start(gp,q);}
     gp.run(20000,r);CHECK(false);
 }
 int main(int argc,char** argv) {
     if(argc==3 && std::string(argv[1])=="--original-helpers"){original_helpers(argv[2]);return 0;}
-    if(argc==3 && std::string(argv[1])=="--original-boot"){guarded_cpu(argv[1],argv[2]);return 1;}
+    if(argc==3 && std::string(argv[1])=="--original-boot"){guarded_cpu(argv[1],argv[2]);return 0;}
     if(argc==2){guarded_cpu(argv[1],nullptr);return 1;}
     CHECK(argc==1);mixed_frames();overlap_guards();admission_and_lifetimes();debt_and_selected_eol();
     std::puts("GP frame:30 real VP/GP/DMA frames, selected events, yield/budget/lease guards and lifetimes passed");

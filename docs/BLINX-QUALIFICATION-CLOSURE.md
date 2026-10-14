@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: required GP bit9 profiles qualified; preserved original graph passes | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: GP bit9 and bounded configuration producer pass; EP/wake/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -42,7 +42,26 @@ can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
-## Hardware-session tooling and next GP prerequisite - 2026-10-14
+## GP configuration continuation and remaining startup gates - 2026-10-14
+
+The unchanged original GP entry now executes its exact B2/B0/B1 configuration
+and reaches the first C4 yield at PC002B. A passive counter producer belongs
+to the existing serialized GP CPU. Its epoch begins after successful B1
+instruction retirement, and callback reads use a cached pre-instruction
+boundary without advancing time or reentering the DSP core. The frozen hardware
+observer predicts all seven raw samples exactly; eleven focused tests pass.
+Unsupported profiles, EP and unmeasured warm reset/rebind remain guarded.
+
+Original GP profiling branches reconverge after the same DMA/output operations.
+Their clock precision is explicitly deferred as AUDIO-D08; EP's threshold can
+enter a permanent error spin and is not covered by that deferral. There are now
+27 accepted precision questions (14 graphics,13 cross-family). Required wake,
+EP configuration, active FE ordering, initial title SECTL context and connected
+output remain open. This first-yield result does not manufacture a frame or
+qualify the audio family. Private evidence is
+`build/blinx/audio-gp-counter-profile-20261014/`.
+
+## Hardware-session tooling and GP observations - 2026-10-14
 
 Current result: the circular output clear/set pair also passed physically,
 establishing exact format2 SG bytes, preserved alternative destination, cursor

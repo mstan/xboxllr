@@ -7,7 +7,7 @@ now governs remaining work and family acceptance. Exhaustive scene numerical
 proof stays deferred; working LLE routing/processing and connected title evidence
 remain required. Existing blocked-fence/full64-slot evidence is reused.
 
-**Current status, 2026-10-13: 6/9 bounded families qualified.** Movies and
+**Current status, 2026-10-14: 6/9 bounded families qualified.** Movies and
 scheduling now close alongside input, display, memory and files. The full Q03
 capture completed 600 GP seconds with all seven numeric gates passing. Two
 natural openings, actual later movie interruption, title return and fresh demo
@@ -16,7 +16,15 @@ also closes; the audio family still requires original device startup/output.
 
 | Qualified | Remaining required | Deferred precision |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 26 questions, unchanged |
+| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 27 questions; GP profiling precision added as AUDIO-D08 |
+
+Required GP bit9 input/output now passes independent physical observations,
+and the unchanged preserved original graph passes all1,501 blocks and73,549
+DMA nodes. The original GP configuration also reaches its first C4 yield
+through the maintained sole CPU owner, with the hardware observer's seven
+counter samples reproduced. EP configuration, wake/reset, initial SECTL context,
+active FE ordering and actual title output remain required audio work. See the
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#gp-configuration-continuation-and-remaining-startup-gates---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable

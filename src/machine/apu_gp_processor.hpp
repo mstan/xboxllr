@@ -3,6 +3,7 @@
 #pragma once
 #include "machine/apu.hpp"
 #include "machine/apu_dsp_core.h"
+#include "machine/apu_gp_counter.hpp"
 #include <utility>
 
 namespace xlle {
@@ -59,6 +60,8 @@ private:
     bool executing_=false,bound_=false,frame_bound_=false,initializing_=false;
     bool working_=false;
     uint32_t retired_work_instructions_=0;
+    ApuGpCounterProfile counter_profile_;
+    uint32_t retired_before_instruction_=0;
 };
 class ApuGpProcessor final:public ApuDspProcessor {
 public:

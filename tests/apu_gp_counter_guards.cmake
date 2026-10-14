@@ -1,0 +1,6 @@
+foreach(mode wrong-value wrong-order repeat read-config ep)
+  execute_process(COMMAND "${PROGRAM}" "${mode}" RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 10)
+  if(NOT status EQUAL 2 OR NOT err MATCHES "expected counter boundary")
+    message(FATAL_ERROR "${mode}: missing terminal counter guard: ${status} ${out}${err}")
+  endif()
+endforeach()

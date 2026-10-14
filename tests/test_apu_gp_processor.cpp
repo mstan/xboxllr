@@ -239,7 +239,7 @@ static void cpu_publication_guard(bool bit9) {
     f.guarded_p.assign(f.apu.gp_word(0x2800),f.apu.gp_word(0x2800)+4096);f.guard_exit=true;f.unsafe_host_publication=!bit9;
     xlle::ApuGpRun result;owner.run(1000,result);CHECK(false);
 }
-static void original_boot_boundary(const char* path) {
+static void original_boot_continuation(const char* path) {
     FILE* input=std::fopen(path,"rb");CHECK(input);
     std::vector<uint32_t> words(0x5cc/4);
     CHECK(std::fread(words.data(),4,words.size(),input)==words.size());
@@ -248,11 +248,16 @@ static void original_boot_boundary(const char* path) {
     xlle::ApuGpProcessor owner(f.apu,[&](const std::string& why){f.owner_fault(why);});
     CHECK(owner.bootstrap_from_scratch());
     for(unsigned i=0;i<words.size();++i)CHECK(*f.apu.gp_word(0x2800+i)==(words[i]&0xffffff));
-    f.guarded_p.assign(f.apu.gp_word(0x2800),f.apu.gp_word(0x2800)+4096);f.guard_exit=true;
-    xlle::ApuGpRun result;owner.run(10000,result);CHECK(false);
+    const auto ram=f.ram;
+    xlle::ApuGpRun result;CHECK(owner.run(10000,result));
+    CHECK(result.yielded && result.pc==0x2b && result.power==0 && !result.sp);
+    CHECK(owner.phase()==xlle::ApuGpPhase::Yielded && !f.apu.gp_dma_nodes());
+    CHECK(!f.apu.gp_frame_outstanding() && f.ram==ram && f.owner_error.empty() && f.apu_error.empty());
+    CHECK(std::equal(words.begin(),words.end(),f.apu.gp_word(0x2800)));
+    std::puts("{\"boundary\":\"first-C4-yield\",\"pc\":43,\"power\":0,\"yielded\":true,\"dma_nodes\":0,\"frame_outstanding\":false,\"ram_unchanged\":true,\"original_prefix_loaded\":true}");
 }
 int main(int argc,char** argv) {
-    if(argc==3 && std::string(argv[1])=="--original-boot"){original_boot_boundary(argv[2]);return 1;}
+    if(argc==3 && std::string(argv[1])=="--original-boot"){original_boot_continuation(argv[2]);return 0;}
     if(argc==2){cpu_publication_guard(std::string(argv[1])=="bit9");return 1;}
     CHECK(argc==1);
     mapped_mix_lifetimes();external_program_publication();owner_and_mapping_guards();

@@ -9,6 +9,8 @@ namespace xlle {
 ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuDmaDispatchPolicy policy)
     :apu_(apu),kind_(kind),policy_(policy),fault_(std::move(fault)) {
     if(apu_.faulted()){fail("GP owner requires an available APU");return;}
+    if(kind_==ApuDspKind::Gp && apu_.gp_counter_profile_touched_)
+        {fail("GP counter profile requires its retained CPU owner; warm rebind is unqualified");return;}
     if(!policy_.retired_instructions_per_quantum || policy_.retired_instructions_per_quantum>4096)
         {fail("invalid GP nominal DMA dispatch policy");return;}
     if(apu_.dsp_work_active() || apu_.dsp_dma_pending(kind_))
@@ -56,6 +58,7 @@ bool ApuDspProcessor::reset_cpu() {
     if(executing_ || working_ || apu_.dsp_work_active())return fail("reentrant GP CPU reset");
     if(apu_.dsp_dma_pending(kind_))return fail("GP CPU reset with pending DMA remains unqualified");
     if(kind_==ApuDspKind::Gp && apu_.gp_frame_outstanding())return fail("GP CPU reset with an outstanding frame remains unqualified");
+    if(counter_profile_.touched())return fail("GP CPU reset after counter configuration remains unqualified");
     xlle_dsp_core_reset(core_);
     initializing_=false;retired_work_instructions_=0;phase_=ApuGpPhase::Held;
     return true;
@@ -112,7 +115,12 @@ bool ApuDspProcessor::run(uint32_t cycles,ApuGpRun& result) {
         // The pinned block escape ABI only covers selected peripheral opcodes;
         // its single-instruction entry supplies the boundary for every form.
         // This correctness owner is absent from the default fast HLE path.
+        retired_before_instruction_=xlle_dsp_core_cycles(core_);
         executing_=true;const bool stepped=xlle_dsp_core_step_budget(core_);executing_=false;
+        // All FFI access occurs outside the callback. Commit a completed B1
+        // instruction before any subsequent read or queued device dispatch.
+        if(stepped && phase_!=ApuGpPhase::Failed && !apu_.faulted())
+            counter_profile_.retired(xlle_dsp_core_cycles(core_));
         if(!stepped)return fail("GP actual instruction budget accounting failed");
         if(phase_==ApuGpPhase::Failed || apu_.faulted())return fail("GP CPU/device work failed");
         if(!dispatch_work())return false;
@@ -148,6 +156,12 @@ bool ApuDspProcessor::start_gp_frame(ApuVoiceQuantum& result) {
 }
 uint32_t ApuDspProcessor::read(void* opaque,uint32_t address) {
     auto& owner=*static_cast<ApuDspProcessor*>(opaque);
+    if(address==0xffffb3 && owner.kind_==ApuDspKind::Gp) {
+        if(!owner.executing_ || owner.phase_==ApuGpPhase::Failed) {
+            owner.fail("GP counter read requires the serialized CPU owner");std::abort();
+        }
+        return owner.counter_profile_.observe(owner.retired_before_instruction_);
+    }
     uint32_t value=0;
     if(!(owner.kind_==ApuDspKind::Gp?owner.apu_.gp_read(address,value):owner.apu_.ep_read(address,value))) {
         char why[80];std::snprintf(why,sizeof(why),"GP CPU peripheral read failed at %06x",address);
@@ -157,6 +171,19 @@ uint32_t ApuDspProcessor::read(void* opaque,uint32_t address) {
 }
 void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
     auto& owner=*static_cast<ApuDspProcessor*>(opaque);
+    if(address>=0xffffb0 && address<=0xffffb3 && owner.kind_==ApuDspKind::Gp) {
+        if(owner.kind_!=ApuDspKind::Gp || !owner.executing_ ||
+           owner.phase_==ApuGpPhase::Failed || !owner.counter_profile_.permits(address,value)) {
+            owner.fail("unqualified GP counter configuration profile");std::abort();
+        }
+        if(!owner.counter_profile_.touched()) {
+            if(owner.apu_.gp_program_owner_!=&owner) {
+                owner.fail("GP counter configuration lacks program ownership");std::abort();
+            }
+            owner.apu_.gp_counter_profile_touched_=true;
+        }
+        owner.counter_profile_.write(address,value);return;
+    }
     if(address==0xffffc4) {
         if(value!=1 || !owner.executing_) {
             owner.fail("unqualified GP vendor yield control");std::abort();
