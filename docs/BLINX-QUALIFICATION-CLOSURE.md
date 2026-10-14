@@ -64,6 +64,16 @@ Private evidence: probe `results/gp-output-physical-20261014/`, main
 `build/blinx/audio-gp-original-output-20261014/`. The chronological observations
 below retain earlier guards and failures without changing their meaning.
 
+The next finite GP configuration observation also completed. With exactly the
+original B2=FFFFFF/B0=1/B1=1 stores, raw B3 samples were0,0,0,0,0,20,280.
+The preconfiguration16-NOP interval stayed zero; subsequent16/256-NOP intervals
+plus sample/store instructions advanced20/260. All38 fields, witnesses,
+canaries and immutable P passed; separate hold/SG restoration matched.
+No DMA START, frame event, EP, storage or boot operation occurred. This supplies
+a concrete configuration/counter observation for the next producer decision;
+it does not yet determine clock source, rate, epoch, halt/wake or EP behavior.
+Private evidence: probe `results/gp-b3-physical-20261014/summary.aot-private.json`.
+
 The original-sequence input-only baseline subsequently copied all four expected
 scatter/gather source words into X0400-X0403. Its descriptor and eight new run
 witnesses matched, and all 2,044 immutable program words plus the four excluded

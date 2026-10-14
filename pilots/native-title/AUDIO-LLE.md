@@ -2131,3 +2131,25 @@ Private model evidence is `build/blinx/audio-gp-output-admission-20261014/`;
 graph executable, inputs, source identities and logs are pinned under
 `build/blinx/audio-gp-original-output-20261014/`. Probe compatibility checks
 retain GP unknown-bit and EP rejection plus16 synthetic DSP control cases.
+
+## Physical GP configuration/counter observation - 2026-10-14
+
+A fresh owned finite observer executed exactly the original X:B2=FFFFFF,
+B0=1,B1=1 sequence, without DMA descriptors/START or frame events. Seven B3
+samples were0,0,0,0,0,20,280. The16-NOP preconfiguration interval stayed zero;
+postconfiguration intervals containing16/256 NOPs plus ordinary sample/store
+instructions advanced20/260. These are raw observed deltas, not yet proof of
+the clock source, rate, epoch, wrap or progress while halted/yielded.
+
+All38 bank fields, exact counts/stage/token, eight fresh witnesses, preserved
+X/Y/P targets and2,044 immutable P words passed. Root bound every reply and
+payload to the reviewed owner, including immutable-P verification. Separate
+retirement rechecked the completed program and fields before hold and original
+SG restoration; both immediate readbacks matched. No old RAM read/free or
+B-register restoration was used. Four focused offline tests and17 retirement
+scenarios passed. Private summary and21 source snapshots are probe
+`results/gp-b3-physical-20261014/summary.aot-private.json`.
+
+This resolves whether the exact original GP configuration can produce changing
+B3 samples in this bounded program. Runtime producer/lifecycle admission and
+the corresponding EP questions remain in A03; no full audio pass is claimed.
