@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: original EP reaches first yield after empty event clear; wake/CA/D5/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: EP register batch and original config tail pass; real wake/reset/cadence remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,29 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## EP configuration batch and original tail - 2026-10-14
+
+A fresh hardware batch established the reached EP C5=FFF, CA=0, D7=0 and
+D5/D4=4000 configuration readbacks with no DMA or output. All34 fields and2048
+loaded P words passed. Initial D6 was0, correcting the model's unsupported
+EP STOPPED default. CA supports only the observed zero profile; D5 admits
+the exact4000 empty-list seed while other unobserved EOL seeds stay guarded.
+The maintained CPU matches the frozen observer's full result, with observed
+initial D5 supplied as captured context, and rejects a wrong CA golden.
+
+An authored caller now executes the unchanged original post-yield setup tail
+at02F3 through its actual RET, preserving RAM and DSP banks and producing no
+DMA. The full original entry still ends at its genuine first yield: a real
+wake has not been supplied. First-yield,30 EP packets,30 GP frames, retained
+bit9/counter/owner guards and the busy-configuration rejection pass. HLE
+processing is unchanged. Evidence: `build/blinx/audio-ep-config-20261014/`;
+probe evidence: `results/ep-startup-registers-20261014-v2/`.
+
+The dashboard SMC restart and remote probe return then completed without user
+input; previous hardware allocation ownership is retired. Required EP wake,
+CPU control/reset, cadence/708000 threshold, active FE and connected output
+remain open. The count remains6/9, with27 accepted precision deferrals.
 
 ## Resumed EP startup: first yield - 2026-10-14
 

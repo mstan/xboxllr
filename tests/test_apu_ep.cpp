@@ -132,6 +132,22 @@ static void executable_publication_and_yield() {
     // with an empty EP event word and an existing yielded owner.
     CHECK(!leased.apu.ep_write(0xffffc5,0xfff) && leased.apu.faulted());
 }
+static void observed_empty_configuration() {
+    Fixture f;unsigned value=~0u;
+    CHECK(f.apu.ep_read(0xffffd6,value) && value==0);
+    CHECK(f.apu.ep_read(0xffffca,value) && value==0);
+    const auto ram=f.ram;
+    CHECK(f.apu.ep_write(0xffffca,0) && f.apu.ep_write(0xffffd5,0x4000) &&
+          f.apu.ep_write(0xffffd4,0x4000) && f.apu.ep_write(0xffffd7,0));
+    for(unsigned address:{0xffffd4u,0xffffd5u})CHECK(f.apu.ep_read(address,value) && value==0x4000);
+    for(unsigned address:{0xffffc5u,0xffffcau,0xffffd6u,0xffffd7u})CHECK(f.apu.ep_read(address,value) && value==0);
+    CHECK(!f.apu.dsp_dma_pending(xlle::ApuDspKind::Ep) && !f.apu.ep_dma_nodes() && f.ram==ram);
+    // Configuration cannot silently discard real pending DMA.
+    Fixture busy;busy.descriptor(true,0x20,0x4000,0x59e0,1,0x200,0x2ffd);
+    CHECK(busy.apu.ep_write(0xffffd4,0x20) && busy.apu.ep_write(0xffffd6,1));
+    CHECK(!busy.apu.ep_write(0xffffca,0) && busy.apu.faulted() && !busy.apu.ep_dma_nodes());
+    Fixture gp;CHECK(!gp.apu.gp_write(0xffffca,0) && gp.apu.faulted());
+}
 static void coherent_lifetimes() {
     for(unsigned life=0;life<3;++life) {
         Fixture f;f.voice(71,false,0,4096);f.voice(96,true,0,8192,-16384);
@@ -213,9 +229,40 @@ static void contexts_and_failures() {
 static std::vector<uint32_t> original(const char* path) {
     FILE* file=std::fopen(path,"rb");CHECK(file);std::vector<uint32_t> p(2048);CHECK(std::fread(p.data(),4,p.size(),file)==p.size() && std::fgetc(file)==EOF);std::fclose(file);for(auto& v:p)v&=0xffffff;return p;
 }
+static void physical_configuration(const char* image,const char* observations) {
+    std::vector<uint32_t> p(4096),values(34);
+    FILE* file=std::fopen(image,"rb");CHECK(file);CHECK(std::fread(p.data(),4,4096,file)==4096 && std::fgetc(file)==EOF);std::fclose(file);
+    file=std::fopen(observations,"rb");CHECK(file);CHECK(std::fread(values.data(),4,34,file)==34 && std::fgetc(file)==EOF);std::fclose(file);
+    CHECK(values[4]==0x4000);
+    Fixture f;f.boot(true,std::vector<uint32_t>(p.begin(),p.begin()+2048));
+    // Captured pre-stimulus D5 is an input context, not a universal reset value.
+    CHECK(f.apu.ep_write(0xffffd5,values[4]));
+    xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
+    const auto ram=f.ram;const auto banks=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+    const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+    xlle::ApuEpRun r;CHECK(ep.run(10000,r) && !r.power && !r.sp && !r.yielded);
+    std::vector<uint32_t> expected=banks;unsigned slot=0;
+    for(unsigned i=0x100;i<0x10d;++i)expected[i]=values[slot++];
+    for(unsigned i=0x110;i<0x118;++i)expected[i]=values[slot++];
+    for(unsigned i=0x200;i<0x205;++i)expected[i]=values[slot++];
+    for(unsigned i=0x400;i<0x404;++i)expected[i]=values[slot++];
+    for(unsigned i=0x1840;i<0x1844;++i)expected[i]=values[slot++];
+    CHECK(slot==34 && std::equal(expected.begin(),expected.end(),f.apu.ep_word(0)));
+    CHECK(std::equal(p.begin(),p.begin()+2048,f.apu.ep_word(0x2800)) && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
+    CHECK(f.ram==ram && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes() && !f.apu.dsp_dma_pending(xlle::ApuDspKind::Ep));
+    CHECK(f.apu_error.empty() && f.owner_error.empty());
+    std::puts("Frozen EP physical observer:34 exact fields,2048 P words, other EP/GP banks and RAM preserved; initial D5 supplied as captured context, no wake/DMA/output claim");
+}
 static void cpu_guard(const std::string& mode,const char* path) {
     Fixture f;std::vector<uint32_t> p;
-    if(mode=="--original-entry") {p=original(path);}
+    if(mode=="--original-entry" || mode=="--original-config-tail") {
+        p=original(path);
+        if(mode=="--original-config-tail") {
+            p[0]=0x0af080;p[1]=0x700;
+            // Authored caller of unchanged post-yield setup; no claimed wake.
+            p[0x700]=0x0bf080;p[0x701]=0x2f3;p[0x702]=0x87;
+        }
+    }
     else if(mode=="--original-bit9") {
         p=original(path);p[0]=0x0af080;p[1]=0x700;
         // Original276 and2E1 remain unchanged; builder owns its actual P node.
@@ -225,6 +272,17 @@ static void cpu_guard(const std::string& mode,const char* path) {
     else if(mode=="bank") {p={0x65f400,0xbfc,0x021594,0x87};f.expected_guard="unmapped DSP read";}
     else {p={0x08f494,0x20,0x08f496,1,0x87};f.expected_guard="EP executable host publication during DMA work";}
     f.boot(true,p);xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
+    if(mode=="--original-config-tail") {
+        const auto ram=f.ram;const auto banks=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+        const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+        xlle::ApuEpRun r;CHECK(ep.run(1000,r) && r.pc==0x703 && r.power==2 && !r.sp && !r.yielded);
+        unsigned v;for(unsigned a:{0xffffd4u,0xffffd5u})CHECK(f.apu.ep_read(a,v) && v==0x4000);
+        for(unsigned a:{0xffffc5u,0xffffcau,0xffffd6u,0xffffd7u})CHECK(f.apu.ep_read(a,v) && !v);
+        CHECK(!f.apu.ep_dma_nodes() && !f.apu.dsp_dma_pending(xlle::ApuDspKind::Ep) && f.ram==ram);
+        CHECK(std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)) && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
+        CHECK(f.apu_error.empty() && f.owner_error.empty());
+        std::puts("original EP configuration tail: CA0/D5=4000/D4=4000/D7=0, actual RET, no DMA/output; authored caller, no wake claim");return;
+    }
     if(mode=="--original-entry") {
         const auto ram=f.ram;const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
         xlle::ApuEpRun r;CHECK(ep.run(10000,r) && r.yielded && r.pc==0x2f3 && r.sp==2 && !r.power);
@@ -247,8 +305,9 @@ static void cpu_guard(const std::string& mode,const char* path) {
     xlle::ApuEpRun r;ep.run(10000,r);CHECK(false);
 }
 int main(int argc,char** argv) {
-    if(argc==3){cpu_guard(argv[1],argv[2]);return std::string(argv[1])=="--original-entry"?0:1;}
+    if(argc==4 && std::string(argv[1])=="--physical-config"){physical_configuration(argv[2],argv[3]);return 0;}
+    if(argc==3){cpu_guard(argv[1],argv[2]);return (std::string(argv[1])=="--original-entry" || std::string(argv[1])=="--original-config-tail")?0:1;}
     if(argc==2){cpu_guard(argv[1],nullptr);return 1;}
-    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();
+    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();
     std::puts("APU EP:30 real VP/GP/scratch/EP/FIFO PCM packets, static distinct banks, owner replacement/remap, exact output RAM and terminal failures passed; cadence/AC97/original boot remain guarded");
 }

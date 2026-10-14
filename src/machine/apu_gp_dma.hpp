@@ -22,11 +22,14 @@ public:
     ApuDspDma(Word word,Bytes bytes,Fifo fifo,Fault fault,ProgramWrite program_write={},MixWrite mix_write={},ApuDspKind kind=ApuDspKind::Gp)
         :word_(std::move(word)),bytes_(std::move(bytes)),fifo_(std::move(fifo)),
          fault_(std::move(fault)),program_write_(std::move(program_write)),mix_write_(std::move(mix_write)),kind_(kind),
-         control_(kind==ApuDspKind::Gp?0u:32u){}
+         control_(0u){} // Observed fresh GP and held-to-running EP both report zero.
     bool read(uint32_t address,uint32_t& value) {
         if(failed_)return false;
         switch(address) {
         case 0xffffc5:value=interrupts_;return true;
+        case 0xffffca:
+            if(kind_!=ApuDspKind::Ep)return fail("unqualified GP context register");
+            value=0;return true;
         case 0xffffd4:value=next_;return true;
         case 0xffffd5:value=start_;return true;
         case 0xffffd6:value=control_;return true;
@@ -40,13 +43,20 @@ public:
         case 0xffffc5:
             if(value&~0x80u)return fail("unqualified GP interrupt acknowledgement");
             interrupts_&=~value;return true;
+        case 0xffffca:
+            // The reached EP zero profile reads back zero on hardware. No
+            // nonzero meaning or effect on wake/DMA/interrupts is inferred.
+            if(kind_!=ApuDspKind::Ep || value || servicing_ || active_)
+                return fail("unqualified GP context register configuration");
+            return true;
         case 0xffffd4:
             if(servicing_ || active_)return fail("GP DMA pointer publication overlaps active work");
             if(value&~0x7fffu)return fail("invalid GP DMA node pointer");
             next_=value;return true;
         case 0xffffd5:
             if(servicing_ || active_)return fail("GP DMA start publication overlaps active work");
-            if(value&~0x3fffu)return fail("invalid GP DMA start pointer");
+            if((value&~0x3fffu) && !(kind_==ApuDspKind::Ep && value==0x4000))
+                return fail("invalid GP DMA start pointer");
             start_=value;return true;
         case 0xffffd7:
             if(servicing_ || active_)return fail("GP DMA configuration overlaps active work");

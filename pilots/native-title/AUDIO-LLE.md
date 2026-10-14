@@ -4,14 +4,30 @@ Tracked by `beads-xbox.1.113`. Audio is the active independent offline family;
 the original-scheduler/GPU startup experiments are not prerequisites. The family
 remains **open**, and the overall burndown is **6/9 qualified**. Earlier dated
 observations retain their historical counts. Hardware access has resumed after
-the dashboard migration; the latest offline result is the original EP first
-yield, described below and in the bounded closing checklist.
+the dashboard migration; the latest result is the physical EP register batch
+and original configuration tail, described in the bounded closing checklist.
 
 The native title continues to select its real XAudio2/DSP implementation.
 The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driver
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
+
+## Physical EP configuration and original tail - 2026-10-14
+
+The hardware batch's five matched write/readback pairs establish the reached
+empty configuration: C5 acknowledgement, CA0, D7=0 and D5/D4=4000. The model
+now supports only that CA profile and exact EP empty-list seed, and uses the
+observed initial D6=0 instead of an unsupported STOPPED default. Configuration
+during active DMA still rejects. No GP CA support or EP wake is inferred.
+
+All34 physical fields and2048 loaded P words match on the maintained EP CPU,
+using initial D5=4000 as explicit captured input. A wrong CA expectation fails.
+The unchanged original02F3 tail also executes to RET through an authored
+caller with exact register state and preserved RAM/banks. Full original entry
+still yields at02F3/SP2; this helper call does not replace a real wake.
+The existing30 EP packets,30 GP frames and retained guards pass. Evidence:
+`build/blinx/audio-ep-config-20261014/`. HLE processing is unchanged.
 
 ## Original EP first yield - 2026-10-14
 

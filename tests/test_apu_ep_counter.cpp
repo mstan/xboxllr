@@ -125,8 +125,8 @@ static void rejected(const std::string& mode) {
     else if(mode=="repeat")p={0x07f432,0xffffff,0x07f432,0xffffff,0x87};
     else if(mode=="read-config")p={0x44f000,0xffffb2,0x87};
     else if(mode=="write-b3")p={0x07f433,1,0x87};
-    else if(mode=="ca")p={0x08f48a,0,0x87};
-    else if(mode=="d5-seed")p={0x08f495,0x4000,0x87};
+    else if(mode=="ca")p={0x08f48a,1,0x87};
+    else if(mode=="d5-seed")p={0x08f495,0x4001,0x87};
     else p={0x08f485,0x7ff,0x87}; // Only exact FFF in the empty bootstrap context is admitted.
     f.boot(p);f.terminal_guard=true;
     f.expected_error=mode=="read-config"?"at ffffb2":mode=="ca"?"at ffffca":mode=="d5-seed"?"at ffffd5":mode=="c5"?"at ffffc5":"counter configuration profile";

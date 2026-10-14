@@ -2,9 +2,10 @@
 """Bind original EP bootstrap/helpers to explicit maintained EP guards.
 
 Original bytes remain private under build/. The actual original entry reaches
-its first C4 yield after the resident SEN prefix and empty C5 clear. An authored caller executes the unchanged
-original linear builder/transfer helper and stops on its unknown descriptor bit9.
-Neither result claims an original EP boot, graph, cadence or audible output pass.
+its first C4 yield after the resident SEN prefix and empty C5 clear. Authored
+callers execute the unchanged post-yield configuration tail and linear
+builder/transfer helper; the latter stops on its unknown descriptor bit9.
+These results do not claim a complete original EP boot, cadence or output pass.
 """
 import argparse
 import hashlib
@@ -51,12 +52,13 @@ def check(image, processor, output):
     boot.write_bytes(boot_data)
     runs = []
     for mode, guard in (('--original-entry', 'original EP first C4 yield: PC02F3 SP2'),
+                        ('--original-config-tail', 'original EP configuration tail: CA0/D5=4000/D4=4000/D7=0'),
                         ('--original-bit9', 'unqualified EP DMA descriptor format')):
         run = subprocess.run([str(processor), mode, str(boot)],
                              capture_output=True, text=True, timeout=20)
         log = output/f'original-ep-{mode[2:]}.aot-private.log'
         log.write_text(run.stdout+run.stderr, newline='\n')
-        passed = (run.returncode == 0 and guard in run.stdout) if mode=='--original-entry' else (
+        passed = (run.returncode == 0 and guard in run.stdout) if mode!='--original-bit9' else (
                   run.returncode == 2
                   and 'expected EP guard before sample/node/output publication' in run.stderr
                   and guard in run.stderr)
@@ -66,11 +68,12 @@ def check(image, processor, output):
                   mapped_source_sha256=sha(boot), processor_sha256=sha(processor),
                   tool_sha256=sha(Path(__file__)), runs=runs,
                   original_boot_qualified=False, original_output_qualified=False,
-                  scope='Actual original EP entry plus unchanged 0276 linear builder and '
-                        '02E1 transfer/control helper on the distinct EP CPU/banks.',
+                  scope='Actual original EP entry plus unchanged 02F3 configuration tail, '
+                        '0276 linear builder and 02E1 transfer/control helper on the distinct EP CPU/banks.',
                   limits='Exact passive B0-B3 profile and hardware-resident SEN prefix '
-                         'and an empty initial C5 clear are admitted; wake, CA/D5 context '
-                         'and descriptor bit9 stay guarded. '
+                         'and an empty initial C5 clear are admitted. The unchanged post-yield '
+                         'CA0/D5/D4 empty-list/D7 tail passes with an authored caller; '
+                         'wake and descriptor bit9 stay guarded. '
                          'The checks preserve source RAM, GP banks and FIFO cursor '
                          'with no EP DMA publication. Full spill/refill is not implemented. '
                          'The helper caller is authored; dynamic code/table blocks are not '
