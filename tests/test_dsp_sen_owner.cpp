@@ -1,4 +1,4 @@
-// Production EP owner reaches the first yield after the resident SEN prefix.
+// Production EP owner passes C4 and reaches the real poll after resident SEN.
 #include "machine/apu_ep_processor.hpp"
 #include <algorithm>
 #include <array>
@@ -47,16 +47,17 @@ int main(int argc,char** argv) {
         std::fprintf(stderr,"unexpected original EP failure: %s\n",why.c_str());CHECK(false);
     });
     CHECK(ep.bootstrap_from_scratch());xlle::ApuGpRun result;
-    CHECK(ep.run(20000,result) && result.yielded && result.pc==0x2f3 && result.sp==2 && !result.power);
+    CHECK(ep.run(20000,result) && !result.yielded && (result.pc==0x31 || result.pc==0x32) && !result.sp && !result.power);
     CHECK(f.ram==f.before);
     CHECK(!f.apu.gp_dma_nodes() && !f.apu.ep_dma_nodes());
     CHECK(std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
     CHECK(*f.apu.ep_word(0x2801)==0 && *f.apu.ep_word(0x2802)==1 && *f.apu.ep_word(0x2803)==1 && *f.apu.ep_word(0x2804)==0 && *f.apu.ep_word(0x2805)==0);
+    CHECK(*f.apu.ep_word(0x2807)==((p[7]+1)&0xffffff)); // Original29..2C before its first real poll.
     CHECK(*f.apu.ep_word(0x2800+0x19e)==workspace && *f.apu.ep_word(0x2800+0x19f)==workspace_words);
     for(unsigned i=0x122;i<0x140;++i)CHECK(!*f.apu.ep_word(0x2800+i));
-    for(unsigned i=0;i<2048;++i){if(i==1 || i==2 || i==3 || (i>=0x122 && i<0x140) || i==0x19e || i==0x19f)continue;CHECK(*f.apu.ep_word(0x2800+i)==p[i]);}
+    for(unsigned i=0;i<2048;++i){if(i==1 || i==2 || i==3 || i==7 || (i>=0x122 && i<0x140) || i==0x19e || i==0x19f)continue;CHECK(*f.apu.ep_word(0x2800+i)==p[i]);}
     for(unsigned i=0;i<0xc00;++i)CHECK(*f.apu.ep_word(i)==0);
     for(unsigned i=0;i<0x100;++i)CHECK(*f.apu.ep_word(0x1800+i)==0);
     uint32_t events=~0u;CHECK(f.apu.ep_read(0xffffc5,events) && !events);
-    std::puts("Original production EP owner: SEN resident prefix reached first C4 yield PC02F3/SP2; empty event clear, no wake/DMA/output, P workspace30words cleared, X/Y/GP/sourceRAM unchanged.");
+    std::puts("Original production EP owner: SEN resident prefix and configuration returned to C5 poll PC0031/0032 SP0; no event/DMA/output, P workspace30words cleared, X/Y/GP/sourceRAM unchanged.");
 }

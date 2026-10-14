@@ -22,7 +22,10 @@ ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuD
         xlle_dsp_core_create_ep(apu_.ep_word(0x2800),apu_.ep_word(0),apu_.ep_word(0x1800),this,read,write,core_fault);
     if(!core_){fail("GP CPU allocation failed");return;}
     bound_=kind_==ApuDspKind::Gp?apu_.bind_gp_program_owner(this,[this]{return permit_program_write();}):
-                               apu_.bind_ep_program_owner(this,[this]{return permit_program_write();});
+                               apu_.bind_ep_program_owner(this,[this]{return permit_program_write();},[this]{
+                                   if(executing_ || working_)return fail("reentrant EP frame publication");
+                                   return phase_==ApuGpPhase::Ready || phase_==ApuGpPhase::Running;
+                               });
     if(!bound_){fail("GP CPU program banks already have an owner");return;}
     if(kind_==ApuDspKind::Gp) {
         frame_bound_=apu_.bind_gp_frame_owner(this,[this]{return executing_ && initializing_ &&
@@ -198,23 +201,24 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
             // C4=1 is a control publication, not a DSP power/halt operation.
             // Let the original C5 polling instructions wait for a real event.
             owner.apu_.ep_control_value_=value;owner.apu_.ep_control_written_=true;
+            owner.apu_.ep_frame_status_&=~2u;owner.apu_.ep_frame_requested_=true;
             owner.initializing_=false;return;
         }
         xlle_dsp_core_set_halted(owner.core_,1);return;
     }
     if(owner.kind_==ApuDspKind::Ep && address==0xffffc5 && value==2) {
-        // Reached original startup clears an empty frame event after its
-        // configuration returns. The shared W1C operation cannot create an
-        // event, consume DMA completion or admit a later unqualified frame.
+        // Hardware retains102 after this original command. C4, not this
+        // write, clears the frame bit. The command cannot consume DMA EOL
+        // or manufacture an event; clock publication is a separate owner.
         uint32_t events=0;
         if(!owner.executing_ || !owner.apu_.ep_control_written_ || owner.initializing_ ||
-           owner.phase_==ApuGpPhase::Failed || owner.apu_.ep_dma_nodes() ||
+           owner.phase_==ApuGpPhase::Failed ||
            owner.apu_.dsp_dma_pending(ApuDspKind::Ep) ||
-           !owner.apu_.ep_read(address,events) || events) {
-            owner.fail("EP empty startup frame acknowledgement requires idle control ownership");std::abort();
+           !owner.apu_.ep_read(address,events) || (events&~0x102u)) {
+            owner.fail("EP frame command requires idle control ownership and observed event bits");std::abort();
         }
         if(!owner.apu_.ep_write(address,0)) {
-            owner.fail("EP empty startup frame acknowledgement failed");std::abort();
+            owner.fail("EP frame command failed");std::abort();
         }
         return;
     }

@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: EP C4 halt corrected; original startup reaches real event wait; event/reset/cadence remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: EP event handshake and empty-list cadence observed; original first event reaches EP DMA guard; reset/timer/EP descriptors remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,53 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## EP clock-owned events and original first-event boundary - 2026-10-14
+
+Eight physical EP events completed with GP held and all nine voice-list words
+empty. Successive QPC intervals were17996..18007 ticks at3375000 Hz, about
+5.333 ms; successive B3 deltas were710998..711002. The initial event's phase
+was measured separately and is not treated as a complete period. DSP C5 read102
+at the event and still read102 after C5=2. The following C4=1 cleared bit1,
+retaining100, before the next actual polling loop. The meaning of background
+bit8 and general CPU/DSP register aliases remain unassigned.
+
+The bounded batch stopped SE successfully with exact readback, then verified
+all34 fields, fresh ownership, canaries and2048 loaded P words. Two preceding
+batches stopped immediately at newly observed event/acknowledgement values,
+retained read-only evidence and used separate dashboard/SMC recovery. The
+successful batch also completed remote recovery and fresh probe PING/INFO;
+all prior allocation addresses are retired. No user intervention was needed.
+
+The maintained APU now publishes EP events through its existing absolute
+setup-frame clock, gated by SE/FE and the retained, running EP CPU. Executed
+C4 requests the next event and clears bit1; C5=2 retains it. Register reads
+cannot advance this clock. CPU teardown clears the callback while retaining
+device control/event history; warm rebind remains guarded. Pending DMA cannot
+be silently completed or bypassed by frame publication. The same real CPU
+executes the frozen observer: eight events,25 exact control/canary fields,
+2048 P words and unchanged other EP/GP banks and RAM. Nine B3 samples are
+explicitly excluded from this control comparison, not normalized to pass.
+
+Three clock/owner lifetimes, disabled-SE and halted-FE checks, busy-DMA rejection,
+30 EP packet/30 GP frame cases and retained startup guards pass. The original
+SEN test now follows actual startup through its configuration return and
+P7 increment to PC0031/0032, SP0; its old C4-halt expectation was stale. Giving
+that unchanged original program its first clock-owned event reaches the real
+EP DMA descriptor-format guard before any transfer or output. This identifies
+the next required processing boundary without inventing a PC or completion.
+This retained image contains original bootstrap/helper code but STOP fill in
+the dynamic table at P0100..0119. The next step is the original driver's real
+table/scratch publication; this boundary is not evidence that an arbitrary
+descriptor from that unpopulated table needs a new hardware experiment.
+
+The physical cadence observation does not qualify exact instruction timing,
+the known configured-prefix B3 discrepancy, the original708000 threshold,
+late/missed-frame behavior, active FE ordering, EP bit9 transport or reset.
+Connected title output still requires those owners and the initial SECTL
+context. GP's separate C4 behavior is not inferred from EP. HLE processing is
+unchanged. Evidence: `build/blinx/audio-ep-event-20261014/`; physical probe:
+`results/ep-event-20261014-v3/`. Count remains6/9 and27 precision deferrals.
 
 ## EP C4 continuation correction - 2026-10-14
 

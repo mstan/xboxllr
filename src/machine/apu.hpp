@@ -205,7 +205,9 @@ public:
         return ep_words_->data()+address;
     }
     bool ep_read(uint32_t address,uint32_t& value) {
-        return !faulted_ && ep_dma_.read(address,value);
+        if(faulted_ || !ep_dma_.read(address,value))return false;
+        if(address==0xffffc5)value|=ep_frame_status_;
+        return true;
     }
     bool ep_write(uint32_t address,uint32_t value) {
         fe_context_known_=false;fe_state_used_=true;
@@ -217,6 +219,7 @@ public:
         if(!ep_control_written_)return false;
         value=ep_control_value_;return true;
     }
+    uint64_t ep_frame_events()const{return ep_frame_events_;}
     uint64_t ep_dma_nodes()const{return ep_dma_.nodes();}
     bool dsp_dma_pending(ApuDspKind kind)const{return kind==ApuDspKind::Gp?gp_dma_.work_pending():ep_dma_.work_pending();}
     bool dsp_work_active()const{return gp_dma_working_ || ep_dma_working_;}
@@ -229,15 +232,15 @@ public:
         working=false;return done && !faulted_;
     }
     uint64_t ep_program_revision()const{return ep_program_revision_;}
-    bool bind_ep_program_owner(void* owner,ApuDspDma::ProgramWrite guard) {
+    bool bind_ep_program_owner(void* owner,ApuDspDma::ProgramWrite guard,std::function<bool()> frame_owner={}) {
         if(!owner || !guard || ep_program_owner_)return false;
         fe_context_known_=false;fe_state_used_=true;
-        ep_program_owner_=owner;ep_program_guard_=std::move(guard);return true;
+        ep_program_owner_=owner;ep_program_guard_=std::move(guard);ep_frame_owner_=std::move(frame_owner);return true;
     }
     void unbind_ep_program_owner(void* owner) {
         if(ep_program_owner_==owner){
             if(ep_dma_.work_pending() && !faulted_)device_fault("EP CPU owner removed with pending DMA");
-            ep_program_owner_=nullptr;ep_program_guard_={};
+            ep_program_owner_=nullptr;ep_program_guard_={};ep_frame_owner_={};
         }
     }
     bool gp_read(uint32_t address,uint32_t& value) {
@@ -976,6 +979,16 @@ private:
                 set_reg32(kVoiceCurrent[list], voice);
             }
         }
+        // The existing absolute setup-engine clock owns EP event production.
+        // Hardware produces102 at 256/48000s with GP held and empty voices.
+        // C5=2 leaves it pending; a subsequent executed C4 requests the next
+        // event and clears bit1 while retaining observed background bit8.
+        if(ep_frame_requested_ && ep_program_owner_ && ep_frame_owner_ && ep_frame_owner_()) {
+            if(dsp_work_active() || ep_dma_.work_pending()) {
+                device_fault("EP frame publication overlaps unqualified DMA work");return;
+            }
+            ep_frame_requested_=false;ep_frame_status_=0x102;++ep_frame_events_;
+        }
     }
 
     void log_subregion(const char* what, uint32_t off) {
@@ -1010,6 +1023,9 @@ private:
     bool gp_counter_profile_touched_=false,ep_counter_profile_touched_=false;
     bool ep_control_written_=false;
     uint32_t ep_control_value_=0;
+    bool ep_frame_requested_=false;
+    uint32_t ep_frame_status_=0;
+    uint64_t ep_frame_events_=0;
     uint64_t gp_program_revision_=0;
     void* gp_program_owner_=nullptr;
     ApuGpDma::ProgramWrite gp_program_guard_;
@@ -1020,6 +1036,7 @@ private:
     std::unique_ptr<std::array<uint32_t,0x3800>> ep_words_;
     uint64_t ep_program_revision_=0;
     void* ep_program_owner_=nullptr;
+    std::function<bool()> ep_frame_owner_;
     ApuDspDma::ProgramWrite ep_program_guard_;
     ApuDspDma ep_dma_;
     bool gp_dma_working_=false,ep_dma_working_=false;

@@ -1,5 +1,6 @@
 // Explicit EP CPU selection over the same maintained DSP/run/DMA ownership.
-// No EP frame admission/cadence, timer, bit9 or AC97 behavior is supplied.
+// EP events use the maintained setup-frame clock and observed C4/C5 handshake.
+// CPU reset, exact timer/708000 threshold, bit9 and connected output remain open.
 #pragma once
 #include "machine/apu_gp_processor.hpp"
 namespace xlle {
