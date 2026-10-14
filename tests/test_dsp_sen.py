@@ -33,9 +33,9 @@ class SenTests(unittest.TestCase):
         r=subprocess.run([checker,'--original',str(image)],capture_output=True,text=True,timeout=10)
         self.assertEqual(r.returncode,2,r.stdout+r.stderr)
         self.assertEqual(json.loads(r.stdout),dict(boundary='original_EP_C5_FFF_attempt_before_yield',pc=0x2ef,sp=2,sc=2,maximum_depth=3,workspace_P_words_cleared=30,EP=0xbe0,SZ=32,extension_memory_unchanged=True,acknowledgement_supplied=False))
-    def test_production_owner_exact_c5_boundary(self):
+    def test_production_owner_first_yield(self):
         checker=self.checker('DSP_SEN_OWNER_CHECK')
         image=ROOT/'build/blinx/audio-ep-startup-context-audit-20261010/ep-mapped.aot-private.bin'
         r=subprocess.run([checker,str(image)],capture_output=True,text=True,timeout=10)
-        self.assertEqual(r.returncode,2,r.stdout+r.stderr);self.assertIn('SEN resident prefix reached C5=FFF terminal guard',r.stdout)
+        self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertIn('SEN resident prefix reached first C4 yield PC02F3/SP2',r.stdout)
 if __name__=='__main__':unittest.main()

@@ -3,14 +3,38 @@
 Tracked by `beads-xbox.1.113`. Audio is the active independent offline family;
 the original-scheduler/GPU startup experiments are not prerequisites. The family
 remains **open**, and the overall burndown is **6/9 qualified**. Earlier dated
-observations retain their historical counts. Hardware is currently deferred;
-the latest offline result is the resident EP stack checkpoint below.
+observations retain their historical counts. Hardware access has resumed after
+the dashboard migration; the latest offline result is the original EP first
+yield, described below and in the bounded closing checklist.
 
 The native title continues to select its real XAudio2/DSP implementation.
 The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driver
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
+
+## Original EP first yield - 2026-10-14
+
+The production EP owner now admits the exact initial C5=FFF clear only while
+executing its bootstrap with no DMA history, pending DMA or events. C5 uses
+the shared write-one-to-clear contract, independently represented for GP and
+EP in pinned [xemu peripheral semantics](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/dsp/dsp.c).
+The original prefix then executes its own C4=1 and yields at PC02F3/SP2. There
+is no synthetic resume: CA=0, D5/D4=4000 and D7=0 are after that yield and have
+not executed. The broad FFF clear in a nonempty or warm context remains unsupported.
+
+This is bounded empty-state execution, not a physical reset/event measurement.
+The detailed original checker still verifies all workspace/directory P effects
+and unchanged X/Y/GP/source RAM. External FFF acknowledgement and clearing a
+real DMA EOL through this bootstrap exception are rejected. The30 EP packets,
+30 GP frames and counter/descriptor guards pass. Fast HLE has no processing
+change. Evidence: `build/blinx/audio-ep-first-yield-20261014/`.
+
+Fresh hardware context after remote launch is stable but differs from the old
+probe baseline: the new dashboard leaves EP scratch/FIFO tables and IEN00D8.
+No inherited pointers were dereferenced and no qualification device writes
+were made. The next required work is the original EP wake/CA/D5 context,
+reset/cadence and threshold, followed by active FE and connected output.
 
 ## Original defaults through composed voice processing - 2026-10-12
 

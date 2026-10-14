@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bind original EP bootstrap/helpers to explicit maintained EP guards.
 
-Original bytes remain private under build/. The actual original entry stops on
-its unsupported C5 event-clear operation after the resident SEN prefix. An authored caller executes the unchanged
+Original bytes remain private under build/. The actual original entry reaches
+its first C4 yield after the resident SEN prefix and empty C5 clear. An authored caller executes the unchanged
 original linear builder/transfer helper and stops on its unknown descriptor bit9.
 Neither result claims an original EP boot, graph, cadence or audible output pass.
 """
@@ -50,13 +50,14 @@ def check(image, processor, output):
     boot = output/'original-ep-mapped-source.aot-private.bin'
     boot.write_bytes(boot_data)
     runs = []
-    for mode, guard in (('--original-entry', 'at ffffc5'),
+    for mode, guard in (('--original-entry', 'original EP first C4 yield: PC02F3 SP2'),
                         ('--original-bit9', 'unqualified EP DMA descriptor format')):
         run = subprocess.run([str(processor), mode, str(boot)],
                              capture_output=True, text=True, timeout=20)
         log = output/f'original-ep-{mode[2:]}.aot-private.log'
         log.write_text(run.stdout+run.stderr, newline='\n')
-        passed = (run.returncode == 2
+        passed = (run.returncode == 0 and guard in run.stdout) if mode=='--original-entry' else (
+                  run.returncode == 2
                   and 'expected EP guard before sample/node/output publication' in run.stderr
                   and guard in run.stderr)
         runs.append(dict(mode=mode, exit=run.returncode, expected_result=passed,
@@ -68,8 +69,9 @@ def check(image, processor, output):
                   scope='Actual original EP entry plus unchanged 0276 linear builder and '
                         '02E1 transfer/control helper on the distinct EP CPU/banks.',
                   limits='Exact passive B0-B3 profile and hardware-resident SEN prefix '
-                         'are admitted; C5 event-clear and descriptor bit9 stay guarded. '
-                         'Both callbacks check unchanged source RAM, GP MIX and FIFO cursor '
+                         'and an empty initial C5 clear are admitted; wake, CA/D5 context '
+                         'and descriptor bit9 stay guarded. '
+                         'The checks preserve source RAM, GP banks and FIFO cursor '
                          'with no EP DMA publication. Full spill/refill is not implemented. '
                          'The helper caller is authored; dynamic code/table blocks are not '
                          'substituted. Full original DMA/configuration chain, resets, '

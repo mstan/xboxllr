@@ -1,4 +1,4 @@
-foreach(mode bank program)
+foreach(mode bank program startup-busy)
   execute_process(COMMAND "${PROGRAM}" "${mode}" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
   if(NOT result EQUAL 2 OR NOT error MATCHES "expected EP guard before sample/node/output publication")
     message(FATAL_ERROR "EP ${mode} guard did not preserve publication: ${result}: ${output}${error}")

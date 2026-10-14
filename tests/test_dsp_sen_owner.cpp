@@ -1,4 +1,4 @@
-// Production EP owner reaches exact C5 guard after hardware-resident SEN prefix.
+// Production EP owner reaches the first yield after the resident SEN prefix.
 #include "machine/apu_ep_processor.hpp"
 #include <algorithm>
 #include <array>
@@ -44,17 +44,19 @@ int main(int argc,char** argv) {
     CounterFixture f;f.boot(p);
     const auto gp=std::vector<unsigned>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
     xlle::ApuEpProcessor ep(f.apu,[&](const std::string& why) {
-        CHECK(why.find("at ffffc5")!=std::string::npos && f.ram==f.before);
-        CHECK(!f.apu.gp_dma_nodes() && !f.apu.ep_dma_nodes());
-        CHECK(std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
-        CHECK(*f.apu.ep_word(0x2801)==0 && *f.apu.ep_word(0x2802)==1 && *f.apu.ep_word(0x2803)==1 && *f.apu.ep_word(0x2804)==0 && *f.apu.ep_word(0x2805)==0);
-        CHECK(*f.apu.ep_word(0x2800+0x19e)==workspace && *f.apu.ep_word(0x2800+0x19f)==workspace_words);
-        for(unsigned i=0x122;i<0x140;++i)CHECK(!*f.apu.ep_word(0x2800+i));
-        for(unsigned i=0;i<2048;++i){if(i==1 || i==2 || i==3 || (i>=0x122 && i<0x140) || i==0x19e || i==0x19f)continue;CHECK(*f.apu.ep_word(0x2800+i)==p[i]);}
-        for(unsigned i=0;i<0xc00;++i)CHECK(*f.apu.ep_word(i)==0);
-        for(unsigned i=0;i<0x100;++i)CHECK(*f.apu.ep_word(0x1800+i)==0);
-        std::puts("Original production EP owner: SEN resident prefix reached C5=FFF terminal guard; no DMA/ack/yield supplied, P workspace30words cleared, X/Y/GP/sourceRAM unchanged.");
-        std::exit(2);
+        std::fprintf(stderr,"unexpected original EP failure: %s\n",why.c_str());CHECK(false);
     });
-    CHECK(ep.bootstrap_from_scratch());xlle::ApuGpRun result;ep.run(20000,result);CHECK(false);
+    CHECK(ep.bootstrap_from_scratch());xlle::ApuGpRun result;
+    CHECK(ep.run(20000,result) && result.yielded && result.pc==0x2f3 && result.sp==2 && !result.power);
+    CHECK(f.ram==f.before);
+    CHECK(!f.apu.gp_dma_nodes() && !f.apu.ep_dma_nodes());
+    CHECK(std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
+    CHECK(*f.apu.ep_word(0x2801)==0 && *f.apu.ep_word(0x2802)==1 && *f.apu.ep_word(0x2803)==1 && *f.apu.ep_word(0x2804)==0 && *f.apu.ep_word(0x2805)==0);
+    CHECK(*f.apu.ep_word(0x2800+0x19e)==workspace && *f.apu.ep_word(0x2800+0x19f)==workspace_words);
+    for(unsigned i=0x122;i<0x140;++i)CHECK(!*f.apu.ep_word(0x2800+i));
+    for(unsigned i=0;i<2048;++i){if(i==1 || i==2 || i==3 || (i>=0x122 && i<0x140) || i==0x19e || i==0x19f)continue;CHECK(*f.apu.ep_word(0x2800+i)==p[i]);}
+    for(unsigned i=0;i<0xc00;++i)CHECK(*f.apu.ep_word(i)==0);
+    for(unsigned i=0;i<0x100;++i)CHECK(*f.apu.ep_word(0x1800+i)==0);
+    uint32_t events=~0u;CHECK(f.apu.ep_read(0xffffc5,events) && !events);
+    std::puts("Original production EP owner: SEN resident prefix reached first C4 yield PC02F3/SP2; empty event clear, no wake/DMA/output, P workspace30words cleared, X/Y/GP/sourceRAM unchanged.");
 }

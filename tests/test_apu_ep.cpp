@@ -19,6 +19,7 @@ struct Fixture {
     std::vector<uint32_t> saved_p,saved_gp;
     std::vector<uint8_t> saved_ram;
     uint32_t saved_cursor=0;
+    uint64_t saved_nodes=0;
     xlle::McpxApu apu{[this](const std::string& s){apu_error=s;}};
     Fixture() {
         apu.set_mem_access([this](uint32_t a,void* out,size_t n){
@@ -45,7 +46,8 @@ struct Fixture {
         if(exit_guard) {
             const auto combined=s+"; APU: "+apu_error;
             CHECK(combined.find(expected_guard)!=std::string::npos);
-            CHECK(!apu.ep_dma_nodes() && apu.RegFileMmio::mmio_read(0xfe80402c,4)==saved_cursor);
+            CHECK(apu.ep_dma_nodes()==saved_nodes && apu.RegFileMmio::mmio_read(0xfe80402c,4)==saved_cursor);
+            if(saved_nodes){uint32_t events=0;CHECK(apu.ep_read(0xffffc5,events) && events==0x80);}
             CHECK(std::equal(saved_gp.begin(),saved_gp.end(),apu.gp_word(0x1400)));
             CHECK(ram==saved_ram);
             if(!saved_p.empty())CHECK(std::equal(saved_p.begin(),saved_p.end(),apu.ep_word(0x2800)));
@@ -121,11 +123,14 @@ static void executable_publication_and_yield() {
     leased.descriptor(false,0x20,0x4000,0x59e2,64,0x200,0x2ffd);
     xlle::ApuGpProcessor gp(leased.apu,[&](const std::string& s){leased.fault(s);});CHECK(gp.bootstrap_from_scratch());
     xlle::ApuGpRun g;CHECK(gp.run(1000,g) && g.yielded);xlle::ApuVoiceQuantum q;CHECK(gp.start_frame(q) && q.published);
-    leased.boot(true,{0x08f484,1,0x87});xlle::ApuEpProcessor yielding(leased.apu,[&](const std::string& s){leased.fault(s);});
+    leased.boot(true,{0x08f485,0xfff,0x08f484,1,0x87});xlle::ApuEpProcessor yielding(leased.apu,[&](const std::string& s){leased.fault(s);});
     CHECK(yielding.bootstrap_from_scratch() && yielding.run(1000,e) && e.yielded && e.unused_cycles>900);
     CHECK(leased.apu.gp_frame_outstanding() && leased.events(false)==2 && !leased.events(true));
     CHECK(gp.run(5000,g) && g.yielded && !leased.apu.gp_frame_outstanding());
     CHECK(f.apu_error.empty() && f.owner_error.empty() && leased.apu_error.empty() && leased.owner_error.empty());
+    // An external write cannot borrow the CPU's bootstrap admission, even
+    // with an empty EP event word and an existing yielded owner.
+    CHECK(!leased.apu.ep_write(0xffffc5,0xfff) && leased.apu.faulted());
 }
 static void coherent_lifetimes() {
     for(unsigned life=0;life<3;++life) {
@@ -210,22 +215,39 @@ static std::vector<uint32_t> original(const char* path) {
 }
 static void cpu_guard(const std::string& mode,const char* path) {
     Fixture f;std::vector<uint32_t> p;
-    if(mode=="--original-entry") {p=original(path);f.expected_guard="at ffffc5"; /* Resident SEN prefix reaches the original event-clear attempt. */}
+    if(mode=="--original-entry") {p=original(path);}
     else if(mode=="--original-bit9") {
         p=original(path);p[0]=0x0af080;p[1]=0x700;
         // Original276 and2E1 remain unchanged; builder owns its actual P node.
         const uint32_t caller[]={0x308000,0x61f400,0xc00,0x64f400,0x1a2,0x382000,0x3d0100,0x0bf080,0x276,0x0bf080,0x2e1,0x87};
         std::copy(std::begin(caller),std::end(caller),p.begin()+0x700);f.expected_guard="unqualified EP DMA descriptor format";
-    } else if(mode=="bank") {p={0x65f400,0xbfc,0x021594,0x87};f.expected_guard="unmapped DSP read";}
+    } else if(mode=="startup-busy") {p={0x08f485,0xfff,0x87};f.expected_guard="startup event clear requires an empty initial context";}
+    else if(mode=="bank") {p={0x65f400,0xbfc,0x021594,0x87};f.expected_guard="unmapped DSP read";}
     else {p={0x08f494,0x20,0x08f496,1,0x87};f.expected_guard="EP executable host publication during DMA work";}
     f.boot(true,p);xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
+    if(mode=="--original-entry") {
+        const auto ram=f.ram;const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+        xlle::ApuEpRun r;CHECK(ep.run(10000,r) && r.yielded && r.pc==0x2f3 && r.sp==2 && !r.power);
+        CHECK(!f.events(true) && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes() && f.ram==ram);
+        CHECK(std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)) && f.apu_error.empty() && f.owner_error.empty());
+        const auto banks=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+        CHECK(!ep.run(10000,r) && ep.phase()==xlle::ApuEpPhase::Failed && !r.returned);
+        CHECK(f.owner_error.find("run requires a bootstrapped running CPU")!=std::string::npos);
+        CHECK(std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)) && f.ram==ram);
+        std::puts("original EP first C4 yield: PC02F3 SP2, empty C5, no wake/DMA/output; unqualified resume rejected without bank changes");return;
+    }
     if(mode=="program"){f.descriptor(true,0x20,0x4000,0x59e0,1,0x2800,0x2ffd);f.unsafe_host_publication=true;}
+    if(mode=="startup-busy") {
+        f.descriptor(true,0x20,0x4000,0x59e0,1,0x200,0x2ffd);
+        CHECK(f.apu.ep_write(0xffffd4,0x20) && f.apu.ep_write(0xffffd6,1) && f.apu.service_dsp_dma(xlle::ApuDspKind::Ep,4096));
+        CHECK(f.apu.ep_dma_nodes()==1 && f.events(true)==0x80);f.saved_nodes=1;
+    }
     if(mode!="--original-bit9" && mode!="--original-entry")f.saved_p.assign(f.apu.ep_word(0x2800),f.apu.ep_word(0x2800)+4096);
     f.saved_gp.assign(f.apu.gp_word(0x1400),f.apu.gp_word(0x1400)+1024);f.saved_ram=f.ram;f.saved_cursor=f.apu.mmio_read(0xfe80402c,4);f.exit_guard=true;
     xlle::ApuEpRun r;ep.run(10000,r);CHECK(false);
 }
 int main(int argc,char** argv) {
-    if(argc==3){cpu_guard(argv[1],argv[2]);return 1;}
+    if(argc==3){cpu_guard(argv[1],argv[2]);return std::string(argv[1])=="--original-entry"?0:1;}
     if(argc==2){cpu_guard(argv[1],nullptr);return 1;}
     CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();
     std::puts("APU EP:30 real VP/GP/scratch/EP/FIFO PCM packets, static distinct banks, owner replacement/remap, exact output RAM and terminal failures passed; cadence/AC97/original boot remain guarded");

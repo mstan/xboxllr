@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: GP bit9, GP/EP passive profiles and resident EP stack pass; EP events and wake/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: original EP reaches first yield after empty event clear; wake/CA/D5/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,31 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Resumed EP startup: first yield - 2026-10-14
+
+The original EP entry now executes its initial C5=FFF clear and reaches the
+actual C4=1 yield at PC02F3/SP2, through the existing sole EP CPU. Admission is
+limited to the executing bootstrap owner with no EP DMA history, pending DMA
+or event bits. The shared C5 write-one-to-clear contract uses the existing
+acknowledgement path; it neither produces an event nor invents a wake. External
+FFF writes and a clear after actual DMA completion remain rejected. A second
+run attempt cannot resume the yielded CPU or change its banks.
+
+Original P workspace/directory effects, source RAM and all GP banks pass; the
+ordinary30 EP packet and30 GP frame cases and the retained counter/descriptor
+guards also pass. The hardware event source, CA/D5 context, reset/cadence and
+EP708000 threshold remain open. This is a source-supported empty-state
+continuation, not new silicon event qualification or a family closure. Evidence:
+`build/blinx/audio-ep-first-yield-20261014/`.
+
+Hardware access resumed after the dashboard migration and observed SMC restart.
+The probe responds remotely and16 fixed read-only EP context loads completed.
+The new dashboard leaves nonzero EP scratch/FIFO tables and different IEN,
+with GP held0, EP held1 and raw FF14=100. Those inherited pointers are not owned
+test buffers and were not dereferenced. The previous zero-table hardware
+stimulus cannot be reused unchanged; no qualification device write followed.
+The count remains6/9 and the27 precision deferrals are unchanged.
 
 ## GP configuration continuation and remaining startup gates - 2026-10-14
 

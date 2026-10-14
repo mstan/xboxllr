@@ -191,6 +191,23 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
         }
         xlle_dsp_core_set_halted(owner.core_,1);return;
     }
+    if(owner.kind_==ApuDspKind::Ep && address==0xffffc5 && value==0xfff) {
+        // Shared C5 write-one-to-clear contract, restricted to the original
+        // initial empty-event clear. This admits no EP event producer, wake,
+        // warm acknowledgement or unknown status bits. Only the executing
+        // bootstrap owner may cross this boundary before its first yield.
+        uint32_t events=0;
+        if(!owner.executing_ || !owner.initializing_ ||
+           owner.phase_==ApuGpPhase::Failed || owner.apu_.ep_dma_nodes() ||
+           owner.apu_.dsp_dma_pending(ApuDspKind::Ep) ||
+           !owner.apu_.ep_read(address,events) || events) {
+            owner.fail("EP startup event clear requires an empty initial context");std::abort();
+        }
+        if(!owner.apu_.ep_write(address,0x80)) {
+            owner.fail("EP startup event acknowledgement failed");std::abort();
+        }
+        return;
+    }
     if(!(owner.kind_==ApuDspKind::Gp?owner.apu_.gp_write(address,value):owner.apu_.ep_write(address,value))) {
         char why[80];std::snprintf(why,sizeof(why),"GP CPU peripheral write failed at %06x",address);
         owner.fail(why);std::abort();

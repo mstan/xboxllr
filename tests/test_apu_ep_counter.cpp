@@ -127,7 +127,7 @@ static void rejected(const std::string& mode) {
     else if(mode=="write-b3")p={0x07f433,1,0x87};
     else if(mode=="ca")p={0x08f48a,0,0x87};
     else if(mode=="d5-seed")p={0x08f495,0x4000,0x87};
-    else p={0x08f485,0xfff,0x87};
+    else p={0x08f485,0x7ff,0x87}; // Only exact FFF in the empty bootstrap context is admitted.
     f.boot(p);f.terminal_guard=true;
     f.expected_error=mode=="read-config"?"at ffffb2":mode=="ca"?"at ffffca":mode=="d5-seed"?"at ffffd5":mode=="c5"?"at ffffc5":"counter configuration profile";
     xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());xlle::ApuGpRun r;ep.run(64,r);CHECK(false);
