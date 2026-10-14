@@ -2099,3 +2099,35 @@ producing RAM writes, nodes or EOL. Existing paired transfers and post-completio
 idle STOP also pass, along with active cancellation, processor publication and
 EP guards:7 focused tests in5.09s. Private evidence is
 `build/blinx/audio-gp-idle-status-20261014/`. No additional hardware run was needed.
+
+## GP circular output and preserved graph qualification - 2026-10-14
+
+Two fresh-owner physical observations, controls49D2/4BD2, copied four Y words
+as exact format2 bytes into the SG destination while preserving the entire
+alternative direct destination. The32-byte ring wrapped from28 to12; descriptor,
+source banks, witnesses and immutable program remained exact. Both observed
+STOP/FREEZE/UNFREEZE/START0/8/0/16, EOL80 on poll11 and terminalD6=0.
+Each passed separate completed-program hold and original SG restoration.
+Private captures and immutable source snapshots are in the probe worktree's
+`results/gp-output-physical-20261014/summary.aot-private.json`.
+
+GP now also admits exactly4BD2. All existing extent, bank, physical transport,
+MIX lease and executable-publication owners remain in force; EP, linear output,
+FIFO and neighboring bit9 profiles remain guarded. Paired count4/32 offline
+regressions compare literal packed bytes across noncontiguous SGE pages, whole
+RAM preservation, cursor and completion. Count32 is an existing transport
+regression, not a physical measurement. Seven focused tests pass in4.83s.
+
+The preserved original graph passes1,501 blocks and73,549 real DMA nodes:
+192,078 nonzero output words and14,931 retained scratch bytes match between
+the native graph and maintained GP banks/physical SGE transport. No original
+descriptor or program byte changed. This closes the bounded `.114` bit9 task.
+The shared DSP instruction core and explicit graph shell limit this result:
+original boot/framework scheduling, EP/FIFO/AC97 output and actual title
+lifetimes still require A03-A05. HLE processing is unchanged; audio remains
+open and the family count stays6/9 with26 accepted precision deferrals.
+
+Private model evidence is `build/blinx/audio-gp-output-admission-20261014/`;
+graph executable, inputs, source identities and logs are pinned under
+`build/blinx/audio-gp-original-output-20261014/`. Probe compatibility checks
+retain GP unknown-bit and EP rejection plus16 synthetic DSP control cases.

@@ -58,6 +58,42 @@ static void paired_bit9_inputs() {
         }
     }
 }
+static void paired_bit9_circular_outputs() {
+    // Physical count4 evidence; count32 remains an offline transport regression.
+    // This authored ring also crosses noncontiguous SGE pages to preserve the
+    // existing transport ownership contract independently of bit9 admission.
+    for(unsigned count:{4u,32u}) {
+        std::vector<uint8_t> clear_ram;
+        for(bool bit9:{false,true}) {
+            Fixture f;const unsigned base=0x2ff0,offset=28,size=32,bank=0x1c00;
+            const uint32_t source[]={0x123456,0xabcdef,0x654321,0xfedcba};
+            const uint8_t literal_bytes[]={0,0x56,0x34,0x12,0,0xef,0xcd,0xab,
+                                          0,0x21,0x43,0x65,0,0xba,0xdc,0xfe};
+            for(unsigned i=0;i<count;++i)f.word(bank+i)=source[i%4];
+            const std::vector<uint32_t> source_before(f.apu.gp_word(bank),f.apu.gp_word(bank)+count);
+            f.node(0x20,0x4020,2,true,bank,count,offset,size,base);
+            if(bit9)f.word(0x21)|=0x200;
+            CHECK(f.word(0x21)==(bit9?0x4bd2u:0x49d2u));
+            auto expected=f.ram;
+            for(unsigned at=0;at<count*4;++at) {
+                const unsigned logical=base+(offset+at)%size;
+                // Literal independently authored destinations for SGE2/SGE3.
+                const unsigned physical=logical<0x3000?0x6000+logical-0x2000:0x5000+logical-0x3000;
+                expected[physical]=literal_bytes[at%16];
+            }
+            const auto descriptor_before=std::array<uint32_t,7>{f.word(0x20),f.word(0x21),f.word(0x22),
+                f.word(0x23),f.word(0x24),f.word(0x25),f.word(0x26)};
+            f.go(0x20);
+            CHECK(f.error.empty() && f.apu.gp_dma_nodes()==1 && f.ram==expected);
+            CHECK(std::equal(source_before.begin(),source_before.end(),f.apu.gp_word(bank)));
+            for(unsigned i=0;i<7;++i)CHECK(f.word(0x20+i)==(i==4?(offset+count*4)%size:descriptor_before[i]));
+            uint32_t status=0;CHECK(f.apu.gp_read(0xffffc5,status) && status==0x80);
+            CHECK(f.apu.gp_read(0xffffd6,status) && status==0);
+            if(bit9)CHECK(f.ram==clear_ram);else clear_ram=f.ram;
+            CHECK(f.apu.gp_write(0xffffc5,0x80) && f.apu.gp_read(0xffffc5,status) && status==0);
+        }
+    }
+}
 static void observed_gp_idle_controls() {
     Fixture f;uint32_t status=0xffffffff;
     CHECK(f.apu.gp_read(0xffffd6,status) && status==0);
@@ -70,10 +106,10 @@ static void observed_gp_idle_controls() {
     CHECK(f.apu.gp_read(0xffffc5,status) && status==0);
 }
 static void bit9_profile_boundaries() {
-    // Shared implementation must not widen EP, output, FIFO or adjacent flags.
+    // Shared implementation must not widen EP, other output, FIFO or adjacent flags.
     for(bool ep:{false,true})for(uint32_t control:{0x5be0u,0x4bd0u,0x5be2u,0x4bd2u,
-            0x5a00u,0x47e0u,0x4be0u,0x5bd0u,0x5be1u,0x7be0u,0x15be0u}) {
-        if(!ep && (control==0x5be0 || control==0x4bd0))continue;
+            0x5a00u,0x5a02u,0x47e0u,0x47d2u,0x4be0u,0x4be2u,0x5bd0u,0x5bd2u,0x5be1u,0x7be0u,0x15be0u}) {
+        if(!ep && (control==0x5be0 || control==0x4bd0 || control==0x4bd2))continue;
         std::array<uint32_t,0x3800> memory{};std::string error;unsigned byte_calls=0,fifo_calls=0;
         xlle::ApuDspDma dma([&](uint32_t a)->uint32_t*{return a<memory.size()?&memory[a]:nullptr;},
             [&](uint32_t,void*,uint32_t,bool){++byte_calls;return true;},
@@ -109,7 +145,7 @@ static void bit9_profile_boundaries() {
     }
 }
 int main() {
-    observed_gp_idle_controls();paired_bit9_inputs();bit9_profile_boundaries();
+    observed_gp_idle_controls();paired_bit9_inputs();paired_bit9_circular_outputs();bit9_profile_boundaries();
     // Published hardware byte examples, independent of native/xemu packing.
     for(unsigned format:{2u,6u})for(unsigned bank:{0x80u,0x1480u,0x1880u,0x2880u}) {
         Fixture f;f.word(bank)=0x123456;f.word(bank+1)=0xabcdef;
@@ -148,7 +184,7 @@ int main() {
     for(unsigned kind=0;kind<9;++kind) {
         Fixture f;f.node(0x20,0x4000,2,true,0x80,2,0,8);
         if(kind==0)f.word(0x21)|=1;
-        if(kind==1)f.word(0x21)|=0x200;
+        if(kind==1)f.word(0x21)|=0x201; // Unknown bit0 remains rejected with bit9.
         if(kind==2)f.word(0x21)&=~0x4000u;
         if(kind==3)f.word(0x22)=4097;
         if(kind==4)f.word(0x23)=0x1000;

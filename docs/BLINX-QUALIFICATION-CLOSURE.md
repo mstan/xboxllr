@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: GP input profiles admitted; original graph advances to circular output4BD2 | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: required GP bit9 profiles qualified; preserved original graph passes | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -43,6 +43,26 @@ A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
 ## Hardware-session tooling and next GP prerequisite - 2026-10-14
+
+Current result: the circular output clear/set pair also passed physically,
+establishing exact format2 SG bytes, preserved alternative destination, cursor
+28-to-12 wrap and EOL followed by idle. Both fresh owners passed separate
+hold/SG restoration. The maintained GP implementation now admits exactly
+5BE0,4BD0,4BD2 while retaining all other bit9 profile and EP guards. Seven
+focused tests pass; count32 coverage is offline, not an additional physical
+measurement. Probe compatibility checks also pass against this admission.
+
+The unchanged preserved original GP graph now passes all 1,501 blocks and
+73,549 real DMA nodes, with 192,078 nonzero output words and 14,931 retained
+scratch bytes matching native output and physical SGE transport. This completes
+the bounded bit9 issue `.114`. The fixture uses the same DSP instruction core
+on both sides and an explicit graph shell; it does not qualify original
+boot/framework scheduling, EP/FIFO/AC97 output or the full audio family.
+B0-B3, reset/wake/control context and connected title output remain in A03-A05.
+Private evidence: probe `results/gp-output-physical-20261014/`, main
+`build/blinx/audio-gp-output-admission-20261014/` and
+`build/blinx/audio-gp-original-output-20261014/`. The chronological observations
+below retain earlier guards and failures without changing their meaning.
 
 The original-sequence input-only baseline subsequently copied all four expected
 scatter/gather source words into X0400-X0403. Its descriptor and eight new run
@@ -153,8 +173,8 @@ an exact file roundtrip retained TCP liveness during upload and download.
 Startup failures and drive availability are readable through TCP INFO, and an
 updated executable was staged, verified and launched remotely without owner
 screen-reading or a dashboard round trip. Normal boot paths are unchanged.
-The next device experiments are the reached circular bit9 output pair,
-with a new owner and separately checked admission/acknowledgement.
+The reached circular bit9 output pair subsequently passed as recorded above.
+Next evidence concerns the remaining original startup and wake/control context.
 Remote access removes a session-maintenance obstacle;
 it does not close A03 or change
 the **6/9** family count or 26 accepted precision deferrals.
@@ -232,7 +252,7 @@ qualified family. The count remains **6/9**, with the same 26 precision deferral
 | G03 | Passive original producer/first-transfer capture is integrated at `24468bc`; independently sourced internal/RDI packing is now recorded below | Bind saved-instance byte offsets and save/restore semantics to actual consumer state, including required RAMFC/ownership fields. Internal lane packing alone does not establish that map. Capture the real first request after G02; never replace it with an invented image or successful no-op. |
 | G04 | Guarded diagnostic GPU bootstrap and paired noise capture preparation | Obtain the required reached enabled-noise primitive and independently establish its supported sampling behavior. Preserve the existing enable guard until then. |
 | G05 | Existing representative state, lifetime, scene and producer evidence | Run the connected original graphics route after G02-G04, retaining real completion/reentry/teardown and affected representative comparisons. Reuse unchanged evidence; exhaustive scene-pixel composition remains deferred. |
-| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; physical input pairs for X/Y/P and circular Y; supported GP input profiles admitted; original graph advances one node | Establish reached circular output4BD2, then continue exact original graph/owner execution. B0-B3, remaining reset/wake/control transitions and EP remain required. |
+| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; physical GP input/output pairs; exact5BE0/4BD0/4BD2 admission; preserved original graph passes1,501 blocks/73,549 DMA nodes | Complete original shell/owner execution: B0-B3, remaining reset/wake/control transitions and EP remain required. The graph fixture does not supply original scheduling or output ownership. |
 | A04 | Idle FE publication and guarded original-DPC reproducer | Establish active-work ordering and initial control provenance, then connect publication to genuine completed work. Restoring idle register values cannot discard prior work history. |
 | A05 | Shared original-device adapter, compiled/raw MMIO route and real PCM capture consumer | Connect admitted GP/EP/VP work to the shared-clock owner after A03/A04. The current work callback advances the codec while DSPs remain held; wiring complete does not mean original DSP scheduling/output is complete. Then run actual output/ISR/DPC/stop/reuse/timing acceptance. |
 
