@@ -318,6 +318,54 @@ static void acknowledgement_ownership() {
         CHECK(f.ram==ram && std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)));
     }
 }
+static void lookup_ownership() {
+    Fixture f;std::vector<uint32_t> image(2048);
+    for(unsigned i=0;i<2048;++i)image[i]=(0x812345+i*0x10203)&0xffffff;
+    uint32_t value=0xa5a5a5;CHECK(!f.apu.ep_y_lookup_read(0xfc9,value) && value==0xa5a5a5);
+    CHECK(!f.apu.install_ep_y_lookup(nullptr,2048) && !f.apu.install_ep_y_lookup(image.data(),2047));
+    const auto saved=image;image[17]|=0x1000000;
+    CHECK(!f.apu.install_ep_y_lookup(image.data(),2048));image=saved;
+    CHECK(f.apu.install_ep_y_lookup(image.data(),2048));std::fill(image.begin(),image.end(),0xffffff);
+    CHECK(!f.apu.install_ep_y_lookup(image.data(),2048));
+    for(unsigned a:{0x100u,0x7ffu,0x1000u})CHECK(!f.apu.ep_y_lookup_read(a,value));
+    for(unsigned i=0;i<2048;++i)CHECK(f.apu.ep_y_lookup_read(0x800+i,value) && value==saved[i]);
+    CHECK(!f.apu.ep_word(0x2000) && !f.apu.ep_word(0x27ff));
+    *f.apu.ep_word(0x1840)=0x123456;
+    f.boot(true,{0x60f400,0x800,0x61f400,0x200,0x060098,4,0x4cd800,0x445900,0,0x87});
+    const auto ram=f.ram;
+    xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});xlle::ApuEpRun r;
+    CHECK(ep.bootstrap_from_scratch() && ep.run(30000,r) && r.power==2 && !r.sp);
+    CHECK(std::equal(saved.begin(),saved.end(),f.apu.ep_word(0x200)) && *f.apu.ep_word(0x1840)==0x123456);
+    CHECK(f.ram==ram && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes());
+    Fixture late;late.boot(true,{0x87});xlle::ApuEpProcessor held(late.apu,[&](const std::string& s){late.fault(s);});
+    CHECK(!late.apu.install_ep_y_lookup(image.data(),image.size()));
+    CHECK(!late.apu.ep_y_lookup_read(0x800,value) && !late.apu.faulted());
+}
+static void physical_lookup(const char* program,const char* observations,const char* lookup) {
+    std::vector<uint32_t> p(4096),fields(99),image(2048);
+    const char* paths[]={program,observations,lookup};std::vector<uint32_t>* arrays[]={&p,&fields,&image};
+    for(unsigned i=0;i<3;++i){FILE* f=std::fopen(paths[i],"rb");CHECK(f);auto& a=*arrays[i];CHECK(std::fread(a.data(),4,a.size(),f)==a.size() && std::fgetc(f)==EOF);std::fclose(f);}
+    Fixture f;CHECK(f.apu.install_ep_y_lookup(image.data(),image.size()));
+    f.boot(true,std::vector<uint32_t>(p.begin(),p.begin()+2048));
+    xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
+    auto expected=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+    const auto ram=f.ram;const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+    xlle::ApuEpRun r;CHECK(ep.run(20000,r) && !r.power && !r.sp && !r.yielded);
+    unsigned slot=0;
+    for(unsigned i=0x100;i<0x10d;++i)expected[i]=fields[slot++];
+    for(unsigned i=0x110;i<0x118;++i)expected[i]=fields[slot++];
+    for(unsigned i=0x200;i<0x205;++i)expected[i]=fields[slot++];
+    for(unsigned i=0x400;i<0x404;++i)expected[i]=fields[slot++];
+    for(unsigned i=0x1840;i<0x1844;++i)expected[i]=fields[slot++];
+    for(unsigned start:{0x200u,0x220u,0x240u})for(unsigned i=0;i<16;++i)expected[start+i]=fields[slot++];
+    expected[0x260]=fields[slot++];
+    for(unsigned i=0;i<16;++i)expected[0x18c0+i]=fields[slot++];
+    CHECK(slot==99 && fields[10]==0x455059 && fields[11]==0 && fields[12]==2);
+    CHECK(std::equal(expected.begin(),expected.end(),f.apu.ep_word(0)) && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
+    CHECK(f.ram==ram && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes() && !f.apu.ep_frame_events());
+    CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.apu_error.empty() && f.owner_error.empty());
+    std::puts("Physical EP Y lookup: exact99 captured fields/data, full bank/RAM preservation, distinct immutable image owner; no DMA, wake or output");
+}
 static void stereo_fifo_ownership() {
     for(unsigned control:{0x400403u,0x400603u})for(bool fail:{false,true}) {
         Fixture f;
@@ -512,6 +560,11 @@ static void cpu_guard(const std::string& mode,const char* path) {
     else if(mode=="startup-frame-unowned") {p={0x08f485,2,0x87};f.expected_guard="frame command requires idle control ownership";}
     else if(mode=="startup-frame-busy") {p={0x08f484,1,0x08f485,2,0x87};f.expected_guard="frame command requires idle control ownership";}
     else if(mode=="startup-clear-after-control") {p={0x08f484,1,0x08f485,0xfff,0x87};f.expected_guard="startup event clear requires an empty initial context";}
+    else if(mode=="lookup-write") {
+        std::vector<uint32_t> image(2048,0x123456);CHECK(f.apu.install_ep_y_lookup(image.data(),image.size()));
+        p={0x44f400,0x654321,0x4c7000,0xfc9,0x87};f.expected_guard="unqualified EP high Y write at 000fc9";
+    }
+    else if(mode=="lookup-missing") {p={0x4cf000,0xfc9,0x87};f.expected_guard="unmapped DSP read at 000fc9";}
     else if(mode=="bank") {p={0x65f400,0xbfc,0x021594,0x87};f.expected_guard="unmapped DSP read";}
     else {p={0x08f494,0x20,0x08f496,1,0x87};f.expected_guard="EP executable host publication during DMA work";}
     f.boot(true,p);xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
@@ -578,6 +631,7 @@ static void cpu_guard(const std::string& mode,const char* path) {
     xlle::ApuEpRun r;ep.run(10000,r);CHECK(false);
 }
 int main(int argc,char** argv) {
+    if(argc==5 && std::string(argv[1])=="--physical-lookup"){physical_lookup(argv[2],argv[3],argv[4]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-fifo"){physical_output(argv[2],argv[3],true);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-output"){physical_output(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-events"){physical_events(argv[2],argv[3]);return 0;}
@@ -586,6 +640,6 @@ int main(int argc,char** argv) {
     if(argc==4 && std::string(argv[1])=="--physical-c4"){physical_configuration(argv[2],argv[3],true);return 0;}
     if(argc==3){cpu_guard(argv[1],argv[2]);return (std::string(argv[1])=="--original-entry" || std::string(argv[1])=="--original-config-tail" || std::string(argv[1])=="--original-bit9")?0:1;}
     if(argc==2){cpu_guard(argv[1],nullptr);return 1;}
-    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();event_clock_and_ownership();acknowledgement_ownership();stereo_fifo_ownership();
+    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();event_clock_and_ownership();acknowledgement_ownership();stereo_fifo_ownership();lookup_ownership();
     std::puts("APU EP:30 real VP/GP/scratch/EP/FIFO PCM packets;3 clock/C4/C5 lifetimes, disabled/held clock and DMA guards, exact RAM/banks and retained ownership passed; connected cadence/AC97/reset remain open");
 }

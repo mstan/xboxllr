@@ -19,7 +19,7 @@ ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuD
         {fail("GP CPU owner requires idle DMA ownership");return;}
     core_=kind_==ApuDspKind::Gp?
         xlle_dsp_core_create(apu_.gp_word(0x2800),apu_.gp_word(0),apu_.gp_word(0x1800),apu_.gp_word(0x1400),this,read,write,core_fault):
-        xlle_dsp_core_create_ep(apu_.ep_word(0x2800),apu_.ep_word(0),apu_.ep_word(0x1800),this,read,write,core_fault);
+        xlle_dsp_core_create_ep_lookup(apu_.ep_word(0x2800),apu_.ep_word(0),apu_.ep_word(0x1800),this,read,write,core_fault,read_ep_lookup);
     if(!core_){fail("GP CPU allocation failed");return;}
     bound_=kind_==ApuDspKind::Gp?apu_.bind_gp_program_owner(this,[this]{return permit_program_write();}):
                                apu_.bind_ep_program_owner(this,[this]{return permit_program_write();},[this]{
@@ -250,6 +250,11 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
         char why[80];std::snprintf(why,sizeof(why),"GP CPU peripheral write failed at %06x",address);
         owner.fail(why);std::abort();
     }
+}
+uint32_t ApuDspProcessor::read_ep_lookup(void* opaque,uint32_t address) {
+    auto& owner=*static_cast<ApuDspProcessor*>(opaque);uint32_t value=0;
+    if(owner.kind_==ApuDspKind::Ep && owner.apu_.ep_y_lookup_read(address,value))return value;
+    core_fault(opaque,"unmapped DSP read",address);std::abort();
 }
 void ApuDspProcessor::core_fault(void* opaque,const char* why,uint32_t address) {
     auto& owner=*static_cast<ApuDspProcessor*>(opaque);

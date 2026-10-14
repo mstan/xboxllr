@@ -17,7 +17,7 @@ struct Fixture {
     std::vector<unsigned char> ram,registers,map,before,expected_ram;
     std::vector<unsigned> program;
     std::string device_error,owner_error;
-    unsigned writes=0,reads=0,output_nodes=0,fifo_cursor=0,last_pc=0;bool expect_boundary=false,revoke=false;
+    unsigned writes=0,reads=0,output_nodes=0,fifo_cursor=0,last_pc=0;bool expect_boundary=false,revoke=false,has_lookup=false;
     std::vector<std::vector<unsigned>> completed;
     xlle::McpxApu apu{[this](const std::string& s){device_error=s;}};
     static unsigned word(const std::vector<unsigned char>& bytes,unsigned at) {
@@ -58,9 +58,17 @@ struct Fixture {
     }
     void fault(const std::string& why) {
         owner_error=why;if(!expect_boundary)return;
-        CHECK(why=="unmapped DSP read at 000fc9" && device_error.empty() && last_pc==0x31e);
-        CHECK(completed.size()==10 && output_nodes==2 && writes==2);
-        CHECK(*apu.ep_word(0x29a3)==0x5be0 && *apu.ep_word(0x29a4)==0x862);
+        if(!has_lookup) {
+            CHECK(why=="unmapped DSP read at 000fc9" && device_error.empty() && last_pc==0x31e);
+            CHECK(completed.size()==10 && output_nodes==2 && writes==2);
+            CHECK(*apu.ep_word(0x29a3)==0x5be0 && *apu.ep_word(0x29a4)==0x862);
+        } else {
+            CHECK(why=="EP queued DMA work failed" && device_error.find("unqualified EP DMA descriptor format/extent")!=std::string::npos && last_pc==0x2d5);
+            CHECK(completed.size()==33 && output_nodes==15 && writes==18);
+            const unsigned next[]={0x41a2,0x4622,0x5da,0x401f};
+            for(unsigned i=0;i<4;++i)CHECK(*apu.ep_word(0x29a2+i)==next[i]);
+        }
+        std::fprintf(stderr,"last original PC=%x\n",last_pc);
         report("original-first-event-next-boundary");
         std::fflush(stdout);std::fprintf(stderr,"original EP boundary: %s; %s\n",why.c_str(),device_error.c_str());std::exit(2);
     }
@@ -69,7 +77,7 @@ struct Fixture {
         CHECK(apu.ep_dma_nodes()==completed.size() && completed.size()>=7);
         for(unsigned i=0;i<0x3800;++i)CHECK(!*(apu.gp_word(0)+i));
         std::printf("{\"stage\":\"%s\",\"descriptor\":[",stage);
-        const unsigned fields=*apu.ep_word(0x29a3)==0x400603?4:5;
+        const unsigned fields=((*apu.ep_word(0x29a3)>>5)&15)<14?4:5;
         for(unsigned i=0;i<fields;++i)std::printf("%s%u",i?",":"",*apu.ep_word(0x29a2+i));
         std::printf("],\"completed_descriptors\":[");
         for(unsigned n=0;n<completed.size();++n) {
@@ -115,7 +123,8 @@ struct Fixture {
     }
 };
 int main(int argc,char** argv) {
-    CHECK(argc==5);Fixture f(argv);const std::string mode=argv[4];
+    CHECK(argc==5 || argc==6);Fixture f(argv);const std::string mode=argv[4];
+    if(argc==6){const auto bytes=load(argv[5]);CHECK(bytes.size()==8192);std::vector<unsigned> image(2048);std::memcpy(image.data(),bytes.data(),bytes.size());CHECK(f.apu.install_ep_y_lookup(image.data(),image.size()));f.has_lookup=true;}
     CHECK(mode=="startup" || mode=="first-event" || mode=="revoked");
     xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});
     if(mode=="revoked") {
@@ -138,10 +147,10 @@ int main(int argc,char** argv) {
     f.apu.mmio_write(0xfe801100,4,0x7130f);f.apu.mmio_write(0xfe802000,4,15);
     f.apu.set_time(18000,3375000);f.apu.set_frame(1);
     CHECK(f.apu.ep_frame_events()==1);
-    for(unsigned i=0;i<200000;++i){
+    for(unsigned i=0;i<(f.has_lookup?1000000u:200000u);++i){
         f.last_pc=r.pc;CHECK(ep.run(1,r));f.verify_transfers();
         if(f.completed.size()>=8 && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power) {
-            CHECK(f.completed.size()==8 && f.output_nodes==1 && f.writes==1);
+            if(!f.has_lookup)CHECK(f.completed.size()==8 && f.output_nodes==1 && f.writes==1);
             CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.device_error.empty() && f.owner_error.empty());
             unsigned events=0,control=0;CHECK(f.apu.ep_read(0xffffc5,events) && events==0x100);
             CHECK(f.apu.ep_control_publication(control) && control==1);

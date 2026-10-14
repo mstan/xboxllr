@@ -7,8 +7,9 @@ observations retain their historical counts. Hardware access has resumed after
 the dashboard migration. Physical EP input/output and delayed acknowledgement
 now admit the original input, linear output and interleaved stereo FIFO0 routes.
 Selectors0/1 complete their first event and return naturally to the original
-poll after eight transfers. Selector2 reaches ten transfers then guards a
-Y:0FC9 read at PC031E. The earlier malformed-descriptor diagnosis was wrong:
+poll after eight transfers. With the privately captured EP high-Y image,
+selector2 reaches33 verified transfers then guards FIFO1 source401F. Without
+that image it retains the ten-transfer Y:0FC9 stop. The earlier malformed-descriptor diagnosis was wrong:
 400603/1001 is an intentional packed stereo FIFO descriptor. See the bounded
 closing checklist for the current evidence and timing/reset requirements.
 
@@ -17,6 +18,33 @@ The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driv
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
+
+## Physical EP high-Y lookup - 2026-10-14
+
+Physical Y:0FC0..0FCF reads are stable and distinct from known low-Y RAM;
+the original indexed Y:0FC9 read agrees. A separate fresh observation captures
+Y:0100..0FFF into owned internal outputs, preserving the bootstrap and source
+allocation. The zero0100..07FF interval remains guarded. Populated0800..0FFF
+is supplied privately as a2048-word image, copied once before EP execution
+into a separate immutable CPU lookup owner. No writable RAM, host or DMA
+alias is added, and no board bytes are tracked. Physical write behavior and
+cross-console image identity are not established.
+
+The actual small physical program matches all99 fields/data and full banks;
+wrong-image, missing-image, write and bank checks reject as intended. Eight
+retained APU regressions, both physical stereo programs and eighteen fresh
+original setup/event/revocation outcomes pass. Probe validation covers four
+methods/six synthetic actual-DSP cases. Both physical allocations are retired
+through separate authorized remote recovery with fresh PING/INFO.
+
+With the image, unchanged selector2 completes33 transfers/15 output nodes/
+18 RAM writes and produces nonzero intermediate state from zero shared input.
+It stops at four-word FIFO1 descriptor `41A2,4622,5DA,401F`. Original helper029A
+deliberately combines N4=1 and R0=1F into source401F; its DMA interpretation
+remains unresolved and guarded. This is original execution and exact transfer
+evidence, not numerical codec/output acceptance. Exact timing, reset, SECTL,
+active FE and connected title output remain required. Evidence:
+`build/blinx/audio-ep-y-lookup-20261014/`; count6/9, precision27, HLE unchanged.
 
 ## Physical EP interleaved FIFO - 2026-10-14
 

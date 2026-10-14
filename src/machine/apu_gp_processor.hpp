@@ -49,6 +49,7 @@ private:
     void invalidate_publication();
     static uint32_t read(void* opaque,uint32_t address);
     static void write(void* opaque,uint32_t address,uint32_t value);
+    static uint32_t read_ep_lookup(void* opaque,uint32_t address);
     static void core_fault(void* opaque,const char* why,uint32_t address);
     McpxApu& apu_;
     const ApuDspKind kind_;

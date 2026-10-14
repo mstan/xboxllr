@@ -111,7 +111,7 @@ class OriginalStartup(OriginalProducer):
         assert self.get(self.owner+0xc) == 0 and self.get(self.owner+0x10) == 0
 
 
-def check(image, output, observer=None, ep_event_observer=None):
+def check(image, output, observer=None, ep_event_observer=None, ep_y_lookup=None):
     image, output = image.resolve(), output.resolve()
     assert 'build' in output.parts, 'original evidence must stay under private build/'
     blob = image.read_bytes()
@@ -166,7 +166,9 @@ def check(image, output, observer=None, ep_event_observer=None):
         if ep_event_observer:
             runs=[]
             for mode in ('startup','first-event','revoked'):
-                run=subprocess.run([str(ep_event_observer.resolve()),str(ram),str(registers),str(ownership),mode],
+                command=[str(ep_event_observer.resolve()),str(ram),str(registers),str(ownership),mode]
+                if ep_y_lookup:command.append(str(ep_y_lookup.resolve()))
+                run=subprocess.run(command,
                     capture_output=True,text=True,timeout=30)
                 log=output/f'original-ep-event-{lifetime}-{mode}.aot-private.log'
                 log.write_text(run.stdout+run.stderr,newline='\n')
@@ -181,20 +183,31 @@ def check(image, output, observer=None, ep_event_observer=None):
                     tail=([[0x41a2,0x5be2,78,0x63d,0x7458]] if selector==2 else [])
                     tail.append([0x41a2,0x400603,0x1001,0x400 if selector==2 else 0x500])
                     if selector==2:tail.append([0x41a2,0x5be0,2146,0x2b00,0x17c8])
-                    assert completed[7:]==tail
-                    assert observation['clock_events']==1 and observation['dma_nodes']==(10 if selector==2 else 8)
+                    if ep_y_lookup and selector==2:
+                        assert completed[7:10]==tail and len(completed)==33
+                        assert completed[-1]==[0x41a2,0x5be0,912,0x100,0x85e8]
+                    else:assert completed[7:]==tail
+                    assert observation['clock_events']==1 and observation['dma_nodes']==(33 if ep_y_lookup and selector==2 else 10 if selector==2 else 8)
                     assert observation['all_input_words_verified'] and observation['dynamic_table_preserved']
-                    assert observation['all_output_words_verified'] and observation['output_nodes']==(2 if selector==2 else 1)
-                    # This original setup's shared input and outputs are zero.
-                    # Distinct nonzero transport is established
-                    # separately by the frozen physical output comparisons.
-                    assert observation['RAM_unchanged'] and observation['writes']==(2 if selector==2 else 1)
-                    expected=tail[-1]
+                    assert observation['all_output_words_verified'] and observation['output_nodes']==(15 if ep_y_lookup and selector==2 else 2 if selector==2 else 1)
+                    # Shared input starts zero. The high-Y image permits
+                    # nonzero intermediate codec state; this checks transfers,
+                    # not independent numerical codec correctness.
+                    if ep_y_lookup and selector==2:
+                        assert not observation['RAM_unchanged'] and observation['writes']==18
+                        expected=[0x41a2,0x4622,0x5da,0x401f]
+                    else:
+                        assert observation['RAM_unchanged'] and observation['writes']==(2 if selector==2 else 1)
+                        expected=tail[-1]
                     assert observation['descriptor']==expected
                     if selector==2:
                         assert observation['stage']=='original-first-event-next-boundary'
-                        assert 'unmapped DSP read at 000fc9' in run.stderr
-                        observation['next_boundary']='original PC031E reads Y:0FC9 outside admitted EP Y bank'
+                        if ep_y_lookup:
+                            assert 'unqualified EP DMA descriptor format/extent' in run.stderr
+                            observation['next_boundary']='original FIFO1 control4622/count5DA/source401F after33 verified transfers'
+                        else:
+                            assert 'unmapped DSP read at 000fc9' in run.stderr
+                            observation['next_boundary']='original PC031E reads Y:0FC9 without a supplied board lookup image'
                     else:
                         assert observation['stage']=='original-first-event-returned'
                         observation['next_boundary']='first event returned to real polling; connected clock/reset/processing remains open'
@@ -214,6 +227,10 @@ def check(image, output, observer=None, ep_event_observer=None):
         data.update(issue='beads-xbox.1.113.9',ep_event_observer_sha256=sha(ep_event_observer.read_bytes()),
             scope='Unchanged driver tables and mapped EP startup execute through the sole maintained CPU. Selectors0/1 complete seven inputs and one interleaved stereo FIFO0 output then naturally return to their real poll. Selector2 completes ten nodes including78-word linear output, stereo FIFO0 and a2146-word P reload, then guards original Y:0FC9 at PC031E.',
             limits='Explicit offline caller/kernel allocation/settings and observed empty-list clock profile. Reset/core MMIO is recorded, not dispatched. Original shared inputs and outputs are zero; distinct nonzero output transport is separately physically observed. Delayed acknowledgement is queued independently of C4; exact clock/ACK/busy timing remains open. Selector2 high Y-memory semantics are unresolved. No completed title/output/reset or nonzero processing qualification. The older transport observer, if selected, retains its separately recorded historical B2 scope.')
+        if ep_y_lookup:
+            data.update(ep_y_lookup_sha256=sha(ep_y_lookup.read_bytes()),
+                scope='Fresh original driver lifetimes with caller-supplied board Y0800..0FFF image in its separate immutable CPU lookup owner. Selectors0/1 return after8 transfers; selector2 completes33 verified transfers/15 output nodes then guards FIFO1 control4622/count5DA/source401F.',
+                limits='Private board image remains external data, never committed or fabricated. No high-Y write, DMA/host alias or missing-image fallback. Original shared inputs are zero; selector2 produces nonzero intermediate state. Transfer bytes and original execution are checked; numerical codec processing and full first-event completion are not qualified. Reset/core MMIO is recorded, not dispatched; caller clock and exact ACK/busy timing remain open. Connected title/FE/SECTL/output remain required.')
     report=output/'original-ep-startup-reference.aot-private.json'
     report.write_text(json.dumps(data, indent=2)+'\n', newline='\n')
     print(f'PASS: {len(records)} original driver startup lifetimes; {report}')
@@ -225,5 +242,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--observer', type=Path)
     parser.add_argument('--ep-event-observer',type=Path)
+    parser.add_argument('--ep-y-lookup',type=Path,help='private 2048-word Y0800..0FFF board image for the EP CPU owner')
     args=parser.parse_args()
-    check(args.xbe, args.output, args.observer,args.ep_event_observer)
+    check(args.xbe, args.output, args.observer,args.ep_event_observer,args.ep_y_lookup)

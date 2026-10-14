@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: stereo FIFO physically matched; selectors0/1 return after eight transfers; selector2 reaches ten then Y:0FC9 guard; exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: physical high-Y image supplied through separate CPU lookup owner; selectors0/1 return after eight transfers; selector2 reaches33 then FIFO1 source401F guard; exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,51 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## EP high-Y lookup and original codec continuation - 2026-10-14
+
+Two bounded physical observations resolve the former Y:0FC9 stop. The first
+writes and immediately verifies sixteen known low-Y words, then reads
+Y:0FC0..0FCF twice and Y:0FC9 with the original indexed addressing form. The
+high values are stable, differ from the low-Y pattern, and agree with the
+indexed read. A second fresh owner repeats that check and captures all
+Y:0100..0FFF:0100..07FF reads zero, while0800..0FFF contains lookup data.
+These are read observations, not proof of physical write protection or a
+universal image across consoles. The captured bytes remain private.
+
+Each observation uses three consumed CPU register stores, no high-Y store or
+DSP peripheral command, exact9216-word allocation and2048-word bootstrap
+preservation, and separate remote recovery that retires the allocation. The
+full3905-read batch takes5.922 seconds. No playback, storage or boot changes.
+
+The maintained APU accepts one caller-supplied2048-word/24-bit image before EP
+ownership or execution, copies it into a separate immutable owner, and exposes
+it only to CPU Y:0800..0FFF reads. Writable RAM, DMA and host maps stay the
+same. Missing images, high-Y writes and Y:0100..07FF remain guarded; the
+observed zero interval is not silently added as RAM. No board data or generated
+replacement table is compiled into the repository. HLE remains unchanged.
+
+With this image, fresh unchanged selector2 now completes33 verified DMA
+transfers,15 output nodes and18 RAM write calls before the next guard. Its
+shared input is zero, but processing now produces nonzero intermediate state.
+The next four-word descriptor is `41A2,4622,5DA,401F`; the adjacent85E8 word is
+stale metadata. A private instruction trace confirms original helper029A
+constructs it from R1=1, N0=5DA, R0=1F and N4=1, including source
+`(N4 << 14) + R0`. The meaning of that source encoding is unresolved; no
+masking, malformed-descriptor diagnosis or new DMA admission is justified yet.
+Selectors0/1 still return naturally after eight transfers. Without an image,
+selector2 retains its exact ten-transfer Y:0FC9 stop.
+
+Seventeen focused commands pass, including the full physical lookup-program
+comparison, wrong-image rejection, image/write/bank guards, retained stereo
+physical comparisons and18 fresh original setup/event/revocation outcomes
+with/without the image. Four offline probe methods cover six actual-DSP
+synthetic scenarios and emitted-x86 ownership. Numerical codec correctness,
+full selector2 event completion, clock/reset/SECTL/active FE and connected
+title output remain required. Count6/9 and27 accepted precision deferrals stay
+unchanged. Evidence: `build/blinx/audio-ep-y-lookup-20261014/`, diagnostic
+`build/blinx/audio-ep-fifo1-trace-20261014/`, and probe
+`results/ep-y-{lookup,image}-20261014/`.
 
 ## EP stereo FIFO and original first-event return - 2026-10-14
 

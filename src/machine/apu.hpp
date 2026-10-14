@@ -204,6 +204,22 @@ public:
         if(!ep_words_)ep_words_=std::make_unique<std::array<uint32_t,0x3800>>();
         return ep_words_->data()+address;
     }
+    // Caller-owned board image, copied once before EP execution. Hardware
+    // observations establish CPU reads at Y0800..0FFF independently of low
+    // Y RAM. Keep the image separate: no writable RAM/DMA/host alias is implied.
+    bool install_ep_y_lookup(const uint32_t* image,size_t words) {
+        if(!image || words!=2048 || ep_y_lookup_ || faulted_ || ep_program_owner_ ||
+           ep_program_revision_ || ep_control_written_ || ep_counter_profile_touched_ ||
+           ep_dma_.nodes() || dsp_work_active() || dsp_work_pending(ApuDspKind::Ep))return false;
+        for(size_t i=0;i<words;++i)if(image[i]&0xff000000)return false;
+        auto copy=std::make_unique<std::array<uint32_t,2048>>();
+        for(size_t i=0;i<words;++i)(*copy)[i]=image[i];
+        ep_y_lookup_=std::move(copy);return true;
+    }
+    bool ep_y_lookup_read(uint32_t address,uint32_t& value)const {
+        if(!ep_y_lookup_ || address<0x800 || address>=0x1000)return false;
+        value=(*ep_y_lookup_)[address-0x800];return true;
+    }
     bool ep_read(uint32_t address,uint32_t& value) {
         if(faulted_ || !ep_dma_.read(address,value))return false;
         if(address==0xffffc5)value|=ep_frame_status_;
@@ -1068,6 +1084,7 @@ private:
     bool gp_mix_lease_=false,gp_frame_pending_=false,gp_mix_admitting_=false;
     ApuGpDma gp_dma_;
     std::unique_ptr<std::array<uint32_t,0x3800>> ep_words_;
+    std::unique_ptr<const std::array<uint32_t,2048>> ep_y_lookup_;
     uint64_t ep_program_revision_=0;
     void* ep_program_owner_=nullptr;
     std::function<bool()> ep_frame_owner_;
