@@ -18,6 +18,7 @@ from native_ep_reference import IMAGE_SHA256
 KERNEL_SHA = '827c39fd9dea2e831c7ef9091a2a4a4b13ac6ae9f69a2075c4b12e1b9ae97b3c'
 SECTL = 0xfe802000
 IEN = 0xfe801004
+FE_CONTROL = 0xfe801510
 
 
 def sha(blob):
@@ -30,7 +31,7 @@ def pin(path):
 
 
 class KernelHandoff:
-    def __init__(self, blob, seed):
+    def __init__(self, blob, seed, control_seed=0):
         assert sha(blob) == KERNEL_SHA, 'unreviewed kernel image'
         self.blob = blob
         self.cpu = Uc(UC_ARCH_X86, UC_MODE_32)
@@ -42,6 +43,7 @@ class KernelHandoff:
         # No interrupt/DMA completion, callee return or instruction is replaced.
         self.cpu.mem_write(0x8003da60, b'\x02')
         self.put(SECTL, seed)
+        self.put(FE_CONTROL, control_seed)
         self.events, self.calls, self.sources = [], [], {}
         self.cpu.hook_add(UC_HOOK_CODE, self.instruction)
         self.cpu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self.memory,
@@ -80,12 +82,13 @@ class KernelHandoff:
         assert self.cpu.reg_read(UC_X86_REG_ESP) == stack+4+len(args)*4
         assert [self.cpu.reg_read(r) for r in regs] == before
         record = dict(address=address, arguments=list(args), mmio=self.events[offset:],
-                      sectl=self.get(SECTL), ien=self.get(IEN), natural_return=True)
+                      sectl=self.get(SECTL), ien=self.get(IEN),
+                      fe_control=self.get(FE_CONTROL), natural_return=True)
         self.calls.append(record)
         return record
 
 
-def check(kernel, xbe, observation, output):
+def check(kernel, xbe, observation, fe_observation, output):
     assert 'build' in output.resolve().parts, 'original evidence must stay private'
     blob, title = kernel.read_bytes(), xbe.read_bytes()
     assert sha(blob) == KERNEL_SHA and sha(title) == IMAGE_SHA256
@@ -100,6 +103,18 @@ def check(kernel, xbe, observation, output):
     # Bind the retained observation's immediate evidence, without new hardware.
     for row in physical['pins']:
         assert sha(Path(row['path']).read_bytes()) == row['sha256'], row['path']
+    # Retained successful physical execution, not an emulator-authored value.
+    # The pinned held-window payload requires1, observes0 after release, and
+    # verifies1 after restoration before returning this success code.
+    fe_summary = json.loads((fe_observation/'summary.json').read_text())
+    fe_status = json.loads((fe_observation/'status.json').read_text())
+    assert fe_summary['status'] == 'owned_ram_fence_observed'
+    assert fe_summary['mmio_writes'] == 5 and fe_summary['restored_control'] == 1
+    assert fe_summary['held_window'] and fe_summary['token_visible_before_release']
+    assert fe_status['status'] == 'observation_complete'
+    assert fe_status['payload_sha256'] == 'ec86e06791f593803dc226b8496ec47ef47c20f3ad120bb144bd10c20ad5e062'
+    assert (fe_observation/'reply.txt').read_text().strip() == 'RET f1800001'
+    fe_pins = [pin(fe_observation/name) for name in ('summary.json', 'status.json', 'reply.txt')]
     cases = []
     for seed in (0, 7, 0x18, 0xa5a500ff):
         owner = KernelHandoff(blob, seed)
@@ -112,12 +127,20 @@ def check(kernel, xbe, observation, output):
         stop = owner.call(0x80067442, (1,))
         assert owner.get(SECTL) == captured['sectl']
         assert owner.get(IEN) == captured['ien']
+        assert owner.get(FE_CONTROL) == 1
         assert owner.get(0xfe83fffc) == 0 and owner.get(0xfe85fffc) == 1
         # The actual idle FE fence takes its no-work branch. Never substitute
         # successful active notification or borrow this as an active-work proof.
         assert not any(e['write'] and e['address'] in (0xfe820104, 0xfe82010c)
                        for e in stop['mmio'])
         cases.append(dict(seed=seed, calls=owner.calls, instructions=owner.sources))
+    # Unlike SECTL/IEN initialization, FE control preserves unrelated bits.
+    # Source alone must not be presented as proving their physical zero value.
+    preserved = KernelHandoff(blob, 7, 0xa5a500fe)
+    preserved.call(0x800654dc)
+    assert preserved.get(FE_CONTROL) == 0xa5a500fe
+    preserved.call(0x80067442, (1,))
+    assert preserved.get(FE_CONTROL) == 0xa5a500ff
     lives = []
     for selector in range(3):
         p = OriginalStartup(title, selector, selector)
@@ -126,6 +149,14 @@ def check(kernel, xbe, observation, output):
         # Original full title launch and active device startup remain separate.
         p.put(SECTL, cases[0]['calls'][-1]['sectl'])
         p.put(IEN, cases[0]['calls'][-1]['ien'])
+        p.put(FE_CONTROL, 1)
+        first_fe_read, first_fe_write = len(p.reads), len(p.mmio)
+        for mode, expected in ((1, 1), (0, 0), (1, 1)):
+            p.call(0x17bc0c, (mode,), p.owner)
+            assert p.get(FE_CONTROL) == expected
+        fe_reads, fe_writes = p.reads[first_fe_read:], p.mmio[first_fe_write:]
+        assert [e['value'] for e in fe_reads if e['address'] == FE_CONTROL] == [1, 1, 0]
+        assert [e['value'] for e in fe_writes if e['address'] == FE_CONTROL] == [1, 0, 1]
         first_read, first_write = len(p.reads), len(p.mmio)
         for mode, expected in ((0, 7), (1, 15), (2, 23), (3, 31), (0, 7)):
             p.call(0x17bc9e, (mode,), p.owner)
@@ -145,16 +176,21 @@ def check(kernel, xbe, observation, output):
         first_init = len(p.mmio)
         p.call(0x17bf66, ecx=p.owner)
         assert p.get(IEN) == 0xd8 and p.get(SECTL) == 7
+        assert p.get(FE_CONTROL) == 0
         title_init = p.mmio[first_init:]
         p.destroy_startup()
         assert not any(a['live'] for a in p.allocations)
         lives.append(dict(selector=selector, reads=reads, writes=writes,
                           ien_reads=ien_reads, ien_writes=ien_writes, title_init=title_init,
+                          fe_control_reads=fe_reads, fe_control_writes=fe_writes,
                           source_identity=p.source_identity(), allocations_released=True))
     output.mkdir(parents=True, exist_ok=True)
     result = dict(kernel=pin(kernel), title=pin(xbe), physical_observation=pin(observation),
         tool=pin(Path(__file__)), kernel_cases=cases, title_control_lifetimes=lives,
-        handoff_sectl=7, handoff_ien=0xafa, full_boot_qualified=False, active_fence_qualified=False,
+        handoff_sectl=7, handoff_ien=0xafa, handoff_fe_control=1,
+        physical_fe_observation=fe_pins,
+        preserved_fe_bits=dict(calls=preserved.calls, instructions=preserved.sources),
+        full_boot_qualified=False, active_fence_qualified=False,
         limits='Pinned 4983 initialized idle handoff only. Kernel init/control/idle retirement and title RMW helpers execute unchanged with natural returns. Software owner/IRQL and MMIO storage are explicit fixture inputs. Physical capture is probe main entry, not Blinx entry or cold reset. No DSP reset timing, active FE completion, full title startup or connected output is established.')
     report = output/'kernel-audio-handoff.aot-private.json'
     report.write_text(json.dumps(result, indent=2)+'\n', newline='\n')
@@ -163,7 +199,7 @@ def check(kernel, xbe, observation, output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('kernel', 'xbe', 'observation', 'output'):
+    for name in ('kernel', 'xbe', 'observation', 'fe-observation', 'output'):
         parser.add_argument('--'+name, type=Path, required=True)
     args = parser.parse_args()
-    check(args.kernel, args.xbe, args.observation, args.output)
+    check(args.kernel, args.xbe, args.observation, args.fe_observation, args.output)

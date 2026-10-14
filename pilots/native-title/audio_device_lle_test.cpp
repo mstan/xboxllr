@@ -101,6 +101,15 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"startup-active")) {
+        access(0xfe802000,4,15);access(0xfe802000,4,7);
+        uint32_t value=0xa5a55a5a;
+        CHECK(pilot_audio_device_lle_access(0xfe801510,4,0,&value));CHECK(value==0xa5a55a5a);
+        PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+        CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words);
+        CHECK(!pilot_audio_device_lle_close());
+        puts("PASS processing history revokes startup FE control; failed read preserves caller value");return 0;
+    }
     if(!strcmp(mode,"startup") || !strcmp(mode,"startup-width")) {
         uint32_t value=0xa5a5a5a5;
         if(!strcmp(mode,"startup-width")) {
@@ -110,10 +119,15 @@ int main(int argc,char **argv) {
         }
         for(unsigned life=0;life<3;++life) {
             if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            CHECK(!pilot_audio_device_lle_access(0xfe801510,4,0,&value));CHECK(value==1);
             for(unsigned read=0;read<3;++read) {
                 CHECK(!pilot_audio_device_lle_access(0xfe802000,4,0,&value));CHECK(value==7);
                 CHECK(!pilot_audio_device_lle_access(0xfe801004,4,0,&value));CHECK(value==0xafa);
                 CHECK(!pilot_audio_device_lle_sample());
+            }
+            for(uint32_t next:{1u,0u,1u}) {
+                access(0xfe801510,4,next);
+                CHECK(!pilot_audio_device_lle_access(0xfe801510,4,0,&value));CHECK(value==next);
             }
             // Values independently observed from the original title RMW helper.
             for(uint32_t next:{7u,15u,23u,31u,7u}) {

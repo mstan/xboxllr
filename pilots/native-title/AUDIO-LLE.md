@@ -20,6 +20,34 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Startup FE control and connected GP-reset boundary - 2026-10-14
+
+`initialize_kernel_audio_handoff` establishes the pinned initialized-kernel
+SECTL/IEN contract and retained physical idle FE control1 in one fresh APU.
+It grants only startup control read/write access; the captured idle-fence
+contract remains separate. Binding unused held DSP owners preserves access.
+Processing enable, traps, VP/host-bank writes and DSP transport revoke it;
+restoring register values cannot erase history. Partial/crossing operations,
+notification address/data and active control remain guarded. Reads and control
+release perform no RAM publication, IRQ, voice completion or DSP work.
+
+The source check binds the retained held-window payload result and identity,
+executes nine original17BC0C RMW calls across three allocation/destruction
+lifetimes, and executes all three complete17BF66 initializers. A distinct
+kernel control seed with high bits set survives init/retirement: only bit0
+comes from those RMW calls; the other zero bits come from the physical idle
+observation. This does not establish general cold-reset or active FE behavior.
+
+The23 native integration checks pass. The direct FE suite retains96 idle
+publications and covers120 overlapping transactions plus startup history and
+notification rejection. Failed underlying device reads preserve the caller
+value; a private candidate restoring the old assignment fails that check.
+One connected title run now reaches WRITE FE83FFFC=0 after65.5s (exit2),
+with zero captured PCM bytes/stamps. Next is GP/EP reset/bootstrap and active
+FE ordering. Full FECTL/device startup, connected output and lifecycle/movie
+timing remain open. HLE processing and6/9 families/27 deferrals are unchanged.
+Evidence: `build/blinx/audio-fe-startup-20261014/`.
+
 ## Initialized kernel SECTL and interrupt mask - 2026-10-14
 
 The native LLE owner begins after the pinned4983 kernel's initialized idle
@@ -51,7 +79,8 @@ binary is retained at `title/bin/`. One preparation-only failure exposed a
 configure-only HDD path in the new IO library and was corrected before these
 audio observations. Runs use the retained isolated persistent test disk and
 private EEPROM/config/storage. No connected PCM or draw is claimed. Next:
-initial FE control/RMW, DSP startup and active ordering;6/9 and27 unchanged.
+the subsequent FE-control checkpoint above, then DSP startup and active
+ordering;6/9 and27 unchanged.
 
 ## Sustained original EP and numerical output - 2026-10-14
 

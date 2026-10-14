@@ -49,7 +49,7 @@ bool apu_admitted(uint32_t off,unsigned size,int write) {
         if(off>=0x2054 && off<=0x2074)return true;
         switch(off) {
         case 0x2000:case 0x200c:case 0x1000:case 0x1004:case 0x1100:case 0x1110:case 0x1300:case 0x1304:
-        case 0x20010:return true;
+        case 0x1510:case 0x20010:return true;
         default:return false;
         }
     }
@@ -62,7 +62,7 @@ bool apu_admitted(uint32_t off,unsigned size,int write) {
     case 0x2040:case 0x2044:case 0x2048:case 0x204c:
     case 0x20d4:case 0x20d8:case 0x20dc:case 0x20e0:
     case 0x202c:case 0x2030:case 0x115c:case 0x1000:case 0x1004:
-    case 0x1100:case 0x1504:case 0x2000:
+    case 0x1100:case 0x1504:case 0x1510:case 0x2000:
     case 0x2054:case 0x2060:case 0x206c:
     case 0x2058:case 0x205c:case 0x2064:case 0x2068:case 0x2070:case 0x2074:
     case 0x20120:case 0x20124:case 0x20128:case 0x20140:
@@ -144,10 +144,10 @@ extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void 
     // original67442 clears processing bits0x18 without clearing those enables.
     // The same calls initialize IEN=AFA with its global interrupt bit clear.
     // Executable source proof and retained pre-video/network entry agree.
-    // See native_audio_handoff_reference.py. This admits no FE completion or
-    // DSP reset/wake state; the other guarded registers retain their owners.
-    owner->apu.mmio_write(xlle::McpxApu::kBase+0x2000,4,7);
-    owner->apu.mmio_write(xlle::McpxApu::kBase+0x1004,4,0xafa);
+    // Retained physical idle control is1. The device admits its startup RMW
+    // separately from FE completion; processing permanently revokes that scope.
+    // See native_audio_handoff_reference.py. No DSP reset/wake is supplied.
+    owner->apu.initialize_kernel_audio_handoff();
     // Prime the stopped codec before publication. Device creation must not
     // consume any clock interval preceding its ownership.
     owner->aci.set_frame(ticks/6000);
@@ -203,10 +203,10 @@ extern "C" const char *pilot_audio_device_lle_access(uint32_t address,unsigned s
     Busy busy;
     if(apu) {
         if(write)owner->apu.mmio_write(address,int(size),*value);
-        else *value=owner->apu.mmio_read(address,int(size));
+        else {uint32_t observed=owner->apu.mmio_read(address,int(size));if(failure.empty())*value=observed;}
     } else {
         if(write)owner->aci.mmio_write(address,int(size),*value);
-        else *value=owner->aci.mmio_read(address,int(size));
+        else {uint32_t observed=owner->aci.mmio_read(address,int(size));if(failure.empty())*value=observed;}
     }
     return pilot_audio_device_lle_error();
 }

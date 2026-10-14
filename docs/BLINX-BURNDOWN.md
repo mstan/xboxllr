@@ -24,10 +24,11 @@ DMA nodes. The original GP configuration also reaches its first C4 yield
 through the maintained sole CPU owner, with the hardware observer's seven
 counter samples reproduced. All three original EP configurations now sustain32
 events with representative PCM/AC-3 numerical checks. Initialized-kernel
-SECTL/IEN are source-derived, and the connected title crosses both reads to
-the FE control1510 guard. Remaining audio work is FE control/startup, DSP
-wake/reset/shared-clock timing, active ordering and actual title output. See the
-[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#initialized-kernel-audio-handoff---2026-10-14).
+SECTL/IEN are source-derived; startup FE control is independently admitted
+without granting notification completion. The connected title now reaches
+GP reset0. Remaining audio work is DSP bootstrap/reset/shared-clock timing,
+active FE ordering and actual title output. See the
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#startup-fe-control-separated-from-notification-completion---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable

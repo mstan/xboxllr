@@ -34,13 +34,45 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: all three original EP configurations sustain32 events; representative PCM/AC-3 output passes; startup, exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Integration complete; initialized SECTL/IEN crossed; current title stops at FE control1510; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A04 | Open: idle fence and startup control proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
+| A05 | Integration complete; startup controls crossed; current title stops at GP reset0; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Startup FE control separated from notification completion - 2026-10-14
+
+The initialized-kernel handoff now supplies FE control1 from the retained
+physical idle observation. Original kernel init/retirement controls bit0;
+an additional source case proves it preserves unrelated high bits, so their
+observed zero value is not attributed to kernel clearing. Original Blinx
+17BC0C performs nine explicit control RMW calls over three driver lifetimes,
+and the complete17BF66 initializer leaves control0. All original calls and
+destructors return naturally with instruction/source identities retained.
+
+The sole APU owner admits these startup control reads and0/1 writes separately
+from the existing captured idle-fence contract. Unused held DSP owners may be
+attached. Processing enable, FE traps, VP/host-bank writes and DSP transport
+revoke startup admission; restoring registers cannot restore it. Frame/work
+history and partial/overlapping transactions are guarded. Startup control
+never admits FEMEMADDR/FEMEMDATA or publishes a notification. Existing96 idle
+fence publications still pass alongside120 overlap guards and new history/
+notification-separation checks. The23 native integration checks also pass.
+
+Underlying device read failures now preserve the caller's output value. A
+private candidate restoring the previous assignment fails the new sentinel
+check, while maintained code passes. This closes a transport failure detail
+without fabricating a read value or original CPU return.
+
+One changed connected title run passes FE control and reaches DWORD WRITE
+FE83FFFC=0, exiting2 after65.5s. Its partial capture contains zero PCM bytes
+and zero stamps. Next is original GP/EP reset/bootstrap, then active FE ordering
+and connected output/lifetime timing. The full FECTL/device startup and active
+notification contracts remain open. No physical operation or HLE processing
+change occurred;6/9 and27 precision deferrals remain. Evidence:
+`build/blinx/audio-fe-startup-20261014/`. Do not rerun this unchanged reset guard.
 
 ## Initialized kernel audio handoff - 2026-10-14
 
@@ -77,9 +109,9 @@ One preceding launch failed before title entry because the new private IO
 library retained its configure-only empty HDD path; correcting that compiled
 path resolved the preparation error. Runs use the retained isolated post-run
 disk as persistent input, with separate EEPROM/config/storage. The next required
-step is initial FE control/RMW admission, followed by original DSP startup and
-active FE ordering. Do not repeat the unchanged guarded title. Families6/9 and
-27 precision deferrals remain fixed.
+step at that checkpoint was initial FE control/RMW admission; the section
+above now records its implementation and the next GP-reset boundary.
+Families6/9 and27 precision deferrals remain fixed.
 
 ## Sustained original EP and independent output - 2026-10-14
 

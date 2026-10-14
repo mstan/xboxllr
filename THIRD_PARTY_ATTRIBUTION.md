@@ -1796,3 +1796,10 @@ initialized handoff contract; it does not change board cold-reset defaults.
 No kernel instructions, firmware, disassembly or captured binary data are
 included in committed source. Active FE completion and DSP reset/wake timing
 remain separate from the observed idle control state.
+
+The startup FE control extension reuses the retained2026-10-10 held-window
+physical experiment and original17BC0C helper execution. An explicit original
+kernel case preserves nonzero unrelated control bits; their zero value is
+therefore attributed to the physical observation, not invented kernel writes.
+No new external implementation or hardware operation is introduced. Startup
+register admission remains separate from notification-completion semantics.

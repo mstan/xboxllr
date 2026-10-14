@@ -35,6 +35,48 @@ struct Fixture {
 };
 }
 int main() {
+    // Initialized-kernel controls remain distinct from notification admission.
+    // Merely binding two unused CPU owners does not fabricate active work.
+    for(unsigned life=0;life<3;++life) {
+        Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
+        CHECK(f.read(0x2000)==7 && f.read(0x1004)==0xafa && f.read(0x1510)==1);
+        int gp,ep;CHECK(f.apu.bind_gp_program_owner(&gp,[]{return true;}));
+        CHECK(f.apu.bind_ep_program_owner(&ep,[]{return true;}));
+        for(uint32_t value:{1u,0u,1u,0u}) {
+            f.write(0x1510,value);
+            for(unsigned poll=0;poll<8;++poll)CHECK(f.read(0x1510)==value);
+            CHECK(f.apu.service_fe_fence());
+            CHECK(!f.writes && !f.irq_edges && !f.apu.fe_fences_published());
+        }
+        CHECK(f.error.empty());
+    }
+    for(uint32_t field:{0x1324u,0x1334u})for(bool output:{false,true}) {
+        Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());const auto before=f.ram;
+        if(output)f.write(field,4096);else CHECK(f.read(field)==0);
+        CHECK(!f.error.empty() && f.ram==before && !f.writes && !f.irq_edges);
+        CHECK(!f.apu.fe_fence_pending() && !f.apu.fe_fences_published());
+    }
+    // Restoring register values cannot launder processing/transport history.
+    for(unsigned kind=0;kind<8;++kind) {
+        Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
+        switch(kind) {
+        case 0:f.write(0x2000,15);f.write(0x2000,7);break;
+        case 1:CHECK(f.apu.gp_write(0xffffd4,0));break;
+        case 2:CHECK(f.apu.ep_write(0xffffd4,0));break;
+        case 3:CHECK(f.apu.gp_scratch(0,nullptr,0,false));break;
+        case 4:CHECK(f.apu.ep_scratch(0,nullptr,0,false));break;
+        case 5:f.apu.set_frame(1);break;
+        case 6:f.apu.mmio_write(0xfe801fff,2,0x1800);f.write(0x2000,7);break;
+        case 7:f.write(0x1100,0xe0);f.write(0x1100,0x88);break;
+        }
+        CHECK(f.error.empty());CHECK(f.read(0x1510)==0 && !f.error.empty() && !f.writes);
+    }
+    {Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());f.write(0x1510,0);
+     CHECK(!f.apu.initialize_kernel_audio_handoff());
+     CHECK(f.apu.RegFileMmio::mmio_read(0xfe801510,4)==0);}
+    {Fixture f;f.write(0x1004,0);CHECK(!f.apu.initialize_kernel_audio_handoff());}
+    {Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
+     CHECK(!f.apu.capture_fe_idle_context(0x71f8f,7,1,0));}
     // Both observed orderings: publication with control held at 1, and after
     // release. CPU/MMIO reads never stand in for independent device service.
     for(bool held:{true,false})for(unsigned lifetime=0;lifetime<3;++lifetime) {
@@ -75,6 +117,13 @@ int main() {
     struct Access {int delta,size;};
     const Access accesses[]={{-3,4},{-2,4},{-1,2},{-1,4},{0,1},{0,2},
         {1,1},{1,2},{1,4},{2,1},{2,2},{2,4},{3,1},{3,2},{3,4}};
+    for(const auto& a:accesses)for(bool output:{false,true}) {
+        Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
+        if(output)f.apu.mmio_write(0xfe801510+a.delta,a.size,0);
+        else CHECK(f.apu.mmio_read(0xfe801510+a.delta,a.size)==0);
+        CHECK(!f.error.empty() && !f.writes && !f.irq_edges);
+        CHECK(f.apu.RegFileMmio::mmio_read(0xfe801510,4)==1);
+    }
     for(unsigned field:{0x1510u,0x1324u,0x1334u})for(const auto& a:accesses)for(bool output:{false,true}) {
         Fixture f;f.capture();const auto before=f.ram;
         std::array<uint32_t,3> regs{};
@@ -121,5 +170,5 @@ int main() {
         CHECK(f.ram==before && !f.irq_edges && !f.apu.fe_fences_published());
         CHECK(!f.apu.service_fe_fence() && f.writes==1); // sticky: no hidden retry
     }
-    std::puts("PASS: 96 idle FE publications across six lifetimes, 90 captured overlap guards, cold/busy/ownership/DMA/reentry negatives");
+    std::puts("PASS: startup control/notification separation and history guards; 96 idle FE publications, 120 overlap guards, cold/busy/ownership/DMA/reentry negatives");
 }

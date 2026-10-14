@@ -226,7 +226,7 @@ public:
         return true;
     }
     bool ep_write(uint32_t address,uint32_t value) {
-        fe_context_known_=false;fe_state_used_=true;
+        fe_context_known_=false;fe_state_used_=true;kernel_audio_startup_=false;
         if(!faulted_ && address==0xffffc5 && !(value&~0x80u))return queue_ep_ack(value);
         return !faulted_ && ep_dma_.write(address,value);
     }
@@ -286,7 +286,7 @@ public:
     }
     bool gp_write(uint32_t address,uint32_t value) {
         if(faulted_)return false;
-        fe_context_known_=false;fe_state_used_=true;
+        fe_context_known_=false;fe_state_used_=true;kernel_audio_startup_=false;
         if(address!=0xffffc5)return gp_dma_.write(address,value);
         if((value&~0x82u) && !(value==0xfff && gp_startup_clear_ && gp_startup_clear_())) {
             device_fault("unqualified GP event acknowledgement mask");return false;
@@ -366,6 +366,18 @@ private:
     }
 public:
     bool gp_frame_outstanding()const{return gp_mix_lease_ || gp_frame_pending_;}
+    // Explicit pinned-kernel application handoff, separate from board reset
+    // and the captured FE notification experiment. Original init/retirement
+    // establishes SECTL/IEN; retained physical idle control is exactly1.
+    // The control bit may be read/toggled only before processing starts.
+    bool initialize_kernel_audio_handoff() {
+        if(faulted_)return false;
+        if(fe_state_used_ || frame_ || voice_mix_quanta_ || !fe_work_idle()) {
+            device_fault("kernel audio handoff requires a fresh device");return false;
+        }
+        set_reg32(kSectl,7);set_reg32(kIen,0xafa);set_reg32(kFeFenceControl,1);
+        kernel_audio_startup_=true;fe_state_used_=true;update_irq();return true;
+    }
     // Restore only the independently observed running-probe FE context. This
     // is snapshot input, not a cold-reset default or an admission of title work.
     // A used device cannot discard its history by importing this idle floor.
@@ -402,6 +414,7 @@ public:
     // Explicit scratch transport for the GP bootstrap/graph owner. It uses
     // the same physical SGE mapping as descriptor DMA and never starts GP.
     bool gp_scratch(uint32_t address,void* data,uint32_t bytes,bool output) {
+        kernel_audio_startup_=false;
         if(faulted_)return false;
         if((bytes && !data) || (reg32(0x2040)&7) ||
            !gp_sge(0x2040,0x20d4,address,data,bytes,output)) {
@@ -410,6 +423,7 @@ public:
         return true;
     }
     bool ep_scratch(uint32_t address,void* data,uint32_t bytes,bool output) {
+        kernel_audio_startup_=false;
         if(faulted_)return false;
         if((bytes && !data) || (reg32(0x2048)&7) ||
            !gp_sge(0x2048,0x20dc,address,data,bytes,output)) {
@@ -424,7 +438,7 @@ public:
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
         if(touches_fe_fence(off,size)) {
-            if(off==kFeFenceControl && size==4 && fe_context_idle())return reg32(off);
+            if(off==kFeFenceControl && size==4 && (kernel_audio_control_idle() || fe_context_idle()))return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
         }
         if(off>=0x30000 && off<0x40000) {
@@ -455,6 +469,11 @@ public:
         // Guard the device itself, including partial/overlapping transactions;
         // reference-wrapper whitelists cannot establish unknown fence behavior.
         if(touches_fe_fence(off,size)) {
+            // Knowing the startup control register supplies no notification
+            // address/data admission or completion of pending work.
+            if(off==kFeFenceControl && size==4 && value<=1 && kernel_audio_control_idle()) {
+                set_reg32(off,value);return;
+            }
             if(size==4 && (off==kFeFenceControl || off==kFememaddr || off==kFememdata) &&
                fe_context_idle()) {
                 if(off==kFeFenceControl && value<=1) {set_reg32(off,value);return;}
@@ -472,6 +491,12 @@ public:
         // other device state cannot recreate the observation just by later
         // restoring a few register values; busy-to-idle ordering is still open.
         fe_context_known_=false;
+        const uint64_t write_end=uint64_t(off)+unsigned(size);
+        if(off>=kVpBase ||
+           (off<kSectl+4 && write_end>kSectl && (off!=kSectl || size!=4 || (value&0x18))) ||
+           (off<kFectl+4 && write_end>kFectl &&
+            (off!=kFectl || size!=4 || (value&kFectlMethodMode)==kFectlMethodTrapped)))
+            kernel_audio_startup_=false;
         if(off>=kVpBase) {
             const uint32_t method=off-kVpBase;
             const bool ssl=method==0x18c || method==0x190 || method==0x320 || method==0x35c ||
@@ -683,6 +708,13 @@ private:
     static constexpr uint32_t kFememaddr = 0x1324, kFememdata = 0x1334;
     static constexpr uint32_t kFeFenceControl = 0x1510;
     static constexpr uint32_t kObservedIdleFectl=0x00071f8f, kObservedIdleSectl=7;
+    bool kernel_audio_control_idle()const {
+        return kernel_audio_startup_ && !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
+               !frame_ && !voice_mix_quanta_ && !processing_quantum_ && !gp_mix_admitting_ &&
+               !gp_frame_outstanding() && !dsp_work_active() && !gp_dma_.work_pending() &&
+               !dsp_work_pending(ApuDspKind::Ep) && !fe_fence_pending_ &&
+               !gp_program_revision_ && !ep_program_revision_;
+    }
     bool fe_work_idle()const {
         return !processing_quantum_ && !gp_mix_admitting_ && !gp_frame_outstanding() &&
                !dsp_work_active() && !gp_dma_.work_pending() && !dsp_work_pending(ApuDspKind::Ep) &&
@@ -1054,6 +1086,7 @@ private:
     bool irq_level_ = false;
     bool faulted_ = false;
     bool fe_context_known_=false,fe_state_used_=false,fe_address_known_=false;
+    bool kernel_audio_startup_=false;
     bool fe_fence_pending_=false,fe_fence_working_=false;
     uint64_t fe_fences_published_=0;
     uint64_t frame_ = 0;
