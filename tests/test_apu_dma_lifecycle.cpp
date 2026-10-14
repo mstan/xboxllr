@@ -1,5 +1,5 @@
 // Actual queued transport, original helper control flow and dynamic P consumers.
-// Descriptor bit9 and original bootstrap/timer/cadence remain separate guards.
+// EP/unqualified bit9 profiles and original bootstrap/timer/cadence remain guarded.
 #include "machine/apu_ep_processor.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -132,7 +132,7 @@ static void queued_lifetimes() {
         CHECK(f.write(ep,0xffffc5,0x80) && !f.read(ep,0xffffc5));
         // A later linked-node failure retains the actual completed first node,
         // never manufactures whole-list completion or a second destination.
-        f.node(ep,0x20,0x30,0x59e0,2,0x200,0x2ffd);f.node(ep,0x30,0x4000,0x5be0,2,0x210,0x2ffd);
+        f.node(ep,0x20,0x30,0x59e0,2,0x200,0x2ffd);f.node(ep,0x30,0x4000,ep?0x5be0:0x5be1,2,0x210,0x2ffd);
         *f.word(ep,0x210)=0x456789;CHECK(f.write(ep,0xffffd4,0x20) && f.write(ep,0xffffd6,1));
         CHECK(!f.apu.service_dsp_dma(f.kind(ep),4096) && f.nodes(ep)==2 && *f.word(ep,0x210)==0x456789);
         CHECK(f.apu.faulted() && !f.apu.service_dsp_dma(f.kind(ep)) && !f.write(ep,0xffffd6,2));

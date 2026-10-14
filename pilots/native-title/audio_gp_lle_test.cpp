@@ -63,6 +63,16 @@ struct Floor {
     static void fault(void*,const char* message,uint32_t address) {
         std::fprintf(stderr,"%s: %06x\n",message,address);std::exit(2);
     }
+    void service() {
+        uint32_t next=0;CHECK(apu.gp_read(0xffffd4,next));
+        const bool ok=apu.service_dsp_dma(xlle::ApuDspKind::Gp);
+        if(!ok) {
+            std::fprintf(stderr,"GP device-work guard after %llu completed nodes, descriptor %06x:",apu.gp_dma_nodes(),next);
+            for(unsigned i=0;i<7;++i)if(auto* word=apu.gp_word(next+i))std::fprintf(stderr," %06x",*word);
+            std::fprintf(stderr,"\n");
+        }
+        CHECK(ok);
+    }
     void run(uint32_t cycles) {
         // This bounded graph fixture owns explicit device work just like the
         // maintained processor. Passive peripheral reads cannot finish DMA.
@@ -71,14 +81,14 @@ struct Floor {
             uint32_t pc,power,sp;xlle_dsp_core_result(core,&pc,&power,&sp);
             if(power || xlle_dsp_core_budget(core)<=0)break;
             CHECK(xlle_dsp_core_step_budget(core));
-            CHECK(apu.service_dsp_dma(xlle::ApuDspKind::Gp));
+            service();
         }
         // STOP halts the CPU, not the separately owned DMA engine. Finish only
         // real admitted work, with a finite bound; never write idle/status.
         unsigned quanta=0;
         while(apu.dsp_dma_pending(xlle::ApuDspKind::Gp)) {
             CHECK(++quanta<=4096);
-            CHECK(apu.service_dsp_dma(xlle::ApuDspKind::Gp));
+            service();
         }
     }
     void process(const uint32_t* mix,uint32_t* output) {

@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: physical59E0/5BE0 X input pair passes; remaining representative shapes next | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: GP input profiles admitted; original graph advances to circular output4BD2 | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -86,6 +86,39 @@ The next representative batch covers Y/program destinations and circular input.
 The four owner-bound checks passed, including explicit synthetic CPU control
 flow and strict production-bit9 rejection. Production LLE/HLE are unchanged.
 Private evidence: probe `results/input-bit9-physical-20261014/`.
+
+The subsequent six-case hardware batch also passed:59E0/5BE0 to Y and P,
+and49D0/4BD0 circular Y. All four destination words, preserved-bank canaries,
+descriptor fields, eight witnesses and2,044 immutable P words matched.
+The32-byte circular ring wrapped from28 to12 with exact high24 data.
+Linear EOL appeared on poll10, circular on15; every terminalD6 was0 and every
+error was0. These are observed completion samples, not a silicon timing law.
+Every case used a fresh owner and passed separate completed-program retirement
+with exact immediate hold/SG-restore readbacks. No storage or boot writes occurred.
+
+This batch also corrected the probe's Y capture aperture. The first Y-clear
+case passed after four read-only loads from the correct address; the program
+was not rerun. Original and corrected captures remain separate. Earlier samples
+labeled Y actually read an aperture gap and cannot establish Y contents; the
+earlier X/P/completion conclusions are unaffected. Both samplers now have
+independent address-sentinel tests, with21 focused tests passing and zero skips.
+Private evidence: probe `results/gp-shape-batch-physical-20261014/` and
+`docs/GP-PAIRS.md` (probe commit `f461234`). Narrow GP-input admission for5BE0/4BD0
+is now implemented, preserving all existing extent, ownership, MIX and executable
+publication checks. EP/output/FIFO and adjacent bit9 profiles remain rejected.
+Seven focused tests pass, including paired exact bytes/cursor/EOL at counts4/32
+and retained rejection/publication failures. Count32 is an offline existing-
+transport regression, not a larger-count physical measurement.
+
+The preserved original graph was rebuilt against that change and advanced
+past its first4BD0/count32 input node. It then stopped after one completed node
+at circular output4BD2/count32. Its authored contract still passes. No original
+descriptor or byte was changed, and output remains guarded. This identifies
+the next required physical pair: circular GP output with bit9 clear/set into
+owned temporary RAM. Private result:
+`build/blinx/audio-gp-original-admission-20261014/report.aot-private.json`.
+Whole graph execution, EP/output and broader A03-A05 remain open.
+
 Private evidence and immutable source snapshots are probe
 `results/original-input-baseline-20261014/`, including `physical-assessment.aot-private.json`.
 
@@ -114,8 +147,8 @@ an exact file roundtrip retained TCP liveness during upload and download.
 Startup failures and drive availability are readable through TCP INFO, and an
 updated executable was staged, verified and launched remotely without owner
 screen-reading or a dashboard round trip. Normal boot paths are unchanged.
-The next device experiments are the remaining representative bit-9 input pairs,
-each with a new owner and separately checked admission/acknowledgement.
+The next device experiments are the reached circular bit9 output pair,
+with a new owner and separately checked admission/acknowledgement.
 Remote access removes a session-maintenance obstacle;
 it does not close A03 or change
 the **6/9** family count or 26 accepted precision deferrals.
@@ -193,7 +226,7 @@ qualified family. The count remains **6/9**, with the same 26 precision deferral
 | G03 | Passive original producer/first-transfer capture is integrated at `24468bc`; independently sourced internal/RDI packing is now recorded below | Bind saved-instance byte offsets and save/restore semantics to actual consumer state, including required RAMFC/ownership fields. Internal lane packing alone does not establish that map. Capture the real first request after G02; never replace it with an invented image or successful no-op. |
 | G04 | Guarded diagnostic GPU bootstrap and paired noise capture preparation | Obtain the required reached enabled-noise primitive and independently establish its supported sampling behavior. Preserve the existing enable guard until then. |
 | G05 | Existing representative state, lifetime, scene and producer evidence | Run the connected original graphics route after G02-G04, retaining real completion/reentry/teardown and affected representative comparisons. Reuse unchanged evidence; exhaustive scene-pixel composition remains deferred. |
-| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; physical original initialization and completed59E0/5BE0 X input pair | Establish B0-B3 producer/configuration, remaining reset/wake/control transitions and required bit9 input semantics. Representative Y/program destinations and circular-input pairs are next before broader admission. |
+| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; physical input pairs for X/Y/P and circular Y; supported GP input profiles admitted; original graph advances one node | Establish reached circular output4BD2, then continue exact original graph/owner execution. B0-B3, remaining reset/wake/control transitions and EP remain required. |
 | A04 | Idle FE publication and guarded original-DPC reproducer | Establish active-work ordering and initial control provenance, then connect publication to genuine completed work. Restoring idle register values cannot discard prior work history. |
 | A05 | Shared original-device adapter, compiled/raw MMIO route and real PCM capture consumer | Connect admitted GP/EP/VP work to the shared-clock owner after A03/A04. The current work callback advances the codec while DSPs remain held; wiring complete does not mean original DSP scheduling/output is complete. Then run actual output/ISR/DPC/stop/reuse/timing acceptance. |
 

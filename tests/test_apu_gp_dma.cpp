@@ -1,4 +1,5 @@
 #include <array>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -25,7 +26,79 @@ struct Fixture {
     }
     void go(unsigned node){CHECK(apu.gp_write(0xffffd4,node));CHECK(apu.gp_write(0xffffd6,1));CHECK(apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));}
 };
+static void paired_bit9_inputs() {
+    // Physical representatives were count4. Count32 is an offline extent
+    // regression for the existing transport contract, not a silicon measurement.
+    for(bool circular:{false,true})for(unsigned count:{4u,32u})
+    for(unsigned bank:circular?std::vector<unsigned>{0x1c00}:std::vector<unsigned>{0x400,0x1c00,0x2c00}) {
+        std::vector<uint32_t> reference;
+        for(bool bit9:{false,true}) {
+            Fixture f;const unsigned base=0x2000,offset=circular?28:0,size=32;
+            const uint32_t source[]={0xee244400,0x99305500,0x88316600,0x00000087};
+            for(unsigned i=0;i<(circular?8u:count);++i)
+                for(unsigned b=0;b<4;++b)f.scratch(base+i*4+b)=uint8_t(source[i%4]>>(b*8));
+            const uint32_t control=(circular?0x49d0:0x59e0)|(bit9?0x200:0);
+            const uint32_t node[]={0x4020,control,count,bank,circular?offset:base,base,size-1};
+            for(unsigned i=0;i<(circular?7u:5u);++i)f.word(0x20+i)=node[i];
+            for(unsigned i=0;i<count;++i)f.word(bank+i)=0x6b0000+i;
+            const auto before=f.ram;f.go(0x20);
+            CHECK(f.error.empty() && f.apu.gp_dma_nodes()==1 && f.ram==before);
+            uint32_t status=0;CHECK(f.apu.gp_read(0xffffc5,status) && status==0x80);
+            CHECK(f.apu.gp_read(0xffffd6,status) && status==0);
+            const unsigned cursor=circular?(offset+count*4)%size:base;
+            CHECK(f.word(0x24)==cursor);
+            for(unsigned i=0;i<count;++i) {
+                const unsigned source_index=circular?((offset+i*4)%size)/4:i;
+                const uint32_t expected=circular?source[source_index%4]>>8:source[i%4]&0xffffff;
+                CHECK(f.word(bank+i)==expected);
+            }
+            const std::vector<uint32_t> actual(f.apu.gp_word(bank),f.apu.gp_word(bank)+count);
+            if(bit9)CHECK(actual==reference);else reference=actual;
+            CHECK(f.apu.gp_write(0xffffc5,0x80) && f.apu.gp_read(0xffffc5,status) && status==0);
+        }
+    }
+}
+static void bit9_profile_boundaries() {
+    // Shared implementation must not widen EP, output, FIFO or adjacent flags.
+    for(bool ep:{false,true})for(uint32_t control:{0x5be0u,0x4bd0u,0x5be2u,0x4bd2u,
+            0x5a00u,0x47e0u,0x4be0u,0x5bd0u,0x5be1u,0x7be0u,0x15be0u}) {
+        if(!ep && (control==0x5be0 || control==0x4bd0))continue;
+        std::array<uint32_t,0x3800> memory{};std::string error;unsigned byte_calls=0,fifo_calls=0;
+        xlle::ApuDspDma dma([&](uint32_t a)->uint32_t*{return a<memory.size()?&memory[a]:nullptr;},
+            [&](uint32_t,void*,uint32_t,bool){++byte_calls;return true;},
+            [&](unsigned,void*,uint32_t,bool){++fifo_calls;return true;},
+            [&](const std::string& e){error=e;},{},{},ep?xlle::ApuDspKind::Ep:xlle::ApuDspKind::Gp);
+        const uint32_t node[]={0x4020,control,4,0x400,28,0x2000,31};
+        std::copy(std::begin(node),std::end(node),memory.begin()+0x20);const auto before=memory;
+        CHECK(dma.write(0xffffd4,0x20) && dma.write(0xffffd6,1));
+        CHECK(!dma.service(4096) && !error.empty() && !dma.nodes());
+        CHECK(memory==before && byte_calls==0 && fifo_calls==0);
+        CHECK(!dma.write(0xffffd6,1));
+    }
+    // Admitted P input still requires the executable publication owner's consent.
+    std::array<uint32_t,0x3800> memory{};std::string error;unsigned reads=0,publications=0;
+    xlle::ApuDspDma dma([&](uint32_t a)->uint32_t*{return a<memory.size()?&memory[a]:nullptr;},
+        [&](uint32_t,void* out,uint32_t n,bool output){CHECK(!output);++reads;std::memset(out,0x12,n);return true;},
+        [](unsigned,void*,uint32_t,bool){CHECK(false);return false;},
+        [&](const std::string& e){error=e;},[&]{++publications;return false;});
+    const uint32_t node[]={0x4020,0x5be0,4,0x2c00,0x2000};
+    std::copy(std::begin(node),std::end(node),memory.begin()+0x20);const auto before=memory;
+    CHECK(dma.write(0xffffd4,0x20) && dma.write(0xffffd6,1) && !dma.service(4096));
+    CHECK(reads==1 && publications==1 && !dma.nodes() && memory==before);
+    CHECK(error.find("executable DMA publication was rejected")!=std::string::npos);
+    CHECK(!dma.read(0xffffc5,memory[0]) && !dma.write(0xffffd6,1));
+    // Existing count/bank/physical-source guards remain active for exact profiles.
+    for(unsigned failure=0;failure<4;++failure) {
+        Fixture f;const uint32_t node[]={0x4020,0x5be0,failure==0?0u:failure==1?4097u:4u,
+            failure==2?0xffeu:0x400u,failure==3?0x10000u:0x2000u};
+        for(unsigned i=0;i<5;++i)f.word(0x20+i)=node[i];const auto before=f.ram;
+        CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1));
+        CHECK(!f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096) && f.apu.faulted());
+        CHECK(!f.apu.gp_dma_nodes() && f.ram==before && f.word(0x400)==0);
+    }
+}
 int main() {
+    paired_bit9_inputs();bit9_profile_boundaries();
     // Published hardware byte examples, independent of native/xemu packing.
     for(unsigned format:{2u,6u})for(unsigned bank:{0x80u,0x1480u,0x1880u,0x2880u}) {
         Fixture f;f.word(bank)=0x123456;f.word(bank+1)=0xabcdef;

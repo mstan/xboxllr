@@ -2046,3 +2046,40 @@ bins 11/12 output still belong to A03/A05. Original initial SECTL, GP/EP/reset/w
 B0-B3/bit9, active FE ordering and actual original output/lifetimes/timing remain
 required under A03-A05. **The audio family remains open.** No test, build, title
 or hardware run was added for census closure.
+
+
+## Narrow GP input bit9 profile admission - 2026-10-14
+
+Eight fresh-owner observations across four clear/set pairs now support GP input controls
+`5BE0` (linear buffer15, format6) and `4BD0` (circular buffer14, format2 with
+cursor writeback). Linear X/Y/P cases transferred the exact four-word SG
+signature; circular Y cases used a 32-byte ring at offset 28, wrapped four words,
+and published cursor 12. Every case retained exact descriptors, eight witnesses,
+2044 immutable P words and the separately captured four P target words, EOL and
+terminal D6 idle. The Y capture aperture was explicitly corrected from the old
+unmapped gap to `FE837000..C`; original and reconciled captures remain private
+under the probe worktree's `results/gp-shape-batch-physical-20261014`, including
+`summary.aot-private.json`. No failed capture was relabeled without corrected
+read-only evidence. Exact completed-program retirement followed each case.
+
+The shared DMA implementation admits bit9 only for those two exact controls
+on GP input. EP, output, FIFO, format1 and all neighboring bit9 profiles remain
+rejected. Existing count, bank, physical transport, MIX lease and executable P
+publication ownership guards are unchanged. Larger counts use the existing
+bounded transport contract as a profile interpretation: the physical trials
+were count 4, not original count 32 or an arbitrary larger extent. Paired offline
+byte/cursor/EOL tests at counts 4/32 exercise that distinction and retain negative
+profile, extent, ownership and P-publication tests. These observations do not
+establish a general meaning for bit9, active-code reload safety, silicon timing,
+whole original graph correctness, EP, output or a new family acceptance scope.
+
+Seven focused DMA/linear/lifecycle/processor/EP tests passed. The preserved
+original graph, rebuilt against this admission without editing its original
+bytes or descriptors, now completes its first4BD0/count32 input. It then stops
+at node0093, control4BD2/count32 (circular GP output), after one completed node.
+The standalone authored graph contract passes. The graph diagnostic now records
+the descriptor and completed-node count on a device-work failure, so an
+asynchronous guard identifies the actual next boundary. Private results are in
+`build/blinx/audio-gp-original-admission-20261014/`; output remains unsupported
+pending its separate owned-RAM clear/set observation. No whole graph or audio
+family pass follows from this progress.

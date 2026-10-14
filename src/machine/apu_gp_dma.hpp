@@ -129,7 +129,14 @@ private:
             // 0..1 have independent cursor owners.
             // Unsupported input FIFO 2/3 is guarded, never silently completed.
             const bool scratch=linear || circular;
-            if((node[0]&~0x7fffu) || (node[1]&0x220d) ||
+            // Paired physical GP input observations support these exact scratch
+            // profiles. Four-word representatives establish the profile, not
+            // arbitrary flags, EP/output, larger-count silicon timing or P-code
+            // reload safety. Existing extent and publication owners still apply.
+            const bool qualified_bit9_input=kind_==ApuDspKind::Gp && !output &&
+                (node[1]==0x5be0u || node[1]==0x4bd0u);
+            if((node[0]&~0x7fffu) || (node[1]&0x200d) ||
+               ((node[1]&0x200) && !qualified_bit9_input) ||
                (linear && (node[1]&16)) ||
                (!scratch && buffer>=(output?4u:2u)) || (node[1]>>14)!=1 ||
                (format!=1 && format!=2 && format!=6) || !count || count>4096 ||

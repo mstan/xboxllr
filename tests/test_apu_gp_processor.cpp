@@ -228,13 +228,14 @@ static void owner_and_mapping_guards() {
     CHECK(!unavailable.run(100,result) && !result.returned && !result.sequence);
     CHECK(unavailable.phase()==xlle::ApuGpPhase::Failed && !unavailable.reset_cpu());
 }
+// Unknown bit0 combined with bit9 stays outside the admitted GP input profiles.
 static void cpu_publication_guard(bool bit9) {
     Fixture f;
     f.boot_image({0x65f400,0xffffd0,0x44f400,0x20,0x021584,
                   0x65f400,0xffffd2,0x44f400,1,0x021584,0x87});
     xlle::ApuGpProcessor owner(f.apu,[&](const std::string& why){f.owner_fault(why);});
     CHECK(owner.bootstrap_from_scratch());f.scratch_word(0x2ffd,0x123456);
-    f.descriptor(bit9?0x100:0x2800,1,bit9?0x004bd0:0x4000|(6<<10)|(14<<5));
+    f.descriptor(bit9?0x100:0x2800,1,bit9?0x004bd1:0x4000|(6<<10)|(14<<5));
     f.guarded_p.assign(f.apu.gp_word(0x2800),f.apu.gp_word(0x2800)+4096);f.guard_exit=true;f.unsafe_host_publication=!bit9;
     xlle::ApuGpRun result;owner.run(1000,result);CHECK(false);
 }
