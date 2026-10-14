@@ -1803,3 +1803,13 @@ kernel case preserves nonzero unrelated control bits; their zero value is
 therefore attributed to the physical observation, not invented kernel writes.
 No new external implementation or hardware operation is introduced. Startup
 register admission remains separate from notification-completion semantics.
+
+The reset/bootstrap extension executes original GP/EP driver setup through
+`native_audio_reset_reference.py` and retains the owned bootstrap bytes privately.
+Physical GP-marker and EP-startup observations independently verify release3 and
+loaded program contents. The existing xemu reference at482088490c2d5983ed5e1eafbd09906157c1eca0,
+`hw/xbox/mcpx/apu/dsp/gp_ep.c`, `dsp_c.c` and `apu_regs.h`, supplies reset-bit
+and8KB mapped-bootstrap behavior as a separate behavioral reference. The authored
+MMIO callback connects the already credited sole DSP owner; no GPL implementation
+body, owned program bytes, hardware payload or console-specific data is included.
+Precise boot timing, active resets and held-bank aperture semantics are not inferred.

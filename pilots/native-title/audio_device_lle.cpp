@@ -1,5 +1,6 @@
 /* Original DirectSound's shared device owner. This connects qualified storage,
- * transactions and codec consumption, not unknown hardware DSP boot/wake. */
+ * transactions, reset/bootstrap and codec consumption. Shared DSP cadence and
+ * active FE ordering remain separate qualification work. */
 #include "audio_device_lle.h"
 extern "C" {
 #include "io_device_lle.h"
@@ -41,10 +42,11 @@ bool dma(uint32_t address,void *buffer,size_t bytes,int write) {
            pilot_io_device_pinned_dma(address,buffer,uint32_t(bytes),write);
 }
 /* The strict original helper/source proofs qualify these transactions, not
- * RegFileMmio's blanket zero/last-written fallback. Hardware reset/core/wake,
- * active FE fence and unknown registers fail before entering either owner. */
-bool apu_admitted(uint32_t off,unsigned size,int write) {
+ * RegFileMmio's blanket zero/last-written fallback. Reset ownership is checked
+ * by the device; active FE and unknown registers retain their guards. */
+bool apu_admitted(uint32_t off,unsigned size,int write,uint32_t value) {
     if(size!=4 || (off&3))return false;
+    if(off==0x3fffc || off==0x5fffc)return !write || value==1 || value==3 || (off==0x3fffc && value==0);
     if(!write) {
         if(off>=0x2054 && off<=0x2074)return true;
         switch(off) {
@@ -104,6 +106,9 @@ extern "C" const char *pilot_audio_device_lle_error(void) {
 extern "C" const char *pilot_audio_device_lle_close(void) {
     if(!owner)return nullptr;
     if(owner->busy)return fail("original audio device teardown during device work");
+    if((owner->gp && owner->gp->phase()!=xlle::ApuGpPhase::Held) ||
+       (owner->ep && owner->ep->phase()!=xlle::ApuGpPhase::Held))
+        return fail("original audio device teardown requires held DSP owners");
     // Idle CPU execution is not descriptor retirement. Require a stopped,
     // drained codec; unknown active/paused teardown retains its DMA owner.
     if((owner->aci.mmio_read(xlle::McpxAci::kBase+0x11b,1)&1) ||
@@ -146,7 +151,8 @@ extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void 
     // Executable source proof and retained pre-video/network entry agree.
     // Retained physical idle control is1. The device admits its startup RMW
     // separately from FE completion; processing permanently revokes that scope.
-    // See native_audio_handoff_reference.py. No DSP reset/wake is supplied.
+    // See native_audio_handoff_reference.py. Reset writes are routed to the
+    // sole DSP owners below; release fetches their actual guest bootstrap.
     owner->apu.initialize_kernel_audio_handoff();
     // Prime the stopped codec before publication. Device creation must not
     // consume any clock interval preceding its ownership.
@@ -184,10 +190,11 @@ extern "C" const char *pilot_audio_device_lle_access(uint32_t address,unsigned s
     if(!failure.empty())return failure.c_str();
     if(!owner || !value || (write!=0 && write!=1))return fail("invalid original audio device transaction");
     if(owner->busy)return fail("original audio device callback reentry");
+    const uint32_t supplied=write?*value:0; // A read's output need not be initialized.
     const bool apu=address>=xlle::McpxApu::kBase && address<xlle::McpxApu::kBase+xlle::McpxApu::kSize;
     const bool aci=address>=xlle::McpxAci::kBase && address<xlle::McpxAci::kBase+xlle::McpxAci::kSize;
-    if((!apu && !aci) || (apu && !apu_admitted(address-xlle::McpxApu::kBase,size,write)) ||
-       (aci && !aci_admitted(address-xlle::McpxAci::kBase,size,write,*value)))
+    if((!apu && !aci) || (apu && !apu_admitted(address-xlle::McpxApu::kBase,size,write,supplied)) ||
+       (aci && !aci_admitted(address-xlle::McpxAci::kBase,size,write,supplied)))
     {
         char diagnostic[256];
         if(write)std::snprintf(diagnostic,sizeof(diagnostic),
@@ -218,6 +225,8 @@ extern "C" const char *pilot_audio_device_lle_sample(void) {
     const char *error=pilot_usb_pit_clock(&ticks,&next);
     if(error)return fail(error);
     if(ticks<owner->ticks)return fail("original audio device clock moved backwards");
+    if(owner->gp->phase()!=xlle::ApuGpPhase::Held || owner->ep->phase()!=xlle::ApuGpPhase::Held)
+        return fail("original DSP shared-clock execution remains unqualified");
     Busy busy;owner->ticks=ticks;owner->apu.set_time(ticks,1125000);
     // Only the independently qualified, guest-configured codec consumes here.
     // Held DSPs and VP sources are never started by periodic observer work.

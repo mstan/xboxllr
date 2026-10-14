@@ -33,14 +33,50 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: all three original EP configurations sustain32 events; representative PCM/AC-3 output passes; startup, exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: sustained original output and bounded reset/bootstrap pass; startup controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and startup control proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Integration complete; startup controls crossed; current title stops at GP reset0; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Integration complete; initial reset crossed; current title stops at FETFORCE0=0; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Reset controls connected to sole DSP bootstrap owners - 2026-10-14
+
+Original driver execution records GP/EP reset1 then3 over three allocation and
+destruction lifetimes. Each release captures the actual two-page scratch image;
+the maintained MMIO route loads all12,288 original program words exactly across
+those six images. Original kernel retirement and retained physical entry supply
+GP0/EP1. Separate retained physical GP-marker and EP-startup runs verify release3
+and all2,048 loaded P words per DSP. The original programming and pinned xemu
+reset-bit/reference bootstrap model support the bounded hold/release bridge;
+this does not establish arbitrary warm-reset effects or held-bank readback.
+
+Reset callbacks belong to the existing sole program/CPU owners. Holds retain
+bank storage and perform no DMA; release uses the existing complete SG fetch,
+24-bit P publication and executable-cache invalidation. Repeated release/read
+does not refetch or run instructions. Unsupported control bits, partial or
+overlapping accesses, unavailable owners, failed second-page reads and existing
+counter/control/pending-work reset guards fail explicitly. No alternate DSP,
+fake ready bit, completed frame or generated output is introduced. Released
+native DSPs remain guarded at shared-clock service and cannot silently disappear
+through teardown; connecting their admitted execution to that clock is next work.
+
+Six component checks pass, including the new reset test with six authored CPU
+lifetimes/twelve boots and actual instruction-produced markers. All25 native
+device/compiled-MMIO checks pass. Three legacy failure stimuli used now-supported
+reset3; they now exercise unsupported abort bit3 and preserve their original
+failure/ownership assertions. One changed title run crosses the initial reset
+and stops at DWORD WRITE FE801500=0 (FETFORCE0), after52.313s, with zero captured
+PCM bytes/stamps. It does not reach connected release/bootstrap yet.
+
+Next batch: remaining original FE initialization controls, GP/EP host controls
+FF00/FF04/FF10/FF14/FF5C and FIFO/SG method setup, then shared DSP cadence, active
+FE ordering and actual title output. The source trace records later controls
+without admitting their unknown effects. Evidence:
+`build/blinx/audio-reset-startup-20261014/`. No new hardware operation, playback
+or HLE processing change;6/9 families and27 precision deferrals remain.
 
 ## Startup FE control separated from notification completion - 2026-10-14
 

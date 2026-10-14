@@ -91,7 +91,7 @@ static const char *continuation(uint32_t entry,uint32_t regs[8],bool dpc) {
     if(dpc)++dpcs;else {++callbacks;pilot_usb_pic_raise(3,0);}
     uint64_t before=0,deadline=0;CHECK(!pilot_usb_pit_clock(&before,&deadline));
     if(!strcmp(mode,"unknown")) {
-        first_error=decoded_rejection(0xfe83fffc,1,3);
+        first_error=decoded_rejection(0xfe83fffc,1,11); // Abort remains outside reset0/1/3.
         uint32_t value=0xcccccccc;
         CHECK(pilot_io_device_compiled_mmio(0xfe80200c,4,0,&value)==first_error && value==0xcccccccc);
         return "later callback error must not overwrite first device error";

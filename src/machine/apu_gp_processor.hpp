@@ -43,6 +43,7 @@ protected:
     ~ApuDspProcessor();
     bool start_gp_frame(ApuVoiceQuantum& result);
 private:
+    bool reset_control(uint32_t previous,uint32_t next);
     bool fail(const char* why);
     bool permit_program_write();
     bool dispatch_work();
@@ -59,7 +60,7 @@ private:
     ApuGpPhase phase_=ApuGpPhase::Held;
     uint64_t bootstraps_=0,runs_=0,program_revision_=0;
     bool executing_=false,bound_=false,frame_bound_=false,initializing_=false;
-    bool working_=false;
+    bool working_=false,resetting_=false;
     uint32_t retired_work_instructions_=0;
     ApuDspCounterProfile counter_profile_;
     uint32_t retired_before_instruction_=0;

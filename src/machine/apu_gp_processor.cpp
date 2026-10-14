@@ -21,11 +21,12 @@ ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuD
         xlle_dsp_core_create(apu_.gp_word(0x2800),apu_.gp_word(0),apu_.gp_word(0x1800),apu_.gp_word(0x1400),this,read,write,core_fault):
         xlle_dsp_core_create_ep_lookup(apu_.ep_word(0x2800),apu_.ep_word(0),apu_.ep_word(0x1800),this,read,write,core_fault,read_ep_lookup);
     if(!core_){fail("GP CPU allocation failed");return;}
-    bound_=kind_==ApuDspKind::Gp?apu_.bind_gp_program_owner(this,[this]{return permit_program_write();}):
+    auto reset=[this](uint32_t previous,uint32_t next){return reset_control(previous,next);};
+    bound_=kind_==ApuDspKind::Gp?apu_.bind_gp_program_owner(this,[this]{return permit_program_write();},reset):
                                apu_.bind_ep_program_owner(this,[this]{return permit_program_write();},[this]{
                                    if(executing_ || working_)return fail("reentrant EP frame publication");
                                    return phase_==ApuGpPhase::Ready || phase_==ApuGpPhase::Running;
-                               });
+                               },reset);
     if(!bound_){fail("GP CPU program banks already have an owner");return;}
     if(kind_==ApuDspKind::Gp) {
         frame_bound_=apu_.bind_gp_frame_owner(this,[this]{return executing_ && initializing_ &&
@@ -56,6 +57,18 @@ bool ApuDspProcessor::permit_program_write() {
     if(apu_.faulted())return fail("GP program publication on a faulted APU");
     if(executing_)return fail("GP executable DMA/host writes during execution remain unqualified");
     return true;
+}
+bool ApuDspProcessor::reset_control(uint32_t previous,uint32_t next) {
+    if(phase_==ApuGpPhase::Failed)return false;
+    if(executing_ || working_ || resetting_ || apu_.dsp_work_active())return fail("reentrant GP reset control");
+    struct ResetScope {bool& busy;ResetScope(bool& b):busy(b){busy=true;}~ResetScope(){busy=false;}} scope(resetting_);
+    if(next!=3)return reset_cpu();
+    // Rewriting released control does not refetch P or restart the CPU.
+    if(previous==3) {
+        if(phase_==ApuGpPhase::Held)return fail("GP reset control disagrees with held CPU");
+        return true;
+    }
+    return bootstrap_from_scratch();
 }
 bool ApuDspProcessor::reset_cpu() {
     if(phase_==ApuGpPhase::Failed)return false;

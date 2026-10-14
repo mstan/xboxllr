@@ -25,10 +25,13 @@ through the maintained sole CPU owner, with the hardware observer's seven
 counter samples reproduced. All three original EP configurations now sustain32
 events with representative PCM/AC-3 numerical checks. Initialized-kernel
 SECTL/IEN are source-derived; startup FE control is independently admitted
-without granting notification completion. The connected title now reaches
-GP reset0. Remaining audio work is DSP bootstrap/reset/shared-clock timing,
-active FE ordering and actual title output. See the
-[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#startup-fe-control-separated-from-notification-completion---2026-10-14).
+without granting notification completion. Bounded reset controls now route to
+the sole DSP CPUs and fetch their actual SG bootstrap images; six original
+images and retained physical loaded-P observations support that connection.
+The connected title crosses initial reset and stops at FETFORCE0=0. Remaining
+audio work is original startup controls, shared-clock execution, active reset/FE
+ordering and actual title output. See the
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#reset-controls-connected-to-sole-dsp-bootstrap-owners---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable

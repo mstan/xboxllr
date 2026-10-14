@@ -20,6 +20,37 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Original reset/bootstrap transport - 2026-10-14
+
+The initialized-kernel profile now supplies observed GP0/EP1 and routes exact
+DWORD reset0/1/3 (EP1/3) to the existing sole DSP CPU owners. Release fetches two
+actual guest SG pages into the existing P bank; repeated release/read does not
+reload or execute. Failed complete fetches publish no partial P image. Existing
+counter/control/pending-work reset guards remain. Unsupported NMI/abort and
+overlapping transactions fail before device effects. Host bank access while
+held is not admitted by the native adapter. Exact hardware boot latency and
+warm resets after active processing remain separate qualification questions.
+
+`native_audio_reset_reference.py` executes three original driver setup and
+destruction lifetimes, records reset1/3 plus the later host-control requests,
+and captures all six original bootstrap images at their actual release writes.
+The MMIO observer matches12,288 resulting P words exactly. The original caller
+and allocation floor remain authored; passive register storage is not claimed
+as active device execution. Retained successful physical GP-marker and EP
+startup captures separately verify release3 and2,048 loaded P words each.
+Pinned xemu's reset-bit and mapped-bootstrap behavior is an additional reference,
+not the source of the physical results. No external implementation is copied.
+
+Six component checks and25 native/compiled-MMIO checks pass. The new component
+exercises six CPU lives/twelve boots, actual instruction markers, noncontiguous
+SG pages, retained banks, failed-fetch atomicity and guarded history. Native
+tests traverse real pinned-memory DMA and verify released owners remain retained
+when unqualified shared-clock execution is requested. The changed title passes
+initial reset, then stops at FE801500=0 after52.313s, before connected bootstrap
+release or PCM output. Next is the grouped FE/host-control startup contract,
+then shared-clock execution and active FE completion. Evidence:
+`build/blinx/audio-reset-startup-20261014/`. HLE unchanged;6/9 and27 deferrals.
+
 ## Startup FE control and connected GP-reset boundary - 2026-10-14
 
 `initialize_kernel_audio_handoff` establishes the pinned initialized-kernel

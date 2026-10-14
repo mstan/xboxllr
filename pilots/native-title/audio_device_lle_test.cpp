@@ -101,6 +101,30 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"reset-bootstrap") || !strcmp(mode,"reset-clock")) {
+        uint32_t bytes=12288,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
+        word(va)=pa+4096;word(va+8)=pa+8192;
+        for(unsigned i=0;i<2048;++i)word(va+4096+i*4)=0xa7000087; // Authored STOP image.
+        access(0xfe802040,4,pa);access(0xfe8020d4,4,1);
+        access(0xfe802048,4,pa);access(0xfe8020dc,4,1);
+        access(0xfe83fffc,4,1);access(0xfe83fffc,4,3);
+        access(0xfe85fffc,4,1);access(0xfe85fffc,4,3);
+        PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+        CHECK(!s.gp_held && !s.ep_held && s.dma_reads==8 && !s.dma_writes && !s.pcm_words);
+        for(uint32_t a:{0xfe83fffcu,0xfe85fffcu}) {
+            uint32_t v=0;CHECK(!pilot_audio_device_lle_access(a,4,0,&v) && v==3);access(a,4,3);
+        }
+        pilot_audio_device_lle_state(&s);CHECK(s.dma_reads==8 && received.empty());
+        if(!strcmp(mode,"reset-clock")) {
+            CHECK(pilot_audio_device_lle_sample());CHECK(pilot_audio_device_lle_close());
+            pilot_audio_device_lle_state(&s);CHECK(s.owned && s.work_binding && !s.pcm_words && s.dma_reads==8);
+            puts("PASS unqualified DSP cadence fails explicitly and retains released owners");return 0;
+        }
+        access(0xfe83fffc,4,0);access(0xfe85fffc,4,1);
+        pilot_audio_device_lle_state(&s);CHECK(s.gp_held && s.ep_held && s.dma_reads==8);
+        CHECK(!pilot_audio_device_lle_close());call(171,&va);
+        puts("PASS real pinned-SG GP/EP bootstrap, repeated release/passive reads, hold and clean teardown");return 0;
+    }
     if(!strcmp(mode,"startup-active")) {
         access(0xfe802000,4,15);access(0xfe802000,4,7);
         uint32_t value=0xa5a55a5a;
@@ -119,6 +143,9 @@ int main(int argc,char **argv) {
         }
         for(unsigned life=0;life<3;++life) {
             if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            CHECK(!pilot_audio_device_lle_access(0xfe83fffc,4,0,&value));CHECK(value==0);
+            CHECK(!pilot_audio_device_lle_access(0xfe85fffc,4,0,&value));CHECK(value==1);
+            access(0xfe83fffc,4,0);access(0xfe85fffc,4,1);access(0xfe83fffc,4,1);
             CHECK(!pilot_audio_device_lle_access(0xfe801510,4,0,&value));CHECK(value==1);
             for(unsigned read=0;read<3;++read) {
                 CHECK(!pilot_audio_device_lle_access(0xfe802000,4,0,&value));CHECK(value==7);
@@ -148,13 +175,12 @@ int main(int argc,char **argv) {
     PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
     CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding && state.gp_held && state.ep_held && state.clock_ticks==60000);
     if(!strcmp(mode,"unknown") || !strcmp(mode,"unknown-read") || !strcmp(mode,"gap")) {
-        // Actual original setup records GP reset=3 at FE83FFFC. Recording
-        // that write did not qualify its device semantics.
+        // Reset0/1/3 is qualified separately. Abort bit3 is not admitted.
         const bool read=!strcmp(mode,"unknown-read");
-        uint32_t value=read?0xa5a55a5a:3;const char *error=pilot_audio_device_lle_access(!strcmp(mode,"gap")?0xfe803030:0xfe83fffc,read?2:4,!read,&value);CHECK(error);
+        uint32_t value=read?0xa5a55a5a:11;const char *error=pilot_audio_device_lle_access(!strcmp(mode,"gap")?0xfe803030:0xfe83fffc,read?2:4,!read,&value);CHECK(error);
         CHECK(strstr(error,!strcmp(mode,"gap")?"address=fe803030":"address=fe83fffc"));
         CHECK(strstr(error,read?"width=2":"width=4"));
-        CHECK(strstr(error,read?" read":" write value=00000003"));
+        CHECK(strstr(error,read?" read":" write value=0000000b"));
         if(read){CHECK(!strstr(error,"value="));CHECK(value==0xa5a55a5a);}
         CHECK(pilot_audio_device_lle_access(0xfe800000,4,1,&value)==error);
         pilot_audio_device_lle_state(&state);CHECK(!state.dma_reads && !state.dma_writes && !state.pcm_words);
@@ -211,7 +237,7 @@ int main(int argc,char **argv) {
         0xb9,0xa0,0x86,0x01,0,0x49,0x75,0xfd,0xc2,4,0};
     memcpy(guest+0x12000,code,sizeof(code));pilot_io_device_thread_bind(body);
     if(!strcmp(mode,"engine-fault") || !strcmp(mode,"capture-engine")) {
-        const uint8_t unknown[]={0xc7,0x05,0xfc,0xff,0x83,0xfe,3,0,0,0,0xc2,4,0};
+        const uint8_t unknown[]={0xc7,0x05,0xfc,0xff,0x83,0xfe,11,0,0,0,0xc2,4,0};
         memcpy(guest+0x12000,unknown,sizeof(unknown));
     }
     CHECK(!pilot_io_device_clock_bind(clock_input,nullptr));
@@ -222,7 +248,7 @@ int main(int argc,char **argv) {
     if(!strcmp(mode,"engine-fault") || !strcmp(mode,"capture-engine")) {
         uint32_t result=0;CHECK(pilot_io_device_lle(159,guest,join,&result));CHECK(raw_calls==1);
         const char *first=pilot_audio_device_lle_error();CHECK(first);
-        CHECK(strstr(first,"address=fe83fffc width=4 write value=00000003"));
+        CHECK(strstr(first,"address=fe83fffc width=4 write value=0000000b"));
         pilot_audio_device_lle_state(&state);CHECK(!state.dma_reads && !state.pcm_words && !state.descriptors);
         CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&state);
         CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding);

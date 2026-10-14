@@ -268,15 +268,17 @@ public:
         working=false;return done && !faulted_;
     }
     uint64_t ep_program_revision()const{return ep_program_revision_;}
-    bool bind_ep_program_owner(void* owner,ApuDspDma::ProgramWrite guard,std::function<bool()> frame_owner={}) {
+    using DspResetControl=std::function<bool(uint32_t,uint32_t)>;
+    bool bind_ep_program_owner(void* owner,ApuDspDma::ProgramWrite guard,std::function<bool()> frame_owner={},DspResetControl reset={}) {
         if(!owner || !guard || ep_program_owner_)return false;
         fe_context_known_=false;fe_state_used_=true;
-        ep_program_owner_=owner;ep_program_guard_=std::move(guard);ep_frame_owner_=std::move(frame_owner);return true;
+        ep_program_owner_=owner;ep_program_guard_=std::move(guard);ep_frame_owner_=std::move(frame_owner);
+        ep_reset_control_=std::move(reset);return true;
     }
     void unbind_ep_program_owner(void* owner) {
         if(ep_program_owner_==owner){
             if(dsp_work_pending(ApuDspKind::Ep) && !faulted_)device_fault("EP CPU owner removed with pending peripheral work");
-            ep_program_owner_=nullptr;ep_program_guard_={};ep_frame_owner_={};
+            ep_program_owner_=nullptr;ep_program_guard_={};ep_frame_owner_={};ep_reset_control_={};
         }
     }
     bool gp_read(uint32_t address,uint32_t& value) {
@@ -300,15 +302,15 @@ public:
     // One serialized CPU owner observes executable host/DMA publication. This
     // epoch is invalidation bookkeeping, not DSP completion or device time.
     uint64_t gp_program_revision()const{return gp_program_revision_;}
-    bool bind_gp_program_owner(void* owner,ApuGpDma::ProgramWrite guard) {
+    bool bind_gp_program_owner(void* owner,ApuGpDma::ProgramWrite guard,DspResetControl reset={}) {
         if(!owner || !guard || gp_program_owner_)return false;
         fe_context_known_=false;fe_state_used_=true;
-        gp_program_owner_=owner;gp_program_guard_=std::move(guard);return true;
+        gp_program_owner_=owner;gp_program_guard_=std::move(guard);gp_reset_control_=std::move(reset);return true;
     }
     void unbind_gp_program_owner(void* owner) {
         if(gp_program_owner_==owner){
             if(gp_dma_.work_pending() && !faulted_)device_fault("GP CPU owner removed with pending DMA");
-            gp_program_owner_=nullptr;gp_program_guard_={};
+            gp_program_owner_=nullptr;gp_program_guard_={};gp_reset_control_={};
         }
     }
     // Frame flags are vendor polled events, distinct from core IPR/vector state.
@@ -376,6 +378,9 @@ public:
             device_fault("kernel audio handoff requires a fresh device");return false;
         }
         set_reg32(kSectl,7);set_reg32(kIen,0xafa);set_reg32(kFeFenceControl,1);
+        // Original idle retirement and retained pre-video/network observations
+        // agree. These are initialized-kernel values, not cold-reset defaults.
+        set_reg32(kGpReset,0);set_reg32(kEpReset,1);dsp_reset_context_known_=true;
         kernel_audio_startup_=true;fe_state_used_=true;update_irq();return true;
     }
     // Restore only the independently observed running-probe FE context. This
@@ -437,6 +442,10 @@ public:
         if (faulted_) return 0;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
+        if(touches_dsp_reset(off,size)) {
+            if(size==4 && (off==kGpReset || off==kEpReset) && dsp_reset_context_known_)return reg32(off);
+            device_fault("DSP reset read context/width remains unqualified");return 0;
+        }
         if(touches_fe_fence(off,size)) {
             if(off==kFeFenceControl && size==4 && (kernel_audio_control_idle() || fe_context_idle()))return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
@@ -466,6 +475,21 @@ public:
         if (faulted_) return;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
+        if(touches_dsp_reset(off,size)) {
+            if(size!=4 || (off!=kGpReset && off!=kEpReset) || !dsp_reset_context_known_ ||
+               (value!=1 && value!=3 && !(off==kGpReset && value==0)) || fe_fence_pending_) {
+                device_fault("DSP reset write context/value/width remains unqualified");return;
+            }
+            auto& reset=off==kGpReset?gp_reset_control_:ep_reset_control_;
+            if(!reset || !reset(reg32(off),value)) {
+                device_fault("DSP reset requires its available sole CPU owner");return;
+            }
+            // Publish control only after the CPU accepted the transition and
+            // a release fetched all actual bootstrap bytes. Holds do no DMA.
+            set_reg32(off,value);fe_context_known_=false;
+            if(value==3)kernel_audio_startup_=false;
+            return;
+        }
         // Guard the device itself, including partial/overlapping transactions;
         // reference-wrapper whitelists cannot establish unknown fence behavior.
         if(touches_fe_fence(off,size)) {
@@ -707,6 +731,12 @@ private:
     static constexpr uint32_t kFedecmeth = 0x1300, kFedecparam = 0x1304;
     static constexpr uint32_t kFememaddr = 0x1324, kFememdata = 0x1334;
     static constexpr uint32_t kFeFenceControl = 0x1510;
+    static constexpr uint32_t kGpReset=0x3fffc,kEpReset=0x5fffc;
+    static bool touches_dsp_reset(uint32_t off,int size) {
+        if(size<=0)return false;
+        const uint64_t end=uint64_t(off)+unsigned(size);
+        return (off<kGpReset+4 && end>kGpReset) || (off<kEpReset+4 && end>kEpReset);
+    }
     static constexpr uint32_t kObservedIdleFectl=0x00071f8f, kObservedIdleSectl=7;
     bool kernel_audio_control_idle()const {
         return kernel_audio_startup_ && !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
@@ -1112,6 +1142,8 @@ private:
     uint64_t gp_program_revision_=0;
     void* gp_program_owner_=nullptr;
     ApuGpDma::ProgramWrite gp_program_guard_;
+    DspResetControl gp_reset_control_,ep_reset_control_;
+    bool dsp_reset_context_known_=false;
     void* gp_frame_owner_=nullptr;
     std::function<bool()> gp_startup_clear_;
     bool gp_mix_lease_=false,gp_frame_pending_=false,gp_mix_admitting_=false;
