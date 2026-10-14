@@ -42,6 +42,29 @@ can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
+## Hardware-session tooling and next GP prerequisite - 2026-10-14
+
+The original STOP/FREEZE candidate is prepared at probe commit `2be3ab8`.
+It records initial C5/D6, issues at most two D6 control commands, and checks
+RUNNING-clear then FROZEN-set with sixteen samples per stage. No descriptors,
+START or transfer are issued. Thirteen actual maintained-DSP scenarios and
+four actual-x86 transport checks pass; terminal witnesses alone cannot report
+success. Root acceptance is probe
+`results/gp-initialization-offline/accepted-root.aot-private.json`, SHA256
+`10c5840817ddd1b0fd69bf2b8f6f0a513dc0ccafcabca48e97abb0fdbe4ebfcb`.
+This candidate has not run physically. Production LLE/HLE behavior is unchanged.
+
+The prior peripheral observation's ownership context was retired by an ordinary
+dashboard launch for probe maintenance. Subsequent software launches are not
+cold boots; the next device experiment requires fresh context, ownership and
+witnesses. The probe now provides physically checked concurrent FTP and TCP:
+an exact file roundtrip retained TCP liveness during upload and download.
+Startup failures and drive availability are readable through TCP INFO, and an
+updated executable was staged, verified and launched remotely without owner
+screen-reading or a dashboard round trip. Normal boot paths are unchanged.
+This removes a session-maintenance obstacle; it does not close A03 or change
+the **6/9** family count or 26 accepted precision deferrals.
+
 ## Corrected GP diagnostic on the restarted console - 2026-10-13
 
 The subsequent finite peripheral observation now completes on physical hardware.
