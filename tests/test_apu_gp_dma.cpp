@@ -58,6 +58,17 @@ static void paired_bit9_inputs() {
         }
     }
 }
+static void observed_gp_idle_controls() {
+    Fixture f;uint32_t status=0xffffffff;
+    CHECK(f.apu.gp_read(0xffffd6,status) && status==0);
+    CHECK(f.apu.gp_read(0xffffc5,status) && status==0);
+    const auto ram=f.ram;
+    CHECK(f.apu.gp_write(0xffffd6,2) && f.apu.gp_read(0xffffd6,status) && status==0);
+    CHECK(f.apu.gp_write(0xffffd6,3) && f.apu.gp_read(0xffffd6,status) && status==8);
+    CHECK(f.apu.gp_write(0xffffd6,4) && f.apu.gp_read(0xffffd6,status) && status==0);
+    CHECK(!f.apu.dsp_dma_pending(xlle::ApuDspKind::Gp) && !f.apu.gp_dma_nodes() && f.ram==ram);
+    CHECK(f.apu.gp_read(0xffffc5,status) && status==0);
+}
 static void bit9_profile_boundaries() {
     // Shared implementation must not widen EP, output, FIFO or adjacent flags.
     for(bool ep:{false,true})for(uint32_t control:{0x5be0u,0x4bd0u,0x5be2u,0x4bd2u,
@@ -98,7 +109,7 @@ static void bit9_profile_boundaries() {
     }
 }
 int main() {
-    paired_bit9_inputs();bit9_profile_boundaries();
+    observed_gp_idle_controls();paired_bit9_inputs();bit9_profile_boundaries();
     // Published hardware byte examples, independent of native/xemu packing.
     for(unsigned format:{2u,6u})for(unsigned bank:{0x80u,0x1480u,0x1880u,0x2880u}) {
         Fixture f;f.word(bank)=0x123456;f.word(bank+1)=0xabcdef;
@@ -110,7 +121,7 @@ int main() {
         uint32_t value;for(unsigned i=0;i<8;++i)CHECK(f.apu.gp_read(0xffffd6,value) && value==0);
         CHECK(f.apu.gp_read(0xffffc5,value) && value==0x80);
         CHECK(f.apu.gp_write(0xffffc5,0x80));CHECK(f.apu.gp_read(0xffffc5,value) && !value);
-        CHECK(f.apu.gp_write(0xffffd6,2));CHECK(f.apu.gp_read(0xffffd6,value) && value==32);
+        CHECK(f.apu.gp_write(0xffffd6,2));CHECK(f.apu.gp_read(0xffffd6,value) && value==0);
         f.word(bank)=f.word(bank+1)=0;
         // Nonzero padding must be ignored on input in the correct byte lane.
         f.scratch(4093+(6+(format==2?0:3))%11)=0xff;

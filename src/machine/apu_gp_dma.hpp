@@ -21,7 +21,8 @@ public:
     using MixWrite=std::function<bool()>;
     ApuDspDma(Word word,Bytes bytes,Fifo fifo,Fault fault,ProgramWrite program_write={},MixWrite mix_write={},ApuDspKind kind=ApuDspKind::Gp)
         :word_(std::move(word)),bytes_(std::move(bytes)),fifo_(std::move(fifo)),
-         fault_(std::move(fault)),program_write_(std::move(program_write)),mix_write_(std::move(mix_write)),kind_(kind){}
+         fault_(std::move(fault)),program_write_(std::move(program_write)),mix_write_(std::move(mix_write)),kind_(kind),
+         control_(kind==ApuDspKind::Gp?0u:32u){}
     bool read(uint32_t address,uint32_t& value) {
         if(failed_)return false;
         switch(address) {
@@ -57,7 +58,12 @@ public:
             case 1:
                 if(active_)return fail("GP DMA START overlaps active work");
                 control_=(control_&8)|16;active_=true;list_nodes_=0;return true;
-            case 2:control_=(control_&8)|32;active_=false;job_.reset();return true;
+            case 2:
+                // Fresh GP and an idle STOP both read zero on hardware. Do
+                // not invent STOPPED for a command with no active transfer.
+                // Busy STOP and EP retain their separate existing contract.
+                control_=(control_&8)|((kind_==ApuDspKind::Gp && !active_)?0u:32u);
+                active_=false;job_.reset();return true;
             case 3:control_|=8;return true;
             case 4:control_&=~8u;return true;
             default:return fail("unqualified GP DMA action");
@@ -197,9 +203,9 @@ private:
             return true;
     }
     void finish() {
-        // Natural idle follows the actual last publication. STOPPED bit5 is
-        // owned by explicit STOP; its silicon state at natural EOL is not
-        // established by the original consumer. EOL acknowledgement is separate.
+        // Natural idle follows the actual last publication. The measured GP
+        // input cases finish at D6=0. Busy STOP and EP silicon semantics remain
+        // separate; EOL acknowledgement never substitutes for device work.
         active_=false;control_&=~16u;interrupts_|=0x80;job_.reset();
     }
     Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;ProgramWrite program_write_;MixWrite mix_write_;

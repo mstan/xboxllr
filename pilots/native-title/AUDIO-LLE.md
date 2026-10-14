@@ -2083,3 +2083,19 @@ asynchronous guard identifies the actual next boundary. Private results are in
 `build/blinx/audio-gp-original-admission-20261014/`; output remains unsupported
 pending its separate owned-RAM clear/set observation. No whole graph or audio
 family pass follows from this progress.
+
+## Observed idle GP status correction - 2026-10-14
+
+The fresh owned hardware programs repeatedly observed initial D6=0 and an idle
+STOP command returning0, followed by FREEZE8 and UNFREEZE0. The maintained GP
+model previously initialized D6 to32 and set that STOPPED flag even with no
+active work. GP now starts idle at0, and idle STOP preserves only FROZEN.
+This corrects the observed idle path without changing busy STOP, EP, device-work
+dispatch or HLE. Busy cancellation and EP status retain their separate existing
+contracts and are not newly claimed as physical observations.
+
+A regression checks the observed initial/STOP/FREEZE/UNFREEZE values without
+producing RAM writes, nodes or EOL. Existing paired transfers and post-completion
+idle STOP also pass, along with active cancellation, processor publication and
+EP guards:7 focused tests in5.09s. Private evidence is
+`build/blinx/audio-gp-idle-status-20261014/`. No additional hardware run was needed.

@@ -119,6 +119,12 @@ owned temporary RAM. Private result:
 `build/blinx/audio-gp-original-admission-20261014/report.aot-private.json`.
 Whole graph execution, EP/output and broader A03-A05 remain open.
 
+The same physical observations also corrected GP initial/idle-STOP D6 from the
+model's invented STOPPED32 to the observed0. FREEZE/UNFREEZE remain8/0;
+busy STOP and EP semantics are unchanged and remain separate. Seven focused
+regressions pass, including absence of RAM/node/EOL effects on the idle path.
+This uses the existing hardware captures, not another console test cycle.
+
 Private evidence and immutable source snapshots are probe
 `results/original-input-baseline-20261014/`, including `physical-assessment.aot-private.json`.
 
