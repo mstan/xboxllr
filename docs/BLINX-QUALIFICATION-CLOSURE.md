@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: corrected diagnostic entry verified; startup/DMA completion absent | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: physical C5/D6 reads verified; original initialization/DMA pending | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -43,6 +43,27 @@ A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
 ## Corrected GP diagnostic on the restarted console - 2026-10-13
+
+The subsequent finite peripheral observation now completes on physical hardware.
+After an owner cold boot and standalone v0.5 launch, sixteen fixed control/mapping
+reads matched the quiet floor. A new pinned nine-page allocation and unique
+execution signature passed three current-owner checks and all 58 artifact pins.
+SG installation and RESET 3 read back exactly. All eight C5/D6 samples were zero,
+with agreement between absolute and MOVEP addressing on both passes; sample count
+8, phase 2, the completion token and all eight witnesses matched. The independent
+immutable-P comparison passed all 2,044 words.
+
+This resolves the peripheral-read prerequisite and contradicts initial D6=32 for
+the observed startup context. It does not establish general reset defaults,
+STOP/FREEZE transitions, DMA or bit9. Incidental X0400-X0403 data are retained as
+observations, not transfer evidence. The next device experiment must follow the
+original bounded STOP/FREEZE initialization, with separately reviewed fresh-owner
+provenance. No production LLE default or HLE behavior changed. Private evidence:
+probe `results/peripheral-physical-20261014/`; families remain **6/9** and the 26
+accepted precision deferrals are unchanged.
+
+The earlier corrected diagnostic and the source audit that motivated this new
+observation are retained below.
 
 The owner confirmed a restart and the final hardware phase resumed using the
 installed v0.4.0 probe. Identity and sixteen fixed control/mapping reads matched
@@ -76,7 +97,7 @@ requirement. The independently prepared peripheral-read program compares C5/D6
 absolute loads with MOVEP reads, recording every value without DMA or peripheral
 writes by the DSP. Eleven offline tests pass, including unchanged fresh-diagnostic
 contracts, actual x86 transport and three maintained-DSP input cases with stable
-terminal resumes. It has not run on hardware; no production DMA reset default,
+terminal resumes. The later physical result is recorded above; no production DMA reset default,
 descriptor guard or HLE behavior changed. See probe `docs/GP-PERIPHERAL-READ.md`.
 
 ## Offline frontier and final hardware dependencies - 2026-10-13
@@ -94,7 +115,7 @@ qualified family. The count remains **6/9**, with the same 26 precision deferral
 | G03 | Passive original producer/first-transfer capture is integrated at `24468bc`; independently sourced internal/RDI packing is now recorded below | Bind saved-instance byte offsets and save/restore semantics to actual consumer state, including required RAMFC/ownership fields. Internal lane packing alone does not establish that map. Capture the real first request after G02; never replace it with an invented image or successful no-op. |
 | G04 | Guarded diagnostic GPU bootstrap and paired noise capture preparation | Obtain the required reached enabled-noise primitive and independently establish its supported sampling behavior. Preserve the existing enable guard until then. |
 | G05 | Existing representative state, lifetime, scene and producer evidence | Run the connected original graphics route after G02-G04, retaining real completion/reentry/teardown and affected representative comparisons. Reuse unchanged evidence; exhaustive scene-pixel composition remains deferred. |
-| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; corrected fresh-source diagnostic | Establish B0-B3 producer/configuration, reset/wake/control context and required bit9 input semantics. Corrected terminal STOP behavior is offline-tested; its new physical outcome is unknown. Implement the established contract before admitting original startup. |
+| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; corrected fresh-source diagnostic and completed C5/D6 peripheral observation | Establish B0-B3 producer/configuration, reset/wake/control transitions and required bit9 input semantics. Initial C5/D6 are observed zero in the tested nxdk context; original STOP/FREEZE initialization precedes any new DMA attempt. Implement the established contract before admitting original startup. |
 | A04 | Idle FE publication and guarded original-DPC reproducer | Establish active-work ordering and initial control provenance, then connect publication to genuine completed work. Restoring idle register values cannot discard prior work history. |
 | A05 | Shared original-device adapter, compiled/raw MMIO route and real PCM capture consumer | Connect admitted GP/EP/VP work to the shared-clock owner after A03/A04. The current work callback advances the codec while DSPs remain held; wiring complete does not mean original DSP scheduling/output is complete. Then run actual output/ISR/DPC/stop/reuse/timing acceptance. |
 
@@ -122,12 +143,12 @@ The private source-pinned supplement is
 `build/blinx/graphics-startup-consumer-20261012/envytools-packing-supplement-20261013.aot-private.json`,
 SHA256 `8ce4d5000b5d04edbfbc9f185bd33ae78998387e67dd91118531bce61a699aa5`.
 
-The final console phase remains gated by inspection/restart after the last
-unexpected GP execution result. Probe `99bd14e` adds an offline-tested software
-self-restart and preserves cold-boot configuration, but is not installed or
-hardware-qualified; it does not satisfy that recovery prerequisite. New hardware
-requests must use fresh owner/context provenance. Do not rerun the completed
-marker prelude or earlier failed write automatically.
+The owner restart prerequisite was satisfied before the corrected diagnostic and
+again before the peripheral observation above. The standalone v0.5 probe is now
+installed; its software self-restart command remains physically unqualified and
+does not itself establish recovery or a cold boot. New hardware requests must
+use fresh owner/context provenance. Do not rerun the completed marker prelude,
+rewrite the currently started source, or retry an earlier failed write automatically.
 
 ## Fresh GP execution exposes a diagnostic mismatch - 2026-10-13
 
