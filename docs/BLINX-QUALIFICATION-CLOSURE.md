@@ -52,9 +52,15 @@ RUNNING acquisition was observed. However, all six bounded EOL samples were zero
 terminal D6 was 16, error was 10, and the success token remained zero. The later
 CPU capture proves the bytes arrived, not when they arrived relative to the last
 DSP sample. This is **input-byte evidence, not completed-list qualification**.
-No device write, cleanup, reset or retry followed this outcome. A longer bounded
-observation is being prepared offline; six samples being too short is a hypothesis,
-not an established cause. Bit9 admission and production LLE/HLE remain unchanged.
+No GP cleanup or retry followed this capture. The longer bounded observation is
+prepared at probe `9548cf2`: a compact 1,024-read EOL loop, unchanged seven
+peripheral writes, and 19 maintained DSP/DMA scenarios passing. Six samples being
+too short remains a hypothesis, not an established cause. Bit9 admission and
+production LLE/HLE remain unchanged. A later normal firmware reboot reached the
+owner's dashboard; it is not a physical cold-boot observation. The probe is
+awaiting launch after the old dashboard's remote-button route failed. The next
+experiment still requires independently observed quiet controls and a new owner;
+the previous allocation is retired and must not be reused.
 Private evidence and immutable source snapshots are probe
 `results/original-input-baseline-20261014/`, including `physical-assessment.aot-private.json`.
 
