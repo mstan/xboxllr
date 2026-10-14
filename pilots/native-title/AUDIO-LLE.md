@@ -2215,3 +2215,27 @@ closure, exact frozen inputs and output/MIX bytes. A stale build-file pin in the
 second handoff was corrected by preserving the original build CMake byte-exact
 and separately identifying the registration build; earlier handoffs remain.
 Current proof is `build/blinx/audio-gp-continuation-20261014/handoff-v3.aot-private.json`.
+
+## Original effects publication and acknowledgement - 2026-10-14
+
+The actual original177AB4/1778D3 upload now allocates, decodes and publishes the
+retained effects asset, then pauses at its real177A3A wait. One production VP/GP
+frame executes60 DMA nodes, loads the exact decoder-produced program and clears
+the context flags through actual GP DMA. Returning591 changed bytes from recorded
+device writes to unchanged, uniquely owned live original allocations lets the
+original wait return EAX0. Stack, nonvolatiles and borrowed asset remain exact.
+
+The authored allocation fixture needed page alignment for its reached413696-byte
+pool request. A separate actual original-kernel allocation/lock/101-page
+translation/unlock/free case establishes that boundary; the production SG guard
+was retained. The diagnostic PCM/voice and checked physical/pin floor remain
+authored inputs. Two malformed flags/count cases stop before frame output.
+Root verified43 handoff pins, the ownership/return path and six additional
+registration/core/library identities. Existing graph numerical evidence remains
+separate; this fixture establishes one original upload and acknowledgement.
+
+The explicit artifact checker is registered as `pilot_original_gp_publication_test`.
+Evidence and root review are in `build/blinx/audio-gp-publication-20261014/`.
+Parameter updates, EP configuration/wake/reset, active FE ordering, initial
+SECTL context and connected title output remain required. HLE is unchanged;
+the family total remains6/9 with27 precision deferrals.

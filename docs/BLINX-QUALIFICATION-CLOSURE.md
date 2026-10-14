@@ -73,6 +73,19 @@ original nonzero effects/control publication and its acknowledgement, not
 additional default-frame repetitions. EP has not started. Evidence:
 `build/blinx/audio-gp-continuation-20261014/handoff-v3.aot-private.json`.
 
+The subsequent unchanged original effects upload now also returns success.
+Original177AB4/1778D3 allocates, decodes and publishes its nonzero packet, then
+pauses at the real177A3A acknowledgement wait. One production VP/GP frame runs
+60 DMA nodes, reloads the exact decoder-produced program and clears the flags
+through actual GP DMA. Only591 changed bytes from recorded device writes into
+still-live original allocations are returned to the paused CPU. The original
+wait returns EAX0 with stack, nonvolatiles and borrowed asset preserved. Two
+malformed flags/count cases stop before frame output. The fixture's large-pool
+alignment was corrected using a separate actual original-kernel observation;
+the production SG alignment guard was retained. This closes the first upload/
+acknowledgement gate; parameter updates, EP and the connected shell remain open.
+Evidence: `build/blinx/audio-gp-publication-20261014/handoff.aot-private.json`.
+
 ## Hardware-session tooling and GP observations - 2026-10-14
 
 Current result: the circular output clear/set pair also passed physically,

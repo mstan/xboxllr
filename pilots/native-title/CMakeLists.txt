@@ -189,6 +189,8 @@ if(pilot_audio_dsp)
   # Explicit original-artifact CLI only; no automatic private-fixture CTest.
   add_executable(pilot_original_gp_continuation_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_original_gp_continuation.cpp")
   target_link_libraries(pilot_original_gp_continuation_test PRIVATE xlle_apu_gp_processor)
+  add_executable(pilot_original_gp_publication_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_original_gp_publication.cpp")
+  target_link_libraries(pilot_original_gp_publication_test PRIVATE xlle_apu_gp_processor)
   add_executable(pilot_gp_frame_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_gp_frame.cpp")
   target_link_libraries(pilot_gp_frame_test PRIVATE xlle_apu_gp_processor)
   pilot_add_test(NAME pilot_gp_frame_contract COMMAND pilot_gp_frame_test)
