@@ -16,8 +16,11 @@ static std::vector<unsigned char> load(const char* path) {
 struct Fixture {
     std::vector<unsigned char> ram,registers,map,before,expected_ram;
     std::vector<unsigned> program;
+    std::vector<unsigned char> fifo_streams[2];
     std::string device_error,owner_error;
-    unsigned writes=0,reads=0,output_nodes=0,fifo_cursor=0,fifo1_cursor=0,last_pc=0;bool expect_boundary=false,revoke=false,has_lookup=false;
+    unsigned writes=0,reads=0,output_nodes=0,fifo_cursor=0,fifo1_cursor=0,last_pc=0;
+    unsigned directory_offset=0,directory_updates=0;
+    bool expect_boundary=false,revoke=false,has_lookup=false,capture_output=false;
     std::vector<std::vector<unsigned>> completed;
     xlle::McpxApu apu{[this](const std::string& s){device_error=s;}};
     static unsigned word(const std::vector<unsigned char>& bytes,unsigned at) {
@@ -39,6 +42,21 @@ struct Fixture {
     unsigned fifo_physical(unsigned offset)const {
         CHECK(offset/4096<=reg(0xfe8020e0));const auto entry=reg(0xfe80204c)+offset/4096*8;
         CHECK(owned(entry,8));const auto at=word(ram,entry)+(offset&4095);CHECK(owned(at,1));return at;
+    }
+    void verify_directory() {
+        for(unsigned i=0x100;i<0x122;++i)
+            CHECK(*apu.ep_word(0x2800+i)==(i==0x116?directory_offset:program[i]));
+    }
+    void observe_directory(unsigned previous_pc) {
+        const auto current=*apu.ep_word(0x2916);
+        if(current!=directory_offset) {
+            // Original P:01C3..01C7 loads P:0116, toggles bit8, and stores it.
+            // This is the actual alternating GP input window, not immutable data.
+            CHECK(previous_pc==0x1c6 && program[0x1c3]==0x07f084 && program[0x1c4]==0x116 &&
+                  program[0x1c5]==0x0bc448 && program[0x1c6]==0x077084 && program[0x1c7]==0x116);
+            CHECK(current==(directory_offset^0x100));directory_offset=current;++directory_updates;
+        }
+        verify_directory();
     }
     Fixture(char** argv):ram(load(argv[1])),registers(load(argv[2])),map(load(argv[3])),before(ram),expected_ram(ram) {
         CHECK(ram.size()==0x400000 && !(registers.size()%8) && !(map.size()%8));
@@ -67,7 +85,7 @@ struct Fixture {
         std::fflush(stdout);std::fprintf(stderr,"original EP boundary: %s; %s\n",why.c_str(),device_error.c_str());std::exit(2);
     }
     void report(const char* stage) {
-        CHECK(ram==expected_ram && !apu.gp_dma_nodes() && apu.ep_frame_events()==1);
+        CHECK(ram==expected_ram && !apu.gp_dma_nodes() && apu.ep_frame_events()>=1);
         CHECK(apu.ep_dma_nodes()==completed.size() && completed.size()>=7);
         for(unsigned i=0;i<0x3800;++i)CHECK(!*(apu.gp_word(0)+i));
         std::printf("{\"stage\":\"%s\",\"descriptor\":[",stage);
@@ -79,7 +97,8 @@ struct Fixture {
             for(unsigned i=0;i<completed[n].size();++i)std::printf("%s%u",i?",":"",completed[n][i]);
             std::printf("]");
         }
-        std::printf("],\"clock_events\":1,\"dma_nodes\":%zu,\"output_nodes\":%u,\"all_input_words_verified\":true,\"all_output_words_verified\":true,\"RAM_unchanged\":%s,\"writes\":%u,\"dynamic_table_preserved\":true}\n",completed.size(),output_nodes,ram==before?"true":"false",writes);
+        verify_directory();CHECK(directory_updates<=apu.ep_frame_events());
+        std::printf("],\"clock_events\":%llu,\"dma_nodes\":%zu,\"output_nodes\":%u,\"all_input_words_verified\":true,\"all_output_words_verified\":true,\"RAM_unchanged\":%s,\"writes\":%u,\"directory_layout_preserved\":true,\"original_buffer_toggles\":%u,\"fifo_bytes\":[%zu,%zu]}\n",static_cast<unsigned long long>(apu.ep_frame_events()),completed.size(),output_nodes,ram==before?"true":"false",writes,directory_updates,fifo_streams[0].size(),fifo_streams[1].size());
     }
     void verify_transfers() {
         if(apu.ep_dma_nodes()==completed.size())return;
@@ -99,6 +118,7 @@ struct Fixture {
                 const unsigned value=node[3]==0x401f?0:*apu.ep_word(node[3]+(stereo?(i/2%2)*256+i/4:i/2));
                 const unsigned char byte=static_cast<unsigned char>(value>>(8+8*(i%2)));
                 CHECK(ram[at]==byte);expected_ram[at]=byte;
+                if(capture_output)fifo_streams[fifo1?1:0].push_back(ram[at]);
                 if(++cursor==end)cursor=base;
             }
             CHECK(apu.RegFileMmio::mmio_read(ring+8,4)==cursor);++output_nodes;
@@ -112,16 +132,17 @@ struct Fixture {
             ++output_nodes;
         } else {CHECK(node[2] && node[2]<=4096);for(unsigned i=0;i<node[2];++i)CHECK(*apu.ep_word(node[3]+i)==(word(ram,physical(node[4]+i*4))&0xffffff));}
         CHECK(ram==expected_ram && !apu.gp_dma_nodes());
-        for(unsigned i=0x100;i<0x122;++i)CHECK(*apu.ep_word(0x2800+i)==program[i]);
+        verify_directory();
         completed.push_back(node);
         std::fprintf(stderr,"verified original EP node%zu:",completed.size());
         for(auto field:node)std::fprintf(stderr," %x",field);std::fprintf(stderr,"\n");
     }
 };
 int main(int argc,char** argv) {
-    CHECK(argc==5 || argc==6);Fixture f(argv);const std::string mode=argv[4];
-    if(argc==6){const auto bytes=load(argv[5]);CHECK(bytes.size()==8192);std::vector<unsigned> image(2048);std::memcpy(image.data(),bytes.data(),bytes.size());CHECK(f.apu.install_ep_y_lookup(image.data(),image.size()));f.has_lookup=true;}
-    CHECK(mode=="startup" || mode=="first-event" || mode=="revoked");
+    CHECK(argc==5 || argc==6 || argc==8);Fixture f(argv);const std::string mode=argv[4];
+    if(argc>=6){const auto bytes=load(argv[5]);CHECK(bytes.size()==8192);std::vector<unsigned> image(2048);std::memcpy(image.data(),bytes.data(),bytes.size());CHECK(f.apu.install_ep_y_lookup(image.data(),image.size()));f.has_lookup=true;}
+    CHECK(mode=="startup" || mode=="first-event" || mode=="revoked" || mode=="sustained");
+    CHECK((mode=="sustained")==bool(argc==8));
     xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});
     if(mode=="revoked") {
         f.revoke=true;CHECK(!ep.bootstrap_from_scratch() && !ep.bootstraps());
@@ -134,17 +155,59 @@ int main(int argc,char** argv) {
     CHECK(f.ram==f.before && !f.writes && !f.apu.ep_dma_nodes() && !f.apu.ep_frame_events());
     for(unsigned i=0x100;i<0x122;++i)CHECK(*f.apu.ep_word(0x2800+i)==f.program[i]);
     if(mode=="startup") {
-        std::puts("{\"stage\":\"original-startup-poll\",\"dynamic_table_preserved\":true,\"DMA_nodes\":0,\"clock_events\":0,\"RAM_unchanged\":true}");return 0;
+        std::puts("{\"stage\":\"original-startup-poll\",\"directory_layout_preserved\":true,\"DMA_nodes\":0,\"clock_events\":0,\"RAM_unchanged\":true}");return 0;
     }
-    f.expect_boundary=true;
+    f.expect_boundary=mode=="first-event";
     // Observed empty-list clock profile, supplied by this caller. This does
     // not qualify the title's still-guarded initial SECTL/reset context.
     for(unsigned a:{0x2054u,0x2060u,0x206cu})f.apu.mmio_write(0xfe800000+a,4,0xffff);
     f.apu.mmio_write(0xfe801100,4,0x7130f);f.apu.mmio_write(0xfe802000,4,15);
+    if(mode=="sustained") {
+        // Authored signal loan to the original producer's shared allocation.
+        // Its GP production, codec consumption and title clock are separate gates.
+        const auto inputs=load(argv[6]);CHECK(inputs.size()==32*6*256*4);
+        f.capture_output=true;
+        for(unsigned frame=1;frame<=32;++frame) {
+            CHECK(f.directory_offset==((frame-1)%2)*256);
+            for(unsigned ch=0;ch<6;++ch)for(unsigned sample=0;sample<256;++sample) {
+                const auto source=(((frame-1)*6+ch)*256+sample)*4;
+                const auto at=f.physical(0x10000+ch*0x800+f.directory_offset*4+sample*4);
+                std::copy_n(inputs.data()+source,4,f.ram.data()+at);
+                std::copy_n(inputs.data()+source,4,f.expected_ram.data()+at);
+            }
+            const auto prior=f.completed.size();bool returned=false;
+            f.apu.set_time(uint64_t(frame)*18000,3375000);f.apu.set_frame(frame);
+            CHECK(f.apu.ep_frame_events()==frame);
+            for(unsigned i=0;i<1500000;++i) {
+                f.last_pc=r.pc;CHECK(ep.run(1,r));f.observe_directory(f.last_pc);f.verify_transfers();
+                if(f.completed.size()>prior && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power) {
+                    CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.device_error.empty() && f.owner_error.empty());
+                    unsigned events=0;CHECK(f.apu.ep_read(0xffffc5,events) && events==0x100);
+                    CHECK(f.directory_updates==frame && f.directory_offset==(frame%2)*256);
+                    const auto banks=std::vector<unsigned>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+                    const auto nodes=f.apu.ep_dma_nodes();const auto writes=f.writes;
+                    // Same time/frame and repeated reads cannot create another event.
+                    f.apu.set_frame(frame);f.apu.set_time(uint64_t(frame)*18000,3375000);
+                    for(unsigned read=0;read<8;++read)CHECK(f.apu.ep_read(0xffffc5,events) && events==0x100);
+                    CHECK(ep.run(1000,r) && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power);
+                    CHECK(std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)) && f.ram==f.expected_ram &&
+                          f.apu.ep_frame_events()==frame && f.apu.ep_dma_nodes()==nodes && f.writes==writes);
+                    returned=true;break;
+                }
+            }
+            CHECK(returned);
+        }
+        for(unsigned i=0;i<2;++i) {
+            const auto path=std::string(argv[7])+"-fifo"+std::to_string(i)+".aot-private.bin";
+            FILE* file=std::fopen(path.c_str(),"wb");CHECK(file);
+            CHECK(std::fwrite(f.fifo_streams[i].data(),1,f.fifo_streams[i].size(),file)==f.fifo_streams[i].size());CHECK(!std::fclose(file));
+        }
+        f.report("original-sustained-events-returned");return 0;
+    }
     f.apu.set_time(18000,3375000);f.apu.set_frame(1);
     CHECK(f.apu.ep_frame_events()==1);
     for(unsigned i=0;i<(f.has_lookup?1000000u:200000u);++i){
-        f.last_pc=r.pc;CHECK(ep.run(1,r));f.verify_transfers();
+        f.last_pc=r.pc;CHECK(ep.run(1,r));f.observe_directory(f.last_pc);f.verify_transfers();
         if(f.completed.size()>=8 && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power) {
             if(f.has_lookup && f.completed[1][2]==754)CHECK(f.completed.size()==36 && f.output_nodes==18 && f.writes==22);
             else CHECK(f.completed.size()==8 && f.output_nodes==1 && f.writes==1);
@@ -154,6 +217,7 @@ int main(int argc,char** argv) {
             const auto banks=std::vector<unsigned>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
             CHECK(ep.run(1000,r) && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power && !r.yielded);
             CHECK(std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)) && !f.apu.dsp_work_pending(xlle::ApuDspKind::Ep));
+            CHECK(f.directory_updates==1 && f.directory_offset==0x100);
             f.report("original-first-event-returned");return 0;
         }
     }

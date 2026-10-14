@@ -6,11 +6,11 @@ remains **open**, and the overall burndown is **6/9 qualified**. Earlier dated
 observations retain their historical counts. Hardware access has resumed after
 the dashboard migration. Physical EP input/output and delayed acknowledgement
 now admit the original input, linear output and interleaved stereo FIFO0 routes.
-Selectors0/1 complete their first event and return naturally to the original
-poll after eight transfers. With the privately captured EP high-Y image and
-physically matched FIFO1 source401F route, selector2 now also returns after36
-verified transfers. Without
-that image it retains the ten-transfer Y:0FC9 stop. The earlier malformed-descriptor diagnosis was wrong:
+All three original configurations now sustain32 consecutive events with silence
+and distinct-channel signals. Independent PCM arithmetic and AC-3 decoding
+pass representative numerical checks. This uses the privately captured EP high-Y
+image and physically matched FIFO1 source401F route. Without that image,
+selector2 retains the ten-transfer Y:0FC9 stop. The earlier malformed-descriptor diagnosis was wrong:
 400603/1001 is an intentional packed stereo FIFO descriptor. See the bounded
 closing checklist for the current evidence and timing/reset requirements.
 
@@ -19,6 +19,36 @@ The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driv
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
+
+## Sustained original EP and numerical output - 2026-10-14
+
+Six fresh driver lifetimes cover32 events per configuration for silence and
+distinct431/653/887/1103/1327/83Hz signals. Every event returns naturally to
+the poll with acknowledged status and no pending work. Selectors0/1 complete230
+transfers; selector2 completes1198. Input windows alternate by the original
+P:01C6 write to P:0116; all other directory fields remain exact. Output rings
+wrap, repeated idle/time/read calls create no work, and actual original driver
+destructors release all allocations. The signal and setup-clock loans are
+explicit; original GP production and codec/title consumption remain separate.
+
+`qualify_native_ep_output.py` independently evaluates the original PCM matrix:
+all65536 compared samples match exactly across both PCM settings and signals.
+It extracts five complete AC-3 frames per signal from the IEC61937 transport,
+checks burst padding/spacing, and uses FFmpeg with CRC checking and fatal decode
+errors. Both streams decode as640kbps48kHz5.1(side),7680 frames each. Distinct
+tones retain channel assignment and gain within1% on the five full-band
+channels; representative LFE gain uses10%. Other-tone leakage is below2%, and
+decoded silence is below2^-13 full scale. Phase is recorded without claiming
+hardware latency or exact LFE filter behavior. The last incomplete burst is
+reported separately and excluded from decoding.
+
+Five independent negative controls reject wrong channels, substituted silence,
+padding corruption and a payload CRC error. Eighteen retained startup/event/
+revocation cases still pass with actual destructors, including the absent-image
+guard. No production/HLE change, hardware operation or playback occurred.
+Evidence: `build/blinx/audio-ep-sustained-20261014/`. Required next work is initial
+SECTL/startup, shared-clock/reset and active FE ordering, then connected title
+output/stop/reuse/movie timing. Count6/9 and27 precision deferrals remain.
 
 ## Physical FIFO1 source and first-event completion - 2026-10-14
 

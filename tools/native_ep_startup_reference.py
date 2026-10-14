@@ -111,11 +111,14 @@ class OriginalStartup(OriginalProducer):
         assert self.get(self.owner+0xc) == 0 and self.get(self.owner+0x10) == 0
 
 
-def check(image, output, observer=None, ep_event_observer=None, ep_y_lookup=None):
+def check(image, output, observer=None, ep_event_observer=None, ep_y_lookup=None, ep_sustained_input=None):
     image, output = image.resolve(), output.resolve()
     assert 'build' in output.parts, 'original evidence must stay under private build/'
     blob = image.read_bytes()
     assert sha(blob) == IMAGE_SHA256, 'unreviewed original image'
+    if ep_sustained_input:
+        assert ep_event_observer and ep_y_lookup, 'sustained execution requires the original observer and private lookup image'
+        assert ep_sustained_input.stat().st_size==32*6*256*4
     output.mkdir(parents=True, exist_ok=True)
     records = []
     for lifetime, selector in enumerate((0, 1, 2)):
@@ -165,11 +168,14 @@ def check(image, output, observer=None, ep_event_observer=None, ep_y_lookup=None
             result['observer_runs']=runs
         if ep_event_observer:
             runs=[]
-            for mode in ('startup','first-event','revoked'):
+            for mode in (('sustained',) if ep_sustained_input else ('startup','first-event','revoked')):
                 command=[str(ep_event_observer.resolve()),str(ram),str(registers),str(ownership),mode]
                 if ep_y_lookup:command.append(str(ep_y_lookup.resolve()))
+                if mode=='sustained':
+                    prefix=output/f'original-ep-sustained-{lifetime}'
+                    command.extend((str(ep_sustained_input.resolve()),str(prefix)))
                 run=subprocess.run(command,
-                    capture_output=True,text=True,timeout=30)
+                    capture_output=True,text=True,timeout=180 if mode=='sustained' else 30)
                 log=output/f'original-ep-event-{lifetime}-{mode}.aot-private.log'
                 log.write_text(run.stdout+run.stderr,newline='\n')
                 assert run.returncode==(2 if mode=='first-event' and selector==2 and not ep_y_lookup else 0),run.stdout+run.stderr
@@ -189,7 +195,7 @@ def check(image, output, observer=None, ep_event_observer=None, ep_y_lookup=None
                             [0x41a2,0x4622,220,0x1f],[0x41a2,0x5be2,128,0xb40,0xa268]]
                     else:assert completed[7:]==tail
                     assert observation['clock_events']==1 and observation['dma_nodes']==(36 if ep_y_lookup and selector==2 else 10 if selector==2 else 8)
-                    assert observation['all_input_words_verified'] and observation['dynamic_table_preserved']
+                    assert observation['all_input_words_verified'] and observation['directory_layout_preserved']
                     assert observation['all_output_words_verified'] and observation['output_nodes']==(18 if ep_y_lookup and selector==2 else 2 if selector==2 else 1)
                     # Shared input starts zero. The high-Y image permits
                     # nonzero intermediate codec state; this checks transfers,
@@ -207,7 +213,20 @@ def check(image, output, observer=None, ep_event_observer=None, ep_y_lookup=None
                         observation['next_boundary']='original PC031E reads Y:0FC9 without a supplied board lookup image'
                     else:
                         assert observation['stage']=='original-first-event-returned'
+                        assert observation['original_buffer_toggles']==1
                         observation['next_boundary']='first event returned to real polling; connected clock/reset/processing remains open'
+                if mode=='sustained':
+                    assert observation['stage']=='original-sustained-events-returned'
+                    assert observation['clock_events']==observation['original_buffer_toggles']==32
+                    assert observation['dma_nodes']==(1198 if selector==2 else 230)
+                    assert observation['output_nodes']==(555 if selector==2 else 32)
+                    assert observation['directory_layout_preserved'] and observation['all_input_words_verified'] and observation['all_output_words_verified']
+                    assert observation['fifo_bytes']==[32768,34580 if selector==2 else 0]
+                    result['sustained_fifo_sha256']=[]
+                    for fifo,count in enumerate(observation['fifo_bytes']):
+                        capture=Path(str(prefix)+f'-fifo{fifo}.aot-private.bin')
+                        assert capture.stat().st_size==count
+                        result['sustained_fifo_sha256'].append(sha(capture.read_bytes()))
                 runs.append(dict(mode=mode,exit=run.returncode,observation=observation,log_sha256=sha(log.read_bytes())))
             result['ep_event_runs']=runs
         producer.destroy_startup()
@@ -228,6 +247,10 @@ def check(image, output, observer=None, ep_event_observer=None, ep_y_lookup=None
             data.update(ep_y_lookup_sha256=sha(ep_y_lookup.read_bytes()),
                 scope='Fresh original driver lifetimes with caller-supplied board Y0800..0FFF image in its separate immutable CPU lookup owner. All three selectors complete their first event and return naturally: selectors0/1 after8 transfers; selector2 after36 verified transfers/18 output nodes, including the physically observed FIFO1 zero-source route.',
                 limits='Private board image remains external data, never committed or fabricated. No high-Y write, DMA/host alias or missing-image fallback. Original shared inputs are zero; selector2 produces nonzero intermediate/output state. Transfer bytes and original first-event execution are checked; independent numerical codec correctness and sustained events are not qualified. Reset/core MMIO is recorded, not dispatched; caller clock and exact ACK/busy timing remain open. Connected title/FE/SECTL/output remain required.')
+        if ep_sustained_input:
+            data.update(ep_sustained_input_sha256=sha(ep_sustained_input.read_bytes()),
+                scope='All three unchanged original EP configurations complete32 consecutive events, with actual alternating input windows, output ring wrap, exact transfer bytes, idle polling preservation and original driver destruction. Private FIFO captures retain all output bytes for independent numerical checks.',
+                limits='Authored signal loan, offline kernel/settings and explicit setup clock. This report establishes sustained execution and transport, not independent waveform correctness by itself. Original reset/core MMIO, initial SECTL, precise clock/ACK/busy timing, active FE and connected title output remain required. Private high-Y image is caller-supplied.')
     report=output/'original-ep-startup-reference.aot-private.json'
     report.write_text(json.dumps(data, indent=2)+'\n', newline='\n')
     print(f'PASS: {len(records)} original driver startup lifetimes; {report}')
@@ -240,5 +263,6 @@ if __name__ == '__main__':
     parser.add_argument('--observer', type=Path)
     parser.add_argument('--ep-event-observer',type=Path)
     parser.add_argument('--ep-y-lookup',type=Path,help='private 2048-word Y0800..0FFF board image for the EP CPU owner')
+    parser.add_argument('--ep-sustained-input',type=Path,help='private32-event,6-channel,256-sample planar DWORD signal loan')
     args=parser.parse_args()
-    check(args.xbe, args.output, args.observer,args.ep_event_observer,args.ep_y_lookup)
+    check(args.xbe, args.output, args.observer,args.ep_event_observer,args.ep_y_lookup,args.ep_sustained_input)

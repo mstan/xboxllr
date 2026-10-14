@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: all three original first events return naturally (8/8/36 transfers); FIFO1 zero-source route physically matched; sustained events, exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: all three original EP configurations sustain32 events; representative PCM/AC-3 output passes; startup, exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,45 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Sustained original EP and independent output - 2026-10-14
+
+All three unchanged original configurations sustain32 consecutive events for
+both silence and six distinct tones:192 accepted event returns in total.
+Selectors0/1 perform230 transfers each; selector2 performs1198, including555
+output nodes. Actual FIFO rings wrap, acknowledgements retire, each event
+returns to the original poll, and repeated reads/same-clock calls/idle execution
+preserve banks, RAM, transfers and event count. Original destructors release
+all allocations. No runtime production or HLE behavior changes were needed.
+
+The first-event check's immutable-directory assumption was too broad for
+successive events. Original P:01C3..01C7 explicitly toggles bit8 of P:0116,
+alternating the shared input window. The maintained check now requires that
+exact instruction/update once per event and preserves all other directory
+fields. Tones431/653/887/1103/1327/83Hz differ across256-sample windows so a
+stale or swapped window cannot pass by replaying identical signal data.
+
+Independent arithmetic transcribed from the original coefficient stores and
+multiply/accumulate sequence matches all65536 compared PCM16 samples across
+the two PCM settings and both signals. The encoder emits IEC61937 AC-3 bursts
+at6144-byte spacing. Ten complete frames (five per signal) pass independent
+FFmpeg decoding with explicit CRC checking and explode-on-error. Each decode
+contains7680 six-channel48kHz frames. Full-band tone gain is within1% of the
+authored input; LFE uses a10% representative gain bound, with other authored
+tone leakage below2%. Silence stays below2^-13 full scale. Exact LFE phase and
+hardware latency are outside this representative check. The final partial
+burst is explicitly excluded from decoding, rather than accepted as complete.
+
+Five negative controls reject swapped PCM channels beyond hash validation,
+swapped decoded channels, substituted silence, nonzero burst padding and
+corrupt AC-3 payload CRC. Eighteen retained startup/first-event/revocation
+checks pass, including the missing-image Y:0FC9 guard. The private signal loan
+does not provide original GP production or AC97/title consumption. Initial
+SECTL, real startup/reset/shared-clock timing, active FE ordering and connected
+title output remain required. Families6/9 and27 precision deferrals stay fixed.
+Evidence: `build/blinx/audio-ep-sustained-20261014/`; maintained commands are
+`native_ep_startup_reference.py --ep-sustained-input ...` and
+`qualify_native_ep_output.py`. No Xbox or playback operation occurred.
 
 ## EP FIFO1 source and all original first-event returns - 2026-10-14
 
