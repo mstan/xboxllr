@@ -93,6 +93,15 @@ Evidence: `build/blinx/audio-gp-publication-20261014/handoff.aot-private.json`.
 The stronger initial-state proof is `handoff-initial-state-v2.aot-private.json`
 in that directory; its new checker identity supersedes the earlier binary.
 
+The finite EP observer also completed on hardware: seven B3 samples match the
+GP observation0/0/0/0/0/20/280, with34 exact fields and2048 loaded P words verified.
+Its raw FF14 word changed0to100 after reset release; the first context guard
+stopped, and only a separately tested read-only capture followed. No later
+hold/restoration write occurred; the owned allocation remains retained. The
+register's role, original EP708000 elapsed threshold, C5 event semantics,
+wake/cadence and full output remain open. Probe evidence:
+`results/ep-b3-physical-20261014-v2/summary.aot-private.json` at9ea85fb.
+
 ## Hardware-session tooling and GP observations - 2026-10-14
 
 Current result: the circular output clear/set pair also passed physically,
