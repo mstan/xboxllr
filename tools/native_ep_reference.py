@@ -53,15 +53,12 @@ def check(image, processor, output):
     runs = []
     for mode, guard in (('--original-entry', 'original EP startup reaches its real C5 wait: PC0031/0032 SP0'),
                         ('--original-config-tail', 'original EP configuration tail: CA0/D5=4000/D4=4000/D7=0'),
-                        ('--original-bit9', 'unqualified EP DMA descriptor format')):
+                        ('--original-bit9', 'original EP linear input: unchanged276/2E1 copy32 exact words and return')):
         run = subprocess.run([str(processor), mode, str(boot)],
                              capture_output=True, text=True, timeout=20)
         log = output/f'original-ep-{mode[2:]}.aot-private.log'
         log.write_text(run.stdout+run.stderr, newline='\n')
-        passed = (run.returncode == 0 and guard in run.stdout) if mode!='--original-bit9' else (
-                  run.returncode == 2
-                  and 'expected EP guard before sample/node/output publication' in run.stderr
-                  and guard in run.stderr)
+        passed = run.returncode == 0 and guard in run.stdout
         runs.append(dict(mode=mode, exit=run.returncode, expected_result=passed,
                          expected_guard=guard, log_sha256=sha(log)))
     record = dict(image_sha256=IMAGE_SHA256, source_parts=source_parts,
@@ -74,9 +71,10 @@ def check(image, processor, output):
                          'and an empty initial C5 clear are admitted. Hardware C4 publication '
                          'continues execution; unchanged startup returns through CA0/D5/D4 '
                          'empty-list/D7 setup and its empty event2 acknowledgement to C5 polling. '
-                         'Actual event production and descriptor bit9 stay guarded. '
-                         'The checks preserve source RAM, GP banks and FIFO cursor '
-                         'with no EP DMA publication. Full spill/refill is not implemented. '
+                         'The exact linear X/P input profile is admitted from separate physical evidence. '
+                         'The helper check copies32 words, preserving source RAM, GP banks and FIFO cursor. '
+                         'Count32 is an offline extent regression; hardware used24. ACK/busy timing '
+                         'and frame-ACK causality remain open. Full spill/refill is not implemented. '
                          'The helper caller is authored; dynamic code/table blocks are not '
                          'substituted. Full original DMA/configuration chain, resets, '
                          'EP frame admission/cadence, AC97 and full graph/output remain open.')

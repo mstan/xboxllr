@@ -111,7 +111,7 @@ class OriginalStartup(OriginalProducer):
         assert self.get(self.owner+0xc) == 0 and self.get(self.owner+0x10) == 0
 
 
-def check(image, output, observer=None):
+def check(image, output, observer=None, ep_event_observer=None):
     image, output = image.resolve(), output.resolve()
     assert 'build' in output.parts, 'original evidence must stay under private build/'
     blob = image.read_bytes()
@@ -163,6 +163,29 @@ def check(image, output, observer=None):
                 runs.append(dict(mode=mode, exit=run.returncode, expected_result=True,
                     observation=observation, log_sha256=sha(log.read_bytes())))
             result['observer_runs']=runs
+        if ep_event_observer:
+            runs=[]
+            for mode in ('startup','first-event','revoked'):
+                run=subprocess.run([str(ep_event_observer.resolve()),str(ram),str(registers),str(ownership),mode],
+                    capture_output=True,text=True,timeout=30)
+                log=output/f'original-ep-event-{lifetime}-{mode}.aot-private.log'
+                log.write_text(run.stdout+run.stderr,newline='\n')
+                assert run.returncode==(2 if mode=='first-event' else 0),run.stdout+run.stderr
+                observation=json.loads(run.stdout)
+                if mode=='first-event':
+                    completed=observation['completed_descriptors']
+                    assert completed[0]==[0x41a2,0x5be0,result['directory'][21],0xbc0,result['directory'][20]*4]
+                    block={0:(201,0x70d4),1:(188,0x6de4),2:(754,0xc00)}[selector]
+                    assert completed[1]==[0x41a2,0x5be0,block[0],0x2b00,block[1]]
+                    assert completed[2:]==[[0x41a2,0x5be0,256,i*256,0x10000+i*0x800] for i in range(5)]
+                    assert observation['clock_events']==1 and observation['dma_nodes']==7
+                    assert observation['all_input_words_verified'] and observation['dynamic_table_preserved']
+                    assert observation['RAM_unchanged'] and observation['writes']==0
+                    expected=[0x41a2,0x5be2,78,0x63d,0x7458] if selector==2 else [0x41a2,0x400603,0x1001,0x500,0x12000]
+                    assert observation['descriptor']==expected
+                    observation['next_boundary']='linear-output-profile' if selector==2 else 'unresolved-original-descriptor'
+                runs.append(dict(mode=mode,exit=run.returncode,observation=observation,log_sha256=sha(log.read_bytes())))
+            result['ep_event_runs']=runs
         producer.destroy_startup()
         result['original_destructors_release_all_allocations'] = True
         result['executed_original_instructions'] = producer.source_identity()
@@ -173,6 +196,10 @@ def check(image, output, observer=None):
         original_output_qualified=False,
         scope='Unchanged original resource allocation, GP setup17B870, EP setup17B999 and destructors; original mapped GP descriptor producer9E and helper126 feed the actual three-page EP scratch alias. Original EP dispatcher180 selector7 and276/2E1 reach their unknown bit9 guard.',
         limits='Authored offline caller/kernel RAM/settings input and diagnostic MIX payloads. Transport helper invocation is separate from original boot execution, which pauses before B2 without resuming a yield. FE capacity uses the existing synchronous maintained floor; reset/core-control writes are observations, not hardware/runtime admission. B0-B3, coherent C5/CA/D5 startup, original wake event and bit9 remain guarded. No title, playback or Xbox operation.')
+    if ep_event_observer:
+        data.update(issue='beads-xbox.1.113.9',ep_event_observer_sha256=sha(ep_event_observer.read_bytes()),
+            scope='Actual unchanged driver tables and mapped EP startup perform seven exact input transfers through the sole maintained CPU, including original P reload and execution.',
+            limits='Explicit offline caller/kernel allocation/settings and observed empty-list clock profile. Reset/core MMIO is recorded, not dispatched. Selector2 reaches an unqualified linear output profile; selectors0/1 reach an unresolved original descriptor. ACK/busy timing and frame-ACK causality remain open. These next-boundary records are not completed processing or title/output/reset qualification. The older transport observer, if selected, retains its separately recorded historical B2 scope.')
     report=output/'original-ep-startup-reference.aot-private.json'
     report.write_text(json.dumps(data, indent=2)+'\n', newline='\n')
     print(f'PASS: {len(records)} original driver startup lifetimes; {report}')
@@ -183,5 +210,6 @@ if __name__ == '__main__':
     parser.add_argument('--xbe', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--observer', type=Path)
+    parser.add_argument('--ep-event-observer',type=Path)
     args=parser.parse_args()
-    check(args.xbe, args.output, args.observer)
+    check(args.xbe, args.output, args.observer,args.ep_event_observer)

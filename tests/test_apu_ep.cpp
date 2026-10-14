@@ -1,5 +1,5 @@
 // Coherent actual VP/GP producer -> physical scratch -> EP CPU -> output RAM.
-// Authored supported programs do not replace original timer/bit9/cadence paths.
+// Authored supported programs do not replace original timer/cadence paths.
 #include "machine/apu_ep_processor.hpp"
 #include <algorithm>
 #include <cmath>
@@ -383,7 +383,7 @@ static void cpu_guard(const std::string& mode,const char* path) {
         p=original(path);p[0]=0x0af080;p[1]=0x700;
         // Original276 and2E1 remain unchanged; builder owns its actual P node.
         const uint32_t caller[]={0x308000,0x61f400,0xc00,0x64f400,0x1a2,0x382000,0x3d0100,0x0bf080,0x276,0x0bf080,0x2e1,0x87};
-        std::copy(std::begin(caller),std::end(caller),p.begin()+0x700);f.expected_guard="unqualified EP DMA descriptor format";
+        std::copy(std::begin(caller),std::end(caller),p.begin()+0x700);
     } else if(mode=="startup-busy") {p={0x08f485,0xfff,0x87};f.expected_guard="startup event clear requires an empty initial context";}
     else if(mode=="startup-frame-unowned") {p={0x08f485,2,0x87};f.expected_guard="frame command requires idle control ownership";}
     else if(mode=="startup-frame-busy") {p={0x08f484,1,0x08f485,2,0x87};f.expected_guard="frame command requires idle control ownership";}
@@ -391,6 +391,25 @@ static void cpu_guard(const std::string& mode,const char* path) {
     else if(mode=="bank") {p={0x65f400,0xbfc,0x021594,0x87};f.expected_guard="unmapped DSP read";}
     else {p={0x08f494,0x20,0x08f496,1,0x87};f.expected_guard="EP executable host publication during DMA work";}
     f.boot(true,p);xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
+    if(mode=="--original-bit9") {
+        // The unchanged builder/helper executes the independently admitted
+        // input profile. Count32 is an offline extent check; silicon used24.
+        for(unsigned i=0;i<32;++i)f.scratch(0xd000,0x3000+i*4,0xaa120000+i*0x10203);
+        const auto ram=f.ram;const std::vector<uint32_t> gp(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+        const auto before=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+        xlle::ApuEpRun r;CHECK(ep.run(10000,r) && r.power==2 && !r.sp && !r.yielded && r.pc==0x70c);
+        const unsigned expected[]={0x41a2,0x5be0,32,0x80,0x3000};
+        for(unsigned i=0;i<5;++i) {
+            const auto actual=*f.apu.ep_word(0x29a2+i);
+            if(actual!=expected[i])std::fprintf(stderr,"original helper descriptor[%u]=%x expected%x\n",i,actual,expected[i]);
+            CHECK(actual==expected[i]);
+        }
+        for(unsigned i=0;i<32;++i)CHECK(*f.apu.ep_word(0x80+i)==((0xaa120000+i*0x10203)&0xffffff));
+        for(unsigned i=0;i<0x3800;++i)if(!(i>=0x80 && i<0xa0) && !(i>=0x29a2 && i<0x29a7))CHECK(f.apu.ep_word(0)[i]==before[i]);
+        CHECK(f.apu.ep_dma_nodes()==1 && !f.apu.gp_dma_nodes() && f.ram==ram && !f.apu.ep_frame_events());
+        CHECK(std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)) && f.apu_error.empty() && f.owner_error.empty());
+        std::puts("original EP linear input: unchanged276/2E1 copy32 exact words and return; authored caller, no boot/output/timing claim");return;
+    }
     if(mode=="--original-config-tail") {
         const auto ram=f.ram;const auto banks=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
         const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
@@ -438,7 +457,7 @@ int main(int argc,char** argv) {
     if(argc==4 && std::string(argv[1])=="--physical-events"){physical_events(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-config"){physical_configuration(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-c4"){physical_configuration(argv[2],argv[3],true);return 0;}
-    if(argc==3){cpu_guard(argv[1],argv[2]);return (std::string(argv[1])=="--original-entry" || std::string(argv[1])=="--original-config-tail")?0:1;}
+    if(argc==3){cpu_guard(argv[1],argv[2]);return (std::string(argv[1])=="--original-entry" || std::string(argv[1])=="--original-config-tail" || std::string(argv[1])=="--original-bit9")?0:1;}
     if(argc==2){cpu_guard(argv[1],nullptr);return 1;}
     CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();event_clock_and_ownership();
     std::puts("APU EP:30 real VP/GP/scratch/EP/FIFO PCM packets;3 clock/C4/C5 lifetimes, disabled/held clock and DMA guards, exact RAM/banks and retained ownership passed; connected cadence/AC97/reset remain open");

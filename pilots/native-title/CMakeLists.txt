@@ -220,6 +220,9 @@ if(pilot_audio_dsp)
   pilot_add_test(NAME pilot_gp_linear_contract COMMAND pilot_gp_linear_test)
   add_executable(pilot_ep_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_ep.cpp")
   target_link_libraries(pilot_ep_test PRIVATE xlle_apu_gp_processor)
+  # Explicit private-artifact CLI, driven by native_ep_startup_reference.py.
+  add_executable(pilot_ep_startup_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_ep_startup.cpp")
+  target_link_libraries(pilot_ep_startup_test PRIVATE xlle_apu_gp_processor)
   pilot_add_test(NAME pilot_ep_contract COMMAND pilot_ep_test)
   pilot_add_test(NAME pilot_ep_guards COMMAND "${CMAKE_COMMAND}"
     "-DPROGRAM=$<TARGET_FILE:pilot_ep_test>"

@@ -105,8 +105,49 @@ static void observed_gp_idle_controls() {
     CHECK(!f.apu.dsp_dma_pending(xlle::ApuDspKind::Gp) && !f.apu.gp_dma_nodes() && f.ram==ram);
     CHECK(f.apu.gp_read(0xffffc5,status) && status==0);
 }
+static void observed_ep_linear_inputs() {
+    // Independent physical count24 snapshots, taken by the EP immediately
+    // after EOL and before acknowledgement, for both X and P clear/set pairs.
+    const uint32_t expected[]={0x400000,0x430405,0x46080a,0x490c0f,0x4c1014,0x4f1419,
+        0x52181e,0x551c23,0x582028,0x5b242d,0x5e2832,0x612c37,0x64303c,0x673441,
+        0x6a3846,0x6d3c4b,0x704050,0x734455,0x76485a,0x794c5f,0x7c5064,0x7f5469,0x82586e,0x855c73};
+    for(unsigned target:{0xbc0u,0x2c00u})for(unsigned control:{0x59e0u,0x5be0u}) {
+        Fixture f;f.apu.mmio_write(0xfe802048,4,0x1000);f.apu.mmio_write(0xfe8020dc,4,3);
+        for(unsigned i=0;i<24;++i)for(unsigned b=0;b<4;++b) {
+            f.scratch(0x2000+i*4+b)=uint8_t((0xbb400000+i*0x30405)>>(b*8));
+            f.scratch(0x2100+i*4+b)=uint8_t(0x87u>>(b*8));
+        }
+        auto* words=f.apu.ep_word(0);CHECK(words);
+        const auto ram=f.ram;
+        const std::vector<uint32_t> gp(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+        const auto revision=f.apu.ep_program_revision();
+        for(unsigned transfer=0;transfer<2;++transfer) {
+            const uint32_t node[]={0x4200,control,24,target,0x2000+transfer*0x100};
+            std::copy(std::begin(node),std::end(node),words+0x200);
+            for(unsigned i=0;i<24;++i)words[target+i]=0x6b3000;
+            const std::vector<uint32_t> before(words,words+0x3800);
+            CHECK(f.apu.ep_write(0xffffd4,0x200) && f.apu.ep_write(0xffffd6,1));
+            // Reads cannot perform the queued transfer or publish completion.
+            unsigned value=0;for(unsigned i=0;i<16;++i) {
+                CHECK(f.apu.ep_read(0xffffc5,value) && value==0);
+                CHECK(std::equal(before.begin(),before.end(),words));
+            }
+            CHECK(f.apu.service_dsp_dma(xlle::ApuDspKind::Ep,2));
+            CHECK(f.apu.ep_dma_nodes()==transfer+1 && !f.apu.gp_dma_nodes());
+            CHECK(f.apu.ep_read(0xffffc5,value) && value==0x80);
+            CHECK(f.apu.ep_read(0xffffd6,value) && value==0);
+            for(unsigned i=0;i<0x3800;++i)CHECK(words[i]==
+                (i>=target && i<target+24?(transfer?0x87:expected[i-target]):before[i]));
+            CHECK(f.ram==ram && !f.transfers && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
+            CHECK(f.apu.ep_program_revision()==revision+(target==0x2c00?transfer+1:0));
+            // Existing nominal acknowledgement permits the second transfer.
+            // Physical immediate80/late0 ordering is separately unqualified.
+            CHECK(f.apu.ep_write(0xffffc5,0x80));
+        }
+    }
+}
 static void bit9_profile_boundaries() {
-    // Shared implementation must not widen EP, other output, FIFO or adjacent flags.
+    // Shared implementation must not widen EP circular/output/Y, FIFO or adjacent flags.
     for(bool ep:{false,true})for(uint32_t control:{0x5be0u,0x4bd0u,0x5be2u,0x4bd2u,
             0x5a00u,0x5a02u,0x47e0u,0x47d2u,0x4be0u,0x4be2u,0x5bd0u,0x5bd2u,0x5be1u,0x7be0u,0x15be0u}) {
         if(!ep && (control==0x5be0 || control==0x4bd0 || control==0x4bd2))continue;
@@ -115,7 +156,7 @@ static void bit9_profile_boundaries() {
             [&](uint32_t,void*,uint32_t,bool){++byte_calls;return true;},
             [&](unsigned,void*,uint32_t,bool){++fifo_calls;return true;},
             [&](const std::string& e){error=e;},{},{},ep?xlle::ApuDspKind::Ep:xlle::ApuDspKind::Gp);
-        const uint32_t node[]={0x4020,control,4,0x400,28,0x2000,31};
+        const uint32_t node[]={0x4020,control,4,ep && control==0x5be0?0x1840u:0x400u,28,0x2000,31};
         std::copy(std::begin(node),std::end(node),memory.begin()+0x20);const auto before=memory;
         CHECK(dma.write(0xffffd4,0x20) && dma.write(0xffffd6,1));
         CHECK(!dma.service(4096) && !error.empty() && !dma.nodes());
@@ -145,7 +186,7 @@ static void bit9_profile_boundaries() {
     }
 }
 int main() {
-    observed_gp_idle_controls();paired_bit9_inputs();paired_bit9_circular_outputs();bit9_profile_boundaries();
+    observed_gp_idle_controls();paired_bit9_inputs();paired_bit9_circular_outputs();observed_ep_linear_inputs();bit9_profile_boundaries();
     // Published hardware byte examples, independent of native/xemu packing.
     for(unsigned format:{2u,6u})for(unsigned bank:{0x80u,0x1480u,0x1880u,0x2880u}) {
         Fixture f;f.word(bank)=0x123456;f.word(bank+1)=0xabcdef;

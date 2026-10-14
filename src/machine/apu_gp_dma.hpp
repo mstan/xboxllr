@@ -147,11 +147,17 @@ private:
             const bool scratch=linear || circular;
             // Paired physical GP observations support these exact scratch
             // profiles: linear/circular input and circular format2 output.
-            // Four-word representatives do not establish arbitrary flags, EP,
+            // Four-word representatives do not establish arbitrary flags,
             // other output profiles, larger-count silicon timing or P-code
             // reload safety. Existing extent and publication owners still apply.
-            const bool qualified_bit9_profile=kind_==ApuDspKind::Gp &&
-                (node[1]==0x5be0u || node[1]==0x4bd0u || node[1]==0x4bd2u);
+            // Separate physical EP count24 pairs establish linear format6
+            // input to X and P, with bit9 clear/set and two successive exact
+            // copies. Keep EP Y, circular and output flag profiles guarded.
+            // This admits byte transport only; busy/ACK timing is separate.
+            const bool ep_input_bank=node[3]<0xc00 || (node[3]>=0x2800 && node[3]<0x3800);
+            const bool qualified_bit9_profile=kind_==ApuDspKind::Gp ?
+                (node[1]==0x5be0u || node[1]==0x4bd0u || node[1]==0x4bd2u) :
+                (node[1]==0x5be0u && ep_input_bank);
             if((node[0]&~0x7fffu) || (node[1]&0x200d) ||
                ((node[1]&0x200) && !qualified_bit9_profile) ||
                (linear && (node[1]&16)) ||
@@ -215,8 +221,8 @@ private:
     }
     void finish() {
         // Natural idle follows the actual last publication. The measured GP
-        // input cases finish at D6=0. Busy STOP and EP silicon semantics remain
-        // separate; EOL acknowledgement never substitutes for device work.
+        // and EP input cases finish at D6=0. Busy STOP and intermediate status
+        // timing remain separate; acknowledgement cannot replace device work.
         active_=false;control_&=~16u;interrupts_|=0x80;job_.reset();
     }
     Word word_;Bytes bytes_;Fifo fifo_;Fault fault_;ProgramWrite program_write_;MixWrite mix_write_;
