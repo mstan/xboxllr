@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: physical input baseline and completion pass; bit9 comparison next | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: physical59E0/5BE0 X input pair passes; remaining representative shapes next | `.113.9`, `.114` | GP/EP configuration, wake/reset and bit9 DMA input | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -74,6 +74,18 @@ storage or boot changes were needed. Bit9 admission and production LLE/HLE
 remain unchanged. Baseline and retirement evidence are probe
 `results/original-input-eol-physical-20261014/` and
 `results/input-eol-retire-20261014/`.
+
+The subsequent original5BE0 comparator also passed physically (probe
+`c35688c`). In its distinct allocation, initial C5/D6=0/0 skipped the optional
+acknowledgement. All four X words matched the59E0 SG signature, all five
+descriptor words were retained, and EOL80 appeared on poll10 with terminalD6=0,
+error0, the comparator token, phase2 and all eight witnesses exact. Full P
+verification passed. This supplies independent clear/set evidence for the
+four-word linear format6 GP input shape; it does not establish all bit9 cases.
+The next representative batch covers Y/program destinations and circular input.
+The four owner-bound checks passed, including explicit synthetic CPU control
+flow and strict production-bit9 rejection. Production LLE/HLE are unchanged.
+Private evidence: probe `results/input-bit9-physical-20261014/`.
 Private evidence and immutable source snapshots are probe
 `results/original-input-baseline-20261014/`, including `physical-assessment.aot-private.json`.
 
@@ -102,8 +114,9 @@ an exact file roundtrip retained TCP liveness during upload and download.
 Startup failures and drive availability are readable through TCP INFO, and an
 updated executable was staged, verified and launched remotely without owner
 screen-reading or a dashboard round trip. Normal boot paths are unchanged.
-The next device experiment is the original bit-9 input comparison, with a new
-owner and separately checked admission/acknowledgement. Remote access removes a session-maintenance obstacle;
+The next device experiments are the remaining representative bit-9 input pairs,
+each with a new owner and separately checked admission/acknowledgement.
+Remote access removes a session-maintenance obstacle;
 it does not close A03 or change
 the **6/9** family count or 26 accepted precision deferrals.
 
@@ -180,7 +193,7 @@ qualified family. The count remains **6/9**, with the same 26 precision deferral
 | G03 | Passive original producer/first-transfer capture is integrated at `24468bc`; independently sourced internal/RDI packing is now recorded below | Bind saved-instance byte offsets and save/restore semantics to actual consumer state, including required RAMFC/ownership fields. Internal lane packing alone does not establish that map. Capture the real first request after G02; never replace it with an invented image or successful no-op. |
 | G04 | Guarded diagnostic GPU bootstrap and paired noise capture preparation | Obtain the required reached enabled-noise primitive and independently establish its supported sampling behavior. Preserve the existing enable guard until then. |
 | G05 | Existing representative state, lifetime, scene and producer evidence | Run the connected original graphics route after G02-G04, retaining real completion/reentry/teardown and affected representative comparisons. Reuse unchanged evidence; exhaustive scene-pixel composition remains deferred. |
-| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; physical original initialization and completed input baseline | Establish B0-B3 producer/configuration, remaining reset/wake/control transitions and required bit9 input semantics. The longer baseline copied exact SG words and observed EOL on poll10; original5BE0 comparison is next. |
+| A03 | Original directory/storage/composed startup audits; sole GP/EP processors; physical original initialization and completed59E0/5BE0 X input pair | Establish B0-B3 producer/configuration, remaining reset/wake/control transitions and required bit9 input semantics. Representative Y/program destinations and circular-input pairs are next before broader admission. |
 | A04 | Idle FE publication and guarded original-DPC reproducer | Establish active-work ordering and initial control provenance, then connect publication to genuine completed work. Restoring idle register values cannot discard prior work history. |
 | A05 | Shared original-device adapter, compiled/raw MMIO route and real PCM capture consumer | Connect admitted GP/EP/VP work to the shared-clock owner after A03/A04. The current work callback advances the codec while DSPs remain held; wiring complete does not mean original DSP scheduling/output is complete. Then run actual output/ISR/DPC/stop/reuse/timing acceptance. |
 
