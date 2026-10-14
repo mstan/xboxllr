@@ -177,13 +177,18 @@ def check(image, output, observer=None, ep_event_observer=None):
                     assert completed[0]==[0x41a2,0x5be0,result['directory'][21],0xbc0,result['directory'][20]*4]
                     block={0:(201,0x70d4),1:(188,0x6de4),2:(754,0xc00)}[selector]
                     assert completed[1]==[0x41a2,0x5be0,block[0],0x2b00,block[1]]
-                    assert completed[2:]==[[0x41a2,0x5be0,256,i*256,0x10000+i*0x800] for i in range(5)]
-                    assert observation['clock_events']==1 and observation['dma_nodes']==7
+                    assert completed[2:7]==[[0x41a2,0x5be0,256,i*256,0x10000+i*0x800] for i in range(5)]
+                    assert completed[7:]==([[0x41a2,0x5be2,78,0x63d,0x7458]] if selector==2 else [])
+                    assert observation['clock_events']==1 and observation['dma_nodes']==(8 if selector==2 else 7)
                     assert observation['all_input_words_verified'] and observation['dynamic_table_preserved']
-                    assert observation['RAM_unchanged'] and observation['writes']==0
-                    expected=[0x41a2,0x5be2,78,0x63d,0x7458] if selector==2 else [0x41a2,0x400603,0x1001,0x500,0x12000]
+                    assert observation['all_output_words_verified'] and observation['output_nodes']==int(selector==2)
+                    # This original setup's shared input is zero; its one output
+                    # is also zero. Distinct nonzero transport is established
+                    # separately by the frozen physical output comparisons.
+                    assert observation['RAM_unchanged'] and observation['writes']==int(selector==2)
+                    expected=[0x41a2,0x400603,0x1001,0x400,0x7458] if selector==2 else [0x41a2,0x400603,0x1001,0x500,0x12000]
                     assert observation['descriptor']==expected
-                    observation['next_boundary']='linear-output-profile' if selector==2 else 'unresolved-original-descriptor'
+                    observation['next_boundary']='unresolved-original-descriptor'
                 runs.append(dict(mode=mode,exit=run.returncode,observation=observation,log_sha256=sha(log.read_bytes())))
             result['ep_event_runs']=runs
         producer.destroy_startup()
@@ -198,8 +203,8 @@ def check(image, output, observer=None, ep_event_observer=None):
         limits='Authored offline caller/kernel RAM/settings input and diagnostic MIX payloads. Transport helper invocation is separate from original boot execution, which pauses before B2 without resuming a yield. FE capacity uses the existing synchronous maintained floor; reset/core-control writes are observations, not hardware/runtime admission. B0-B3, coherent C5/CA/D5 startup, original wake event and bit9 remain guarded. No title, playback or Xbox operation.')
     if ep_event_observer:
         data.update(issue='beads-xbox.1.113.9',ep_event_observer_sha256=sha(ep_event_observer.read_bytes()),
-            scope='Actual unchanged driver tables and mapped EP startup perform seven exact input transfers through the sole maintained CPU, including original P reload and execution.',
-            limits='Explicit offline caller/kernel allocation/settings and observed empty-list clock profile. Reset/core MMIO is recorded, not dispatched. Selector2 reaches an unqualified linear output profile; selectors0/1 reach an unresolved original descriptor. Delayed acknowledgement is queued independently of C4; exact ACK/busy timing remains open. These next-boundary records are not completed processing or title/output/reset qualification. The older transport observer, if selected, retains its separately recorded historical B2 scope.')
+            scope='Actual unchanged driver tables and mapped EP startup perform seven exact input transfers through the sole maintained CPU, including original P reload and execution; selector2 also completes its78-word linear output.',
+            limits='Explicit offline caller/kernel allocation/settings and observed empty-list clock profile. Reset/core MMIO is recorded, not dispatched. All selectors now reach unresolved control400603/count4097 descriptors. Selector2 output is zero from this zero-filled shared input; distinct nonzero output transport is separately physically observed. Delayed acknowledgement is queued independently of C4; exact ACK/busy timing remains open. These next-boundary records are not completed processing or title/output/reset qualification. The older transport observer, if selected, retains its separately recorded historical B2 scope.')
     report=output/'original-ep-startup-reference.aot-private.json'
     report.write_text(json.dumps(data, indent=2)+'\n', newline='\n')
     print(f'PASS: {len(records)} original driver startup lifetimes; {report}')

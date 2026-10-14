@@ -15,10 +15,10 @@ static std::vector<unsigned char> load(const char* path) {
     std::vector<unsigned char> data(bytes);CHECK(std::fread(data.data(),1,data.size(),file)==data.size());std::fclose(file);return data;
 }
 struct Fixture {
-    std::vector<unsigned char> ram,registers,map,before;
+    std::vector<unsigned char> ram,registers,map,before,expected_ram;
     std::vector<unsigned> program;
     std::string device_error,owner_error;
-    unsigned writes=0,reads=0;bool expect_descriptor=false,revoke=false;
+    unsigned writes=0,reads=0,output_nodes=0;bool expect_descriptor=false,revoke=false;
     std::vector<std::array<unsigned,5>> completed;
     xlle::McpxApu apu{[this](const std::string& s){device_error=s;}};
     static unsigned word(const std::vector<unsigned char>& bytes,unsigned at) {
@@ -37,7 +37,7 @@ struct Fixture {
         CHECK(offset/4096<reg(0xfe8020dc));const auto entry=reg(0xfe802048)+offset/4096*8;
         CHECK(owned(entry,8));const auto at=word(ram,entry)+(offset&4095);CHECK(owned(at,4));return at;
     }
-    Fixture(char** argv):ram(load(argv[1])),registers(load(argv[2])),map(load(argv[3])),before(ram) {
+    Fixture(char** argv):ram(load(argv[1])),registers(load(argv[2])),map(load(argv[3])),before(ram),expected_ram(ram) {
         CHECK(ram.size()==0x400000 && !(registers.size()%8) && !(map.size()%8));
         apu.set_mem_access([this](unsigned a,void* p,size_t n){++reads;if(revoke || !owned(a,n))return false;std::memcpy(p,ram.data()+a,n);return true;},
             [this](unsigned a,const void* p,size_t n){++writes;if(revoke || !owned(a,n))return false;std::memcpy(ram.data()+a,p,n);return true;});
@@ -56,10 +56,17 @@ struct Fixture {
     void fault(const std::string& why) {
         owner_error=why;if(!expect_descriptor)return;
         CHECK(device_error.find("unqualified EP DMA descriptor format")!=std::string::npos);
-        CHECK(ram==before && !writes && !apu.gp_dma_nodes() && apu.ep_frame_events()==1);
-        CHECK(apu.ep_dma_nodes()==7 && completed.size()==7);
+        CHECK((completed.size()==7 && !output_nodes && !writes) ||
+              (completed.size()==8 && output_nodes==1 && writes==1));
+        CHECK(*apu.ep_word(0x29a3)==0x400603 && *apu.ep_word(0x29a4)==0x1001);
+        report("original-first-event-next-boundary");
+        std::fflush(stdout);std::fprintf(stderr,"original EP boundary: %s; %s\n",why.c_str(),device_error.c_str());std::exit(2);
+    }
+    void report(const char* stage) {
+        CHECK(ram==expected_ram && !apu.gp_dma_nodes() && apu.ep_frame_events()==1);
+        CHECK(apu.ep_dma_nodes()==completed.size() && completed.size()>=7);
         for(unsigned i=0;i<0x3800;++i)CHECK(!*(apu.gp_word(0)+i));
-        std::printf("{\"stage\":\"original-first-event-next-boundary\",\"descriptor\":[");
+        std::printf("{\"stage\":\"%s\",\"descriptor\":[",stage);
         for(unsigned i=0;i<5;++i)std::printf("%s%u",i?",":"",*apu.ep_word(0x29a2+i));
         std::printf("],\"completed_descriptors\":[");
         for(unsigned n=0;n<completed.size();++n) {
@@ -67,17 +74,23 @@ struct Fixture {
             for(unsigned i=0;i<5;++i)std::printf("%s%u",i?",":"",completed[n][i]);
             std::printf("]");
         }
-        std::printf("],\"clock_events\":1,\"dma_nodes\":7,\"all_input_words_verified\":true,\"RAM_unchanged\":true,\"writes\":0,\"dynamic_table_preserved\":true}\n");
-        std::fflush(stdout);std::fprintf(stderr,"expected original EP transfer boundary: %s; %s\n",why.c_str(),device_error.c_str());std::exit(2);
+        std::printf("],\"clock_events\":1,\"dma_nodes\":%zu,\"output_nodes\":%u,\"all_input_words_verified\":true,\"all_output_words_verified\":true,\"RAM_unchanged\":%s,\"writes\":%u,\"dynamic_table_preserved\":true}\n",completed.size(),output_nodes,ram==before?"true":"false",writes);
     }
     void verify_transfers() {
         if(apu.ep_dma_nodes()==completed.size())return;
         CHECK(apu.ep_dma_nodes()==completed.size()+1);
         std::array<unsigned,5> node;
         for(unsigned i=0;i<5;++i)node[i]=*apu.ep_word(0x29a2+i);
-        CHECK(node[0]==0x41a2 && node[1]==0x5be0 && node[2] && node[2]<=4096);
-        for(unsigned i=0;i<node[2];++i)CHECK(*apu.ep_word(node[3]+i)==(word(ram,physical(node[4]+i*4))&0xffffff));
-        CHECK(ram==before && !writes && !apu.gp_dma_nodes());
+        CHECK(node[0]==0x41a2 && (node[1]==0x5be0 || node[1]==0x5be2) && node[2] && node[2]<=4096);
+        if(node[1]==0x5be2) {
+            for(unsigned i=0;i<node[2];++i) {
+                const unsigned value=*apu.ep_word(node[3]+i)&0xffffff;
+                CHECK(word(ram,physical(node[4]+i*4))==value);
+                std::memcpy(expected_ram.data()+physical(node[4]+i*4),&value,4);
+            }
+            ++output_nodes;
+        } else for(unsigned i=0;i<node[2];++i)CHECK(*apu.ep_word(node[3]+i)==(word(ram,physical(node[4]+i*4))&0xffffff));
+        CHECK(ram==expected_ram && !apu.gp_dma_nodes());
         for(unsigned i=0x100;i<0x122;++i)CHECK(*apu.ep_word(0x2800+i)==program[i]);
         completed.push_back(node);
         std::fprintf(stderr,"verified original EP node%zu: %x,%x,%x,%x,%x\n",completed.size(),node[0],node[1],node[2],node[3],node[4]);
@@ -107,6 +120,9 @@ int main(int argc,char** argv) {
     f.apu.mmio_write(0xfe801100,4,0x7130f);f.apu.mmio_write(0xfe802000,4,15);
     f.apu.set_time(18000,3375000);f.apu.set_frame(1);
     CHECK(f.apu.ep_frame_events()==1);
-    for(unsigned i=0;i<200000;++i){CHECK(ep.run(1,r));f.verify_transfers();}
+    for(unsigned i=0;i<200000;++i){
+        CHECK(ep.run(1,r));f.verify_transfers();
+    }
+    std::fprintf(stderr,"budget boundary:pc=%x sp=%u nodes=%zu outputs=%u descriptor=%x,%x,%x,%x,%x\n",r.pc,r.sp,f.completed.size(),f.output_nodes,*f.apu.ep_word(0x29a2),*f.apu.ep_word(0x29a3),*f.apu.ep_word(0x29a4),*f.apu.ep_word(0x29a5),*f.apu.ep_word(0x29a6));
     CHECK(false); // A budget exhaustion cannot pass as the observed boundary.
 }

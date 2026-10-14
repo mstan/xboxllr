@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: EP input and delayed ACK observed; original first event completes seven exact transfers; output, two selector descriptors, exact timing, reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: EP input/output and delayed ACK observed; selector2 completes eight transfers; all three settings now reach a common malformed-descriptor pattern; exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,39 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## EP linear output and common original boundary - 2026-10-14
+
+Two physical cases establish count78 linear format6 output from X063D with
+control59E2/5BE2. Both copied all78 exact zero-extended words to the SG-mapped
+destination; distinct high-byte destination signatures were overwritten in
+full. The alternate destination,80 source/canary words,34 control/witness
+fields,9060 immutable owner words and2048 P words passed. Both allocations
+were retired through separate remote dashboard/SMC recovery and a single probe
+launch, with fresh PING/INFO. No user action or storage/boot change was needed.
+
+The shared DMA owner now admits EP5BE2 only for X linear output. Y/P output,
+circular and adjacent bit9 profiles retain their guards. The frozen physical
+programs reproduce78 exact output words, the untouched alternate destination,
+source/canary words and32 non-timing fields through the maintained CPU under
+DMA policies1/2/4; a deliberately wrong output golden rejects. Immediate
+busy visibility and polling count are excluded explicitly and remain required
+timing questions. The physical cases read initial/terminal D6 zero, EOL80
+after14 polls, immediate ACK80 and delayed ACK0.
+
+The unchanged original selector2 now completes its eighth transfer, output
+`41A2,5BE2,4E,63D,7458`. This zero-input driver setup produces78 zero words,
+so it is transfer/ownership evidence, not completed signal processing. Its next
+descriptor is `41A2,400603,1001,400,7458`. Selectors0/1 still stop after seven
+inputs at `41A2,400603,1001,500,12000`. All three therefore share malformed
+control400603/count4097. Investigate the original caller/core path offline;
+these malformed descriptors are not candidates for a hardware experiment.
+
+Fresh original setup/event/revocation and destructor checks pass for all three
+settings. Output, DMA, lifecycle, processor and counter checks retain their
+existing guards; HLE processing is unchanged. Evidence:
+`build/blinx/audio-ep-output-20261014/`, probe
+`results/ep-output-20261014-{x-clear,x-set}/`. Count6/9, precision27 unchanged.
 
 ## EP delayed acknowledgement ownership - 2026-10-14
 

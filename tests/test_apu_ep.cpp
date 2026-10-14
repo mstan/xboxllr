@@ -318,6 +318,47 @@ static void acknowledgement_ownership() {
         CHECK(f.ram==ram && std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)));
     }
 }
+static void physical_output(const char* image,const char* observations) {
+    std::vector<uint32_t> p(4096),values(270);
+    FILE* file=std::fopen(image,"rb");CHECK(file);CHECK(std::fread(p.data(),4,p.size(),file)==p.size() && std::fgetc(file)==EOF);std::fclose(file);
+    file=std::fopen(observations,"rb");CHECK(file);CHECK(std::fread(values.data(),4,values.size(),file)==values.size() && std::fgetc(file)==EOF);std::fclose(file);
+    CHECK(values[10]==0x45504f && values[11]==0 && values[12]==2);
+    CHECK(values[21]==0x4200 && (values[22]==0x59e2 || values[22]==0x5be2) && values[23]==78 && values[24]==0x63d);
+    const unsigned physical=p[1023]-0x6000;CHECK(physical && physical<=0x600000 && !(physical&0x3fff) && values[25]==p[1023]);
+    for(unsigned policy:{1u,2u,4u}) {
+        Fixture f;f.ram.resize(0x609000,0xa5);f.reg(0x2048,physical);f.reg(0x20dc,2047);
+        for(unsigned i=0;i<2048;++i){f.put(physical+i*8,physical+(i<4?i+4:7)*4096);f.put(physical+i*8+4,0);}
+        for(unsigned i=0;i<2048;++i)f.put(physical+0x4000+i*4,p[i]);
+        for(unsigned i=0;i<78;++i){f.put(physical+0x6000+i*4,0xaa100000+i*0x10203);f.put(physical+0x7000+i*4,0xbb400000+i*0x30405);}
+        xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);},{policy});CHECK(ep.bootstrap_from_scratch());
+        auto expected_ram=f.ram;
+        for(unsigned i=0;i<156;++i) {
+            const auto at=physical+(i<78?0x6000:0x7000)+(i%78)*4;
+            std::memcpy(expected_ram.data()+at,&values[114+i],4);
+        }
+        auto expected=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+        const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+        xlle::ApuEpRun r;CHECK(ep.run(20000,r) && !r.power && !r.sp && !r.yielded);
+        unsigned slot=0;
+        for(unsigned i=0x100;i<0x10d;++i)expected[i]=values[slot++];
+        for(unsigned i=0x110;i<0x118;++i)expected[i]=values[slot++];
+        for(unsigned i=0x200;i<0x205;++i)expected[i]=values[slot++];
+        for(unsigned i=0x400;i<0x404;++i)expected[i]=values[slot++];
+        for(unsigned i=0x1840;i<0x1844;++i)expected[i]=values[slot++];
+        CHECK(slot==34);
+        for(unsigned i=0;i<80;++i)expected[0x63c+i]=values[34+i];
+        for(unsigned i=0;i<expected.size();++i) {
+            // Immediate busy visibility/poll count are separately required
+            // timing questions; do not normalize them into a timing pass.
+            if(i==0x104 || i==0x108)continue;
+            CHECK(expected[i]==*(f.apu.ep_word(0)+i));
+        }
+        CHECK(f.ram==expected_ram && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
+        CHECK(f.apu.ep_dma_nodes()==1 && !f.apu.gp_dma_nodes() && !f.apu.ep_frame_events());
+        CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.apu_error.empty() && f.owner_error.empty());
+    }
+    std::puts("Frozen EP output:78 exact RAM words, untouched alternate,80 source/canary words,32 control fields and2048 P; policies1/2/4. Busy/poll timing remains open.");
+}
 static void physical_events(const char* image,const char* observations,bool delayed_ack=false) {
     const unsigned frames=delayed_ack?2:8;
     std::vector<uint32_t> p(4096),values(delayed_ack?37:34);
@@ -486,6 +527,7 @@ static void cpu_guard(const std::string& mode,const char* path) {
     xlle::ApuEpRun r;ep.run(10000,r);CHECK(false);
 }
 int main(int argc,char** argv) {
+    if(argc==4 && std::string(argv[1])=="--physical-output"){physical_output(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-events"){physical_events(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-ack"){physical_events(argv[2],argv[3],true);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-config"){physical_configuration(argv[2],argv[3]);return 0;}

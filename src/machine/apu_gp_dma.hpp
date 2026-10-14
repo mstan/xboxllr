@@ -152,12 +152,14 @@ private:
             // reload safety. Existing extent and publication owners still apply.
             // Separate physical EP count24 pairs establish linear format6
             // input to X and P, with bit9 clear/set and two successive exact
-            // copies. Keep EP Y, circular and output flag profiles guarded.
+            // copies. Separate count78 X output pairs establish59E2/5BE2.
+            // Keep EP Y/P output, circular and adjacent flag profiles guarded.
             // This admits byte transport only; busy/ACK timing is separate.
             const bool ep_input_bank=node[3]<0xc00 || (node[3]>=0x2800 && node[3]<0x3800);
             const bool qualified_bit9_profile=kind_==ApuDspKind::Gp ?
                 (node[1]==0x5be0u || node[1]==0x4bd0u || node[1]==0x4bd2u) :
-                (node[1]==0x5be0u && ep_input_bank);
+                ((node[1]==0x5be0u && ep_input_bank) ||
+                 (node[1]==0x5be2u && node[3]<0xc00));
             if((node[0]&~0x7fffu) || (node[1]&0x200d) ||
                ((node[1]&0x200) && !qualified_bit9_profile) ||
                (linear && (node[1]&16)) ||

@@ -4,8 +4,11 @@ Tracked by `beads-xbox.1.113`. Audio is the active independent offline family;
 the original-scheduler/GPU startup experiments are not prerequisites. The family
 remains **open**, and the overall burndown is **6/9 qualified**. Earlier dated
 observations retain their historical counts. Hardware access has resumed after
-the dashboard migration; the latest result is the physical EP register batch
-and original configuration tail, described in the bounded closing checklist.
+the dashboard migration. Physical EP input/output and delayed acknowledgement
+now admit seven original input transfers and selector2's78-word output. All
+three settings then reach a shared malformed-descriptor pattern under offline
+execution; that caller/core investigation is next. See the bounded closing
+checklist for the current evidence and remaining timing/reset requirements.
 
 The native title continues to select its real XAudio2/DSP implementation.
 The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driver

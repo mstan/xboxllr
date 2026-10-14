@@ -150,7 +150,7 @@ static void observed_ep_linear_inputs() {
     }
 }
 static void bit9_profile_boundaries() {
-    // Shared implementation must not widen EP circular/output/Y, FIFO or adjacent flags.
+    // Shared implementation must not widen EP circular/Y/P output, FIFO or adjacent flags.
     for(bool ep:{false,true})for(uint32_t control:{0x5be0u,0x4bd0u,0x5be2u,0x4bd2u,
             0x5a00u,0x5a02u,0x47e0u,0x47d2u,0x4be0u,0x4be2u,0x5bd0u,0x5bd2u,0x5be1u,0x7be0u,0x15be0u}) {
         if(!ep && (control==0x5be0 || control==0x4bd0 || control==0x4bd2))continue;
@@ -159,7 +159,8 @@ static void bit9_profile_boundaries() {
             [&](uint32_t,void*,uint32_t,bool){++byte_calls;return true;},
             [&](unsigned,void*,uint32_t,bool){++fifo_calls;return true;},
             [&](const std::string& e){error=e;},{},{},ep?xlle::ApuDspKind::Ep:xlle::ApuDspKind::Gp);
-        const uint32_t node[]={0x4020,control,4,ep && control==0x5be0?0x1840u:0x400u,28,0x2000,31};
+        const uint32_t node[]={0x4020,control,4,ep && control==0x5be0?0x1840u:
+            ep && control==0x5be2?0x2c00u:0x400u,28,0x2000,31};
         std::copy(std::begin(node),std::end(node),memory.begin()+0x20);const auto before=memory;
         CHECK(dma.write(0xffffd4,0x20) && dma.write(0xffffd6,1));
         CHECK(!dma.service(4096) && !error.empty() && !dma.nodes());
