@@ -20,6 +20,39 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Initialized kernel SECTL and interrupt mask - 2026-10-14
+
+The native LLE owner begins after the pinned4983 kernel's initialized idle
+handoff. Actual original800654DC writes SECTL0 then7 and IEN=AFA; original
+80067442 idle retirement leaves7/AFA with global interrupts disabled and
+GP/EP reset registers0/1. Four incoming SECTL seeds execute to natural returns
+with353 distinct original instruction identities. The final fields agree with
+the retained physical probe-entry capture before video/network initialization.
+
+The maintained `native_audio_handoff_reference.py` also executes original
+17BC9E/17BBD5 controls and the complete17BF66 initializer over three genuine
+driver allocation/destruction lifetimes. Title initialization replaces IEN
+with D8. The handoff is explicitly the initialized-kernel profile; warm apps
+can change that mask. Kernel IRQL/empty software ownership and passive MMIO
+storage are authored fixture inputs. Active FE completion, DSP reset timing,
+full boot and whole title startup are not supplied by this source check.
+
+`audio_device_lle.cpp` applies7/AFA before publishing its mappings, permitting
+the two aligned DWORD reads through the existing sole register owner. General
+cold-reset state is unchanged. Three device lifetimes and22 focused integration
+checks pass, including passive reads, source-derived RMW values, unsupported
+width and existing reset/unknown-access guards. HLE processing is unchanged.
+Private evidence: `build/blinx/audio-startup-context-20261014/`.
+
+The connected title crosses both former initial reads. The final changed run
+exits2 after53.047s at DWORD READ FE801510, retaining the strict FE control
+guard. Its log and executable identity are in `title/attempt3/`; the current
+binary is retained at `title/bin/`. One preparation-only failure exposed a
+configure-only HDD path in the new IO library and was corrected before these
+audio observations. Runs use the retained isolated persistent test disk and
+private EEPROM/config/storage. No connected PCM or draw is claimed. Next:
+initial FE control/RMW, DSP startup and active ordering;6/9 and27 unchanged.
+
 ## Sustained original EP and numerical output - 2026-10-14
 
 Six fresh driver lifetimes cover32 events per configuration for silence and

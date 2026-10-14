@@ -101,6 +101,35 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"startup") || !strcmp(mode,"startup-width")) {
+        uint32_t value=0xa5a5a5a5;
+        if(!strcmp(mode,"startup-width")) {
+            CHECK(pilot_audio_device_lle_access(0xfe802000,2,0,&value));
+            CHECK(value==0xa5a5a5a5);CHECK(!pilot_audio_device_lle_close());
+            puts("PASS unsupported SECTL width rejects before supplying a value");return 0;
+        }
+        for(unsigned life=0;life<3;++life) {
+            if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            for(unsigned read=0;read<3;++read) {
+                CHECK(!pilot_audio_device_lle_access(0xfe802000,4,0,&value));CHECK(value==7);
+                CHECK(!pilot_audio_device_lle_access(0xfe801004,4,0,&value));CHECK(value==0xafa);
+                CHECK(!pilot_audio_device_lle_sample());
+            }
+            // Values independently observed from the original title RMW helper.
+            for(uint32_t next:{7u,15u,23u,31u,7u}) {
+                access(0xfe802000,4,next);
+                CHECK(!pilot_audio_device_lle_access(0xfe802000,4,0,&value));CHECK(value==next);
+            }
+            for(uint32_t next:{0xafau,0xafbu,0xafau,0xd8u}) {
+                access(0xfe801004,4,next);
+                CHECK(!pilot_audio_device_lle_access(0xfe801004,4,0,&value));CHECK(value==next);
+            }
+            PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+            CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words && !s.descriptors);
+            CHECK(s.clock_ticks==ticks && received.empty());CHECK(!pilot_audio_device_lle_close());
+        }
+        puts("PASS three post-kernel SECTL/IEN lifetimes, real register RMW storage, held DSPs and passive reads");return 0;
+    }
     if(capture)CHECK(!pilot_pcm_capture_bind(capture));
     PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
     CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding && state.gp_held && state.ep_held && state.clock_ticks==60000);

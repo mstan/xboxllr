@@ -48,7 +48,7 @@ bool apu_admitted(uint32_t off,unsigned size,int write) {
     if(!write) {
         if(off>=0x2054 && off<=0x2074)return true;
         switch(off) {
-        case 0x200c:case 0x1000:case 0x1100:case 0x1110:case 0x1300:case 0x1304:
+        case 0x2000:case 0x200c:case 0x1000:case 0x1004:case 0x1100:case 0x1110:case 0x1300:case 0x1304:
         case 0x20010:return true;
         default:return false;
         }
@@ -139,6 +139,15 @@ extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void 
     if(!owner)return fail("original audio device allocation failed");
     owner->pcm=pcm;owner->context=context;owner->ticks=ticks;
     owner->lifetime=++next_lifetime;owner->epoch=ticks;
+    // This owner begins after the pinned4983 kernel's initialized idle handoff,
+    // not at board cold reset. Original654DC clears SECTL then enables bits0..2;
+    // original67442 clears processing bits0x18 without clearing those enables.
+    // The same calls initialize IEN=AFA with its global interrupt bit clear.
+    // Executable source proof and retained pre-video/network entry agree.
+    // See native_audio_handoff_reference.py. This admits no FE completion or
+    // DSP reset/wake state; the other guarded registers retain their owners.
+    owner->apu.mmio_write(xlle::McpxApu::kBase+0x2000,4,7);
+    owner->apu.mmio_write(xlle::McpxApu::kBase+0x1004,4,0xafa);
     // Prime the stopped codec before publication. Device creation must not
     // consume any clock interval preceding its ownership.
     owner->aci.set_frame(ticks/6000);

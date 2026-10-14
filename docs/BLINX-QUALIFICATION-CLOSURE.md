@@ -35,12 +35,51 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: all three original EP configurations sustain32 events; representative PCM/AC-3 output passes; startup, exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Integration complete; initialized SECTL/IEN crossed; current title stops at FE control1510; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Initialized kernel audio handoff - 2026-10-14
+
+The pinned4983 kernel supplies a source-derived initial control contract.
+Actual original800654DC clears SECTL and sets its low three bits; original
+80067442 idle retirement clears processing bits0x18 and leaves SECTL7.
+The same calls initialize IEN=AFA and clear its global interrupt enable.
+Four different incoming SECTL values all reach those postconditions through
+natural original returns, with353 distinct executed instruction identities.
+The original idle retirement also writes GP reset0 and EP reset1, matching
+the retained physical pre-video/network probe-entry capture on this kernel.
+DSP reset transitions and active completion are still separate requirements.
+
+`native_audio_handoff_reference.py` retains exact kernel/title source identities,
+actual accesses and ABI checks. It executes original Blinx SECTL and IEN RMW
+helpers across three real driver allocation/destruction lifetimes, then the
+complete original17BF66 initializer. That initializer replaces IEN with D8;
+the kernel AFA value is an initialized-kernel contract, not a universal warm
+application value. The kernel fixture explicitly supplies an empty software
+owner, DISPATCH_LEVEL and passive register storage. It never substitutes
+active FE completion, a callee return or a DSP ready event.
+
+The maintained native post-kernel audio owner now starts SECTL7/IEN=AFA and
+admits their aligned DWORD reads. General board cold-reset defaults remain
+unchanged. Repeated reads, three owner lifetimes, original-derived control
+values and unsupported-width checks preserve held DSPs and zero DMA/PCM work.
+All22 focused device/compiled-MMIO checks pass. No HLE processing or physical
+Xbox operation is introduced. Evidence: `build/blinx/audio-startup-context-20261014/`.
+
+Connected title checks cross the former SECTL and IEN read guards. The final
+changed binary reaches DWORD READ FE801510 after53.047s and exits2 with the
+explicit FE-control admission guard. No draw or PCM output is established.
+One preceding launch failed before title entry because the new private IO
+library retained its configure-only empty HDD path; correcting that compiled
+path resolved the preparation error. Runs use the retained isolated post-run
+disk as persistent input, with separate EEPROM/config/storage. The next required
+step is initial FE control/RMW admission, followed by original DSP startup and
+active FE ordering. Do not repeat the unchanged guarded title. Families6/9 and
+27 precision deferrals remain fixed.
 
 ## Sustained original EP and independent output - 2026-10-14
 
@@ -1138,10 +1177,11 @@ SECTL's generic zero/last-written model fallback is not an independently
 established startup state. The accepted SECTL7 observation belongs to an
 explicit captured idle probe context. Original helper17BC9E preserves bits
 from a SECTL read; original code17C1EF tests bits0x18. Neither establishes the
-initial value of this title's context. Keep the read guarded and add initial
-SECTL/control context to A03/A04's existing final hardware batch. Do not rerun
-the unchanged audio title until that dependency changes. This closes the
-diagnostic attribution task, not the audio family.
+initial value of this title's context. At this checkpoint the read remained
+guarded and initial control context joined A03/A04's final hardware batch.
+The2026-10-14 initialized-kernel handoff section above supersedes this initial
+SECTL/IEN dependency with original kernel init/retirement evidence and retained
+physical corroboration. This diagnostic attribution alone did not close audio.
 
 The Q03 batch `reference-movie-batch-20261011/q03-c32000-v6` used frozen sources
 and an isolated8GiB runtime disk copy. Its preceding v4 generation passed three
@@ -1648,7 +1688,7 @@ whole graphics/audio runs between observations:
 | --- | --- | --- |
 | G02 encoder startup | Fixed original-kernel SMBus byte reads of encoder C4 and6C, with raw HAL status and read-mode ambiguity retained | Legacy Status bytes or present dashboard settings do not establish an old warm capture's register state |
 | A03 owned GP mapping | Fresh owned16KiB-aligned SG allocation, physical/alias/pin checks, then one bounded calibration store/readback | The earlier changed address does not establish a complete silicon mask or permit DSP start |
-| A03 original DSP startup | With verified owned mapping, establish title-relevant initial SECTL/control context, B0..B3 and coherent GP/EP reset, C5/CA/D5, wake and bit9 input transport | Diagnostic retired-cycle counters, authored wakes, generic zero/last-written SECTL or unrelated captured idle state do not qualify original startup/output |
+| A03 original DSP startup | Initialized-kernel SECTL/IEN established; with verified owned mapping, resolve remaining FE control, B0..B3 and coherent GP/EP reset, C5/CA/D5, wake and bit9 input transport | Diagnostic retired-cycle counters, authored wakes, generic zero/last-written startup values or unrelated captured idle state do not qualify original startup/output |
 | A04 active FE ordering | A bounded independently observable work item and actual notification consumer | The retained idle token writes do not establish ordering against active audio/DMA work |
 | G03/G04 reached graphics state | Capture the first real context image/queue after G02; resolve only consumed unknown fields and the enabled-noise primitive | A default-only load, method replay or disabled noise cannot replace required state transfer/pixels |
 

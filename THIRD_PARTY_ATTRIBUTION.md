@@ -1784,3 +1784,15 @@ origin are separate requirements. The authored original DSP control tool reuses
 the already credited original-kernel/Unicorn allocation reference and pinned
 MIT DSP core. Diagnostic retired-cycle samples are not an admitted MCPX timer;
 no original driver or firmware bytes are incorporated into committed source.
+
+## Original initialized audio handoff (2026-10-14)
+
+`native_audio_handoff_reference.py` executes the privately owned pinned4983
+kernel's actual audio initialization, control and idle retirement, using the
+existing credited Unicorn dependency. It also executes original Blinx control
+helpers and compares the resulting idle SECTL/reset fields with retained
+physical probe-entry observations. The authored native adapter uses this
+initialized handoff contract; it does not change board cold-reset defaults.
+No kernel instructions, firmware, disassembly or captured binary data are
+included in committed source. Active FE completion and DSP reset/wake timing
+remain separate from the observed idle control state.

@@ -9,6 +9,8 @@ extern "C" {
  * synchronous DMA capability; they must never reenter CPU/services or hold
  * the USB lock. A consumer accepts an entire actual little-endian PCM chunk. */
 typedef int (*PilotAudioDevicePcm)(void*,const uint8_t*,size_t);
+/* Begins at the pinned kernel4983 initialized idle handoff. SECTL/IEN derive from
+ * original init/retirement; this is not a board cold-reset constructor. */
 const char *pilot_audio_device_lle_open(PilotAudioDevicePcm consumer,void *context);
 /* Close requires a stopped/drained codec and an idle shared engine. Active or
  * paused descriptors, or an engine fault forbidding exact unbind, retain the
