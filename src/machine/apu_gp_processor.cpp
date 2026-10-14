@@ -9,6 +9,8 @@ namespace xlle {
 ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuDmaDispatchPolicy policy)
     :apu_(apu),kind_(kind),policy_(policy),fault_(std::move(fault)) {
     if(apu_.faulted()){fail("GP owner requires an available APU");return;}
+    if(kind_==ApuDspKind::Ep && apu_.ep_control_written_)
+        {fail("EP control requires its retained CPU owner; warm rebind is unqualified");return;}
     if(kind_==ApuDspKind::Gp?apu_.gp_counter_profile_touched_:apu_.ep_counter_profile_touched_)
         {fail("GP counter profile requires its retained CPU owner; warm rebind is unqualified");return;}
     if(!policy_.retired_instructions_per_quantum || policy_.retired_instructions_per_quantum>4096)
@@ -59,6 +61,8 @@ bool ApuDspProcessor::reset_cpu() {
     if(apu_.dsp_dma_pending(kind_))return fail("GP CPU reset with pending DMA remains unqualified");
     if(kind_==ApuDspKind::Gp && apu_.gp_frame_outstanding())return fail("GP CPU reset with an outstanding frame remains unqualified");
     if(counter_profile_.touched())return fail("GP CPU reset after counter configuration remains unqualified");
+    if(kind_==ApuDspKind::Ep && apu_.ep_control_written_)
+        return fail("EP CPU reset after control publication remains unqualified");
     xlle_dsp_core_reset(core_);
     initializing_=false;retired_work_instructions_=0;phase_=ApuGpPhase::Held;
     return true;
@@ -189,7 +193,30 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
         if(value!=1 || !owner.executing_) {
             owner.fail("unqualified GP vendor yield control");std::abort();
         }
+        if(owner.kind_==ApuDspKind::Ep) {
+            // Hardware executes subsequent instructions with C5 still zero.
+            // C4=1 is a control publication, not a DSP power/halt operation.
+            // Let the original C5 polling instructions wait for a real event.
+            owner.apu_.ep_control_value_=value;owner.apu_.ep_control_written_=true;
+            owner.initializing_=false;return;
+        }
         xlle_dsp_core_set_halted(owner.core_,1);return;
+    }
+    if(owner.kind_==ApuDspKind::Ep && address==0xffffc5 && value==2) {
+        // Reached original startup clears an empty frame event after its
+        // configuration returns. The shared W1C operation cannot create an
+        // event, consume DMA completion or admit a later unqualified frame.
+        uint32_t events=0;
+        if(!owner.executing_ || !owner.apu_.ep_control_written_ || owner.initializing_ ||
+           owner.phase_==ApuGpPhase::Failed || owner.apu_.ep_dma_nodes() ||
+           owner.apu_.dsp_dma_pending(ApuDspKind::Ep) ||
+           !owner.apu_.ep_read(address,events) || events) {
+            owner.fail("EP empty startup frame acknowledgement requires idle control ownership");std::abort();
+        }
+        if(!owner.apu_.ep_write(address,0)) {
+            owner.fail("EP empty startup frame acknowledgement failed");std::abort();
+        }
+        return;
     }
     if(owner.kind_==ApuDspKind::Ep && address==0xffffc5 && value==0xfff) {
         // Shared C5 write-one-to-clear contract, restricted to the original

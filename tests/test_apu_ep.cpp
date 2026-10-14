@@ -118,18 +118,23 @@ static void executable_publication_and_yield() {
     CHECK(f.apu.ep_program_revision()==revision+1 && f.apu.ep_dma_nodes()==1);reach(16);CHECK(*f.apu.ep_word(0x100)==0x2468ac);
     CHECK(f.apu.gp_program_revision()==gp_revision && !*f.apu.gp_word(0x100));
 
-    // An actual EP vendor yield does not release an outstanding GP MIX lease.
+    // EP C4 publication continues to the real STOP; it cannot halt the EP or
+    // release the separate outstanding GP MIX lease.
     Fixture leased;leased.voice(71,false,0,4096);leased.boot(false,gp_program());
     leased.descriptor(false,0x20,0x4000,0x59e2,64,0x200,0x2ffd);
     xlle::ApuGpProcessor gp(leased.apu,[&](const std::string& s){leased.fault(s);});CHECK(gp.bootstrap_from_scratch());
     xlle::ApuGpRun g;CHECK(gp.run(1000,g) && g.yielded);xlle::ApuVoiceQuantum q;CHECK(gp.start_frame(q) && q.published);
     leased.boot(true,{0x08f485,0xfff,0x08f484,1,0x87});xlle::ApuEpProcessor yielding(leased.apu,[&](const std::string& s){leased.fault(s);});
-    CHECK(yielding.bootstrap_from_scratch() && yielding.run(1000,e) && e.yielded && e.unused_cycles>900);
+    CHECK(yielding.bootstrap_from_scratch() && yielding.run(1000,e) && !e.yielded && e.power==2 && e.pc==5);
+    uint32_t control_value=0;CHECK(leased.apu.ep_control_publication(control_value) && control_value==1);
     CHECK(leased.apu.gp_frame_outstanding() && leased.events(false)==2 && !leased.events(true));
     CHECK(gp.run(5000,g) && g.yielded && !leased.apu.gp_frame_outstanding());
     CHECK(f.apu_error.empty() && f.owner_error.empty() && leased.apu_error.empty() && leased.owner_error.empty());
     // An external write cannot borrow the CPU's bootstrap admission, even
-    // with an empty EP event word and an existing yielded owner.
+    // with an empty EP event word and an existing stopped owner.
+    CHECK(!yielding.reset_cpu() && leased.owner_error.find("control publication")!=std::string::npos);
+    xlle::ApuEpProcessor rebound(leased.apu,[&](const std::string& s){leased.owner_error=s;});
+    CHECK(rebound.phase()==xlle::ApuEpPhase::Failed && leased.owner_error.find("warm rebind")!=std::string::npos);
     CHECK(!leased.apu.ep_write(0xffffc5,0xfff) && leased.apu.faulted());
 }
 static void observed_empty_configuration() {
@@ -229,14 +234,14 @@ static void contexts_and_failures() {
 static std::vector<uint32_t> original(const char* path) {
     FILE* file=std::fopen(path,"rb");CHECK(file);std::vector<uint32_t> p(2048);CHECK(std::fread(p.data(),4,p.size(),file)==p.size() && std::fgetc(file)==EOF);std::fclose(file);for(auto& v:p)v&=0xffffff;return p;
 }
-static void physical_configuration(const char* image,const char* observations) {
+static void physical_configuration(const char* image,const char* observations,bool c4=false) {
     std::vector<uint32_t> p(4096),values(34);
     FILE* file=std::fopen(image,"rb");CHECK(file);CHECK(std::fread(p.data(),4,4096,file)==4096 && std::fgetc(file)==EOF);std::fclose(file);
     file=std::fopen(observations,"rb");CHECK(file);CHECK(std::fread(values.data(),4,34,file)==34 && std::fgetc(file)==EOF);std::fclose(file);
-    CHECK(values[4]==0x4000);
+    if(!c4)CHECK(values[4]==0x4000);
     Fixture f;f.boot(true,std::vector<uint32_t>(p.begin(),p.begin()+2048));
     // Captured pre-stimulus D5 is an input context, not a universal reset value.
-    CHECK(f.apu.ep_write(0xffffd5,values[4]));
+    if(!c4)CHECK(f.apu.ep_write(0xffffd5,values[4]));
     xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
     const auto ram=f.ram;const auto banks=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
     const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
@@ -247,11 +252,27 @@ static void physical_configuration(const char* image,const char* observations) {
     for(unsigned i=0x200;i<0x205;++i)expected[i]=values[slot++];
     for(unsigned i=0x400;i<0x404;++i)expected[i]=values[slot++];
     for(unsigned i=0x1840;i<0x1844;++i)expected[i]=values[slot++];
-    CHECK(slot==34 && std::equal(expected.begin(),expected.end(),f.apu.ep_word(0)));
+    // C4 control-flow comparison excludes the two B3 samples. The inherited
+    // pre-configuration input and branch timing are separately unqualified:
+    // this physical prefix measured32, whereas retired-cycle modeling gives31.
+    // Do not tune the counter to this fixture or claim a timer match.
+    CHECK(slot==34);
+    for(unsigned i=0;i<expected.size();++i) {
+        if(c4 && (i==0x200 || i==0x204))continue;
+        if(expected[i]!=*(f.apu.ep_word(0)+i))
+            std::fprintf(stderr,"EP observer bank%04x expected%06x actual%06x\n",i,expected[i],*(f.apu.ep_word(0)+i));
+        CHECK(expected[i]==*(f.apu.ep_word(0)+i));
+    }
     CHECK(std::equal(p.begin(),p.begin()+2048,f.apu.ep_word(0x2800)) && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
     CHECK(f.ram==ram && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes() && !f.apu.dsp_dma_pending(xlle::ApuDspKind::Ep));
     CHECK(f.apu_error.empty() && f.owner_error.empty());
-    std::puts("Frozen EP physical observer:34 exact fields,2048 P words, other EP/GP banks and RAM preserved; initial D5 supplied as captured context, no wake/DMA/output claim");
+    if(c4) {
+        unsigned control=0;CHECK(f.apu.ep_control_publication(control) && control==1);
+        CHECK(values[11]==3 && values[12]==3 && values[22]==1 && values[23]==0);
+        const auto stable=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+        CHECK(ep.run(10000,r) && !r.yielded && !r.power && std::equal(stable.begin(),stable.end(),f.apu.ep_word(0)));
+        std::printf("Frozen EP C4 observer:32 exact control/canary fields and2048 P words; C4 continues to C5=0/error3 without a frame; configured B3 hardware%u model%u UNQUALIFIED, inherited B3 excluded; other banks/RAM preserved\n",values[21],*f.apu.ep_word(0x200));
+    } else std::puts("Frozen EP physical observer:34 exact fields,2048 P words, other EP/GP banks and RAM preserved; initial D5 supplied as captured context, no wake/DMA/output claim");
 }
 static void cpu_guard(const std::string& mode,const char* path) {
     Fixture f;std::vector<uint32_t> p;
@@ -269,6 +290,9 @@ static void cpu_guard(const std::string& mode,const char* path) {
         const uint32_t caller[]={0x308000,0x61f400,0xc00,0x64f400,0x1a2,0x382000,0x3d0100,0x0bf080,0x276,0x0bf080,0x2e1,0x87};
         std::copy(std::begin(caller),std::end(caller),p.begin()+0x700);f.expected_guard="unqualified EP DMA descriptor format";
     } else if(mode=="startup-busy") {p={0x08f485,0xfff,0x87};f.expected_guard="startup event clear requires an empty initial context";}
+    else if(mode=="startup-frame-unowned") {p={0x08f485,2,0x87};f.expected_guard="empty startup frame acknowledgement requires idle control ownership";}
+    else if(mode=="startup-frame-busy") {p={0x08f484,1,0x08f485,2,0x87};f.expected_guard="empty startup frame acknowledgement requires idle control ownership";}
+    else if(mode=="startup-clear-after-control") {p={0x08f484,1,0x08f485,0xfff,0x87};f.expected_guard="startup event clear requires an empty initial context";}
     else if(mode=="bank") {p={0x65f400,0xbfc,0x021594,0x87};f.expected_guard="unmapped DSP read";}
     else {p={0x08f494,0x20,0x08f496,1,0x87};f.expected_guard="EP executable host publication during DMA work";}
     f.boot(true,p);xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});CHECK(ep.bootstrap_from_scratch());
@@ -285,17 +309,20 @@ static void cpu_guard(const std::string& mode,const char* path) {
     }
     if(mode=="--original-entry") {
         const auto ram=f.ram;const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
-        xlle::ApuEpRun r;CHECK(ep.run(10000,r) && r.yielded && r.pc==0x2f3 && r.sp==2 && !r.power);
+        xlle::ApuEpRun r;CHECK(ep.run(10000,r) && !r.yielded && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power);
+        unsigned control=0;CHECK(f.apu.ep_control_publication(control) && control==1);
+        for(unsigned a:{0xffffd4u,0xffffd5u})CHECK(f.apu.ep_read(a,control) && control==0x4000);
+        for(unsigned a:{0xffffc5u,0xffffcau,0xffffd6u,0xffffd7u})CHECK(f.apu.ep_read(a,control) && !control);
         CHECK(!f.events(true) && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes() && f.ram==ram);
         CHECK(std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)) && f.apu_error.empty() && f.owner_error.empty());
         const auto banks=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
-        CHECK(!ep.run(10000,r) && ep.phase()==xlle::ApuEpPhase::Failed && !r.returned);
-        CHECK(f.owner_error.find("run requires a bootstrapped running CPU")!=std::string::npos);
+        CHECK(ep.run(10000,r) && ep.phase()==xlle::ApuEpPhase::Running && r.returned && !r.yielded && !r.sp && !r.power);
+        CHECK((r.pc==0x31 || r.pc==0x32) && f.owner_error.empty());
         CHECK(std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)) && f.ram==ram);
-        std::puts("original EP first C4 yield: PC02F3 SP2, empty C5, no wake/DMA/output; unqualified resume rejected without bank changes");return;
+        std::puts("original EP startup reaches its real C5 wait: PC0031/0032 SP0, configuration returned, empty acknowledgement, no invented event/DMA/output; repeated execution preserves banks");return;
     }
     if(mode=="program"){f.descriptor(true,0x20,0x4000,0x59e0,1,0x2800,0x2ffd);f.unsafe_host_publication=true;}
-    if(mode=="startup-busy") {
+    if(mode=="startup-busy" || mode=="startup-frame-busy") {
         f.descriptor(true,0x20,0x4000,0x59e0,1,0x200,0x2ffd);
         CHECK(f.apu.ep_write(0xffffd4,0x20) && f.apu.ep_write(0xffffd6,1) && f.apu.service_dsp_dma(xlle::ApuDspKind::Ep,4096));
         CHECK(f.apu.ep_dma_nodes()==1 && f.events(true)==0x80);f.saved_nodes=1;
@@ -306,6 +333,7 @@ static void cpu_guard(const std::string& mode,const char* path) {
 }
 int main(int argc,char** argv) {
     if(argc==4 && std::string(argv[1])=="--physical-config"){physical_configuration(argv[2],argv[3]);return 0;}
+    if(argc==4 && std::string(argv[1])=="--physical-c4"){physical_configuration(argv[2],argv[3],true);return 0;}
     if(argc==3){cpu_guard(argv[1],argv[2]);return (std::string(argv[1])=="--original-entry" || std::string(argv[1])=="--original-config-tail")?0:1;}
     if(argc==2){cpu_guard(argv[1],nullptr);return 1;}
     CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();

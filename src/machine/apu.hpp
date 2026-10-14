@@ -211,6 +211,12 @@ public:
         fe_context_known_=false;fe_state_used_=true;
         return !faulted_ && ep_dma_.write(address,value);
     }
+    // Retained DSP-side C4 publication. No CPU MMIO alias/reset value is
+    // inferred: a value exists only after the executing EP wrote it.
+    bool ep_control_publication(uint32_t& value)const {
+        if(!ep_control_written_)return false;
+        value=ep_control_value_;return true;
+    }
     uint64_t ep_dma_nodes()const{return ep_dma_.nodes();}
     bool dsp_dma_pending(ApuDspKind kind)const{return kind==ApuDspKind::Gp?gp_dma_.work_pending():ep_dma_.work_pending();}
     bool dsp_work_active()const{return gp_dma_working_ || ep_dma_working_;}
@@ -1002,6 +1008,8 @@ private:
     friend class ApuDspProcessor;
     // Retained across CPU detach/rebind. No qualified warm-reset profile exists.
     bool gp_counter_profile_touched_=false,ep_counter_profile_touched_=false;
+    bool ep_control_written_=false;
+    uint32_t ep_control_value_=0;
     uint64_t gp_program_revision_=0;
     void* gp_program_owner_=nullptr;
     ApuGpDma::ProgramWrite gp_program_guard_;

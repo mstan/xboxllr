@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: EP register batch and original config tail pass; real wake/reset/cadence remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: EP C4 halt corrected; original startup reaches real event wait; event/reset/cadence remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,39 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## EP C4 continuation correction - 2026-10-14
+
+Physical EP execution disproved the unconditional C4=1 halt inherited from the
+reference emulator. The bounded observer continued after that write, read C5=0
+and entered its no-further-writes error3 branch. Fresh ownership, all34 fields
+and2048 loaded P words were verified by a read-only follow-up. CPU FF10 changed
+to1; the context guard stopped before any IEN/FE/SE control action. Raw FF14
+had separately changed from the older100 capture to180 before the batch and
+read100 afterward; no general register identity is inferred.
+
+The sole maintained EP CPU now retains C4 control publication without halting.
+Unchanged original startup returns through CA0/D5/D4=4000/D7=0, acknowledges
+the empty event under its explicit startup owner, and reaches its actual C5
+poll at0031/0032 with SP0. Further execution keeps polling without fabricating
+an event or changing RAM/banks. Control survives owner teardown; unqualified
+warm reset/rebind, unowned/busy acknowledgements and a late initial clear reject.
+The historical first-yield entries below are superseded by this hardware finding.
+
+The frozen observer matches32 control/canary fields and2048 P words. Its two B3
+samples remain outside this control-flow comparison: pre-configuration B3 is
+inherited context, and the configured prefix measured32 on hardware versus31
+in the current model. That timing discrepancy stays in required A03 work;
+the original708000 threshold is not declared qualified or deferred. The30 EP
+packet/30 GP frame checks, actual original configuration/bit9 paths, counter
+lifetimes and focused negative guards pass. HLE processing is unchanged.
+
+The next event probe must execute an actual C5 polling loop instead of assuming
+C4 halts. GP's separate C4/frame behavior, event production, reset/cadence,
+active FE ordering and connected output remain open. Remote DASH, dashboard
+SMC restart and probe return succeeded without user input, retiring all prior
+allocation addresses. Evidence: `build/blinx/audio-ep-c4-continuation-20261014/`;
+probe: `results/ep-wake-20261014-v2/`. Count remains6/9 and27 precision deferrals.
 
 ## EP configuration batch and original tail - 2026-10-14
 
