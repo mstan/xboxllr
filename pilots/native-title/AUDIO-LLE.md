@@ -2188,3 +2188,30 @@ FECTL071F8F and SECTL7 before video/network, on kernel1.0.4983.6. The retained
 owned kernel's export324 reports the same version. This strengthens launch
 context investigation without proving original Blinx entry or authorizing a
 guessed initial register value. Initial SECTL context remains an A05 gate.
+
+## Original default-context GP frame through the production owner - 2026-10-14
+
+The retained original driver/scratch/ownership fixture now runs through
+`ApuGpProcessor`, replacing its former diagnostic raw-core counter shim. The
+unchanged original prefix yields, one real VP frame publishes its actual MIX
+bank and event2, and the original firmware completes eight DMA nodes before
+returning to C4 yield PC002B. All832 output DWORDs match an independent byte
+oracle over the published MIX ordering. Actual shared GP/EP physical aliases,
+unchanged P, cleared frame event, released MIX lease and preservation outside
+the known voice/output extents are checked. EP is not started.
+
+The diagnostic PCM/voice loan remains authored; original driver allocations,
+scratch, default control packet and descriptors are retained unchanged. Zero
+flags take P0064 to P009D, so P0066 program reload and P0084 parameter reload
+are not exercised. Actual nonzero original effects/control publication and
+acknowledgement are the next required GP step. No full shell, original wave
+constructor, hardware reset or whole audio pass follows from this one frame.
+
+The small owner/checker build, one-frame byte/ownership contract and two input/
+output isolation controls pass using cached libraries. The checker is registered
+as an explicit artifact CLI under the DSP build selection; it does not create
+an automatic private-data test. Root verified45 pins including the local header
+closure, exact frozen inputs and output/MIX bytes. A stale build-file pin in the
+second handoff was corrected by preserving the original build CMake byte-exact
+and separately identifying the registration build; earlier handoffs remain.
+Current proof is `build/blinx/audio-gp-continuation-20261014/handoff-v3.aot-private.json`.

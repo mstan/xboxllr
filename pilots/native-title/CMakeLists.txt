@@ -186,6 +186,9 @@ if(pilot_audio_dsp)
     "-DPROGRAM=$<TARGET_FILE:pilot_gp_counter_test>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/apu_gp_counter_guards.cmake")
   set_tests_properties(pilot_gp_counter_contract pilot_gp_counter_guards PROPERTIES TIMEOUT 20)
+  # Explicit original-artifact CLI only; no automatic private-fixture CTest.
+  add_executable(pilot_original_gp_continuation_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_original_gp_continuation.cpp")
+  target_link_libraries(pilot_original_gp_continuation_test PRIVATE xlle_apu_gp_processor)
   add_executable(pilot_gp_frame_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_gp_frame.cpp")
   target_link_libraries(pilot_gp_frame_test PRIVATE xlle_apu_gp_processor)
   pilot_add_test(NAME pilot_gp_frame_contract COMMAND pilot_gp_frame_test)

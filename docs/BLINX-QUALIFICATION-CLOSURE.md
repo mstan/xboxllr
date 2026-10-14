@@ -61,6 +61,18 @@ output remain open. This first-yield result does not manufacture a frame or
 qualify the audio family. Private evidence is
 `build/blinx/audio-gp-counter-profile-20261014/`.
 
+One actual default-context GP frame also passes through that production owner:
+the real VP frame publishes MIX/event2, unchanged original firmware executes
+eight DMA nodes, and832 output DWORDs match independently ordered MIX bytes.
+The CPU returns to C4 yield PC002B, releases its MIX lease and preserves the
+program and all RAM outside the known voice/output extents. This uses the
+retained original driver's allocations, scratch and shared GP/EP aliases;
+the voice/PCM loan remains an explicitly authored input. Zero context skips
+the program and parameter reload branches. The next GP gate is the actual
+original nonzero effects/control publication and its acknowledgement, not
+additional default-frame repetitions. EP has not started. Evidence:
+`build/blinx/audio-gp-continuation-20261014/handoff-v3.aot-private.json`.
+
 ## Hardware-session tooling and GP observations - 2026-10-14
 
 Current result: the circular output clear/set pair also passed physically,
