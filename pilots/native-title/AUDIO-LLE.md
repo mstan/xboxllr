@@ -2236,6 +2236,15 @@ separate; this fixture establishes one original upload and acknowledgement.
 
 The explicit artifact checker is registered as `pilot_original_gp_publication_test`.
 Evidence and root review are in `build/blinx/audio-gp-publication-20261014/`.
-Parameter updates, EP configuration/wake/reset, active FE ordering, initial
+All1712 initial parameter words now also match the original decoded source at
+the actual pre-effects PC0037, after four reload/ack DMA nodes. The reached
+flags3 upload exercises both P0066 program and P0084 parameter reload. No separate
+later effect-data/commit caller is established by the retained caller/binding
+audit; an unreached flags2 transaction is not an additional family gate.
+Root verified54 pins for `handoff-initial-state-v2.aot-private.json`; it binds
+the changed checker and fresh capture. Its rebuilt executable supersedes the
+earlier binary, while historical captures/logs remain retained.
+
+EP configuration/wake/reset, active FE ordering, initial
 SECTL context and connected title output remain required. HLE is unchanged;
 the family total remains6/9 with27 precision deferrals.

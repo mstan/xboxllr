@@ -83,8 +83,15 @@ wait returns EAX0 with stack, nonvolatiles and borrowed asset preserved. Two
 malformed flags/count cases stop before frame output. The fixture's large-pool
 alignment was corrected using a separate actual original-kernel observation;
 the production SG alignment guard was retained. This closes the first upload/
-acknowledgement gate; parameter updates, EP and the connected shell remain open.
+acknowledgement gate. At the actual pre-effects PC0037, all1712 initial parameter
+words also match the original decoded source after four reload/ack DMA nodes.
+The reached flags3 upload therefore covers both program and parameter reload.
+The retained caller/binding audit establishes no separate later effect-data/
+commit service; an unreached flags2 transaction is not an added family gate.
+EP and the connected shell remain open.
 Evidence: `build/blinx/audio-gp-publication-20261014/handoff.aot-private.json`.
+The stronger initial-state proof is `handoff-initial-state-v2.aot-private.json`
+in that directory; its new checker identity supersedes the earlier binary.
 
 ## Hardware-session tooling and GP observations - 2026-10-14
 

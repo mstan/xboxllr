@@ -78,6 +78,16 @@ static void observe(Fixture& f,const char* capture) {
     CHECK(code_words==1535);
     std::vector<unsigned> expected_program(f.apu.gp_word(0x2800),f.apu.gp_word(0x2800)+2048);
     for(unsigned n=0;n<code_words;++n)expected_program[0x171+n]=f.get(f.physical(false,0x818+n*4))&0xffffff;
+    // Original P0086..0094: destination X0080 + packet[0], source
+    // packet[2] in owned scratch, count packet[3]. Check before P0037 calls
+    // the graph, which legitimately mutates its state thereafter.
+    const unsigned parameter_offset=f.get(f.physical(false,0x800));
+    const unsigned parameter_source=f.get(f.physical(false,0x808));
+    const unsigned parameter_words=f.get(f.physical(false,0x80c));
+    CHECK(parameter_offset==0 && parameter_source==0x818+code_words*4 && parameter_words==1712);
+    std::vector<unsigned> expected_parameters;
+    for(unsigned n=0;n<parameter_words;++n)expected_parameters.push_back(f.get(f.physical(false,parameter_source+n*4))&0xffffff);
+    bool parameter_state_checked=false;
     xlle::ApuGpRun result;CHECK(owner.run(20000,result));
     CHECK(result.yielded && result.pc==0x2b && !result.sp && !result.power);
     CHECK(!f.apu.gp_dma_nodes() && !f.apu.gp_frame_outstanding() && f.ram==f.before);
@@ -89,8 +99,16 @@ static void observe(Fixture& f,const char* capture) {
             std::printf("{\"status\":\"blocked_original_gp_publication\",\"last_pc\":%u,\"dma_nodes\":%llu,\"context_flags\":%u,\"owner_error\":\"%s\",\"device_error\":\"%s\",\"original_acknowledged\":false}\n",last_pc,(unsigned long long)f.apu.gp_dma_nodes(),f.get(f.physical(false,0x810)),owner_error.c_str(),f.error.c_str());
             return;
         }
+        if(result.pc==0x37 && !parameter_state_checked) {
+            CHECK(f.apu.gp_dma_nodes()==4 && *f.apu.gp_word(4)==0);
+            CHECK(f.get(f.physical(false,0x810))==0);
+            CHECK(std::equal(expected_parameters.begin(),expected_parameters.end(),f.apu.gp_word(0x80+parameter_offset)));
+            CHECK(std::equal(expected_program.begin(),expected_program.end(),f.apu.gp_word(0x2800)));
+            parameter_state_checked=true;
+        }
         last_pc=result.pc;CHECK(++calls<400000 && !result.power);
     }while(!result.yielded);
+    CHECK(parameter_state_checked);
     CHECK(result.pc==0x2b && !result.sp && !f.apu.gp_frame_outstanding());
     CHECK(f.get(f.physical(false,0x810))==0 && *f.apu.gp_word(4)==0);
     CHECK(owner_error.empty() && f.error.empty());
@@ -104,6 +122,6 @@ static void observe(Fixture& f,const char* capture) {
     for(const auto& w:f.written){unsigned fields[]={w.first,w.second};CHECK(std::fwrite(fields,4,2,ranges)==2);}CHECK(!std::fclose(ranges));
     FILE* file=std::fopen(capture,"wb");CHECK(file);
     CHECK(std::fwrite(f.ram.data(),1,f.ram.size(),file)==f.ram.size());CHECK(!std::fclose(file));
-    std::printf("{\"status\":\"original_gp_publication_frame_continued\",\"final_pc\":43,\"dma_nodes\":%llu,\"context_flags\":0,\"real_vp_frames\":1,\"full_shell_qualified\":false,\"ep_started\":false}\n",(unsigned long long)f.apu.gp_dma_nodes());
+    std::printf("{\"status\":\"original_gp_publication_frame_continued\",\"final_pc\":43,\"dma_nodes\":%llu,\"context_flags\":0,\"real_vp_frames\":1,\"pre_effects_pc\":55,\"loaded_parameter_words\":1712,\"parameter_state_matches_original_source\":true,\"full_shell_qualified\":false,\"ep_started\":false}\n",(unsigned long long)f.apu.gp_dma_nodes());
 }
 int main(int argc,char** argv){CHECK(argc==9);Fixture f(argv);observe(f,argv[8]);}
