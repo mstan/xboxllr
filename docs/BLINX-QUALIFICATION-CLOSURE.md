@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: EP input/output and delayed ACK observed; selector2 completes eight transfers; all three settings now reach a common malformed-descriptor pattern; exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: stereo FIFO physically matched; selectors0/1 return after eight transfers; selector2 reaches ten then Y:0FC9 guard; exact timing and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -41,6 +41,52 @@ Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## EP stereo FIFO and original first-event return - 2026-10-14
+
+The earlier malformed-descriptor diagnosis was incorrect. Original helper2B1
+intentionally constructs control400603/count1001:256 stereo frames, two planar
+channels separated by256 X words, PCM16 FIFO0 output. Its descriptor owns four
+words; the apparent fifth word is stale scratch metadata. The trace executes
+the unchanged original builder and preserves its inputs and resulting fields.
+
+Two confined physical cases,400403/400603, now establish this form with bit9
+clear/set. Both wrote512 exact PCM16 samples to the SG destination, advanced
+CUR by1024 bytes, and preserved the alternate destination,514 source/canary
+words,8704 immutable owner DWORDs and2048 P words. Immediate D6 was0; EOL80
+appeared after35 polls; terminal D6 was0; immediate ACK80 became0 after64 NOPs.
+Both fresh allocations were retired through separate DASH/SMC/single-launch
+recovery with fresh PING/INFO, without user action or storage/boot changes.
+
+The existing DMA owner admits only this EP stereo FIFO0 shape, reorders its
+word references, and retains the established PCM16 packing and FIFO SG/cursor
+owner. Frozen hardware programs match512 samples and32 non-timing fields under
+policies1/2/4. A wrong-channel output golden rejects. Ring wrapping, partial
+write failure, four-word bank-edge ownership and13 adjacent unsupported modes
+retain their guards. No HLE implementation or performance policy changes.
+
+Fresh unchanged original setup, first event, ownership revocation and actual
+destructors pass their expected outcomes across all three settings. Selectors0/1
+complete seven input nodes and one stereo FIFO output, return naturally to
+PC0031/0032 with SP0, no pending work, acknowledged frame and C4=1, then keep
+polling without further RAM/bank mutation. Selector2 completes ten nodes:
+seven inputs,78-word linear output, stereo FIFO output and2146-word P reload.
+It then stops at original PC031E (`MOVE Y:(R0+N0),A`), reading Y:0FC9 with
+R0=0FC2/N0=7. This high Y-memory route is unresolved; no invented mapping or
+zero read is supplied. Diagnostic faults now retain the offending address.
+
+These original inputs and outputs are zero. Nonzero transfer correctness is
+established by the separate physical patterns; nonzero original processing,
+connected clocks/reset/initial SECTL/active FE/title output remain required.
+Count6/9 and27 precision deferrals are unchanged. Evidence:
+`build/blinx/audio-ep-fifo-20261014/`, diagnostic trace
+`build/blinx/audio-ep-fifo-trace-20261014/`, and probe
+`results/ep-interleave-20261014-{stereo-clear,stereo-set}/`.
+
+Probe readback now uses one existing armed TCP connection for sequential fixed
+load/RET payloads, with no retry or protocol/XBE change. The second case's1029
+reads took0.906 seconds. Four loopback tests cover exact order, denied ARM,
+invalid addresses, malformed replies/disconnect and caller cancellation.
 
 ## EP linear output and common original boundary - 2026-10-14
 
@@ -65,9 +111,10 @@ The unchanged original selector2 now completes its eighth transfer, output
 `41A2,5BE2,4E,63D,7458`. This zero-input driver setup produces78 zero words,
 so it is transfer/ownership evidence, not completed signal processing. Its next
 descriptor is `41A2,400603,1001,400,7458`. Selectors0/1 still stop after seven
-inputs at `41A2,400603,1001,500,12000`. All three therefore share malformed
-control400603/count4097. Investigate the original caller/core path offline;
-these malformed descriptors are not candidates for a hardware experiment.
+inputs at `41A2,400603,1001,500,12000`. The initial interpretation of this as
+malformed control/count4097 was superseded by the original-builder trace and
+physical stereo FIFO observations above. Count1001 is a packed field and the
+FIFO descriptor has four words.
 
 Fresh original setup/event/revocation and destructor checks pass for all three
 settings. Output, DMA, lifecycle, processor and counter checks retain their

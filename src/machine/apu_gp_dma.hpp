@@ -135,10 +135,18 @@ private:
                 if(!fields[i])return fail("GP DMA descriptor outside memory banks");
                 node[i]=*fields[i]&0xffffff;
             }
-            const uint32_t count=node[2];
+            const bool interleaved=(node[1]&1)!=0;
+            // Observed original EP FIFO0 form: 256 frames, two planar X
+            // channels, PCM16 output. Low count nibble stores channels-1;
+            // the control's high field is the distance between channels.
+            // Admit the measured shape only; other layouts remain guarded.
+            const bool ep_stereo_fifo=kind_==ApuDspKind::Ep &&
+                (node[1]==0x400403u || node[1]==0x400603u) &&
+                node[2]==0x1001u && node[3]<0xc00;
+            const uint32_t count=interleaved ? (node[2]>>4)*((node[2]&15)+1) : node[2];
             const bool output=(node[1]&2)!=0;
             job.output=output;job.count=count;
-            // Noninterleaved unit-stride scratch and FIFO transport. Linear
+            // Unit-stride scratch/FIFO and observed EP stereo FIFO transport. Linear
             // offset writeback is not reached by the original builders and
             // lacks independent evidence; keep it guarded rather than apply
             // the circular cursor rule. Output FIFOs 0..3 and input FIFOs
@@ -159,18 +167,20 @@ private:
             const bool qualified_bit9_profile=kind_==ApuDspKind::Gp ?
                 (node[1]==0x5be0u || node[1]==0x4bd0u || node[1]==0x4bd2u) :
                 ((node[1]==0x5be0u && ep_input_bank) ||
-                 (node[1]==0x5be2u && node[3]<0xc00));
-            if((node[0]&~0x7fffu) || (node[1]&0x200d) ||
+                 (node[1]==0x5be2u && node[3]<0xc00) || ep_stereo_fifo);
+            if((node[0]&~0x7fffu) || (node[1]&0x200c) ||
+               (interleaved && !ep_stereo_fifo) ||
                ((node[1]&0x200) && !qualified_bit9_profile) ||
                (linear && (node[1]&16)) ||
-               (!scratch && buffer>=(output?4u:2u)) || (node[1]>>14)!=1 ||
+               (!scratch && buffer>=(output?4u:2u)) || (!interleaved && (node[1]>>14)!=1) ||
                (format!=1 && format!=2 && format!=6) || !count || count>4096 ||
                (format==1 && (count&1)))
                 return fail("unqualified GP DMA descriptor format/extent");
             job.words.resize(count);auto& words=job.words;
             if(uint64_t(node[3])+count>bank_end(node[3]))return fail("GP DMA samples cross memory bank");
             for(unsigned i=0;i<count;++i) {
-                words[i]=word_(node[3]+i);
+                const unsigned offset=interleaved ? (i%2)*(node[1]>>14)+i/2 : i;
+                words[i]=word_(node[3]+offset);
                 if(!words[i])return fail("GP DMA sample outside memory banks");
             }
             // The VP/host/input-DMA bank publisher cannot take a GP frame's

@@ -251,8 +251,9 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
         owner.fail(why);std::abort();
     }
 }
-void ApuDspProcessor::core_fault(void* opaque,const char* why,uint32_t) {
+void ApuDspProcessor::core_fault(void* opaque,const char* why,uint32_t address) {
     auto& owner=*static_cast<ApuDspProcessor*>(opaque);
-    owner.fail(why);std::abort();
+    char message[160];std::snprintf(message,sizeof(message),"%s at %06x",why,address);
+    owner.fail(message);std::abort();
 }
 } // namespace xlle

@@ -318,23 +318,73 @@ static void acknowledgement_ownership() {
         CHECK(f.ram==ram && std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)));
     }
 }
-static void physical_output(const char* image,const char* observations) {
-    std::vector<uint32_t> p(4096),values(270);
+static void stereo_fifo_ownership() {
+    for(unsigned control:{0x400403u,0x400603u})for(bool fail:{false,true}) {
+        Fixture f;
+        for(unsigned i=0;i<256;++i) {
+            *f.apu.ep_word(0x400+i)=(0x1000f1+i*0x12300)&0xffffff;
+            *f.apu.ep_word(0x500+i)=(0x9000a7+i*0x20100)&0xffffff;
+        }
+        // Four-word object at the bank end, with a byte-misaligned cursor
+        // that wraps after three bytes into a different physical page.
+        f.descriptor(true,0xbfc,0x4000,control,0x1001,0x400);
+        const auto banks=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+        auto expected=f.ram;
+        for(unsigned i=0;i<(fail?3u:1024u);++i) {
+            const unsigned frame=i/4,channel=(i/2)%2,byte=i%2;
+            expected[f.physical(0xe000,(0x1ffd+i)%0x2000)]=uint8_t(*f.apu.ep_word(0x400+channel*256+frame)>>(8+8*byte));
+        }
+        if(fail)f.fail_write=f.physical(0xe000,0);
+        CHECK(f.apu.ep_write(0xffffd4,0xbfc) && f.apu.ep_write(0xffffd6,1));
+        CHECK(f.apu.service_dsp_dma(xlle::ApuDspKind::Ep,4096)==!fail);
+        CHECK(f.ram==expected && std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)));
+        CHECK(f.apu.ep_dma_nodes()==(fail?0u:1u) && !f.apu.gp_dma_nodes());
+        CHECK(f.apu.RegFileMmio::mmio_read(0xfe80402c,4)==(fail?0x1ffdu:0x3fdu));
+        if(fail)CHECK(f.apu.faulted() && !f.apu.ep_write(0xffffd6,1));
+        else CHECK(f.events(true)==0x80 && !f.apu.dsp_dma_pending(xlle::ApuDspKind::Ep));
+    }
+    // Neighbouring flags/counts/banks and GP interleave are not established
+    // by the exact EP pair. Rejection must precede any destination write.
+    const unsigned cases[][4]={
+        {1,0x400603,0x1001,0x400},{0,0x400602,0x1001,0x400},
+        {0,0x400601,0x1001,0x400},{0,0x400623,0x1001,0x400},
+        {0,0x400613,0x1001,0x400},{0,0x400a03,0x1001,0x400},
+        {0,0x404603,0x1001,0x400},{0,0x400603,0x1000,0x400},
+        {0,0x400603,0x1002,0x400},{0,0x400603,0x0ff1,0x400},
+        {0,0x400603,0x1001,0xa01},{0,0x400603,0x1001,0x1800},
+        {0,0x400603,0x1001,0x2800}};
+    for(const auto& c:cases) {
+        Fixture f;const bool ep=!c[0];f.descriptor(ep,0x20,0x4000,c[1],c[2],c[3]);
+        const auto ram=f.ram;
+        if(ep)CHECK(f.apu.ep_write(0xffffd4,0x20) && f.apu.ep_write(0xffffd6,1));
+        else CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1));
+        CHECK(!f.apu.service_dsp_dma(ep?xlle::ApuDspKind::Ep:xlle::ApuDspKind::Gp,4096));
+        CHECK(f.ram==ram && !f.apu.ep_dma_nodes() && !f.apu.gp_dma_nodes());
+        CHECK(f.apu.RegFileMmio::mmio_read(0xfe80402c,4)==0x1ffd);
+    }
+}
+static void physical_output(const char* image,const char* observations,bool interleaved=false) {
+    const unsigned destination_words=interleaved?256:78,source_words=interleaved?514:80;
+    std::vector<uint32_t> p(4096),values(interleaved?1063:270);
     FILE* file=std::fopen(image,"rb");CHECK(file);CHECK(std::fread(p.data(),4,p.size(),file)==p.size() && std::fgetc(file)==EOF);std::fclose(file);
     file=std::fopen(observations,"rb");CHECK(file);CHECK(std::fread(values.data(),4,values.size(),file)==values.size() && std::fgetc(file)==EOF);std::fclose(file);
-    CHECK(values[10]==0x45504f && values[11]==0 && values[12]==2);
-    CHECK(values[21]==0x4200 && (values[22]==0x59e2 || values[22]==0x5be2) && values[23]==78 && values[24]==0x63d);
-    const unsigned physical=p[1023]-0x6000;CHECK(physical && physical<=0x600000 && !(physical&0x3fff) && values[25]==p[1023]);
+    CHECK(values[10]==(interleaved?0x455046u:0x45504fu) && values[11]==0 && values[12]==2);
+    CHECK(values[21]==0x4200 && (interleaved?((values[22]==0x400403 || values[22]==0x400603) && values[23]==0x1001 && values[24]==0x400 && values[25]==0x6b4000):((values[22]==0x59e2 || values[22]==0x5be2) && values[23]==78 && values[24]==0x63d)));
+    const unsigned physical=(interleaved?values[1060]:p[1023])-0x6000;
+    CHECK(physical && physical<=0x600000 && !(physical&0x3fff));
+    if(!interleaved)CHECK(values[25]==p[1023]);
+    else CHECK(values[1061]==physical+0x7000 && values[1062]==physical+0x6400);
     for(unsigned policy:{1u,2u,4u}) {
         Fixture f;f.ram.resize(0x609000,0xa5);f.reg(0x2048,physical);f.reg(0x20dc,2047);
         for(unsigned i=0;i<2048;++i){f.put(physical+i*8,physical+(i<4?i+4:7)*4096);f.put(physical+i*8+4,0);}
         for(unsigned i=0;i<2048;++i)f.put(physical+0x4000+i*4,p[i]);
-        for(unsigned i=0;i<78;++i){f.put(physical+0x6000+i*4,0xaa100000+i*0x10203);f.put(physical+0x7000+i*4,0xbb400000+i*0x30405);}
+        for(unsigned i=0;i<destination_words;++i){f.put(physical+0x6000+i*4,0xaa100000+i*0x10203);f.put(physical+0x7000+i*4,0xbb400000+i*0x30405);}
+        if(interleaved){f.reg(0x204c,physical);f.reg(0x20e0,2047);f.reg(0x4024,physical+0x6000);f.reg(0x4028,physical+0x7000);f.reg(0x402c,physical+0x6000);}
         xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);},{policy});CHECK(ep.bootstrap_from_scratch());
         auto expected_ram=f.ram;
-        for(unsigned i=0;i<156;++i) {
-            const auto at=physical+(i<78?0x6000:0x7000)+(i%78)*4;
-            std::memcpy(expected_ram.data()+at,&values[114+i],4);
+        for(unsigned i=0;i<destination_words*2;++i) {
+            const auto at=physical+(i<destination_words?0x6000:0x7000)+(i%destination_words)*4;
+            std::memcpy(expected_ram.data()+at,&values[34+source_words+i],4);
         }
         auto expected=std::vector<uint32_t>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
         const auto gp=std::vector<uint32_t>(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
@@ -343,10 +393,10 @@ static void physical_output(const char* image,const char* observations) {
         for(unsigned i=0x100;i<0x10d;++i)expected[i]=values[slot++];
         for(unsigned i=0x110;i<0x118;++i)expected[i]=values[slot++];
         for(unsigned i=0x200;i<0x205;++i)expected[i]=values[slot++];
-        for(unsigned i=0x400;i<0x404;++i)expected[i]=values[slot++];
+        for(unsigned i=0;i<4;++i)expected[(interleaved?0x700:0x400)+i]=values[slot++];
         for(unsigned i=0x1840;i<0x1844;++i)expected[i]=values[slot++];
         CHECK(slot==34);
-        for(unsigned i=0;i<80;++i)expected[0x63c+i]=values[34+i];
+        for(unsigned i=0;i<source_words;++i)expected[(interleaved?0x3ff:0x63c)+i]=values[34+i];
         for(unsigned i=0;i<expected.size();++i) {
             // Immediate busy visibility/poll count are separately required
             // timing questions; do not normalize them into a timing pass.
@@ -354,10 +404,11 @@ static void physical_output(const char* image,const char* observations) {
             CHECK(expected[i]==*(f.apu.ep_word(0)+i));
         }
         CHECK(f.ram==expected_ram && std::equal(gp.begin(),gp.end(),f.apu.gp_word(0)));
+        if(interleaved)CHECK(f.apu.RegFileMmio::mmio_read(0xfe80402c,4)==values[1062]);
         CHECK(f.apu.ep_dma_nodes()==1 && !f.apu.gp_dma_nodes() && !f.apu.ep_frame_events());
         CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.apu_error.empty() && f.owner_error.empty());
     }
-    std::puts("Frozen EP output:78 exact RAM words, untouched alternate,80 source/canary words,32 control fields and2048 P; policies1/2/4. Busy/poll timing remains open.");
+    std::printf("Frozen EP %s output:%u exact destination DWORDs, untouched alternate,%u source/canary words,32 control fields and2048 P; policies1/2/4. Busy/poll timing remains open.\n",interleaved?"interleaved FIFO":"linear",destination_words,source_words);
 }
 static void physical_events(const char* image,const char* observations,bool delayed_ack=false) {
     const unsigned frames=delayed_ack?2:8;
@@ -527,6 +578,7 @@ static void cpu_guard(const std::string& mode,const char* path) {
     xlle::ApuEpRun r;ep.run(10000,r);CHECK(false);
 }
 int main(int argc,char** argv) {
+    if(argc==4 && std::string(argv[1])=="--physical-fifo"){physical_output(argv[2],argv[3],true);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-output"){physical_output(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-events"){physical_events(argv[2],argv[3]);return 0;}
     if(argc==4 && std::string(argv[1])=="--physical-ack"){physical_events(argv[2],argv[3],true);return 0;}
@@ -534,6 +586,6 @@ int main(int argc,char** argv) {
     if(argc==4 && std::string(argv[1])=="--physical-c4"){physical_configuration(argv[2],argv[3],true);return 0;}
     if(argc==3){cpu_guard(argv[1],argv[2]);return (std::string(argv[1])=="--original-entry" || std::string(argv[1])=="--original-config-tail" || std::string(argv[1])=="--original-bit9")?0:1;}
     if(argc==2){cpu_guard(argv[1],nullptr);return 1;}
-    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();event_clock_and_ownership();acknowledgement_ownership();
+    CHECK(argc==1);coherent_lifetimes();executable_publication_and_yield();contexts_and_failures();observed_empty_configuration();event_clock_and_ownership();acknowledgement_ownership();stereo_fifo_ownership();
     std::puts("APU EP:30 real VP/GP/scratch/EP/FIFO PCM packets;3 clock/C4/C5 lifetimes, disabled/held clock and DMA guards, exact RAM/banks and retained ownership passed; connected cadence/AC97/reset remain open");
 }

@@ -5,16 +5,38 @@ the original-scheduler/GPU startup experiments are not prerequisites. The family
 remains **open**, and the overall burndown is **6/9 qualified**. Earlier dated
 observations retain their historical counts. Hardware access has resumed after
 the dashboard migration. Physical EP input/output and delayed acknowledgement
-now admit seven original input transfers and selector2's78-word output. All
-three settings then reach a shared malformed-descriptor pattern under offline
-execution; that caller/core investigation is next. See the bounded closing
-checklist for the current evidence and remaining timing/reset requirements.
+now admit the original input, linear output and interleaved stereo FIFO0 routes.
+Selectors0/1 complete their first event and return naturally to the original
+poll after eight transfers. Selector2 reaches ten transfers then guards a
+Y:0FC9 read at PC031E. The earlier malformed-descriptor diagnosis was wrong:
+400603/1001 is an intentional packed stereo FIFO descriptor. See the bounded
+closing checklist for the current evidence and timing/reset requirements.
 
 The native title continues to select its real XAudio2/DSP implementation.
 The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driver
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
+
+## Physical EP interleaved FIFO - 2026-10-14
+
+Original helper2B1 constructs a four-word FIFO descriptor. Control400603 selects
+PCM16 output, planar channel stride256 and interleave; count1001 represents256
+frames and two channels. Physical400403/400603 pairs both transferred all512
+samples exactly, advanced the existing SG-mapped FIFO0 cursor by1024 bytes and
+preserved source/canaries, alternate destination,8704 immutable owner words
+and2048 P words. The maintained CPU matches both programs under DMA policies
+1/2/4 through the existing DMA, packing and FIFO owners. Other interleave
+shapes remain guarded; byte correctness does not establish busy/ACK timing.
+
+Fresh original selectors0/1 return to PC0031/0032/SP0 after seven inputs and
+one FIFO output. Selector2 also performs78-word linear output and then reloads
+2146 P words, reaching original `MOVE Y:(R0+N0),A` at031E with R0=0FC2/N0=7.
+Y:0FC9 is outside the admitted EP Y bank and remains guarded. The first-event
+fixtures have zero shared input/output; nonzero original processing and the
+connected title route remain required. Exact physical transfer patterns,
+ring/failure/adjacent-mode checks and fresh original lifetimes are retained in
+`build/blinx/audio-ep-fifo-20261014/`. HLE is unchanged; count6/9 remains.
 
 ## Physical EP configuration and original tail - 2026-10-14
 

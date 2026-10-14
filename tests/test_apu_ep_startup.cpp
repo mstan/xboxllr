@@ -2,7 +2,6 @@
 // Kernel allocation and initial clock context are explicit caller inputs.
 #include "machine/apu_ep_processor.hpp"
 #include <algorithm>
-#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,8 +17,8 @@ struct Fixture {
     std::vector<unsigned char> ram,registers,map,before,expected_ram;
     std::vector<unsigned> program;
     std::string device_error,owner_error;
-    unsigned writes=0,reads=0,output_nodes=0;bool expect_descriptor=false,revoke=false;
-    std::vector<std::array<unsigned,5>> completed;
+    unsigned writes=0,reads=0,output_nodes=0,fifo_cursor=0,last_pc=0;bool expect_boundary=false,revoke=false;
+    std::vector<std::vector<unsigned>> completed;
     xlle::McpxApu apu{[this](const std::string& s){device_error=s;}};
     static unsigned word(const std::vector<unsigned char>& bytes,unsigned at) {
         CHECK(uint64_t(at)+4<=bytes.size());unsigned value;std::memcpy(&value,bytes.data()+at,4);return value;
@@ -37,6 +36,10 @@ struct Fixture {
         CHECK(offset/4096<reg(0xfe8020dc));const auto entry=reg(0xfe802048)+offset/4096*8;
         CHECK(owned(entry,8));const auto at=word(ram,entry)+(offset&4095);CHECK(owned(at,4));return at;
     }
+    unsigned fifo_physical(unsigned offset)const {
+        CHECK(offset/4096<=reg(0xfe8020e0));const auto entry=reg(0xfe80204c)+offset/4096*8;
+        CHECK(owned(entry,8));const auto at=word(ram,entry)+(offset&4095);CHECK(owned(at,1));return at;
+    }
     Fixture(char** argv):ram(load(argv[1])),registers(load(argv[2])),map(load(argv[3])),before(ram),expected_ram(ram) {
         CHECK(ram.size()==0x400000 && !(registers.size()%8) && !(map.size()%8));
         apu.set_mem_access([this](unsigned a,void* p,size_t n){++reads;if(revoke || !owned(a,n))return false;std::memcpy(p,ram.data()+a,n);return true;},
@@ -51,14 +54,13 @@ struct Fixture {
         }
         for(unsigned i=0;i<2048;++i)program.push_back(word(ram,physical(i*4))&0xffffff);
         CHECK(program[0x100]==0x24 && program[0x101]==6 && program[0x114]==0x1cfe && program[0x115]==24);
-        CHECK(!apu.faulted());
+        fifo_cursor=reg(0xfe80402c);CHECK(!apu.faulted());
     }
     void fault(const std::string& why) {
-        owner_error=why;if(!expect_descriptor)return;
-        CHECK(device_error.find("unqualified EP DMA descriptor format")!=std::string::npos);
-        CHECK((completed.size()==7 && !output_nodes && !writes) ||
-              (completed.size()==8 && output_nodes==1 && writes==1));
-        CHECK(*apu.ep_word(0x29a3)==0x400603 && *apu.ep_word(0x29a4)==0x1001);
+        owner_error=why;if(!expect_boundary)return;
+        CHECK(why=="unmapped DSP read at 000fc9" && device_error.empty() && last_pc==0x31e);
+        CHECK(completed.size()==10 && output_nodes==2 && writes==2);
+        CHECK(*apu.ep_word(0x29a3)==0x5be0 && *apu.ep_word(0x29a4)==0x862);
         report("original-first-event-next-boundary");
         std::fflush(stdout);std::fprintf(stderr,"original EP boundary: %s; %s\n",why.c_str(),device_error.c_str());std::exit(2);
     }
@@ -67,11 +69,12 @@ struct Fixture {
         CHECK(apu.ep_dma_nodes()==completed.size() && completed.size()>=7);
         for(unsigned i=0;i<0x3800;++i)CHECK(!*(apu.gp_word(0)+i));
         std::printf("{\"stage\":\"%s\",\"descriptor\":[",stage);
-        for(unsigned i=0;i<5;++i)std::printf("%s%u",i?",":"",*apu.ep_word(0x29a2+i));
+        const unsigned fields=*apu.ep_word(0x29a3)==0x400603?4:5;
+        for(unsigned i=0;i<fields;++i)std::printf("%s%u",i?",":"",*apu.ep_word(0x29a2+i));
         std::printf("],\"completed_descriptors\":[");
         for(unsigned n=0;n<completed.size();++n) {
             std::printf("%s[",n?",":"");
-            for(unsigned i=0;i<5;++i)std::printf("%s%u",i?",":"",completed[n][i]);
+            for(unsigned i=0;i<completed[n].size();++i)std::printf("%s%u",i?",":"",completed[n][i]);
             std::printf("]");
         }
         std::printf("],\"clock_events\":1,\"dma_nodes\":%zu,\"output_nodes\":%u,\"all_input_words_verified\":true,\"all_output_words_verified\":true,\"RAM_unchanged\":%s,\"writes\":%u,\"dynamic_table_preserved\":true}\n",completed.size(),output_nodes,ram==before?"true":"false",writes);
@@ -79,21 +82,36 @@ struct Fixture {
     void verify_transfers() {
         if(apu.ep_dma_nodes()==completed.size())return;
         CHECK(apu.ep_dma_nodes()==completed.size()+1);
-        std::array<unsigned,5> node;
-        for(unsigned i=0;i<5;++i)node[i]=*apu.ep_word(0x29a2+i);
-        CHECK(node[0]==0x41a2 && (node[1]==0x5be0 || node[1]==0x5be2) && node[2] && node[2]<=4096);
-        if(node[1]==0x5be2) {
+        const bool fifo=*apu.ep_word(0x29a3)==0x400603;
+        std::vector<unsigned> node(fifo?4:5);
+        for(unsigned i=0;i<node.size();++i)node[i]=*apu.ep_word(0x29a2+i);
+        CHECK(node[0]==0x41a2 && (node[1]==0x5be0 || node[1]==0x5be2 || fifo));
+        if(fifo) {
+            CHECK(node[2]==0x1001 && node[3]+512<=0xc00);
+            const unsigned base=reg(0xfe804024),end=reg(0xfe804028);
+            CHECK(base<end && fifo_cursor>=base && fifo_cursor<end);
+            for(unsigned i=0;i<1024;++i) {
+                const unsigned at=fifo_physical(fifo_cursor);
+                const unsigned value=*apu.ep_word(node[3]+(i/2%2)*256+i/4);
+                const unsigned char byte=static_cast<unsigned char>(value>>(8+8*(i%2)));
+                CHECK(ram[at]==byte);expected_ram[at]=byte;
+                if(++fifo_cursor==end)fifo_cursor=base;
+            }
+            CHECK(apu.RegFileMmio::mmio_read(0xfe80402c,4)==fifo_cursor);++output_nodes;
+        } else if(node[1]==0x5be2) {
+            CHECK(node[2] && node[2]<=4096);
             for(unsigned i=0;i<node[2];++i) {
                 const unsigned value=*apu.ep_word(node[3]+i)&0xffffff;
                 CHECK(word(ram,physical(node[4]+i*4))==value);
                 std::memcpy(expected_ram.data()+physical(node[4]+i*4),&value,4);
             }
             ++output_nodes;
-        } else for(unsigned i=0;i<node[2];++i)CHECK(*apu.ep_word(node[3]+i)==(word(ram,physical(node[4]+i*4))&0xffffff));
+        } else {CHECK(node[2] && node[2]<=4096);for(unsigned i=0;i<node[2];++i)CHECK(*apu.ep_word(node[3]+i)==(word(ram,physical(node[4]+i*4))&0xffffff));}
         CHECK(ram==expected_ram && !apu.gp_dma_nodes());
         for(unsigned i=0x100;i<0x122;++i)CHECK(*apu.ep_word(0x2800+i)==program[i]);
         completed.push_back(node);
-        std::fprintf(stderr,"verified original EP node%zu: %x,%x,%x,%x,%x\n",completed.size(),node[0],node[1],node[2],node[3],node[4]);
+        std::fprintf(stderr,"verified original EP node%zu:",completed.size());
+        for(auto field:node)std::fprintf(stderr," %x",field);std::fprintf(stderr,"\n");
     }
 };
 int main(int argc,char** argv) {
@@ -113,7 +131,7 @@ int main(int argc,char** argv) {
     if(mode=="startup") {
         std::puts("{\"stage\":\"original-startup-poll\",\"dynamic_table_preserved\":true,\"DMA_nodes\":0,\"clock_events\":0,\"RAM_unchanged\":true}");return 0;
     }
-    f.expect_descriptor=true;
+    f.expect_boundary=true;
     // Observed empty-list clock profile, supplied by this caller. This does
     // not qualify the title's still-guarded initial SECTL/reset context.
     for(unsigned a:{0x2054u,0x2060u,0x206cu})f.apu.mmio_write(0xfe800000+a,4,0xffff);
@@ -121,7 +139,17 @@ int main(int argc,char** argv) {
     f.apu.set_time(18000,3375000);f.apu.set_frame(1);
     CHECK(f.apu.ep_frame_events()==1);
     for(unsigned i=0;i<200000;++i){
-        CHECK(ep.run(1,r));f.verify_transfers();
+        f.last_pc=r.pc;CHECK(ep.run(1,r));f.verify_transfers();
+        if(f.completed.size()>=8 && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power) {
+            CHECK(f.completed.size()==8 && f.output_nodes==1 && f.writes==1);
+            CHECK(!f.apu.dsp_work_pending(xlle::ApuDspKind::Ep) && f.device_error.empty() && f.owner_error.empty());
+            unsigned events=0,control=0;CHECK(f.apu.ep_read(0xffffc5,events) && events==0x100);
+            CHECK(f.apu.ep_control_publication(control) && control==1);
+            const auto banks=std::vector<unsigned>(f.apu.ep_word(0),f.apu.ep_word(0)+0x3800);
+            CHECK(ep.run(1000,r) && (r.pc==0x31 || r.pc==0x32) && !r.sp && !r.power && !r.yielded);
+            CHECK(std::equal(banks.begin(),banks.end(),f.apu.ep_word(0)) && !f.apu.dsp_work_pending(xlle::ApuDspKind::Ep));
+            f.report("original-first-event-returned");return 0;
+        }
     }
     std::fprintf(stderr,"budget boundary:pc=%x sp=%u nodes=%zu outputs=%u descriptor=%x,%x,%x,%x,%x\n",r.pc,r.sp,f.completed.size(),f.output_nodes,*f.apu.ep_word(0x29a2),*f.apu.ep_word(0x29a3),*f.apu.ep_word(0x29a4),*f.apu.ep_word(0x29a5),*f.apu.ep_word(0x29a6));
     CHECK(false); // A budget exhaustion cannot pass as the observed boundary.
