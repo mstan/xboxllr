@@ -210,7 +210,7 @@ static std::vector<uint32_t> original(const char* path) {
 }
 static void cpu_guard(const std::string& mode,const char* path) {
     Fixture f;std::vector<uint32_t> p;
-    if(mode=="--original-entry") {p=original(path);f.expected_guard="at ffffb2";}
+    if(mode=="--original-entry") {p=original(path);f.expected_guard="Unqualified Xbox DSP mode"; /* Original P0017 SEN precedes C5 startup. */}
     else if(mode=="--original-bit9") {
         p=original(path);p[0]=0x0af080;p[1]=0x700;
         // Original276 and2E1 remain unchanged; builder owns its actual P node.

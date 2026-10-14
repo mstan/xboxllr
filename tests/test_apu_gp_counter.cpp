@@ -37,7 +37,7 @@ struct CounterFixture {
     }
 };
 static void composite_boundaries() {
-    xlle::ApuGpCounterProfile p;
+    xlle::ApuDspCounterProfile p;
     CHECK(!p.touched() && !p.active() && p.observe(123)==0);
     for(unsigned stage=0;stage<3;++stage) {
         const uint32_t a[]={0xffffb2,0xffffb0,0xffffb1},v[]={0xffffff,1,1};
@@ -126,9 +126,9 @@ static void rejected(const std::string& mode) {
     else if(mode=="wrong-order")p={0x07f430,1,0x87};
     else if(mode=="repeat")p={0x07f432,0xffffff,0x07f432,0xffffff,0x87};
     else if(mode=="read-config")p={0x44f000,0xffffb2,0x87};
-    else p={0x07f432,0xffffff,0x87};
+    else p={0x07f432,0xfffffe,0x87};
     f.boot(p);f.terminal_guard=true;
-    f.expected_error=mode=="ep"?"at ffffb2":mode=="read-config"?"at ffffb2":"counter configuration profile";
+    f.expected_error=mode=="read-config"?"at ffffb2":"counter configuration profile";
     if(mode=="ep") {xlle::ApuEpProcessor owner(f.apu,[&](const std::string& s){f.fault(s);});CHECK(owner.bootstrap_from_scratch());xlle::ApuGpRun r;owner.run(64,r);}
     else {xlle::ApuGpProcessor owner(f.apu,[&](const std::string& s){f.fault(s);});CHECK(owner.bootstrap_from_scratch());xlle::ApuGpRun r;owner.run(64,r);}
     CHECK(false);

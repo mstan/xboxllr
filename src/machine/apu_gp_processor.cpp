@@ -9,7 +9,7 @@ namespace xlle {
 ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuDmaDispatchPolicy policy)
     :apu_(apu),kind_(kind),policy_(policy),fault_(std::move(fault)) {
     if(apu_.faulted()){fail("GP owner requires an available APU");return;}
-    if(kind_==ApuDspKind::Gp && apu_.gp_counter_profile_touched_)
+    if(kind_==ApuDspKind::Gp?apu_.gp_counter_profile_touched_:apu_.ep_counter_profile_touched_)
         {fail("GP counter profile requires its retained CPU owner; warm rebind is unqualified");return;}
     if(!policy_.retired_instructions_per_quantum || policy_.retired_instructions_per_quantum>4096)
         {fail("invalid GP nominal DMA dispatch policy");return;}
@@ -156,7 +156,7 @@ bool ApuDspProcessor::start_gp_frame(ApuVoiceQuantum& result) {
 }
 uint32_t ApuDspProcessor::read(void* opaque,uint32_t address) {
     auto& owner=*static_cast<ApuDspProcessor*>(opaque);
-    if(address==0xffffb3 && owner.kind_==ApuDspKind::Gp) {
+    if(address==0xffffb3) {
         if(!owner.executing_ || owner.phase_==ApuGpPhase::Failed) {
             owner.fail("GP counter read requires the serialized CPU owner");std::abort();
         }
@@ -171,16 +171,17 @@ uint32_t ApuDspProcessor::read(void* opaque,uint32_t address) {
 }
 void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
     auto& owner=*static_cast<ApuDspProcessor*>(opaque);
-    if(address>=0xffffb0 && address<=0xffffb3 && owner.kind_==ApuDspKind::Gp) {
-        if(owner.kind_!=ApuDspKind::Gp || !owner.executing_ ||
+    if(address>=0xffffb0 && address<=0xffffb3) {
+        if(!owner.executing_ ||
            owner.phase_==ApuGpPhase::Failed || !owner.counter_profile_.permits(address,value)) {
             owner.fail("unqualified GP counter configuration profile");std::abort();
         }
         if(!owner.counter_profile_.touched()) {
-            if(owner.apu_.gp_program_owner_!=&owner) {
+            if((owner.kind_==ApuDspKind::Gp?owner.apu_.gp_program_owner_:owner.apu_.ep_program_owner_)!=&owner) {
                 owner.fail("GP counter configuration lacks program ownership");std::abort();
             }
-            owner.apu_.gp_counter_profile_touched_=true;
+            if(owner.kind_==ApuDspKind::Gp)owner.apu_.gp_counter_profile_touched_=true;
+            else owner.apu_.ep_counter_profile_touched_=true;
         }
         owner.counter_profile_.write(address,value);return;
     }

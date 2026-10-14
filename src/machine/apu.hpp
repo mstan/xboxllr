@@ -1001,7 +1001,7 @@ private:
     std::array<uint32_t,0x3800> gp_words_{};
     friend class ApuDspProcessor;
     // Retained across CPU detach/rebind. No qualified warm-reset profile exists.
-    bool gp_counter_profile_touched_=false;
+    bool gp_counter_profile_touched_=false,ep_counter_profile_touched_=false;
     uint64_t gp_program_revision_=0;
     void* gp_program_owner_=nullptr;
     ApuGpDma::ProgramWrite gp_program_guard_;

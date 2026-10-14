@@ -2162,7 +2162,8 @@ nominal epoch begins only after the successful B1 instruction retires. Callback
 reads use the pre-instruction boundary cached outside the callback, with no FFI
 reentry or read-driven progress. The isolated policy is `apu_gp_counter.hpp`.
 Unsupported values/order, repeated configuration and configuration-register
-reads remain terminal; EP retains its prior guard.
+reads remain terminal. EP's matching passive profile is covered by the later
+bounded EP milestone below.
 
 All11 focused tests pass in5.34s using cached backend libraries. They cover
 passive reads, instruction budgets, partial/complete profile lifetimes, five
@@ -2248,3 +2249,30 @@ earlier binary, while historical captures/logs remain retained.
 EP configuration/wake/reset, active FE ordering, initial
 SECTL context and connected title output remain required. HLE is unchanged;
 the family total remains6/9 with27 precision deferrals.
+
+## EP passive configuration producer - 2026-10-14
+
+The existing EP CPU now accepts exactly B2=FFFFFF, B0=1, B1=1 and exposes
+passive elapsed core progress at B3 through the same reviewed post-retirement
+epoch policy as GP. Fixed-kind program ownership and separate retained APU
+markers prevent cross-DSP state reuse. Partial or active reset and warm rebind
+remain terminal; unsupported values, order, repeats and config reads still stop.
+
+Nine focused checks pass in8.23s using cached backend libraries. The frozen
+physical EP observer matches all34 fields,2048 loaded P words and seven raw
+samples0/0/0/0/0/20/280. Budget variants, unchanged RAM/GP banks, independent
+GP/EP lifetimes and prior GP observer/original-prefix behavior also pass. Root
+verified53 handoff pins and reviewed callback/ownership boundaries. Maintained
+CTest targets cover the new EP contract and terminal guards. Private evidence:
+`build/blinx/audio-ep-counter-profile-20261014/handoff.aot-private.json`.
+
+The unchanged full EP entry now reaches P0017 (`BSET #20,OMR`) and stops at
+the retained unsupported stack-extension mode guard, SR=C00300/OMR=100300.
+This is earlier than the first unsupported peripheral operation C5=FFF at
+P02EF. The original-entry check asserts that actual boundary; it does not
+claim C5 or first-yield reachability. The initial failed check is retained.
+No C5/CA/D5 event, cadence, output, reset or 708000 threshold behavior is newly
+admitted. AUDIO-D08 remains GP-only. The observed raw hardware FF14=100 is
+not normalized or assigned a meaning. Hardware remains deferred at the owner's
+request while documented stack semantics are investigated offline. HLE is
+unchanged; the family total remains6/9 with27 accepted precision deferrals.

@@ -1,9 +1,9 @@
-// GP original composite profile over actual retired progress. Nominal epoch,
-// halt/yield and wrap precision are explicit; this is not a timer identity map.
+// Exact observed GP/EP composite profile over each serialized CPU's retired
+// progress. This is not a timer identity map or EP cadence/threshold contract.
 #pragma once
 #include <cstdint>
 namespace xlle {
-class ApuGpCounterProfile {
+class ApuDspCounterProfile {
 public:
     bool permits(uint32_t address,uint32_t value)const {
         return (stage_==0 && address==0xffffb2 && value==0xffffff) ||

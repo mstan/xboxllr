@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: GP bit9 and bounded configuration producer pass; EP/wake/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: GP bit9 and GP/EP passive profiles pass; EP stack/events and wake/reset remain | `.113.9`; `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration complete; current title blocked by initial SECTL read context; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -50,7 +50,8 @@ to the existing serialized GP CPU. Its epoch begins after successful B1
 instruction retirement, and callback reads use a cached pre-instruction
 boundary without advancing time or reentering the DSP core. The frozen hardware
 observer predicts all seven raw samples exactly; eleven focused tests pass.
-Unsupported profiles, EP and unmeasured warm reset/rebind remain guarded.
+Unsupported profiles and unmeasured warm reset/rebind remain guarded. EP's
+matching passive profile has since passed the bounded checks below.
 
 Original GP profiling branches reconverge after the same DMA/output operations.
 Their clock precision is explicitly deferred as AUDIO-D08; EP's threshold can
@@ -101,6 +102,18 @@ hold/restoration write occurred; the owned allocation remains retained. The
 register's role, original EP708000 elapsed threshold, C5 event semantics,
 wake/cadence and full output remain open. Probe evidence:
 `results/ep-b3-physical-20261014-v2/summary.aot-private.json` at9ea85fb.
+
+The existing EP CPU now owns that exact passive B2/B0/B1 profile, with a
+separate retained lifetime marker from GP. Nine focused checks pass, including
+both frozen observers, independent reset/rebind guards and GP regression. The
+unchanged original EP entry advances to its first unsupported mode at P0017:
+`BSET #20,OMR` enables DSP stack extension. The mode guard remains terminal;
+the later C5 event operation has not yet been reached by the full entry.
+This closes the bounded EP profile producer, not EP startup, cadence or its
+708000 threshold contract. Evidence and 53-pin root review are in
+`build/blinx/audio-ep-counter-profile-20261014/`. Hardware is deferred at the
+owner's request; stack-extension work continues offline. Family count remains
+6/9, with 27 accepted precision deferrals and no HLE processing change.
 
 ## Hardware-session tooling and GP observations - 2026-10-14
 
