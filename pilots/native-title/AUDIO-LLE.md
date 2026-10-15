@@ -15,7 +15,7 @@ selector2 retains the ten-transfer Y:0FC9 stop. The earlier malformed-descriptor
 closing checklist for the current evidence and timing/reset requirements.
 
 The native title continues to select its real XAudio2/DSP implementation.
-The audio LLE floor still needs GP/EP startup, active FE ordering and whole-driver
+The audio LLE floor still needs GP/EP restart, active FE ordering and whole-driver
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
@@ -166,6 +166,53 @@ movie-relative timing acceptance. The analog-ring question stays in the final
 hardware batch. A03-A05 remain open, families6/9 and deferrals31 IDs /30 scopes.
 This step used short one-core BelowNormal file analysis, with no build, title,
 hardware or playback operation.
+
+## Remaining retirement contract and analog probe preparation - 2026-10-15
+
+The unchanged original17C2AD retirement caller has a larger contract than
+stopping SE admission. Its source order is now explicit:
+
+| Original helper / publication | Required behavior still to connect |
+| --- | --- |
+|17CA64 on the codec owner | Original codec interrupt/stream disconnection must precede release; the separately qualified codec teardown is reused |
+|17C1B1(1) | If FE mode bitsE0 are zero and SE bits18 are active, wait for PIO space and submit method2010C=0; a live notification object also causes20104=2 and an actual consumer wait |
+|17BBD5(0) | Clear only IEN bit0 |
+|17BC0C(1) | Set only control1510 bit0; the idle observation does not establish completion of active work |
+|17BC43(0),17BC9E(0) | Preserve unrelated FE fields while selecting mode80, then clear SE bits18 |
+| Nine list words, GP/EP reset | Clear the original lists toFFFF, then GP reset0 and EP reset1 while retaining original allocations |
+
+The earlier fixture stops SE and disposes its owners without reexecuting17C2AD.
+It never exercises that active2010C/20104 path and cannot stand in for the
+enclosing retirement. `reset_cpu()` also deliberately rejects a configured
+counter, EP control publication or pending work. Existing silicon receipts cover
+initial hold/release and idle request clearing, not those active histories.
+Required A03/A04 evidence must cover the consumed active method/notification
+ordering and the original drained reset/reinitialization profile. No production
+guard is relaxed from caller intent or a similar device's behavior. These remain
+required hardware questions in the final batch, not new precision deferrals.
+
+The caller inventory is retained in
+`build/blinx/audio-retirement-contract-20261015/caller-inventory.aot-private.json`,
+alongside the earlier full17C2AD audit. It is static source evidence, not executed
+retirement or hardware behavior. The current working original device owners and
+live captures remain available; no reset, title or console operation ran here.
+
+Task `.113.34` now prepares the other required physical question: analog PCM
+ring traversal, committed as `466a28b` in the probe repository. Its `host/pcm_ring_build.py` and
+`docs/PCM-RING.md` cover the original single8KiB descriptor and a distinguishing
+two-node ring. Both use fresh pinned noncached RAM, all32 descriptors pointing
+inside verified silence, no IRQ enable or DSP release, and one store plus its
+immediate raw readback per mutating payload. Captures deliberately retain either
+halted or cyclic status and preserve possible CIV/PIV boundary races. There is
+no network runner, retry, automatic restoration or allocation free.
+
+All12 focused offline methods pass in9.552s, including existing SPDIF regression
+cases and execution of actual analog payloads under both traversal hypotheses.
+That validates the observer, not the analog model. Hardware stays deferred; do
+not copy SPDIF wrap/PIV semantics into PCM before this observation. Families
+remain6/9 with31 deferred IDs /30 scopes; the question was already required A05
+work. The short serial payload compilation/tests ran with the game absent,
+normal priority and affinity limited to four logical CPUs, without playback.
 
 ## Digital prefix diagnosis - 2026-10-15
 

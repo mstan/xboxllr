@@ -77,6 +77,15 @@ FE ordering and codec/GP/EP stop/reset ownership, then remaining connected
 output/HLE-effect/timing/attract acceptance. No new hardware or title run was
 needed for this numerical proof; the analog question stays in the final
 hardware batch.
+
+The retirement source audit identifies the original active2010C/20104 method
+and consumer group before control1510, SE stop and GP0/EP1 reset. Earlier
+already-stopped fixture disposal does not cover it. Those active ordering and
+configured warm-reset questions remain required final hardware work. The analog
+probe is now prepared under `.113.34`: original single-node and distinguishing
+two-node silent rings, one-write phases and64 timestamped samples. All12 focused
+offline methods pass; no analog hardware result or emulator correction is yet
+claimed. See the [retirement contract and preparation](../pilots/native-title/AUDIO-LLE.md#remaining-retirement-contract-and-analog-probe-preparation---2026-10-15).
 AUDIO-D12 defers only raw nontrapped FE reason values/timing; required active
 IRQ/DPC/queue behavior remains A03-A05. Families6/9; deferred31 IDs /30 scopes.
 See the [selector2 PCM proof](../pilots/native-title/AUDIO-LLE.md#selector2-stereo-pcm-contract---2026-10-15),
@@ -2207,10 +2216,10 @@ whole graphics/audio runs between observations:
 | Required dependency | Smallest next evidence | What that evidence must not be used to claim |
 | --- | --- | --- |
 | G02 encoder startup | Fixed original-kernel SMBus byte reads of encoder C4 and6C, with raw HAL status and read-mode ambiguity retained | Legacy Status bytes or present dashboard settings do not establish an old warm capture's register state |
-| A03 owned GP mapping | Fresh owned16KiB-aligned SG allocation, physical/alias/pin checks, then one bounded calibration store/readback | The earlier changed address does not establish a complete silicon mask or permit DSP start |
-| A03 original DSP startup | Initialized-kernel SECTL/IEN established; with verified owned mapping, resolve remaining FE control, B0..B3 and coherent GP/EP reset, C5/CA/D5, wake and bit9 input transport | Diagnostic retired-cycle counters, authored wakes, generic zero/last-written startup values or unrelated captured idle state do not qualify original startup/output |
-| A04 active FE ordering | A bounded independently observable work item and actual notification consumer | The retained idle token writes do not establish ordering against active audio/DMA work |
-| A05 analog PCM ring traversal | Owned silent PCM ring, coherent CIV/PIV/PICB/SR observations across multiple descriptor periods, then bounded stop/reset; compare the original flags0/no-refill route | The retained SPDIF cyclic observation and generic PC AC97 last-buffer halt do not establish analog Xbox behavior; this remains required, with hardware deferred to the final batch |
+| Shared audio prerequisite | Reuse the qualified owned allocation/SG mechanism, validating each fresh physical/alias/pin binding | Fresh-session ownership remains mandatory; do not repeat completed mapping research or reuse an old allocation address |
+| A03 original DSP warm reset | After bounded completed work and stopped SE admission, observe the original GP0/EP1 reset and fresh bootstrap/counter/control sequence with the same retained owners | Initial startup, idle request clearing and fixture disposal do not establish reset after counter/control publication or cancellation of pending DMA |
+| A04 active FE ordering | Bounded original2010C/20104 active control/consumer group, plus required1510/FEMEMDATA ordering with independently visible work | Idle token publication and a fixture that already stopped SE do not establish active queue completion or original retirement |
+| A05 analog PCM ring traversal | Prepared `.113.34` single/two-node silent PCM rings;64 timestamped CIV/PIV/PICB/SR samples followed by separate stop/reset/restore phases |12 offline methods validate instrumentation only; SPDIF traversal and generic PC AC97 halt behavior do not establish analog Xbox semantics |
 | G03/G04 reached graphics state | Capture the first real context image/queue after G02; resolve only consumed unknown fields and the enabled-noise primitive | A default-only load, method replay or disabled noise cannot replace required state transfer/pixels |
 
 Each observation preserves its own bounded stop conditions and source identity.
