@@ -3316,3 +3316,54 @@ The full original publication/consumer group remains `.113.31`, including
 The previous title boundary at350 is historical evidence, not a new pass.
 Families6/9 and deferred30 IDs /29 scopes remain unchanged. These required
 startup questions were not moved into the precision deferral queue.
+
+## Complete original voice publication - 2026-10-15
+
+The ordinary null HRTF target is now an explicit low16-bit voice-table update
+through the existing selected-voice/RAM owner. Pinned xemu defines that field;
+the terminal physical observation corroborates the reached0-to-FFFF result.
+Native admission accepts only31C=FFFF, and the device rejects spatial handles,
+other values, partial/unaligned transactions and method readback. No spatial
+filter or generic register-file substitute is admitted. The physical check
+did not measure arbitrary high-bit preservation; that mask follows the pinned
+independent reference, with isolation/DMA-failure tests in the model.
+
+`native_audio_publication_reference.py` executes original constructors,
+the complete1795F1 publication including177CE9 handle allocation, reentry,
+179C4B start,178D7C list retirement and177D7D handle release. Prepared device
+allocator/notifier/source mappings and DISPATCH_LEVEL remain explicit fixture
+inputs. No original callee or completion record is replaced. Three lifetimes
+select handles64,71 and255, emit all18 publication writes after their actual
+PIO-capacity check, preserve all unrelated RAM, and consume2048 authored stereo
+PCM frames each through the maintained source/envelope/mix processor. Fixed
+source/gain expectations pass; completion and original cleanup retain real
+ownership. Reentry emits no second publication or allocation. This is not the
+enclosing title initializer, active FE queue or GP/EP output proof.
+
+The first fixture's expected stereo format omitted samples-per-block bit16.
+That expectation was corrected from the existing PCM format contract; its
+failed receipt is retained. The final original batch also executes the complete
+mode helper with reason fields0,9 and3 and verifies that mode RMW preserves
+those uninterpreted bits without changing the publication/processing result.
+All five direct encoded FECTL-address references in the original image were
+audited: initialization, mode RMW/test, and the IRQ handler's requested-reasonF
+branch. The publication routine itself reads only PIO capacity. This census
+does not prove absence of computed-address or future caller dependencies.
+
+AUDIO-D12 therefore retains only the raw nontrapped reason values and their
+transition timing. The model retains programmed reason bits until its actual
+trap owner replaces them; this is a declared policy, not a hardware readback
+match. Trapped reasonF, actual IRQ/DPC/queue ordering and supported consumers
+remain required A03-A05. Their existing owners can be refined without changing
+the voice publication or HLE architecture.
+
+Five current-source native checks pass in3.39s, and the publication contract
+also passes MinGW. One changed muted/headless title ran75.515s and no longer
+stopped at350. It stopped at `APU startup method requires stopped SE and held
+DSPs`. The diagnostic does not retain the exact method/value, so no particular
+SG/FIFO register is inferred. Both capture partials still contain zero accepted
+bytes. `.113.31` has satisfied its bounded original method-group acceptance;
+`.113.32` owns the next runtime configuration/ordering group. No new hardware
+operation or HLE processing change occurred. Private evidence is under
+`build/blinx/audio-original-publication-20261015/`. Families remain6/9;
+the append-only queues now retain31 IDs /30 deferred scopes.

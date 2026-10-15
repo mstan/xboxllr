@@ -520,6 +520,9 @@ public:
         if(touches_zero_voice_control(off,size)) {
             device_fault("voice control method has no qualified register readback");return 0;
         }
+        if(touches_hrtf_target(off,size)) {
+            device_fault("HRTF target method has no qualified register readback");return 0;
+        }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
         if(touches_gp_output_base(off,size)) {
@@ -604,6 +607,10 @@ public:
         if(touches_zero_voice_control(off,size) &&
            (size!=4 || (off!=0x20350 && off!=0x20370) || value)) {
             device_fault("voice control publication is qualified only for the original zero DWORD");return;
+        }
+        if(touches_hrtf_target(off,size) &&
+           (off!=0x2031c || size!=4 || value!=0xffff || reg32(kFecv)<64)) {
+            device_fault("HRTF target publication requires the original ordinary null DWORD");return;
         }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
@@ -1176,6 +1183,9 @@ private:
         return size>0 && ((off<0x20354 && uint64_t(off)+unsigned(size)>0x20350) ||
                          (off<0x20374 && uint64_t(off)+unsigned(size)>0x20370));
     }
+    static bool touches_hrtf_target(uint32_t off,int size) {
+        return size>0 && off<0x20320 && uint64_t(off)+unsigned(size)>0x2031c;
+    }
     bool configure_voice(uint32_t method, uint32_t value) {
         struct Field { uint32_t method, offset, mask; };
         static constexpr Field fields[] = {
@@ -1183,6 +1193,9 @@ private:
             {0x308,0x08,0xffffffff}, {0x30c,0x0c,0xffffffff},
             {0x310,0x10,0xffffffff}, {0x314,0x14,0xffffffff},
             {0x318,0x18,0xffffffff},
+            // Ordinary null target: physical zero->FFFF observation and the
+            // reference's low16-bit field. Spatial processing stays guarded.
+            {0x31c,0x1c,0x0000ffff},
             // Owned, stopped hardware observations establish these zero
             // publications. Nonzero values and their processing stay guarded.
             {0x350,0x50,0xffffffff}, {0x370,0x70,0xffffffff},

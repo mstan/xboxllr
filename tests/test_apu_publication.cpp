@@ -1,4 +1,4 @@
-// Physical zero-publication prefix; unknown HRTF-null behavior stays guarded.
+// Physical zero publications and ordinary null target through the RAM owner.
 #include "machine/apu.hpp"
 #include "../pilots/native-title/audio_device_apu_contract.hpp"
 #include <cstdio>
@@ -33,6 +33,13 @@ int main() {
             CHECK(f.ram==expected && f.error.empty());
         }
         CHECK(f.writes==2);
+        CHECK(pilot_original_apu_admitted(0x2031c,4,1,0xffff));
+        f.apu.mmio_write(0xfe82031c,4,0xffff);
+        // Low16-bit field is independently defined by the reference; hardware
+        // corroborates the reached initial0 -> FFFF case, not arbitrary high bits.
+        expected[0x1000+voice*128+0x1c]=0xff;
+        expected[0x1000+voice*128+0x1d]=0xff;
+        CHECK(f.ram==expected && f.error.empty() && f.writes==3);
     }
     for(unsigned method:{0x350u,0x370u})for(unsigned bad=0;bad<6;++bad) {
         Fixture f;const auto before=f.ram;unsigned address=0xfe820000+method;
@@ -50,6 +57,18 @@ int main() {
         CHECK(!pilot_original_apu_admitted(0x20000+method,4,0,0));
         CHECK(!pilot_original_apu_admitted(0x20000+method,1,1,0));
     }
-    CHECK(!pilot_original_apu_admitted(0x2031c,4,1,0xffff));
-    std::puts("PASS owned zero voice publications, isolation, failed DMA and retained HRTF-null guard");
+    for(unsigned bad=0;bad<7;++bad) {
+        Fixture f;const auto before=f.ram;
+        if(bad==0)f.apu.mmio_write(0xfe82031c,4,0);
+        if(bad==1)f.apu.mmio_write(0xfe82031c,1,0xff);
+        if(bad==2)f.apu.mmio_write(0xfe82031d,4,0xffff);
+        if(bad==3)(void)f.apu.mmio_read(0xfe82031c,4);
+        if(bad==4){f.reject=true;f.apu.mmio_write(0xfe82031c,4,0xffff);}
+        if(bad==5){f.apu.mmio_write(0xfe80202c,4,0xfffff000);f.apu.mmio_write(0xfe82031c,4,0xffff);}
+        if(bad==6){f.apu.mmio_write(0xfe8202f8,4,63);f.apu.mmio_write(0xfe82031c,4,0xffff);}
+        CHECK(!f.error.empty() && f.ram==before && !f.writes);
+    }
+    CHECK(!pilot_original_apu_admitted(0x2031c,4,1,0));
+    CHECK(!pilot_original_apu_admitted(0x2031c,4,0,0xffff));
+    std::puts("PASS owned zero/null voice publications, isolation, failed DMA and retained non-null/spatial guards");
 }
