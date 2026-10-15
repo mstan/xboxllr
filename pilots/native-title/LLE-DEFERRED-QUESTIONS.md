@@ -10,12 +10,13 @@ The existing 14 graphics questions and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
-Current reconciliation, 2026-10-14: the fourteen entries here retain their
+Current reconciliation, 2026-10-14: the fifteen entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues, 28 IDs
-are retained; 27 still contain deferred scope. AUDIO-D09 records the sample
-counter's remaining sub-sample phase question. See the
+behavior from its remaining precision question. Across both queues, 29 IDs
+are retained; 28 still contain deferred scope. AUDIO-D09 records the sample
+counter's remaining sub-sample phase question; AUDIO-D10 records AC-link
+control-transaction phase and bus latency. See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
 
@@ -45,6 +46,8 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | AUDIO-D08 | What exact GP B3 clock identity, rate, epoch, halt/yield and wrap behavior does the original composite profile use? | A fresh physical observer executes exactly B2=FFFFFF, B0=1, B1=1 and samples 0/0/0/0/0/20/280. The serialized GP CPU now owns a passive elapsed producer with a post-B1-retirement epoch; the frozen observer matches all seven samples. Original GP branches only change profiling telemetry and reconverge after the same required DMA/output calls at the same yield. The nominal policy is isolated in `apu_gp_counter.hpp`, and warm reset/rebind remains guarded. This defers GP profiling precision, not a missing producer, wake, DMA, output or lifetime owner. EP is explicitly excluded: its elapsed threshold can enter a permanent error spin. | A reached GP consumer uses profiling state to alter required output/scheduling, independent samples distinguish the nominal policy, or reset/rebind is admitted. Replace the isolated source/epoch policy and replay the frozen observer and original consumer cases. Establish EP behavior separately before admitting its configuration. |
 
 | AUDIO-D09 | What is XGSCNT's exact sample-edge phase across mode0/mode1 transitions and a stopped zero write? | Physical observations establish stopped retention, writable zero, mode1 progression with FE halted, and resume without clearing the count. Host request intervals agree with the original 48 kHz sample-clock contract but do not resolve sub-sample edge phase. The isolated `ApuSampleCounter` retains the common clock's phase while gating increments; it neither advances on reads nor adds stopped time. This policy can change without moving clock, MMIO or DSP ownership. | A supported original consumer observes a one-sample boundary/order mismatch or a bounded independent observation distinguishes the edge phase. Replay the retained gate/reset/resume observations and native callback checks when replacing the policy. Active mode2/3 processing, nonzero/running counter writes, shared DSP execution and actual title output remain required/guarded behavior, not part of this deferral. |
+
+| AUDIO-D10 | What is the precise AC-link command-completion phase and synchronous NAM-read bus latency? | A physical NAM18 write leaves CAS busy immediately and completes after one original20us wait; CAS acquisition and NAM-read release are separately observed. The existing ACI owner now services pending writes from the shared guest clock at a nominal next48kHz link boundary. Repeated polls do not advance work; a held semaphore exhausts the original1000 waits. Synchronous NAM reads return their response and release CAS without an additional modeled CPU bus stall. This policy can be replaced without moving device, clock or RAM ownership. The full connected original codec initialization crosses its old guard. | A supported caller distinguishes the nominal completion/read latency, or an independent phase measurement establishes a different ordering. Replay the physical bounded wait, original helper timeouts and native clock integration. Cold/warm link reset, active SPDIF processing, DSP scheduling and connected title output remain required when reached; none is waived by this timing deferral. |
 
 Initial FP values no longer need a console query. Original/native callback state
 transport and the scheduling idle/compute clock path were required integration

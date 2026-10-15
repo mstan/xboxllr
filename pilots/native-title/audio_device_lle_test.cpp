@@ -101,6 +101,32 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"codec-startup")) {
+        auto read=[](unsigned off,unsigned size){uint32_t value=0;CHECK(!pilot_audio_device_lle_access(0xfec00000+off,size,0,&value));return value;};
+        for(unsigned life=0;life<3;++life) {
+            if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            CHECK(read(0x12c,4)==2 && read(0x130,4)==0x300100);
+            CHECK(read(0x7c,2)==0x574d && read(0x7e,2)==0x4c09);
+            CHECK(read(0x134,1)==0);access(0xfec00018,2,0x0808);
+            for(unsigned i=0;i<100;++i)CHECK(read(0x134,1)==1);
+            CHECK(!pilot_audio_device_lle_sample());CHECK(read(0x134,1)==1);
+            ticks+=24;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+            CHECK(read(0x134,1)==0 && read(0x18,2)==0);
+            uint32_t args[]={0x2000,0,0x03ffffff,0x1000,PAGE_READWRITE};
+            const uint32_t va=call(166,args),pa=call(173,&va);CHECK(va && pa);
+            for(unsigned stream:{0x110u,0x170u}) {
+                access(0xfec00000+stream+11,1,2);CHECK(read(stream+11,1)==0 && read(stream,4)==0);
+                access(0xfec00000+stream,4,pa+(stream==0x170?0x1000:0));
+                access(0xfec00000+stream+4,1,0);access(0xfec00000+stream+5,1,0);
+                CHECK(read(stream+6,2)==1 && read(stream+8,2)==0);
+            }
+            access(0xfec0017c,4,0x02000000);CHECK(read(0x17c,4)==0x02000000);
+            PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
+            CHECK(!state.dma_reads && !state.dma_writes && !state.pcm_words && received.empty());
+            CHECK(!pilot_audio_device_lle_close());call(171,&va);
+        }
+        puts("PASS native clock services asynchronous codec writes; stopped PCM/SPDIF rings release all original RAM");return 0;
+    }
     if(!strcmp(mode,"startup-methods")) {
         for(unsigned life=0;life<3;++life) {
             if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));

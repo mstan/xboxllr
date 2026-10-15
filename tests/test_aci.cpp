@@ -23,6 +23,8 @@ int main() {
     std::vector<std::pair<int, bool>> irq;
     std::vector<uint8_t> ram(0x10000, 0);
     xlle::McpxAci aci([&](const std::string& why) { fault = why; });
+    CHECK(aci.initialize_kernel_audio_handoff());
+    aci.set_time(0,1125000);
     aci.set_mem_access([&](uint32_t addr, void* dst, size_t n) {
         if (addr + n > ram.size()) return false;
         std::memcpy(dst, ram.data() + addr, n);

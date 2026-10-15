@@ -65,6 +65,35 @@ public:
     uint64_t consumed_pcm_words() const { return consumed_pcm_words_; }
     uint64_t current_frame() const { return frame_; }
 
+    // Explicit post-kernel handoff, not a cold-reset default. The owned4983
+    // kernel releases AC_RESET# before waiting for the physical codec. The
+    // stopped console observation is GLOB_CNT=2, GLOB_STA=00300100.
+    bool initialize_kernel_audio_handoff() {
+        if (faulted_ || kernel_handoff_ || state_used_ || frame_ || clock_known_) {
+            device_fault("codec handoff requires a fresh stopped owner"); return false;
+        }
+        kernel_handoff_ = true;
+        glob_cnt_ = 2; glob_sta_ = 0x00300100;
+        return true;
+    }
+
+    // The shared guest clock services AC-link control transactions separately
+    // from the existing 256-sample PCM batching. Polling CAS never advances it.
+    // Nominal completion is the next48kHz link boundary; exact bus/edge phase
+    // remains a replaceable timing policy, not a silicon-cycle claim.
+    void set_time(uint64_t ticks, uint64_t hz) {
+        if (faulted_) return;
+        if (servicing_ || pcm_inflight_ || hz < 48000 || hz > UINT64_MAX/48000 ||
+            (clock_known_ && (hz != clock_hz_ || ticks < clock_ticks_))) {
+            device_fault("invalid or reentrant codec clock"); return;
+        }
+        clock_known_ = true; clock_ticks_ = ticks; clock_hz_ = hz;
+        link_frame_ = (ticks/hz)*48000 + ((ticks%hz)*48000)/hz;
+        if (nam_pending_ && link_frame_ >= nam_complete_frame_) {
+            nam_pending_ = false; cas_ = 0;
+        }
+    }
+
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - kBase;
         if (off < 0x100) return nam_read(off, size);
@@ -75,6 +104,7 @@ public:
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         if (faulted_) return;
         if (pcm_inflight_) { device_fault("register mutation during PCM consumption"); return; }
+        state_used_ = true;
         uint32_t off = addr - kBase;
         if (off < 0x100) {
             nam_write(off, size, value);
@@ -95,7 +125,6 @@ private:
     enum { CR_IOCE = 16, CR_FEIE = 8, CR_LVBIE = 4, CR_RR = 2, CR_RPBM = 1 };
     static constexpr uint32_t kCrValidMask = 0x1f;
     static constexpr uint32_t kGcValidMask = 0x3f;
-    static constexpr uint32_t kGcWr = 4, kGcCr = 2;
     static constexpr uint32_t kGsS0cr = 1u << 8;
     static constexpr uint32_t kGsPiint = 1u << 5, kGsPoint = 1u << 6;
     static constexpr uint32_t kGsMint = 1u << 7, kGsSoint = 1u << 4;
@@ -121,19 +150,11 @@ private:
 
     void reset_mixer() {
         std::memset(mixer_, 0, sizeof(mixer_));
-        mixer_store(0x26, 0x000f);
-        mixer_store(0x7c, 0x8384);
-        mixer_store(0x7e, 0x7600);
-        mixer_store(0x28, 0x0809);
-        mixer_store(0x2a, 0x0009);
-        mixer_store(0x2c, 0xbb80);
-        mixer_store(0x2e, 0xbb80);
-        mixer_store(0x30, 0xbb80);
-        mixer_store(0x32, 0xbb80);
-        mixer_store(0x34, 0xbb80);
-        mixer_store(0x02, 0x8000);
-        mixer_store(0x18, 0x8808);
-        mixer_store(0x1c, 0x8808);
+        // Wolfson WM9709, production datasheet pp9/13 and physical vendor
+        // reads. Ordinary AC97 mixer/rate/power registers are unsupported,
+        // read zero and ignore writes. The DAC is fixed48kHz.
+        mixer_store(0x7c, 0x574d);
+        mixer_store(0x7e, 0x4c09);
     }
 
     void mixer_store(uint32_t idx, uint16_t value) {
@@ -146,25 +167,23 @@ private:
     }
 
     uint32_t nam_read(uint32_t off, int size) {
-        cas_ = 0;
-        if (size == 2) return mixer_load(off);
-        return 0xffffffffu >> (32 - 8 * size);
+        if (size != 2 || (off & 1) || off >= 0x80 || !(glob_sta_ & kGsS0cr)) {
+            device_fault("unqualified codec read width/address/readiness"); return 0;
+        }
+        // NAM reads synchronously return the link response and release CAS.
+        state_used_ = true; nam_pending_ = false; cas_ = 0;
+        return mixer_load(off);
     }
     void nam_write(uint32_t off, int size, uint32_t value) {
-        cas_ = 0;
-        if (size != 2) return;
-        switch (off) {
-            case 0x00:
-                reset_mixer();
-                break;
-            case 0x26:
-                mixer_store(off, static_cast<uint16_t>((value & ~0x800fu) |
-                                                       (mixer_load(off) & 0xf)));
-                break;
-            default:
-                mixer_store(off, static_cast<uint16_t>(value));
-                break;
+        (void)value;
+        if (size != 2 || (off & 1) || off >= 0x80 || off == 0x5a ||
+            !(glob_sta_ & kGsS0cr) || !clock_known_ || nam_pending_ || link_frame_ == UINT64_MAX) {
+            device_fault("unqualified codec write context/width/address"); return;
         }
+        // A real write is asynchronous even when the DAC ignores its data.
+        // The physical immediate-CAS experiment returned1; the original
+        //20us wait then observed completion. Never clear this on a CAS poll.
+        cas_ = 1; nam_pending_ = true; nam_complete_frame_ = link_frame_ + 1;
     }
 
     BmRegs& bm(uint32_t off) { return bm_[(off >> 4) & 7]; }
@@ -172,12 +191,16 @@ private:
     uint32_t nabm_read(uint32_t off, int size) {
         switch (off) {
             case 0x2c: return glob_cnt_;
-            case 0x30: return glob_sta_ | kGsS0cr;
+            case 0x30: return glob_sta_;
             case 0x34: {
+                state_used_ = true;
                 uint32_t value = cas_;
                 cas_ = 1;
                 return value;
             }
+            case 0x7c:
+                if (size == 4 && spdif_control_known_) return spdif_control_;
+                device_fault("unknown SPDIF control or unsupported width"); return 0;
             default: break;
         }
         BmRegs& r = bm(off);
@@ -204,7 +227,7 @@ private:
     }
 
     void nabm_write(uint32_t off, int size, uint32_t value) {
-        const bool exact_dword = (off & 0xf) == 0 || off == 0x2c || off == 0x30;
+        const bool exact_dword = (off & 0xf) == 0 || off == 0x2c || off == 0x30 || off == 0x7c;
         if (size == 4 && !exact_dword) {
             nabm_write(off, 2, value & 0xffff);
             nabm_write(off + 2, 2, value >> 16);
@@ -219,7 +242,10 @@ private:
 
         switch (off) {
             case 0x2c:
-                if (!(value & (kGcWr | kGcCr))) glob_cnt_ = value & kGcValidMask;
+                // Active/cold/warm reset needs its own link/reset owner.
+                // Do not silently discard the original driver's reset write.
+                if (size != 4 || !kernel_handoff_ || value != glob_cnt_)
+                    device_fault("AC97 link reset/control transition remains unqualified");
                 return;
             case 0x30:
                 glob_sta_ &= ~(value & kGsWclearMask);
@@ -227,12 +253,23 @@ private:
                     (value & ~(kGsWclearMask | kGsRoMask)) & kGsValidMask;
                 update_irq();
                 return;
+            case 0x7c:
+                if (size != 4 || (value != 0x02000000 && value != 0x02000002) ||
+                    (bm_[7].cr & CR_RPBM) || bm_[7].bd_valid) {
+                    device_fault("unqualified SPDIF format/context"); return;
+                }
+                spdif_control_ = value; spdif_control_known_ = true; return;
             default: break;
         }
 
         BmRegs& r = bm(off);
         switch (off & 0xf) {
-            case 0x4:  // CIV is read-only; combined CIV/LVI/SR stores are common.
+            case 0x4:
+                // Reached original startup writes zero after reset on both
+                // rings. Active/nonzero CIV rewrites are not established.
+                if (value || r.civ || r.bd_valid || (r.cr & CR_RPBM))
+                    device_fault("active/nonzero CIV rewrite remains unqualified");
+                return;
             case 0x8:  // PICB is read-only.
             case 0x9:
             case 0xa:  // PIV is read-only.
@@ -254,6 +291,10 @@ private:
                 update_irq();
                 return;
             case 0xb:
+                if ((value & CR_RPBM) && !(value & CR_RR) &&
+                    (!(glob_sta_ & kGsS0cr) || &r == &bm_[7])) {
+                    device_fault("codec not ready or active SPDIF processing unqualified"); return;
+                }
                 if (value & CR_RR) {
                     const uint8_t enables = r.cr & (CR_IOCE | CR_FEIE | CR_LVBIE);
                     r = BmRegs{};
@@ -318,9 +359,8 @@ private:
 
     bool consume_pcm(BmRegs& r, uint32_t words) {
         if (!words) return true;
-        if (mixer_load(0x2c) != 48000) {
-            device_fault("unqualified PCM output sample rate"); return false;
-        }
+        // WM9709 has no programmable rate register; ordinary NAM writes do
+        // not alter this fixed48kHz PCM consumer.
         const uint32_t bytes = words * 2;
         if (uint64_t(r.bd_addr) + bytes > (uint64_t(1) << 32)) {
             device_fault("PCM buffer address wraps"); return false;
@@ -414,6 +454,10 @@ private:
     uint8_t mixer_[0x100] = {};
     BmRegs bm_[8];
     uint32_t glob_cnt_ = 0, glob_sta_ = 0, cas_ = 0;
+    uint32_t spdif_control_ = 0;
+    bool kernel_handoff_ = false, state_used_ = false, spdif_control_known_ = false;
+    bool clock_known_ = false, nam_pending_ = false;
+    uint64_t clock_ticks_ = 0, clock_hz_ = 0, link_frame_ = 0, nam_complete_frame_ = 0;
     int irq_num_ = 6;
     bool irq_level_ = false, faulted_ = false;
     bool servicing_ = false, pcm_inflight_ = false;

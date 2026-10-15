@@ -16,7 +16,7 @@ also closes; the audio family still requires original device startup/output.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 28 retained IDs; 27 contain deferred scope, including new AUDIO-D09 sample-edge phase. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 29 retained IDs; 28 contain deferred scope, including AUDIO-D09 sample phase and AUDIO-D10 AC-link transaction phase. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
 The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 preserves every question/evidence/reopening trigger and identifies promoted work.
@@ -43,13 +43,17 @@ The next physical batch resolved that method experiment: original startup clears
 FE1510, while the inherited control1 held the command pair. Differential field
 mapping, input publication to VPSGE and output publication to GPF now support
 three complete original VP initializer returns. All38 targeted checks pass.
-The latest changed64.625s title run crosses FE8202A4 and stops at AC97 read
-FEC0012C, with zero captured PCM. Remote SMC restart and probe launch recovered
-the stopped experiments without manual input; later batches restored controls.
-No manual recovery remains pending.
-Remaining audio work is AC97 initialization, active VP methods/tables, DSP host controls, shared-clock execution, active
+The subsequent AC97 batch identifies the actual WM9709 DAC, corrects generic
+mixer/rate defaults and connects asynchronous CAS completion to the shared
+guest clock. Both stopped output rings pass original reset/setup;42 targeted
+checks and three original codec helper groups pass. The latest changed105.5s
+muted title run crosses the enclosing original codec initialization/IRQ setup
+and reaches GP DWORD WRITE FE83FF00=0, with zero captured PCM. Remote SMC
+restart and probe launch recovered the earlier immediate-CAS experiment without
+manual input; the bounded follow-up passes. No manual recovery remains pending.
+Remaining audio work is active VP methods/tables, DSP host controls, shared-clock execution, active
 reset/FE ordering and actual title output. See the
-[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#complete-stopped-vp-initializer-and-ac97-boundary---2026-10-14).
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#original-ac97-startup-crossed---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable

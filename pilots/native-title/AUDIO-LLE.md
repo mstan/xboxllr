@@ -20,6 +20,32 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Original codec initialization connected - 2026-10-14
+
+Tracked in `.113.29`. Physical vendor574D/4C09 and ordinary zero register
+readbacks match [Wolfson WM9709, pp9/13](https://consolemods.org/wiki/images/7/7e/WM9709.pdf).
+The maintained ACI now represents that fixed48kHz DAC, replacing the generic
+SigmaTel mixer/rate state. Ready GLOB_CNT2/GLOB_STA00300100 are an explicit
+post-kernel handoff, not cold-reset defaults. Original PCM/SPDIF reset/base/
+zero-index setup and stopped format02000000/02000002 use the existing owner.
+Active SPDIF, link resets and active/nonzero CIV rewrites remain guarded.
+
+The physical direct-CAS follow-up exposed asynchronous completion after a mixer
+write. Remote recovery succeeded; a bounded experiment then observed completion
+after one original20us wait. The shared guest clock now services pending commands
+at the nominal next48kHz link boundary. CAS reads do not advance time or force write
+completion. A synchronous NAM read returns its response and releases CAS; its
+unmodeled CPU bus stall and exact link phase are documented in AUDIO-D10.
+
+Three original codec helper groups create six owned rings and destroy all their
+allocations; three real1000-wait semaphore failure branches also return. No
+enclosing IRQ-registration result is fabricated by that source fixture. All42
+targeted checks pass. The changed muted title run crosses the enclosing original
+codec setup/IRQ registration and stops at GP FE83FF00=0 after105.5s. It captures
+zero PCM/stamps. Required next work remains DSP host controls/shared execution,
+active VP/FE behavior and connected output. Family count stays6/9;29 retained
+question IDs contain28 deferred scopes. HLE processing is unchanged.
+
 ## Complete original VP initializer - 2026-10-14
 
 The original stopped VP initializer now returns through shared native/source

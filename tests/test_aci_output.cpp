@@ -14,6 +14,8 @@ struct Fixture {
     std::vector<bool> irq;
     xlle::McpxAci aci{[this](const std::string& why){error=why;}};
     Fixture(bool observe=true) {
+        CHECK(aci.initialize_kernel_audio_handoff());
+        aci.set_time(0,1125000);
         aci.set_mem_access([this](uint32_t a,void* out,size_t n){
             ++reads;if(a>=0x2000)++payload_reads;
             if(a==failed_address || uint64_t(a)+n>ram.size())return false;
@@ -82,11 +84,10 @@ static void ring_wrap_and_headless() {
     CHECK(headless.payload_reads==1 && headless.aci.consumed_pcm_words()==512 && headless.aci.completed_descriptors()==1 && headless.error.empty());
 }
 static void failure_ownership() {
-    for(unsigned which=0;which<6;++which) {
+    for(unsigned which=0;which<5;++which) {
         Fixture f;f.samples(0x4000,512,27);f.descriptor(0,0x4000,512);f.run(0);
         if(which==0)f.failed_address=0x4000;
         if(which==1)f.reject=true;if(which==2)f.mutate=true;if(which==3)f.reenter=true;if(which==4)f.rebind=true;
-        if(which==5)f.reg(0x2c,2,32000);
         f.aci.set_frame(1);CHECK(!f.error.empty() && f.output.empty() && !f.aci.consumed_pcm_words() && !f.aci.completed_descriptors());
         CHECK(f.read(0x118,2)==512 && !f.read(0x114) && f.read(0x11a)==1 && !(f.read(0x130,4)&64));
         const auto reads=f.reads;f.reg(0x11b,1,0x1d);f.reg(0x115,1,1);f.aci.set_frame(4);CHECK(f.reads==reads && f.output.empty());

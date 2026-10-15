@@ -35,12 +35,50 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: full stopped VP initializer returns; active methods/table consumers, DSP host controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Integration complete; original VP initializer crossed; title stops at AC97 read FEC0012C; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Integration and original AC97 startup crossed; title now stops at GP write FE83FF00; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Original AC97 startup crossed - 2026-10-14
+
+The physical codec identifies as WM9709, matching the manufacturer's fixed48kHz
+DAC with zero ordinary mixer/rate/power readbacks. The maintained ACI replaces
+the generic SigmaTel mixer defaults, admits the explicit ready post-kernel
+profile and implements the original stopped PCM/SPDIF ring setup. Both physical
+stream resets clear BDBAR/indices/count and return CR0/SR1. The original SPDIF
+format values02000000/02000002 read back correctly while stopped. Active SPDIF
+and link reset transitions remain guarded; a reset write is no longer silently
+ignored. The default HLE audio implementation is unchanged.
+
+The initial12-store batch passed. Its NAM readbacks concealed whether writes
+themselves release CAS. A separate one-store experiment exposed the incorrect
+immediate-clear assumption: direct CAS returned1. No further experiment or
+restoration followed; dashboard SMC restart and remote probe launch recovered
+without controller input. A newly prepared bounded payload then observed busy
+immediately and completion after one original20us wait, followed by correct
+acquisition/read-release behavior. Its final three-store batch also compared
+both SPDIF formats and restored the original. All prior allocations were retired
+by restart. No manual recovery remains pending.
+
+Pending codec commands now belong to the existing ACI and shared guest clock.
+CAS polls never advance work. A nominal next48kHz link boundary supplies their
+completion, with exact phase and synchronous NAM-read bus latency retained as
+new AUDIO-D10. Three unchanged original helper groups return, produce six real
+owned descriptor rings and release all original allocations. Each also executes
+the real1000-wait failure branch while the semaphore remains acquired. The
+prepared helper proof does not replace enclosing IRQ-registration returns.
+
+All42 targeted checks pass in28.91s. One changed, muted105.5s connected title
+run crosses the enclosing original codec initialization/IRQ setup and reaches
+GP DWORD WRITE FE83FF00=0 (original PC17B883). This is the next required DSP
+host-control group, not a codec-output pass. Capture contains zero PCM/stamps.
+The title uses only its memory/file PCM consumer, with no speaker transport.
+Current evidence is `build/blinx/audio-ac97-startup-20261014/`; physical details
+are probe `docs/AC97-STARTUP.md` and its private results. Families remain6/9.
+The queues retain29 IDs,28 with deferred scope; no required work was waived.
 
 ## Complete stopped VP initializer and AC97 boundary - 2026-10-14
 
