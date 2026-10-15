@@ -33,14 +33,70 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: stopped VP mapping prefix crosses; methods, active table consumers, host controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Open: idle fence and startup control proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Integration complete; original VP mappings crossed; title stops at method FE8202A4; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A03 | Open: full stopped VP initializer returns; active methods/table consumers, DSP host controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
+| A05 | Integration complete; original VP initializer crossed; title stops at AC97 read FEC0012C; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Complete stopped VP initializer and AC97 boundary - 2026-10-14
+
+The immediate-zero experiment omitted an original startup precondition:
+FE1510 must be cleared before these methods execute. A bounded comparison
+with inherited control1 retained decoder804/free7C and a zero destination
+through100,000 polls. Matching the original control0 allowed the actual
+input pointer to publish with SE stopped. A separate causal experiment held
+804/808 for1,000 consistent observations, then released the pending pair by
+clearing only that control. This resolves the earlier probe setup question;
+it does not close active notification-fence ordering.
+
+Physical differential writes identify the nonsequential method-to-register
+mapping:2A0->2078,2A4->207C,2B0->2080,2AC->2084,2A8->2088. Each0 write andFFF
+restoration affected exactly its observed field. Method2C0 updates20AC with
+the original packed submix encoding. Separate owned tables distinguish input
+804/808 publication to VPSGE from output1800/1808 publication to GPF. A full
+60KiB owned-area check after the two input cases found only their expected
+pointers changed. The physical field/gate batch and submix/output follow-up
+completed24 and16 planned stores and restored controls/mappings.
+
+The maintained APU now implements reachedFFF field initialization, submix
+configuration and actual pointer writes through its existing RAM owner.
+Native/source admission is shared. Non-null field consumers, halted/held
+methods, active contexts, unsupported widths/encodings and unowned writes
+reject explicitly. The physical held-pair observation is retained for A04;
+this change does not pretend to implement its missing runtime command queue.
+No additional DSP, register or RAM owner is introduced. HLE processing is unchanged.
+
+Three complete unchanged original VP initializers return through maintained
+MMIO:42 writes,three exact owned input-table publications and768 original CPU
+voice self-links. Original destructors release all prepared allocations. The
+device's owned physical RAM view and original CPU self-link writes are checked
+separately; this is a prepared caller proof, not a complete boot. All38 targeted
+checks pass, including three native allocation/write/free lifetimes and explicit
+held-context, width, range, missing-selection and failed-publication cases. The
+first native fixture incorrectly counted DMA bytes rather than transactions;
+its corrected assertion expects two real four-byte writes, and the failed log
+is retained.
+
+One changed connected title run crosses the original method stop and reaches
+DWORD READ FEC0012C in AC97 initialization after64.625s, with zero PCM bytes or
+stamps. The runtime's0000009F diagnostic is an ordinal, not an original PC.
+Current evidence is `build/blinx/audio-vp-method-order-20261014/`, authoritative
+source `source-final/`, tests `tests-final.aot-private.log` and connected `title/`.
+
+A separate clock comparison stopped before any methods when FE status bit15
+changed. Both unexpected experiments were recovered by the existing dashboard
+SMC restart/remote launch sequence, without manual input. The later successful
+batches leave the probe responsive, with restored stopped controls/mappings;
+its64KiB allocation remains retained until restart. Probe details are
+`docs/VP-STARTUP-METHODS.md` and its private result directories.
+
+Next is the original AC97 initialization group, followed by DSP host controls,
+shared cadence and required active FE work. Families stay6/9;28 question IDs
+retain27 deferred scopes. No required task is reclassified as a deferral.
 
 ## VP mapping transport and unresolved method ordering - 2026-10-14
 

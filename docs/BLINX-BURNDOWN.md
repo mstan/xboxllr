@@ -39,13 +39,17 @@ fields and the original FE control sequence. Captured pre-video FECTL state is
 part of the explicit kernel handoff. Three live original initializer transports
 and all36 targeted checks pass at that checkpoint. The subsequent VP mapping
 batch passes37 checks and18 original mapping writes across three lifetimes.
-The latest connected title crosses FE802038 and stops at method FE8202A4=FFF,
-with zero captured PCM. A physical input-SGE method pair returned unexpected
-immediate zero; it was stopped, then the console was recovered through dashboard
-SMC restart and remote probe launch. No manual recovery remains pending.
-Remaining audio work is VP methods/active tables, DSP host controls, shared-clock execution, active
+The next physical batch resolved that method experiment: original startup clears
+FE1510, while the inherited control1 held the command pair. Differential field
+mapping, input publication to VPSGE and output publication to GPF now support
+three complete original VP initializer returns. All38 targeted checks pass.
+The latest changed64.625s title run crosses FE8202A4 and stops at AC97 read
+FEC0012C, with zero captured PCM. Remote SMC restart and probe launch recovered
+the stopped experiments without manual input; later batches restored controls.
+No manual recovery remains pending.
+Remaining audio work is AC97 initialization, active VP methods/tables, DSP host controls, shared-clock execution, active
 reset/FE ordering and actual title output. See the
-[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#vp-mapping-transport-and-unresolved-method-ordering---2026-10-14).
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#complete-stopped-vp-initializer-and-ac97-boundary---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable

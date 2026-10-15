@@ -20,6 +20,25 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Complete original VP initializer - 2026-10-14
+
+The original stopped VP initializer now returns through shared native/source
+admission, including its fiveFFF fields, packed submix configuration and real
+owned input-SGE publication. Physical differential observations establish the
+nonsequential field mapping and distinguish VPSGE input from GPF output.
+Native integration checks the actual table writes across three allocation/free
+lifetimes. All38 targeted checks pass; three unchanged original initializer
+executions contribute42 writes,three exact input publications and768 voice
+self-links. One changed title run crosses FE8202A4 and reaches AC97 read
+FEC0012C after64.625s, with zero PCM. HLE processing is unchanged.
+
+The earlier zero readback inherited FE1510=1. Physical held/release observations
+show that clearing this original startup control permits pending methods to
+publish even with SE stopped. Runtime held queues and active voice/DSP fence
+ordering remain guarded under A04; they are not supplied by immediate fake
+completion. Non-null field consumers and active method access also remain
+guarded. See the [current evidence and limits](../../docs/BLINX-QUALIFICATION-CLOSURE.md#complete-stopped-vp-initializer-and-ac97-boundary---2026-10-14).
+
 ## Original VP mappings and method boundary - 2026-10-14
 
 The original VP prefix now routes six mappings through the same admission

@@ -4,6 +4,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 
 namespace xlle {
 class ApuStartupConfiguration {
@@ -55,5 +56,30 @@ public:
     }
 private:
     uint32_t known_=0;
+};
+
+// Physical stopped-device differential observations establish this permutation.
+// The non-null consumers of these unnamed fields are not part of startup.
+class ApuStartupMethods {
+public:
+    struct Field {uint32_t method,offset;};
+    inline static constexpr std::array<Field,5> fields={{
+        {0x2a0,0x2078},{0x2a4,0x207c},{0x2b0,0x2080},
+        {0x2ac,0x2084},{0x2a8,0x2088}
+    }};
+    static bool touches(uint32_t offset,int bytes) {
+        if(bytes<=0)return false;
+        const uint64_t end=uint64_t(offset)+unsigned(bytes);
+        for(uint32_t field:{0x1148u,0x202a0u,0x202a4u,0x202a8u,0x202acu,0x202b0u,
+                           0x202c0u,0x20804u,0x20808u,0x21800u,0x21808u})
+            if(offset<field+4 && end>field)return true;
+        return false;
+    }
+    static int register_index(uint32_t offset) {
+        if(offset>=0x2078 && offset<=0x2088 && !(offset&3))return int((offset-0x2078)/4);
+        if(offset==0x20ac)return 5;
+        if(offset==0x1148)return 6;
+        return -1;
+    }
 };
 }

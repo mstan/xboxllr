@@ -101,6 +101,28 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"startup-methods")) {
+        for(unsigned life=0;life<3;++life) {
+            if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            uint32_t args[]={0x10000,0,0x03ffffff,0x4000,PAGE_READWRITE};
+            uint32_t va=call(166,args),pa=call(173,&va);CHECK(va && pa && !(pa&0x3fff));
+            memset(guest+va,0xa5,0x10000);
+            access(0xfe801100,4,0x88);access(0xfe801138,4,0x7ff);access(0xfe801148,4,1);
+            access(0xfe802030,4,pa);access(0xfe802044,4,pa+0x4000);
+            access(0xfe801510,4,0);access(0xfe801100,4,0x100f);
+            for(uint32_t off:{0x2a4u,0x2b0u,0x2a0u,0x2a8u,0x2acu})access(0xfe820000+off,4,0xfff);
+            access(0xfe8202c0,4,0x09070806);
+            access(0xfe820804,4,0x7ff);access(0xfe820808,4,pa+0xe000);
+            access(0xfe821800,4,1);access(0xfe821808,4,pa+0xf000);
+            CHECK(word(va+0x3ff8)==pa+0xe000 && word(va+0x3ffc)==0xa5a5a5a5);
+            CHECK(word(va+0x4008)==pa+0xf000 && word(va+0x400c)==0xa5a5a5a5);
+            CHECK(word(va+8)==0xa5a5a5a5); // Output belongs to GPF, independently of VPSGE.
+            PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+            CHECK(s.gp_held && s.ep_held && s.dma_writes==2 && !s.pcm_words && received.empty());
+            CHECK(!pilot_audio_device_lle_close());call(171,&va);
+        }
+        puts("PASS three native startup-method lifetimes with real owned VPSGE/GPF writes and held DSPs");return 0;
+    }
     if(!strcmp(mode,"startup-mappings")) {
         for(unsigned life=0;life<3;++life) {
             if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));

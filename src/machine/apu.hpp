@@ -462,6 +462,13 @@ public:
         if (faulted_) return 0;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
+        const int startup_register=ApuStartupMethods::register_index(off);
+        if(startup_register>=0) {
+            if(size!=4 || !kernel_audio_control_idle() || !(startup_method_known_&(1u<<startup_register))) {
+                device_fault("APU startup method result read remains unqualified");return 0;
+            }
+            return reg32(off);
+        }
         if(ApuStartupMappings::touches(off,size)) {
             if(size!=4 || !kernel_audio_control_idle() || !startup_mappings_.known(off)) {
                 device_fault("APU startup mapping read context/width remains unqualified");return 0;
@@ -524,6 +531,9 @@ public:
         if (faulted_) return;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
+        if(ApuStartupMethods::touches(off,size)) {
+            startup_method(off,size,value);return;
+        }
         if(ApuStartupMappings::touches(off,size)) {
             if(size!=4 || !kernel_audio_control_idle() || !startup_mappings_.write(off,value)) {
                 device_fault("APU startup mapping requires stopped aligned physical allocation");return;
@@ -817,6 +827,61 @@ private:
         return size>0 && off<kXgscnt+4 && uint64_t(off)+unsigned(size)>kXgscnt;
     }
     static constexpr uint32_t kObservedIdleFectl=0x00071f8f, kObservedIdleSectl=7;
+    void startup_method(uint32_t off,int size,uint32_t value) {
+        if(size!=4 || (off&3) || !kernel_audio_control_idle() ||
+           reg32(kGpReset)!=0 || reg32(kEpReset)!=1) {
+            device_fault("APU startup method requires stopped SE and held DSPs");return;
+        }
+        fe_context_known_=false;
+        if(off==0x1148) {
+            if(value!=1){device_fault("APU output SGE limit remains unqualified");return;}
+            set_reg32(off,value);startup_method_known_|=1u<<6;return;
+        }
+        // Physical control1 holds a decoded804 and queues808; clearing it
+        // releases the real table write. Pending/active work stays guarded
+        // until it has a shared command-service owner. The original startup
+        // clears this control before emitting its methods.
+        if((reg32(kFectl)&kFectlMethodMode) || reg32(kFeFenceControl)!=0) {
+            device_fault("APU startup method held by FE control; queued work remains unqualified");return;
+        }
+        const uint32_t method=off-kVpBase;
+        for(const auto& field:ApuStartupMethods::fields)if(method==field.method) {
+            if(value!=0xfff){device_fault("APU non-null startup field consumer remains unqualified");return;}
+            set_reg32(field.offset,value);
+            startup_method_known_|=1u<<ApuStartupMethods::register_index(field.offset);
+            set_reg32(kFedecmeth,method);set_reg32(kFedecparam,value);return;
+        }
+        if(method==0x2c0) {
+            if(value&~0x1f1f1f1fu){device_fault("APU HRTF submix encoding remains unqualified");return;}
+            set_reg32(0x20ac,value);startup_method_known_|=1u<<5;
+        }else if(method==0x804 || method==0x1800) {
+            const bool input=method==0x804;
+            if((input && (!startup_configuration_.known(0x1138) || value>reg32(0x1138))) ||
+               (!input && (!(startup_method_known_&(1u<<6)) || value>reg32(0x1148)))) {
+                device_fault("APU startup SGE selector exceeds its qualified limit");return;
+            }
+            (input?startup_input_sge_:startup_output_sge_)=value;
+            (input?startup_input_sge_known_:startup_output_sge_known_)=true;
+        }else if(method==0x808 || method==0x1808) {
+            const bool input=method==0x808;
+            const uint32_t base=reg32(input?0x2030:0x2044);
+            const uint32_t slot=input?startup_input_sge_:startup_output_sge_;
+            if(!(input?startup_input_sge_known_:startup_output_sge_known_) ||
+               (value&0xfff) || value>0x03fff000 || !base || (base&0x3fff) ||
+               uint64_t(base)+uint64_t(slot)*8+8>0x04000000) {
+                device_fault("APU startup SGE mapping/selection remains unqualified");return;
+            }
+            // Physical observation distinguishes VPSGE input from GPF output.
+            // Preserve descriptor word1; only the hardware-owned pointer moves.
+            const std::array<uint8_t,4> bytes={uint8_t(value),uint8_t(value>>8),uint8_t(value>>16),uint8_t(value>>24)};
+            if(!mem_write_ || !mem_write_(base+slot*8,bytes.data(),bytes.size())) {
+                device_fault("APU startup SGE publication requires owned writable RAM");return;
+            }
+        }else {device_fault("unknown APU startup method");return;}
+        set_reg32(kFedecmeth,method);set_reg32(kFedecparam,value);
+    }
+    uint32_t startup_method_known_=0,startup_input_sge_=0,startup_output_sge_=0;
+    bool startup_input_sge_known_=false,startup_output_sge_known_=false;
     bool kernel_audio_control_idle()const {
         return kernel_audio_startup_ && !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
                !frame_ && !voice_mix_quanta_ && !processing_quantum_ && !gp_mix_admitting_ &&

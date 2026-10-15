@@ -4,6 +4,8 @@
 
 inline bool pilot_original_apu_admitted(uint32_t off,unsigned size,int write,uint32_t value) {
     if(size!=4 || (off&3))return false;
+    if(!write && xlle::ApuStartupMethods::register_index(off)>=0)return true;
+    if(xlle::ApuStartupMethods::touches(off,int(size)))return write;
     if(xlle::ApuStartupMappings::touches(off,int(size)))return true;
     if(xlle::ApuStartupConfiguration::touches(off,int(size)))return true; // Device owns value/context admission.
     if(off==0x200c && write)return value==0; // Device also requires mode0.
