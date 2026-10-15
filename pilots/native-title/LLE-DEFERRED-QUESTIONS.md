@@ -10,11 +10,12 @@ The existing 14 graphics questions and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
-Current reconciliation, 2026-10-14: the thirteen entries here retain their
+Current reconciliation, 2026-10-14: the fourteen entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues, 27 IDs
-are retained; 26 still contain deferred scope. See the
+behavior from its remaining precision question. Across both queues, 28 IDs
+are retained; 27 still contain deferred scope. AUDIO-D09 records the sample
+counter's remaining sub-sample phase question. See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
 
@@ -42,6 +43,8 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | AUDIO-D07 | What exact MCPX DMA work rate/phase and natural STOPPED bit5 does each GP/EP transfer expose? | Real queued descriptor admission/copy/publication now produces RUNNING, EOL and idle without status-read progress. The sole actual DSP CPU uses an isolated injectable nominal policy of one work quantum per1/2/4 retired instructions;18 dynamic P/output consumers and original EP2D5/2DA/2D0 helpers pass. Explicit STOP cancellation sets bit5; natural bit5 remains unclaimed. The policy can change without altering RAM, bank, CPU or completion ownership. | A reached original consumer requires different ordering/status, or independent silicon evidence establishes rate/phase/natural bit5. Replace the isolated dispatch/status policy and replay retained original helpers, warm P loads, cancellation and exact RAM/CUR checks. B0..B3, bit9, original graph/bootstrap, reset/cadence and AC97 remain required behavior. |
 
 | AUDIO-D08 | What exact GP B3 clock identity, rate, epoch, halt/yield and wrap behavior does the original composite profile use? | A fresh physical observer executes exactly B2=FFFFFF, B0=1, B1=1 and samples 0/0/0/0/0/20/280. The serialized GP CPU now owns a passive elapsed producer with a post-B1-retirement epoch; the frozen observer matches all seven samples. Original GP branches only change profiling telemetry and reconverge after the same required DMA/output calls at the same yield. The nominal policy is isolated in `apu_gp_counter.hpp`, and warm reset/rebind remains guarded. This defers GP profiling precision, not a missing producer, wake, DMA, output or lifetime owner. EP is explicitly excluded: its elapsed threshold can enter a permanent error spin. | A reached GP consumer uses profiling state to alter required output/scheduling, independent samples distinguish the nominal policy, or reset/rebind is admitted. Replace the isolated source/epoch policy and replay the frozen observer and original consumer cases. Establish EP behavior separately before admitting its configuration. |
+
+| AUDIO-D09 | What is XGSCNT's exact sample-edge phase across mode0/mode1 transitions and a stopped zero write? | Physical observations establish stopped retention, writable zero, mode1 progression with FE halted, and resume without clearing the count. Host request intervals agree with the original 48 kHz sample-clock contract but do not resolve sub-sample edge phase. The isolated `ApuSampleCounter` retains the common clock's phase while gating increments; it neither advances on reads nor adds stopped time. This policy can change without moving clock, MMIO or DSP ownership. | A supported original consumer observes a one-sample boundary/order mismatch or a bounded independent observation distinguishes the edge phase. Replay the retained gate/reset/resume observations and native callback checks when replacing the policy. Active mode2/3 processing, nonzero/running counter writes, shared DSP execution and actual title output remain required/guarded behavior, not part of this deferral. |
 
 Initial FP values no longer need a console query. Original/native callback state
 transport and the scheduling idle/compute clock path were required integration

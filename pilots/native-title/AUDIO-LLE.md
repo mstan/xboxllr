@@ -20,6 +20,22 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Physical XGSCNT control - 2026-10-14
+
+The original initializer's stopped zero write and sequencer mode1 now control
+a retained sample counter on the sole APU owner. Physical checks establish zero,
+run, stop and resume; modes2/3 retain the counter with FE halted but their active
+processing remains guarded. Warm handoff readback requires the original zero
+initialization rather than borrowing absolute machine uptime. Reads cannot
+advance time; nonzero/running/partial writes and invalid clocks reject.
+
+All34 targeted checks pass, including shared-clock lifetimes and compiled
+ISR/DPC reads. The physical/reference checker binds nine matching volatile
+writes to retained original control execution. Exact edge phase is AUDIO-D09;
+start/stop/reset behavior is implemented, not deferred. See the
+[closing evidence](../../docs/BLINX-QUALIFICATION-CLOSURE.md#physical-sample-counter-gateresetresume---2026-10-14).
+The earlier title stop remains FETFORCE0; no new title/playback run is claimed.
+
 ## Original reset/bootstrap transport - 2026-10-14
 
 The initialized-kernel profile now supplies observed GP0/EP1 and routes exact

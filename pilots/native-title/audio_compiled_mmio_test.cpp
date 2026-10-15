@@ -84,7 +84,7 @@ static const char *decoded_rejection(uint32_t address,int write,uint32_t value) 
 static const char *continuation(uint32_t entry,uint32_t regs[8],bool dpc) {
     if(entry==0x12540 && !dpc) {
         ++nested_isrs;pilot_usb_pic_raise(1,0);
-        CHECK(compiled_load(0xfe80200c)==2560);
+        CHECK(compiled_load(0xfe80200c)==48);
         regs[0]=1;regs[4]+=12;return nullptr;
     }
     CHECK(entry==(dpc?0x12560u:0x12520u));
@@ -105,7 +105,7 @@ static const char *continuation(uint32_t entry,uint32_t regs[8],bool dpc) {
         return "later callback error must not overwrite first device error";
     }
     unsigned work_before=work_calls;
-    CHECK(compiled_load(0xfe80200c)==2560); // actual counter at frozen60000 PIT ticks
+    CHECK(compiled_load(0xfe80200c)==48); // retained device counter, not absolute PIT uptime
     HANDLE thread=CreateThread(nullptr,0,wrong_thread,nullptr,0,nullptr);CHECK(thread);
     CHECK(WaitForSingleObject(thread,1000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
     CHECK(compiled_load(0xfe100000)==0x31415926);
@@ -115,7 +115,7 @@ static const char *continuation(uint32_t entry,uint32_t regs[8],bool dpc) {
     uint32_t value=0;CHECK(!pilot_io_device_lle(125,guest,nullptr,&value));
     CHECK(work_calls>sampled); // nested original entry suspends callback scope
     unsigned after_service=work_calls;
-    CHECK(compiled_load(0xfe80200c)==2560); // restored outer scope remains usable
+    CHECK(compiled_load(0xfe80200c)==48); // restored outer scope remains usable
     CHECK(work_calls==after_service);
     uint64_t after=0;CHECK(!pilot_usb_pit_clock(&after,&deadline) && after==before);
     if(!dpc) {
@@ -133,6 +133,10 @@ int main(int argc,char **argv) {
     uint32_t prep[]={captured_thread(argv[2]),31};call(148,prep);call(36,prep);
     CHECK(!pilot_usb_pit_time(ticks));
     CHECK(!pilot_audio_device_lle_open(nullptr,nullptr));
+    uint32_t control=0;CHECK(!pilot_audio_device_lle_access(0xfe80200c,4,1,&control));
+    control=15;CHECK(!pilot_audio_device_lle_access(0xfe802000,4,1,&control));
+    ticks+=1125;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+    control=7;CHECK(!pilot_audio_device_lle_access(0xfe802000,4,1,&control));
     CHECK(!pilot_io_device_mmio_bind(0xfe100000,4096,dma_register));
     CHECK(!pilot_io_device_work_bind(work));CHECK(!pilot_io_device_clock_bind(clock_input,nullptr));
     uint32_t allocate[]={4096,0,0x03ffffff,4096,PAGE_READWRITE};allocation=call(166,allocate);CHECK(allocation);

@@ -120,10 +120,21 @@ public:
         update_irq();
     }
 
-    // Independently advance the free-running audio sample clock.
+    // Advance from the shared clock. Physical mode1 counts while FE is halted;
+    // off retains its value. Reads do not service time or fabricate an epoch.
     void set_time(uint64_t ticks,uint64_t frequency) {
-        if(!frequency || frequency>UINT64_MAX/48000u){device_fault("invalid APU clock frequency");return;}
-        xgscnt_=apu_sample_counter(ticks,frequency);
+        if(faulted_)return;
+        const uint32_t mode=reg32(kSectl)&0x18;
+        // Modes2/3 were observed frozen with FE halted, not qualified as an
+        // active processing route. Do not reuse the old nonzero-mode shortcut.
+        if((mode==0x10 || mode==0x18) && (reg32(kFectl)&kFectlMethodMode)!=0x80) {
+            device_fault("active APU sequencer modes2/3 remain unqualified");return;
+        }
+        if(mode==8 && !sample_counter_known_) {
+            device_fault("APU sample counter requires its original zero initialization");return;
+        }
+        if(!sample_counter_.advance(ticks,frequency,mode==8))
+            device_fault("invalid or nonmonotonic APU clock");
     }
     // Advance to an absolute 5.333 ms APU-frame number.
     void set_frame(uint64_t frame) {
@@ -381,6 +392,9 @@ public:
         // Original idle retirement and retained pre-video/network observations
         // agree. These are initialized-kernel values, not cold-reset defaults.
         set_reg32(kGpReset,0);set_reg32(kEpReset,1);dsp_reset_context_known_=true;
+        // The warm kernel handoff does not establish a counter value. The
+        // original title writes zero while stopped before enabling mode1.
+        sample_counter_known_=false;
         kernel_audio_startup_=true;fe_state_used_=true;update_irq();return true;
     }
     // Restore only the independently observed running-probe FE context. This
@@ -395,6 +409,7 @@ public:
         }
         set_reg32(kFectl,fectl);set_reg32(kSectl,sectl);
         set_reg32(kFeFenceControl,control);set_reg32(0x3fffc,gp_reset);
+        sample_counter_known_=false;
         fe_context_known_=true;fe_state_used_=true;return true;
     }
     bool fe_fence_pending()const{return fe_fence_pending_;}
@@ -442,6 +457,12 @@ public:
         if (faulted_) return 0;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
+        if(touches_sample_counter(off,size)) {
+            if(off!=kXgscnt || size!=4 || !sample_counter_known_) {
+                device_fault("APU sample counter read context/width remains unqualified");return 0;
+            }
+            return sample_counter_.value();
+        }
         if(touches_dsp_reset(off,size)) {
             if(size==4 && (off==kGpReset || off==kEpReset) && dsp_reset_context_known_)return reg32(off);
             device_fault("DSP reset read context/width remains unqualified");return 0;
@@ -460,8 +481,6 @@ public:
             if(!word){device_fault("unqualified EP host read");return 0;}
             return *word&0xffffff;
         }
-        if (off == kXgscnt)
-            set_reg32(kXgscnt, static_cast<uint32_t>(xgscnt_));
         // Synchronous FE model: the strict reference admits only implemented
         // methods whose effects precede this capacity read. Queue latency is
         // unqualified; this does not acknowledge unknown work as completed.
@@ -475,6 +494,12 @@ public:
         if (faulted_) return;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
+        if(touches_sample_counter(off,size)) {
+            if(off!=kXgscnt || size!=4 || value || (reg32(kSectl)&0x18) || fe_fence_pending_) {
+                device_fault("APU sample counter write requires stopped DWORD zero");return;
+            }
+            sample_counter_.clear();sample_counter_known_=true;fe_context_known_=false;return;
+        }
         if(touches_dsp_reset(off,size)) {
             if(size!=4 || (off!=kGpReset && off!=kEpReset) || !dsp_reset_context_known_ ||
                (value!=1 && value!=3 && !(off==kGpReset && value==0)) || fe_fence_pending_) {
@@ -736,6 +761,9 @@ private:
         if(size<=0)return false;
         const uint64_t end=uint64_t(off)+unsigned(size);
         return (off<kGpReset+4 && end>kGpReset) || (off<kEpReset+4 && end>kEpReset);
+    }
+    static bool touches_sample_counter(uint32_t off,int size) {
+        return size>0 && off<kXgscnt+4 && uint64_t(off)+unsigned(size)>kXgscnt;
     }
     static constexpr uint32_t kObservedIdleFectl=0x00071f8f, kObservedIdleSectl=7;
     bool kernel_audio_control_idle()const {
@@ -1062,6 +1090,9 @@ private:
         // The setup engine is stopped while XCNTMODE is off or the FE is halted/trapped.
         if ((reg32(kSectl) & 0x18) == 0 || (reg32(kFectl) & kFectlMethodMode) != 0)
             return;
+        if((reg32(kSectl)&0x18)!=8) {
+            device_fault("active APU sequencer modes2/3 remain unqualified");return;
+        }
 
         uint32_t voice_base = reg32(kVpvaddr);
         for (size_t list = 0; list < kVoiceTop.size(); ++list) {
@@ -1124,7 +1155,8 @@ private:
     uint64_t voice_off_methods_ = 0;
     uint64_t voice_release_methods_ = 0;
     uint64_t idle_voice_traps_ = 0;
-    uint64_t xgscnt_ = 0;
+    ApuSampleCounter sample_counter_;
+    bool sample_counter_known_=true; // fresh device; warm imports revoke this
     std::array<bool,kMaxVoices> voice_locked_{};
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
     std::array<std::array<apu_envelope_curve::ReleaseHistory,2>,kMaxVoices> voice_envelopes_{};

@@ -42,9 +42,42 @@ can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
+## Physical sample counter gate/reset/resume - 2026-10-14
+
+Nine bounded volatile writes all returned their expected values: one original
+XGSCNT zero write while stopped, then SECTL7/15 transitions and halted mode2/3
+observations. GP/EP remain held, FE remains halted and the global APU interrupt
+stays masked. No storage operation, retry, DSP release or audio playback occurs.
+The zero write changes the retained442758 to0. Mode1 advances to49796; mode0
+holds it. A later mode1 resumes from49796 and stops at105627. Modes2/3 remain
+at105627 in the halted context. Two host time intervals are consistent with48k
+samples/second, but do not measure exact rate or sample-edge phase.
+
+`ApuSampleCounter` replaces unconditional uptime readback with a retained,
+gated count on the existing shared clock. Mode1 advances independently of FE
+halt; mode0 holds, and reads do not advance it. Original stopped DWORD zero is
+admitted; nonzero, running, partial and overlapping writes remain guarded.
+An initialized-kernel handoff does not invent a warm counter value: the original
+zero write establishes it. Backward time and changing/invalid frequency reject.
+Active mode2/3 processing remains guarded, separately from observed halted
+retention. AUDIO-D09 records only the replaceable sub-sample phase policy.
+
+All34 targeted component and native integration checks pass. They include three
+real shared-clock counter lifetimes, compiled ISR/DPC reads of the actual retained
+count, explicit unknown-warm rejection, rollover and existing reset/GP/EP/FE
+regressions. `native_audio_counter_reference.py` rechecks every physical payload,
+write readback, stopped endpoint and timing interval, plus all recorded original
+instruction identities and the three original initializer/control lifetimes.
+Private evidence: `build/blinx/audio-init-controls-20261014/` and matching probe
+results. No new title run is claimed: the earlier FETFORCE0 guard still precedes
+this counter initialization. Remaining work is the rest of the startup controls,
+shared DSP cadence, active FE ordering and actual output. Families remain6/9.
+There are now28 retained questions,27 with deferred scope. Default HLE processing
+and its existing running-clock conversion are unchanged.
+
 ## Deferral reconciliation and idle counter finding - 2026-10-14
 
-The append-only queues retain27 question IDs, but that is not27 currently
+At this earlier audit, the append-only queues retained27 question IDs, not27
 deferred closing requirements. GFX-D06 has reopened as G01-G03/G05 (G01 is
 complete). GFX-D04 splits required enabled-noise behavior G04 from additional
 sampling/rounding precision. There are26 entries with deferred scope, including

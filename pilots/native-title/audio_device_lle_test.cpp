@@ -101,6 +101,29 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"counter-unknown")) {
+        uint32_t value=0xa5a55a5a;
+        CHECK(pilot_audio_device_lle_access(0xfe80200c,4,0,&value) && value==0xa5a55a5a);
+        CHECK(!pilot_audio_device_lle_close());
+        puts("PASS uninitialized warm counter rejects without fabricating output");return 0;
+    }
+    if(!strcmp(mode,"counter")) {
+        auto sample=[&]() {uint32_t value=0;CHECK(!pilot_audio_device_lle_access(0xfe80200c,4,0,&value));return value;};
+        auto advance=[&](uint64_t delta) {ticks+=delta;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());};
+        for(unsigned life=0;life<3;++life) {
+            if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            access(0xfe80200c,4,0);advance(11250);CHECK(sample()==0);
+            access(0xfe802000,4,15);advance(1125);CHECK(sample()==48);
+            for(unsigned read=0;read<100;++read)CHECK(sample()==48);
+            access(0xfe802000,4,7);advance(11250);CHECK(sample()==48);
+            access(0xfe802000,4,15);advance(2250);CHECK(sample()==144);
+            access(0xfe802000,4,7);access(0xfe80200c,4,0);advance(11250);CHECK(sample()==0);
+            PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+            CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words && received.empty());
+            CHECK(!pilot_audio_device_lle_close());
+        }
+        puts("PASS three real shared-clock counter lifetimes: stopped, run, pause, resume and reset without DMA");return 0;
+    }
     if(!strcmp(mode,"reset-bootstrap") || !strcmp(mode,"reset-clock")) {
         uint32_t bytes=12288,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
         word(va)=pa+4096;word(va+8)=pa+8192;

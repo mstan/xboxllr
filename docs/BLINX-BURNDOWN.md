@@ -16,7 +16,7 @@ also closes; the audio family still requires original device startup/output.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 27 retained IDs; 26 contain deferred scope. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 28 retained IDs; 27 contain deferred scope, including new AUDIO-D09 sample-edge phase. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
 The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 preserves every question/evidence/reopening trigger and identifies promoted work.
@@ -32,10 +32,12 @@ SECTL/IEN are source-derived; startup FE control is independently admitted
 without granting notification completion. Bounded reset controls now route to
 the sole DSP CPUs and fetch their actual SG bootstrap images; six original
 images and retained physical loaded-P observations support that connection.
-The connected title crosses initial reset and stops at FETFORCE0=0. Remaining
+Physical XGSCNT observations now support stopped retention, zero initialization,
+mode1 progression and resume; the unconditional uptime counter is corrected.
+The last connected title crosses initial reset and stops at FETFORCE0=0. Remaining
 audio work is original startup controls, shared-clock execution, active reset/FE
 ordering and actual title output. See the
-[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#reset-controls-connected-to-sole-dsp-bootstrap-owners---2026-10-14).
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#physical-sample-counter-gateresetresume---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable
