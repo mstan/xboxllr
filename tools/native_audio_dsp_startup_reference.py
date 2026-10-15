@@ -8,7 +8,10 @@ original stall service and executes both real DSPs with the sequencer stopped.
 The active extension runs the original SE start/stop helper over the same
 live allocations and immutable physical EP lookup. The reset extension invokes
 original retirement after admitted work drains, then reenters on the same owners.
-Codec output and retirement with pending FE notification remain separate.
+The timeout extension enters retirement with real outstanding work and lets
+the original 668 one-us waits advance those same owners. No notifier success,
+device acknowledgement or supplemental drain is supplied by this driver.
+Connected codec output remains separate.
 """
 import argparse
 import hashlib
@@ -42,6 +45,7 @@ def active_result(reply):
 class Startup(OriginalStartup):
     transport = None
     stall = None
+    retirement = None
 
     def _instruction(self, cpu, address, size, unused):
         if address == 0x80000097 and self.stall is not None:
@@ -62,6 +66,9 @@ class Startup(OriginalStartup):
             observed = self.transport('R', address, size, 0)
             self.put(address, observed)
             self.reads.append(dict(address=address, size=size, value=observed))
+        elif self.retirement is not None and address == self.retirement['notifier_virtual']+15:
+            assert size == 1 and cpu.reg_read(UC_X86_REG_EIP) == 0x179e17
+            self.retirement['status_reads'].append(bytes(cpu.mem_read(address,1))[0])
 
     def _write(self, cpu, access, address, size, value, unused):
         super()._write(cpu, access, address, size, value, unused)
@@ -69,6 +76,9 @@ class Startup(OriginalStartup):
             assert self.transport is not None
             self.mmio[-1]['pc'] = cpu.reg_read(UC_X86_REG_EIP)
             self.transport('W', address, size, value)
+        elif self.retirement is not None and address == self.retirement['notifier_virtual']+15:
+            assert size == 1 and value == 0x80
+            self.retirement['status_writes'].append(value)
 
     def physical_owner(self, address, size):
         assert size and size <= 4096
@@ -95,6 +105,8 @@ class Startup(OriginalStartup):
 
 
 def check(args):
+    if args.execute_timeout_retirement:
+        args.execute_reset_reentry = True
     if args.execute_reset_reentry:
         args.execute_active = True
     if args.execute_active:
@@ -115,6 +127,7 @@ def check(args):
                     guest_time_advanced=args.execute_stall, dsp_execution=args.execute_stall,
                     active_clock_requested=args.execute_active,
                     drained_reset_reentry_requested=args.execute_reset_reentry,
+                    timeout_retirement_requested=args.execute_timeout_retirement,
                     ep_y_lookup_sha256=EP_Y_LOOKUP_SHA256 if args.execute_active else None)
     reports = []
     for life in range(3):
@@ -179,6 +192,23 @@ def check(args):
                         assert actual == expected, 'actual CPU bootstrap must match the current original source pages'
                         boot_report[kind.lower()+'_bootstrap_sha256'] = hashlib.sha256(actual).hexdigest()
                 def stall(us):
+                    if original.retirement is not None:
+                        assert us == 1
+                        audit = original.retirement
+                        audit['requested_microseconds'] += us
+                        # Carry the1125000Hz fractional tick across all waits;
+                        # never round every1us call into a larger fake drain.
+                        target = audit['start_ticks']+audit['requested_microseconds']*9//8
+                        audit['last_clock'] = clock_result(command(f'T {target}'))
+                        if audit['requested_microseconds'] == 668:
+                            # Capture work before the next original MMIO can
+                            # reject it. This observation supplies no extra
+                            # ticks, completion, or reset permission.
+                            audit['timeout_work'] = active_result(command('ACTIVE'))
+                            audit['timeout_cpu_state'] = command('STATE')
+                            audit['timeout_ep_state'] = command('EPSTATE')
+                            audit['timeout_notification_state'] = command('NOTIFY')
+                        return
                     assert us == 10000 and 'dsp_clock' not in boot_report
                     verify_bootstrap()
                     target = baseline['ticks']+11250
@@ -223,6 +253,12 @@ def check(args):
                     assert run['ticks'] == target and run['ep_phase'] == 2 and run['events']-start['ep_events'] == 8
                     assert progress['gp_frames']-start['gp_frames'] == target//750-start['ticks']//750
                     assert progress['ep_events']-start['ep_events'] == 8 and not progress['pcm_words']
+                    if args.execute_timeout_retirement:
+                        # This exact event boundary has just admitted GP work
+                        # and a real EP event. The original retirement code,
+                        # not this fixture, must stop admission and wait.
+                        assert progress['gp_outstanding'] == 1
+                        return run
                     # Stop admission through the original SE helper, then
                     # retain every allocation while actual admitted work runs.
                     original.call(0x17bc9e,(0,),original.owner)
@@ -254,18 +290,61 @@ def check(args):
                     assert list(map(int,state.split()[1:5])) == [0,0,generation,generation]
                     boot_report['drained_retirement_state'] = state
                     save()
+                def retire_with_timeout():
+                    before = active_result(command('ACTIVE'))
+                    assert before['gp_outstanding'] == 1
+                    notifier = original.get(0x17df38)
+                    physical = original.get(0x17df3c)
+                    assert original.physical_owner(physical,16) == notifier
+                    audit = dict(start_ticks=before['ticks'],notifier_virtual=notifier,
+                                 notifier_physical=physical,requested_microseconds=0,
+                                 status_reads=[],status_writes=[],before=before)
+                    boot_report['timeout_retirement'] = audit
+                    first, first_ram = len(rows), len(ram_events)
+                    allocations = [dict(a) for a in original.allocations]
+                    prefix = bytes(original.cpu.mem_read(notifier,16))
+                    original.retirement = audit
+                    report['current_original_entry'] = 0x17c2ad; save()
+                    original.call(0x17c2ad,ecx=original.owner)
+                    original.retirement = None
+                    assert audit['status_reads'] == [0x80]*668
+                    assert audit['status_writes'] == [0x80,0x80] and audit['requested_microseconds'] == 668
+                    assert original.allocations == allocations
+                    assert bytes(original.cpu.mem_read(notifier,16)) == prefix[:15]+b'\x80'
+                    writes = [(r['address'],r['value']) for r in rows[first:] if r['operation']=='W']
+                    assert [w for w in writes if w[0] in (0xfe82010c,0xfe820104)] == [(0xfe82010c,0),(0xfe820104,2)]
+                    assert [w for w in writes if w[0] in (0xfe83fffc,0xfe85fffc)] == [(0xfe83fffc,0),(0xfe85fffc,1)]
+                    assert not any(e['operation']=='MEMW' and physical<=e['physical']<physical+16 for e in ram_events[first_ram:])
+                    after = active_result(command('ACTIVE'))
+                    audit['after'] = after
+                    assert after['ticks'] == before['ticks']+751
+                    assert after['gp_frames'] == before['gp_frames'] and after['ep_events'] == before['ep_events']
+                    assert not after['gp_outstanding'] and not after['ep_work_pending'] and not after['pcm_words']
+                    state = command('STATE');audit['retirement_state'] = state
+                    assert list(map(int,state.split()[1:5])) == [0,0,generation,generation]
+                    audit['notification_state'] = command('NOTIFY')
+                    assert audit['notification_state'] == f'NOTIFY 0 {generation}'
+                    # Equal-time inspection cannot do the work missing from
+                    # retirement. Both CPUs were already held by the caller.
+                    count = len(ram_events)
+                    held = clock_result(command(f'T {after["ticks"]}'))
+                    assert held['gp_phase'] == 0 and held['ep_phase'] == 0 and len(ram_events) == count
+                    audit['held_clock'] = held;save()
+                    return held
                 setup()
                 if args.execute_active:
                     baseline = active_cycle()
                 if args.execute_reset_reentry:
                     allocations = [dict(a) for a in original.allocations]
-                    retire_drained()
+                    if args.execute_timeout_retirement:baseline = retire_with_timeout()
+                    else:retire_drained()
                     assert original.allocations == allocations, 'retirement must retain backing through reentry'
                     generation = 2
                     boot_report = report['reentry'] = {}
                     setup()
                     baseline = active_cycle()
-                    retire_drained()
+                    if args.execute_timeout_retirement:baseline = retire_with_timeout()
+                    else:retire_drained()
                     original.destroy_startup()
                     report['original_allocations_freed'] = not any(a['live'] for a in original.allocations)
                     # Still-live but held devices must not touch freed RAM.
@@ -275,7 +354,8 @@ def check(args):
                     assert after['events'] == baseline['events'] and len(ram_events) == count
                     report['after_original_free'] = after
                 report['source_identity'] = original.source_identity()
-                report['status'] = ('original-drained-reset-reentry-returned' if args.execute_reset_reentry else
+                report['status'] = ('original-timeout-retirement-reentry-returned' if args.execute_timeout_retirement else
+                                    'original-drained-reset-reentry-returned' if args.execute_reset_reentry else
                                     'original-startup-active-clock-returned' if args.execute_active else 'original-startup-returned')
             except BaseException as error:
                 report.update(status='stopped', error=repr(error), source_identity=original.source_identity()); save(); raise
@@ -290,7 +370,9 @@ def check(args):
         if not args.execute_reset_reentry:original.destroy_startup()
         report['original_allocations_freed'] = not any(a['live'] for a in original.allocations)
         save()
-    detail = ('; two processed generations on the same owners, original drained retirement/reentry and free; active FE notification and codec output remain separate'
+    detail = ('; two processed generations, original668us retirement timeout drains actual work before holds/reentry/free; no fabricated notifier success; codec output separate'
+              if args.execute_timeout_retirement else
+              '; two processed generations on the same owners, original drained retirement/reentry and free; active FE notification and codec output remain separate'
               if args.execute_reset_reentry else '; original SE start/stop, eight shared-clock EP events and actual GP/EP DMA; codec output and reset remain separate'
               if args.execute_active else '; original10000us wait runs GP to yield and EP into polling without frame events'
               if args.execute_stall else '; execution/cadence still separate')
@@ -304,5 +386,6 @@ if __name__ == '__main__':
     parser.add_argument('--execute-stall',action='store_true',help='Execute the unchanged enclosing setup and its real10000us wait')
     parser.add_argument('--execute-active',action='store_true',help='Also execute original SE start/stop and eight active EP events; implies --execute-stall')
     parser.add_argument('--execute-reset-reentry',action='store_true',help='Original retirement after drained work, warm setup, processing and original free on the same device owners; implies --execute-active')
+    parser.add_argument('--execute-timeout-retirement',action='store_true',help='Enter original retirement with outstanding work and execute its bounded pending-notification timeout; implies --execute-reset-reentry')
     parser.add_argument('--ep-y-lookup',type=Path,help='Required verified private EP Y0800 image for --execute-active')
     check(parser.parse_args())

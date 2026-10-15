@@ -76,6 +76,8 @@ extern "C" const char *pilot_audio_device_lle_close(void) {
     if((owner->gp && owner->gp->phase()!=xlle::ApuGpPhase::Held) ||
        (owner->ep && owner->ep->phase()!=xlle::ApuGpPhase::Held))
         return fail("original audio device teardown requires held DSP owners");
+    if(owner->apu.retirement_notification_pending())
+        return fail("original audio device teardown requires notification retirement");
     // Idle CPU execution is not descriptor retirement. Require a stopped,
     // drained codec; unknown active/paused teardown retains its DMA owner.
     if((owner->aci.mmio_read(xlle::McpxAci::kBase+0x11b,1)&1) ||

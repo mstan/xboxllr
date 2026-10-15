@@ -53,10 +53,14 @@ struct Fixture {
         // GP requests yield; EP requests retain its running polling CPU.
         return {0x08f485,0xfff,0x08f484,1,0x0a8581,4,0x08f485,2,0x08f484,1,0x0af080,4};
     }
-    void configure(const std::vector<uint32_t>& gp_program=event_program(),bool release_gp=true) {
+    static std::vector<uint32_t> counter_event_program() {
+        return {0x07f432,0xffffff,0x07f430,1,0x07f431,1,
+                0x08f485,0xfff,0x08f484,1,0x0a8581,10,0x08f485,2,0x08f484,1,0x0af080,10};
+    }
+    void configure(const std::vector<uint32_t>& gp_program=event_program(),bool release_gp=true,
+                   const std::vector<uint32_t>& ep_program=event_program()) {
         reg(0x2040,0x1000);reg(0x20d4,1);reg(0x2048,0x2000);reg(0x20dc,1);
         word(0x1000,0x4000);word(0x1008,0x5000);word(0x2000,0x6000);word(0x2008,0x7000);
-        const auto ep_program=event_program();
         std::memcpy(ram.data()+0x4000,gp_program.data(),gp_program.size()*4);
         std::memcpy(ram.data()+0x6000,ep_program.data(),ep_program.size()*4);
         reg(0x200c,0);reg(0x1100,0x7130f);
@@ -173,19 +177,79 @@ static void drained_control() {
     CHECK(f.clock->ticks()==tick && f.clock->retired(false)==gp && f.clock->retired(true)==ep);
     CHECK(f.reads==reads && f.writes==writes && f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
     // Stopping admission at a boundary leaves a real GP frame outstanding.
-    // Reads must not consume that work or claim the drained encoding.
+    // The physical status encoding is not a drained-work acknowledgement.
+    // Its read must preserve pending work; the actual reset guards own drain.
     for(bool release_gp:{false,true}) {
         Fixture pending;pending.configure(Fixture::event_program(),release_gp);
         pending.reg(0x1100,0x100f);pending.reg(0x2000,15);
         CHECK(pending.clock->advance(66000) && pending.apu.gp_frame_outstanding()==release_gp);
         CHECK(pending.apu.ep_frame_events()==1);
         pending.reg(0x2000,7);const auto before=pending.ram;
-        pending.apu.mmio_read(pending.apu.kBase+0x1100,4);
-        CHECK(pending.apu.faulted() && pending.apu.gp_frame_outstanding()==release_gp && pending.ram==before);
+        CHECK(pending.apu.mmio_read(pending.apu.kBase+0x1100,4)==0x7100f);
+        CHECK(!pending.apu.faulted() && pending.apu.gp_frame_outstanding()==release_gp && pending.ram==before);
+        pending.reg(0x5fffc,1);
+        CHECK(pending.apu.faulted() && pending.ep->phase()==xlle::ApuGpPhase::Failed && pending.ram==before);
     }
 }
 
+static void retirement_timeout() {
+    Fixture f;f.reg(0x1510,0);f.reg(0x115c,0x8000);
+    f.ram[0x800f]=0x80;f.configure(Fixture::counter_event_program(),true,Fixture::counter_event_program());
+    f.reg(0x1100,0x100f);f.reg(0x2000,15);
+    CHECK(f.clock->advance(66000) && f.apu.gp_frame_outstanding());
+    CHECK(f.apu.mmio_read(f.apu.kBase+0x1100,4)==0x7900f && f.error.empty());
+    const auto before=f.ram;const auto gp=f.clock->retired(false),ep=f.clock->retired(true);
+    f.reg(0x2010c,0);
+    CHECK(f.apu.mmio_read(f.apu.kBase+0x2000,4)==7 && f.apu.gp_frame_outstanding());
+    CHECK(f.apu.mmio_read(f.apu.kBase+0x1100,4)==0x7100f);
+    f.reg(0x20104,2);CHECK(f.error.empty() && f.apu.retirement_notification_pending());
+    CHECK(f.apu.retirement_notifications()==1 && f.ram==before && !f.writes);
+    CHECK(f.clock->retired(false)==gp && f.clock->retired(true)==ep);
+    CHECK(f.apu.mmio_read(f.apu.kBase+0x20010,4)==0x80);
+    CHECK(f.clock->advance(66751) && !f.apu.gp_frame_outstanding());
+    CHECK(f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    CHECK(f.ram==before && !f.writes && f.apu.retirement_notification_pending());
+    CHECK(f.clock->retired(false)>gp && f.clock->retired(true)>ep);
+    f.reg(0x3fffc,0);f.reg(0x5fffc,1);
+    CHECK(f.error.empty() && !f.apu.retirement_notification_pending());
+    CHECK(f.gp->phase()==xlle::ApuGpPhase::Held && f.ep->phase()==xlle::ApuGpPhase::Held);
+    const auto reads=f.reads;
+    CHECK(f.clock->advance(78000) && f.reads==reads && f.ram==before && !f.writes);
+    for(unsigned variant=0;variant<6;++variant) {
+        Fixture bad;bad.reg(0x1510,0);bad.reg(0x1100,0x100f);bad.reg(0x115c,0x8000);
+        bad.ram[0x800f]=0x80;
+        if(variant!=0)bad.reg(0x2010c,0);
+        if(variant==1)bad.reg(0x1510,1);
+        if(variant==2)bad.ram[0x800f]=1;
+        if(variant==3)bad.reg(0x115c,0x10000); // outside the live callback owner
+        const auto ram=bad.ram;
+        if(variant==4)bad.apu.mmio_write(bad.apu.kBase+0x20103,4,2);
+        else bad.reg(0x20104,variant==5?1:2);
+        CHECK(bad.apu.faulted() && !bad.apu.retirement_notification_pending());
+        CHECK(bad.ram==ram && !bad.writes && !bad.apu.retirement_notifications());
+    }
+    for(unsigned action=0;action<3;++action) {
+        Fixture pending;pending.reg(0x1510,0);pending.reg(0x1100,0x100f);
+        pending.reg(0x115c,0x8000);pending.ram[0x800f]=0x80;
+        pending.reg(0x2010c,0);pending.reg(0x20104,2);CHECK(pending.error.empty());
+        const auto ram=pending.ram;
+        pending.reg(action==0?0x115c:action==1?0x2000:0x20104,action==0?0x4000:action==1?15:2);
+        CHECK(pending.apu.faulted() && pending.apu.retirement_notification_pending() &&
+              pending.apu.retirement_notifications()==1 && pending.ram==ram && !pending.writes);
+    }
+    {
+        Fixture busy;busy.reg(0x1510,0);busy.reg(0x115c,0x8000);busy.ram[0x800f]=0x80;
+        busy.configure(Fixture::counter_event_program(),true,Fixture::counter_event_program());
+        busy.reg(0x1100,0x100f);busy.reg(0x2000,15);CHECK(busy.clock->advance(66000));
+        busy.reg(0x2010c,0);busy.reg(0x20104,2);CHECK(busy.error.empty());
+        const auto ram=busy.ram;const auto reads=busy.reads;
+        busy.reg(0x3fffc,0);
+        CHECK(busy.apu.faulted() && busy.apu.gp_frame_outstanding() &&
+              busy.apu.retirement_notification_pending() && busy.apu.retirement_notifications()==1);
+        CHECK(busy.gp->phase()==xlle::ApuGpPhase::Failed && busy.ram==ram && busy.reads==reads && !busy.writes);
+    }
+}
 int main() {
-    stopped_epoch();partitioned_active_output();admission_and_failure();runtime_input_sge();drained_control();
+    stopped_epoch();partitioned_active_output();admission_and_failure();runtime_input_sge();drained_control();retirement_timeout();
     puts("PASS authored shared audio timeline: epoch, actual GP/EP events, partition-independent PCM bytes/stamps and failure retention");
 }

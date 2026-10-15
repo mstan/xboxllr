@@ -104,6 +104,16 @@ int main(int argc,char** argv) {
                 static_cast<unsigned long long>(apu.ep_frame_events()),static_cast<unsigned long long>(apu.gp_dma_nodes()),
                 static_cast<unsigned long long>(apu.ep_dma_nodes()),static_cast<unsigned long long>(aci.consumed_pcm_words()),
                 unsigned(apu.gp_frame_outstanding()),unsigned(apu.dsp_work_pending(xlle::ApuDspKind::Ep)));
+        }else if(op=="EPSTATE") {
+            if(in>>extra)return 2;
+            uint32_t status=0,control=0;
+            if(!apu.ep_read(0xffffc5,status) || !apu.ep_control_publication(control))return 2;
+            const auto request=apu.mmio_read(apu.kBase+0x5ff10,4);
+            std::printf("EPSTATE %06x %06x %u\n",status,control,request);
+        }else if(op=="NOTIFY") {
+            if(in>>extra)return 2;
+            std::printf("NOTIFY %u %llu\n",unsigned(apu.retirement_notification_pending()),
+                static_cast<unsigned long long>(apu.retirement_notifications()));
         }else if(op=="STATE") {
             if(in>>extra)return 2;
             std::printf("STATE %u %u %llu %llu %llu %llu\n",unsigned(gp.phase()),unsigned(ep.phase()),

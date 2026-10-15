@@ -50,6 +50,49 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## Original notification-timeout retirement boundary - 2026-10-15
+
+The maintained FE now implements the observed setup-stop method, preserves an
+explicit pending notification, and exposes the observed active/stopped status
+without treating a status read as completed DSP work. The unchanged original
+retirement caller runs its actual 668 one-microsecond stalls against the same
+GP/EP CPUs and owned RAM. There is no injected status1 or supplemental drain.
+
+Selectors0/1 each complete two processed generations, original retirement,
+warm bootstrap and final original allocation cleanup. Each retirement begins
+with a real outstanding GP frame and advances751 PIT ticks. The original CPU
+polls status80 throughout, then both drained CPU owners accept their holds.
+Further time after original free performs no device RAM access. These runs
+have stopped codec streams; they do not establish connected output acceptance.
+
+Selector2 does not pass this fallback at the same EP event boundary. After
+668us its GP frame and current peripheral transactions have drained, but its
+EP program is still at PC05F4 with request0, rather than back at its request
+loop. The next original1510 read reaches the existing drain guard. The pending
+notification and allocations remain retained; no hold, free, completion or
+successful retirement is fabricated. This distinguishes a still-executing EP
+frame from an empty DMA queue. Normal selector2 retirement remains required;
+the earlier-NOTIFY-completion candidate in AUDIO-D14 is not accepted for the
+whole profile. This is a reached normal-lifecycle question, not a request for
+an exhaustive arbitrary-reset matrix.
+
+The next A04 work is to establish this reached selector2 stop/hold behavior
+and the separate original DPC FEMEM completion, using existing program and
+hardware evidence first. Do not lengthen the original timeout or repeat the
+held-DSP NOTIFY experiment. Evidence and the stopped selector2 report are
+retained under `build/blinx/audio-timeout-retirement-20261015/`. HLE and accepted
+visuals are unchanged; the family count remains6/9.
+
+All18 focused clock/reset/control/fence/native-owner regressions pass. The
+prior drained original retirement/reentry proof still passes all three
+configurations on the rebuilt implementation. The active-timeout investigation
+retains its expected failing selector2 exit explicitly; it is not relabeled a
+three-configuration pass. Native close now retains an outstanding notification
+even when both CPUs are held, until an accepted retirement transition retires
+the request. Private checkpoint `reviewed-checkpoint.aot-private.json` binds40
+source, executable, output and prior physical-evidence identities, SHA256
+`9daaf81ed0d268244bcfaeb047ff49a5468fc76791ad34bb6360e1c70424b3a8`.
+
 ## FE active-context comparison - 2026-10-15
 
 The fresh physical comparison now reaches original control0/SE15. Setup clocks
@@ -178,7 +221,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Open: physical halt stops SE15->7; notifier stays80 beyond10ms. Test original retirement's bounded timeout; DPC memory fence remains required | `.115` | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
+| A04 | Open: original timeout retires selectors0/1; selector2 still has an executing EP frame at668us. Required normal retirement and DPC memory fence remain | `.115` | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
 | A05 | Captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; sends/mix/GP/EP and digital-ring content agree; complete output/timing/retirement and analog ring evidence remain | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits

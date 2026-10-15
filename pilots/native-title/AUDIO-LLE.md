@@ -1,15 +1,15 @@
 # Bounded original audio contract
 
-Latest A04 evidence,2026-10-15: a fresh owned physical comparison establishes
-the original2010C=0 setup stop(SE15->7). Released FE control allows the subsequent
-20104=2 submission to reclaim PIO space, but the actual first notifier stays80
-for10000.296us and remains unchanged in the later whole-owner capture. The
-second global16-byte slot changes when setup clocks run; it is separate from
-the status byte consumed by original17C1B1. Eleven actual-x86 observer checks
-pass. This does not establish completion or a missing DSP acknowledgement.
-Audit the original NOTIFY-specific initialization and consumer/owner context
-next, retaining this hardware evidence. See the current
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#fe-active-context-comparison---2026-10-15).
+Latest A04 evidence,2026-10-15: the observed2010C setup stop and explicitly
+pending20104 notification now execute against maintained GP/EP owners. The
+unchanged original668us timeout safely retires selectors0/1 across two processed
+generations each, warm bootstrap and original cleanup. Selector2 is still
+executing an EP frame when that timeout expires; its next original control
+read remains guarded. No synthetic completion or extra drain is supplied.
+Resolve that reached normal-retirement case and the separate DPC FEMEM fence
+next. Earlier NOTIFY completion remains a deferral candidate, not an accepted
+waiver for the whole profile. See the current
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-notification-timeout-retirement-boundary---2026-10-15).
 
 Tracked by `beads-xbox.1.113`. Audio is the active independent offline family;
 the original-scheduler/GPU startup experiments are not prerequisites. The family

@@ -29,6 +29,8 @@ inline bool pilot_original_apu_admitted(uint32_t off,unsigned size,int write,uin
     if(off==0x20280)return value<=7; // Original17815A masks before this write-only method.
     if(off==0x20350 || off==0x20370)return value==0; // Observed stopped zero publications.
     if(off==0x2031c)return value==0xffff; // Device additionally requires an ordinary voice.
+    if(off==0x2010c)return value==0; // Observed setup stop; real pending work is retained.
+    if(off==0x20104)return value==2; // Original bounded retirement notification.
     switch(off) {
     case 0x2040:case 0x2044:case 0x2048:case 0x204c:
     case 0x20d4:case 0x20d8:case 0x20dc:case 0x20e0:

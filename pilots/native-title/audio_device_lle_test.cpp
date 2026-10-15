@@ -437,6 +437,24 @@ int main(int argc,char **argv) {
         CHECK(!pilot_audio_device_lle_close());call(171,&va);
         puts("PASS real pinned-SG GP/EP bootstrap, repeated release/passive reads, hold and clean teardown");return 0;
     }
+    if(!strcmp(mode,"retirement-owner") || !strcmp(mode,"retirement-held")) {
+        uint32_t args[]={0x4000,0,0x03ffffff,0x4000,PAGE_READWRITE};
+        const uint32_t va=call(166,args),pa=call(173,&va);CHECK(va && pa && !(pa&0x3fff));
+        memset(guest+va,0xa5,0x4000);guest[va+15]=0x80;
+        access(0xfe80115c,4,pa);access(0xfe801510,4,0);access(0xfe801100,4,0x100f);
+        access(0xfe82010c,4,0);access(0xfe820104,4,2);
+        CHECK(guest[va+15]==0x80);
+        if(!strcmp(mode,"retirement-owner")) {
+            const char* error=pilot_audio_device_lle_close();CHECK(error);
+            CHECK(strstr(error,"requires notification retirement"));
+            PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+            CHECK(s.owned && s.work_binding && s.apu_mapping && s.gp_held && s.ep_held && !s.dma_writes);
+            puts("PASS pending notification retains device and RAM ownership through rejected close");return 0;
+        }
+        access(0xfe83fffc,4,0);access(0xfe85fffc,4,1);
+        CHECK(!pilot_audio_device_lle_close());call(171,&va);
+        puts("PASS accepted held retirement permits device close and original allocation free");return 0;
+    }
     if(!strcmp(mode,"startup-active")) {
         access(0xfe802000,4,15);
         uint32_t value=0xa5a55a5a;

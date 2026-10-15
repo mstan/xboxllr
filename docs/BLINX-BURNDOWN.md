@@ -27,10 +27,13 @@ for the evidence and remaining gates.
 
 The active FE hardware comparison now establishes original2010C=0 stopping
 SE15->7. Releasing FE control allows the following20104 submission to reclaim
-PIO space, but the real notifier remains pending beyond10ms. Thus queue progress
-cannot stand in for completion. The next A04 action is an original NOTIFY
-initialization/consumer-context audit, using the retained measurements instead
-of repeating this held-DSP comparison. No HLE runtime or accepted visuals changed.
+PIO space, but the real notifier remains pending beyond10ms. The maintained
+model now executes the original668us timeout with actual work. Selectors0/1
+pass two generations of retirement/reentry and original cleanup; selector2
+still executes its EP frame when that timeout expires and remains guarded.
+Next resolve that reached normal-retirement case and the separate DPC FEMEM
+completion. The timeout does not yet justify deferring early completion for
+the whole profile. No HLE runtime or accepted visuals changed.
 
 The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 preserves every question/evidence/reopening trigger and identifies promoted work.

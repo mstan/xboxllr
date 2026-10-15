@@ -477,6 +477,8 @@ public:
     }
     bool fe_fence_pending()const{return fe_fence_pending_;}
     uint64_t fe_fences_published()const{return fe_fences_published_;}
+    bool retirement_notification_pending()const{return retirement_notify_pending_;}
+    uint64_t retirement_notifications()const{return retirement_notifications_;}
     // The serialized device owner supplies service boundaries, independently
     // of CPU polls. Exact latency is unspecified. A control release is neither
     // required for publication nor treated as proof that prior work finished.
@@ -559,18 +561,19 @@ public:
             return reg32(off); // one canonical register owner, including future active updates
         }
         if(off==kFectl && size==4 && dsp_reset_context_known_) {
-            if(!fectl_initialized_ || !audio_control_drained()) {
+            if(!fectl_initialized_ || (!audio_control_drained() && !fe_status_observable())) {
                 char diagnostic[192];
                 std::snprintf(diagnostic,sizeof(diagnostic),
                     "original FE control/status remains unqualified: known=%u startup=%u fectl=%08x sectl=%08x gp=%x ep=%x",
                     unsigned(fectl_initialized_),unsigned(kernel_audio_startup_),reg32(kFectl),reg32(kSectl),reg32(kGpReset),reg32(kEpReset));
                 device_fault(diagnostic);return 0;
             }
-            // The original88/8/100F writes physically read70088/70008/7100F
-            // with no active SE/DSP work. The same empty-state encoding is
-            // applicable after actual work drains, without erasing history or
-            // treating SE stop alone as acknowledgement of pending work.
-            return (reg32(kFectl)&~0x70000u)|0x70000u;
+            // Physical active/quiet comparisons retain70000 even with a
+            // queued method or a pending notification. These bits are not a
+            // drained-DSP acknowledgement. SE15 adds8000; actual10C=0 stops
+            // SE and clears it. Reads never execute or discard pending work.
+            return (reg32(kFectl)&~0x78000u)|0x70000u|
+                   ((reg32(kSectl)&0x18)==8 ? 0x8000u:0u);
         }
         if(touches_sample_counter(off,size)) {
             if(off!=kXgscnt || size!=4 || !sample_counter_known_) {
@@ -622,6 +625,16 @@ public:
         }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
+        if(touches_retirement_method(off,size)) {
+            retirement_method(off,size,value);return;
+        }
+        if(retirement_notify_pending_ && size>0 &&
+           ((off<kFenaddr+4 && uint64_t(off)+unsigned(size)>kFenaddr) ||
+            (off<kSectl+4 && uint64_t(off)+unsigned(size)>kSectl &&
+             (off!=kSectl || size!=4 || (value&0x18))))) {
+            device_fault("retirement notifier ownership cannot be rebound or resumed before held retirement");return;
+        }
+        if(off==kSectl && size==4 && (value&0x18))retirement_halted_=false;
         if(touches_gp_output_base(off,size)) {
             const int index=gp_output_base_index(off);
             if(size!=4 || index<0 || (value&0xff0000ffu)) {
@@ -674,6 +687,13 @@ public:
             }
             if(off==kEpReset)ep_host_status_known_=false;
             if(value==3)kernel_audio_startup_=false;
+            // The original bounded timeout may proceed without status1.
+            // Both real CPU owners must accept their drained holds before
+            // this generation's uncompleted request can lose its RAM owner.
+            if(reg32(kGpReset)==0 && reg32(kEpReset)==1 && audio_control_drained()) {
+                retirement_notify_pending_=false;retirement_halted_=false;
+                retirement_notify_address_=0;
+            }
             return;
         }
         if(ApuDspHostRegisters::touches(off,size)) {dsp_host_write(off,size,value);return;}
@@ -799,7 +819,7 @@ public:
 
         log_subregion("wr", off);
         if(off==kFectl && size==4 && dsp_reset_context_known_) {
-            value&=~0x70000u;
+            value&=~0x78000u;
             const bool idle_mode=(value&kFectlMethodMode)==0 || (value&kFectlMethodMode)==0x80;
             const bool preserves=fectl_initialized_ && idle_mode &&
                 ((value^reg32(kFectl))&~kFectlMethodMode)==0;
@@ -1141,6 +1161,49 @@ private:
                !gp_frame_outstanding() && !dsp_work_active() && !dsp_work_pending(ApuDspKind::Gp) &&
                !(ep_frame_status_&2u) && (!ep_control_written_ || ep_frame_requested_) &&
                !dsp_work_pending(ApuDspKind::Ep) && !fe_fence_pending_ && !fe_fence_working_;
+    }
+    bool fe_status_observable()const {
+        const uint32_t setup=reg32(kSectl);
+        return dsp_reset_context_known_ && fectl_initialized_ && (setup==7 || setup==15) &&
+               !(reg32(kIsts)&kIstsFet) &&
+               !processing_quantum_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
+               !fe_fence_pending_ && !fe_fence_working_;
+    }
+    static bool touches_retirement_method(uint32_t off,int size) {
+        if(size<=0)return false;
+        const uint64_t end=uint64_t(off)+unsigned(size);
+        return (off<0x20108 && end>0x20104) || (off<0x20110 && end>0x2010c);
+    }
+    void retirement_method(uint32_t off,int size,uint32_t value) {
+        if(size!=4 || (off!=0x20104 && off!=0x2010c) ||
+           !fe_status_observable() || (reg32(kFectl)&kFectlMethodMode) ||
+           reg32(kFeFenceControl)!=0 || retirement_notify_pending_) {
+            device_fault("FE retirement method context/width remains unqualified");return;
+        }
+        if(off==0x2010c) {
+            if(value) {device_fault("FE retirement restart method remains unqualified");return;}
+            // Observed15->7. Stop future setup admission, retaining every
+            // already admitted GP/EP frame, DMA, instruction and RAM owner.
+            set_reg32(kSectl,7);retirement_halted_=true;
+            set_reg32(kFedecmeth,0x10c);set_reg32(kFedecparam,0);
+        } else {
+            const uint32_t base=reg32(kFenaddr);
+            uint8_t status=0;
+            if(value!=2 || !retirement_halted_ || reg32(kSectl)!=7 || !base ||
+               (base&0x3fff) || base>0x03fffff0 ||
+               !read_mem(base+15,&status,1) || faulted_ || status!=0x80) {
+                device_fault("FE retirement notification requires the original live pending slot");return;
+            }
+            // Physical observation consumed this request without publishing
+            // status1 through10ms. Preserve an explicit owned request, never
+            // fabricate completion or IRQ. Original17C1B1's bounded timeout
+            // advances the actual clock; normal reset still requires drain.
+            // Earlier completion remains a documented qualification question.
+            retirement_notify_address_=base;retirement_notify_pending_=true;
+            ++retirement_notifications_;
+            set_reg32(kFedecmeth,0xd0104);set_reg32(kFedecparam,value);
+        }
+        fe_context_known_=false;kernel_audio_startup_=false;fe_state_used_=true;
     }
     bool fe_work_idle()const {
         return !processing_quantum_ && !gp_mix_admitting_ && !gp_frame_outstanding() &&
@@ -1538,6 +1601,9 @@ private:
     bool kernel_audio_startup_=false;
     bool fe_fence_pending_=false,fe_fence_working_=false;
     uint64_t fe_fences_published_=0;
+    bool retirement_halted_=false,retirement_notify_pending_=false;
+    uint32_t retirement_notify_address_=0;
+    uint64_t retirement_notifications_=0;
     uint64_t frame_ = 0;
     bool frame_clock_primed_=false;
     uint64_t voice_on_methods_ = 0;

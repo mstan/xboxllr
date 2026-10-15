@@ -66,6 +66,16 @@ new waived requirement. Reopen on an original consumer requiring status1, an
 unsafe timeout/late write, or an affected lifetime/output regression. The
 separate original DPC FEMEM completion remains required.
 
+AUDIO-D14 candidate result,2026-10-15: actual maintained CPUs now execute that
+original timeout. Selectors0/1 pass two processed generations, holds/reentry
+and original free with no later RAM access. Selector2 remains in its EP frame
+at the timeout, so the next original control read rejects and retains its
+owners. The candidate is not accepted for the whole profile; no new scope is
+waived. AUDIO-D13's reopening condition is reached for this specific normal
+selector2 retirement. Resolve that case without expanding to arbitrary reset
+interleavings. Stopped codec streams mean connected output acceptance also
+remains A05. The current family/deferral counts are unchanged.
+
 AUDIO-D13 update,2026-10-15: configured reset is adopted and original drained
 retirement/reentry now passes for three configurations, two processed generations
 each, on retained owners. The original final free precedes an observed interval

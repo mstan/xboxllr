@@ -56,7 +56,8 @@ int main() {
         CHECK(!f.error.empty() && f.ram==before && !f.writes && !f.irq_edges);
         CHECK(!f.apu.fe_fence_pending() && !f.apu.fe_fences_published());
     }
-    // Restoring register values cannot launder processing/transport history.
+    // Drained control access can follow real processing history. Restoring
+    // registers still cannot grant the independently required RAM fence.
     for(unsigned kind=0;kind<8;++kind) {
         Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
         switch(kind) {
@@ -69,7 +70,9 @@ int main() {
         case 6:f.apu.mmio_write(0xfe801fff,2,0x1800);f.write(0x2000,7);break;
         case 7:f.write(0x1100,0xe0);f.write(0x1100,0x88);break;
         }
-        CHECK(f.error.empty());CHECK(f.read(0x1510)==0 && !f.error.empty() && !f.writes);
+        CHECK(f.error.empty());const auto before=f.ram;
+        f.write(0x1324,4096);
+        CHECK(!f.error.empty() && !f.writes && f.ram==before && !f.apu.fe_fence_pending());
     }
     {Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());f.write(0x1510,0);
      CHECK(!f.apu.initialize_kernel_audio_handoff());
