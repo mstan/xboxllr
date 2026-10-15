@@ -101,6 +101,30 @@ binding, not proof of a new device defect or grounds for another title run. The
 result and the corrected capture-framing analysis remain private beside the
 saved prefix. No new deferral or family closure;6/9 remains.
 
+The saved title-music comparison now includes the independently qualified
+selector2 PCM transform and original device-wide submix headroom. Constructor
+176D72 initializes bins0..30 to headroom1 and bin31 to0; startup178646 publishes
+those settings through178191. The ordinary stereo bins therefore contribute
+half their input before the observed -300 volume. Omitting this original default
+caused the earlier factor-of-two level discrepancy. This corrects the oracle,
+not the emulator, and no fitted gain or relaxed threshold is used. With both
+stages included, three half-second windows have RMSE0.0081..0.0155 but correlation
+0.834..0.899, below the existing0.99 requirement. The exact current title source
+and DSP-stage binding still need resolution; this is not a proven device defect.
+The private `title-headroom-source` and `title-music-headroom-review` reports
+retain the source hashes and comparison. Separate extraction of88,200 actual
+input frames from the accepted Q03 reference route agrees with FFmpeg's ADX
+decode at correlation0.999985/0.999989 and RMSE0.000459/0.000399. That source check
+does not establish the current original-audio route's input or final output.
+
+Saved-evidence analysis also exposed many small disk reads under contention.
+The reference DMA reader now batches them in a1MiB buffer. On4,096 real retained
+records (2,251,216 bytes), old and new readers return identical complete reports,
+source bytes and rows; both reject truncated headers and payloads. The private
+`buffer-reader-check.aot-private.json` records this check. Cached timings are not
+a controlled speed comparison. No guest timing, processing, HLE selection or
+acceptance condition changes, and these analyses require no title rerun.
+
 ## Idle interrupt feedback and service-stack ownership - 2026-10-15
 
 The hotplug guard has a short reproducer: an actual IRQ interrupts original

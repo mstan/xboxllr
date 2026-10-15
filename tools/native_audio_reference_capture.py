@@ -25,7 +25,9 @@ def inspect(path, output=None, log=None):
     mismatches = 0
     source = {}
     generations = {}
-    with path.open('rb') as file:
+    # Records are small; batch immutable capture reads to avoid an 8 KiB
+    # disk request for every few records on a busy evidence volume.
+    with path.open('rb', buffering=1024 * 1024) as file:
         while raw := file.read(HEADER.size):
             if len(raw) != HEADER.size:
                 raise ValueError('partial reference record')
