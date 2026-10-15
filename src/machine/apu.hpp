@@ -523,6 +523,9 @@ public:
         if(touches_hrtf_target(off,size)) {
             device_fault("HRTF target method has no qualified register readback");return 0;
         }
+        if(size>0 && off<0x2080c && uint64_t(off)+unsigned(size)>0x20804) {
+            device_fault("input SGE method has no qualified register readback");return 0;
+        }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
         if(touches_gp_output_base(off,size)) {
@@ -623,6 +626,9 @@ public:
             if(index==0)startup_output_base_known_=false;
         }
         if(size>0 && off<0x3030 && uint64_t(off)+unsigned(size)>0x3028)startup_output_base_known_=false;
+        if(size>0 && off<0x2080c && uint64_t(off)+unsigned(size)>0x20804) {
+            input_sge_method(off,size,value);return;
+        }
         if(ApuStartupMethods::touches(off,size)) {
             startup_method(off,size,value);return;
         }
@@ -982,10 +988,52 @@ private:
             if(off<base+4 && uint64_t(off)+unsigned(size)>base)return true;
         return false;
     }
+    void input_sge_method(uint32_t off,int size,uint32_t value) {
+        // Original17ACBF publishes locked source pages while SE/GP/EP run.
+        // The shared clock settles preceding work before CPU MMIO. A future
+        // VP source fetch reads this same RAM table; already fetched samples
+        // and an outstanding GP MIX frame retain their existing ownership.
+        if(size!=4 || (off!=0x20804 && off!=0x20808) ||
+           (reg32(kFectl)&kFectlMethodMode) || (reg32(kIsts)&kIstsFet) ||
+           reg32(kFeFenceControl)!=0 || fe_fence_pending_ ||
+           processing_quantum_ || gp_mix_admitting_ || dsp_work_active() || input_sge_publishing_) {
+            device_fault("input SGE publication requires free FE and serialized device work");return;
+        }
+        fe_context_known_=false;
+        if(off==0x20804) {
+            if(!startup_configuration_.known(0x1138) || value>reg32(0x1138)) {
+                device_fault("input SGE selector exceeds its qualified limit");return;
+            }
+            input_sge_=value;input_sge_known_=true;
+        } else {
+            const uint32_t base=reg32(0x2030);
+            if(!input_sge_known_ || (value&0xfff) || value>0x03fff000 ||
+               !base || (base&0x3fff) || uint64_t(base)+uint64_t(input_sge_)*8+8>0x04000000) {
+                device_fault("input SGE mapping/selection remains unqualified");return;
+            }
+            // Stopped physical observations and the independent field layout
+            // agree: only VPSGE descriptor DWORD0 changes, not DWORD1 or GPF.
+            const std::array<uint8_t,4> bytes={uint8_t(value),uint8_t(value>>8),uint8_t(value>>16),uint8_t(value>>24)};
+            input_sge_publishing_=true;
+            const bool written=mem_write_ && mem_write_(base+input_sge_*8,bytes.data(),bytes.size());
+            input_sge_publishing_=false;
+            if(!written || faulted_) {
+                device_fault("input SGE publication requires owned writable RAM");return;
+            }
+        }
+        set_reg32(kFedecmeth,off-kVpBase);set_reg32(kFedecparam,value);
+    }
     void startup_method(uint32_t off,int size,uint32_t value) {
         if(size!=4 || (off&3) || !kernel_audio_control_idle() ||
            reg32(kGpReset)!=0 || reg32(kEpReset)!=1) {
-            device_fault("APU startup method requires stopped SE and held DSPs");return;
+            char detail[320];
+            std::snprintf(detail,sizeof(detail),
+                "APU startup method requires stopped SE and held DSPs: address=%08x width=%d value=%08x FE=%08x SE=%08x GP=%08x EP=%08x control=%08x kernel_scope=%u quanta=%llu GP_revision=%llu EP_revision=%llu",
+                kBase+off,size,value,reg32(kFectl),reg32(kSectl),reg32(kGpReset),reg32(kEpReset),
+                reg32(kFeFenceControl),unsigned(kernel_audio_startup_),
+                static_cast<unsigned long long>(voice_mix_quanta_),
+                static_cast<unsigned long long>(gp_program_revision_),static_cast<unsigned long long>(ep_program_revision_));
+            device_fault(detail);return;
         }
         fe_context_known_=false;
         if(off==0x1148) {
@@ -1024,19 +1072,15 @@ private:
             // The original pair restores end2000. A separate length2100
             // comparison trapped the physical FE; do not silently accept it.
             set_reg32(0x3028,0x2000);
-        }else if(method==0x804 || method==0x1800) {
-            const bool input=method==0x804;
-            if((input && (!startup_configuration_.known(0x1138) || value>reg32(0x1138))) ||
-               (!input && (!(startup_method_known_&(1u<<6)) || value>reg32(0x1148)))) {
+        }else if(method==0x1800) {
+            if(!(startup_method_known_&(1u<<6)) || value>reg32(0x1148)) {
                 device_fault("APU startup SGE selector exceeds its qualified limit");return;
             }
-            (input?startup_input_sge_:startup_output_sge_)=value;
-            (input?startup_input_sge_known_:startup_output_sge_known_)=true;
-        }else if(method==0x808 || method==0x1808) {
-            const bool input=method==0x808;
-            const uint32_t base=reg32(input?0x2030:0x2044);
-            const uint32_t slot=input?startup_input_sge_:startup_output_sge_;
-            if(!(input?startup_input_sge_known_:startup_output_sge_known_) ||
+            startup_output_sge_=value;startup_output_sge_known_=true;
+        }else if(method==0x1808) {
+            const uint32_t base=reg32(0x2044);
+            const uint32_t slot=startup_output_sge_;
+            if(!startup_output_sge_known_ ||
                (value&0xfff) || value>0x03fff000 || !base || (base&0x3fff) ||
                uint64_t(base)+uint64_t(slot)*8+8>0x04000000) {
                 device_fault("APU startup SGE mapping/selection remains unqualified");return;
@@ -1050,10 +1094,10 @@ private:
         }else {device_fault("unknown APU startup method");return;}
         set_reg32(kFedecmeth,method);set_reg32(kFedecparam,value);
     }
-    uint32_t startup_method_known_=0,startup_input_sge_=0,startup_output_sge_=0;
+    uint32_t startup_method_known_=0,input_sge_=0,startup_output_sge_=0;
     uint8_t gp_output_base_known_=0;
     bool startup_output_base_known_=false;
-    bool startup_input_sge_known_=false,startup_output_sge_known_=false;
+    bool input_sge_known_=false,input_sge_publishing_=false,startup_output_sge_known_=false;
     bool kernel_audio_control_idle()const {
         return kernel_audio_startup_ && !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
                !voice_mix_quanta_ && !processing_quantum_ && !gp_mix_admitting_ &&

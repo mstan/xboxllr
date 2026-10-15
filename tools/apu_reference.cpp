@@ -33,6 +33,7 @@ struct Reference {
 bool qualified_write(uint32_t offset) {
     if(offset>=0x20200 && offset<=0x2027c && !(offset&3))return true;
     switch(offset) {
+    case 0x1138:case 0x20804:case 0x20808: // Device owns input SGE limit and runtime publication.
     case 0x202c:case 0x2030: // voice table and source scatter/gather physical addresses
     case 0x115c:case 0x1000:case 0x1004: // notifier table and real interrupt ownership
     case 0x1100:case 0x1504:case 0x2000: // FE trap ownership and setup frame enable
@@ -56,6 +57,11 @@ EXPORT void* xlle_apu_reference_create(void* ram,uint32_t bytes) {
     return new(std::nothrow) Reference(ram,bytes);
 }
 EXPORT void xlle_apu_reference_destroy(void* instance) {delete static_cast<Reference*>(instance);}
+EXPORT int xlle_apu_reference_kernel_handoff(void* instance) {
+    if(!instance)return 0;
+    auto& ref=*static_cast<Reference*>(instance);
+    return ref.failure.empty() && ref.apu.initialize_kernel_audio_handoff();
+}
 EXPORT const char* xlle_apu_reference_error(void* instance) {
     return instance?static_cast<Reference*>(instance)->failure.c_str():"APU reference missing instance";
 }

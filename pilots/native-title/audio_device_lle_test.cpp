@@ -227,6 +227,11 @@ int main(int argc,char **argv) {
         puts("PASS selected native EP lookup: all2048 actual CPU reads and exact owned DMA bytes; released owner retained for pending reset qualification");return 0;
     }
     if(!strcmp(mode,"clock-active")) {
+        uint32_t sg_args[]={0x8000,0,0x03ffffff,0x4000,PAGE_READWRITE};
+        const uint32_t sg_va=call(166,sg_args),sg_pa=call(173,&sg_va);CHECK(sg_va && sg_pa);
+        memset(guest+sg_va,0xa5,0x8000);
+        access(0xfe801100,4,0x88);access(0xfe801138,4,0x7ff);access(0xfe802030,4,sg_pa);
+        access(0xfe801510,4,0);access(0xfe801100,4,0x100f);
         uint32_t bytes=3*4096,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
         memset(guest+va,0,bytes);word(va)=pa+4096;word(va+8)=pa+8192;
         const uint32_t program[]={0x08f485,0xfff,0x08f484,1,0x0a8581,4,0x08f485,2,0x08f484,1,0x0af080,4};
@@ -242,12 +247,18 @@ int main(int argc,char **argv) {
         CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);
         CHECK(s.gp_quanta==24 && s.ep_events==3 && s.gp_phase==3 && s.ep_phase==2 && !s.pcm_words);
         const auto gp_cycles=s.gp_cycles,ep_cycles=s.ep_cycles;
+        const auto dma_writes=s.dma_writes;
+        access(0xfe820804,4,0);access(0xfe820808,4,sg_pa+0x4000);
+        access(0xfe820804,4,1);access(0xfe820808,4,sg_pa+0x5000);
+        CHECK(word(sg_va)==sg_pa+0x4000 && word(sg_va+8)==sg_pa+0x5000);
+        for(unsigned i=0;i<0x8000;++i)if(i>=4 && (i<8 || i>=12))CHECK(guest[sg_va+i]==0xa5);
         CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);
         CHECK(s.gp_cycles==gp_cycles && s.ep_cycles==ep_cycles && s.gp_quanta==24 && s.ep_events==3);
+        CHECK(s.dma_writes==dma_writes+2 && !s.pcm_words);
         access(0xfe802000,4,7);ticks+=6000;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
         pilot_audio_device_lle_state(&s);CHECK(s.gp_quanta==24 && s.ep_events==3 && s.gp_phase==3 && s.ep_phase==2);
         CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&s);CHECK(s.owned && s.work_binding);
-        puts("PASS native shared clock:24 actual GP frames,3 EP events, no repeated-time work and retained active-reset ownership");return 0;
+        puts("PASS native shared clock:24 GP frames,3 EP events, actual runtime SGE publication, inert repeated time and retained active-reset ownership");return 0;
     }
     if(!strcmp(mode,"host-controls")) {
         auto read=[](uint32_t address){uint32_t value=0;CHECK(!pilot_audio_device_lle_access(address,4,0,&value));return value;};
@@ -428,7 +439,11 @@ int main(int argc,char **argv) {
     if(!strcmp(mode,"startup-active")) {
         access(0xfe802000,4,15);access(0xfe802000,4,7);
         uint32_t value=0xa5a55a5a;
-        CHECK(pilot_audio_device_lle_access(0xfe801510,4,0,&value));CHECK(value==0xa5a55a5a);
+        const char *error=pilot_audio_device_lle_access(0xfe801510,4,0,&value);CHECK(error);CHECK(value==0xa5a55a5a);
+        const std::string first=error;
+        CHECK(first.find("[audio device access: address=fe801510 width=4 read]")!=std::string::npos);
+        CHECK(pilot_audio_device_lle_access(0xfe820804,4,1,&value));
+        CHECK(first==pilot_audio_device_lle_error()); // Later calls cannot relabel the original fault.
         PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
         CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words);
         CHECK(!pilot_audio_device_lle_close());

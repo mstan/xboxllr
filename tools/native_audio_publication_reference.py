@@ -14,6 +14,7 @@ import struct
 from native_ep_directory_reference import OriginalProducer
 from native_ep_reference import IMAGE_SHA256
 from unicorn import UC_HOOK_MEM_READ
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EIP, UC_X86_REG_ESP
 
 
 class Publication(OriginalProducer):
@@ -44,7 +45,34 @@ class Publication(OriginalProducer):
             super()._write(cpu, access, address, size, value, unused)
 
 
-def check(xbe, library, output):
+class RuntimePublication(Publication):
+    """Explicit kernel pin floor; every original driver/IRQL callee executes."""
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.pins = {}
+
+    def _instruction(self, cpu, address, size, unused):
+        if address == 0x800000ad:  # MmGetPhysicalAddress must refer to a locked page.
+            virtual = self.get(cpu.reg_read(UC_X86_REG_ESP)+4)
+            assert any(base <= virtual < base+extent for base, extent in self.pins.items())
+        if address != 0x800000af:  # MmLockUnlockBuffer(address, bytes, unlock)
+            return super()._instruction(cpu, address, size, unused)
+        stack = cpu.reg_read(UC_X86_REG_ESP)
+        virtual, extent, unlock = args = [self.get(stack+4+i*4) for i in range(3)]
+        self.owned(virtual, extent)
+        assert extent and not virtual % 4096 and not extent % 4096 and unlock in (0, 1)
+        if unlock:
+            assert self.pins.pop(virtual) == extent
+        else:
+            assert virtual not in self.pins
+            self.pins[virtual] = extent
+        self.kernel_calls.append(dict(ordinal=175, service='pin_buffer', args=args, result=0))
+        cpu.reg_write(UC_X86_REG_EAX, 0)
+        cpu.reg_write(UC_X86_REG_ESP, stack+16)
+        cpu.reg_write(UC_X86_REG_EIP, self.get(stack))
+
+
+def check(xbe, library, output, runtime_sge=False):
     blob = xbe.read_bytes()
     assert hashlib.sha256(blob).hexdigest() == IMAGE_SHA256
     output = output.resolve()
@@ -57,11 +85,14 @@ def check(xbe, library, output):
         volumes=[0x180f180f, 0xffffffff, 0xffffffff], frames=2048,
         hrtf_target=0xffff, control50=0, control70=0, pitch=0,
         output=[0.25*10**(-384/1280), -0.375*10**(-384/1280)], tolerance=0.00003)
+    expected['runtime_input_sge'] = dict(slots=[0,17,2046], pages=2, descriptor_stride=8,
+        writes_only_dword0=True, unlock_after_retirement=True) if runtime_sge else None
     (output/'expectations.aot-private.json').write_text(json.dumps(expected, indent=2)+'\n')
     dll = c.CDLL(str(library.resolve()))
     dll.xlle_apu_reference_create.argtypes = [c.c_void_p, c.c_uint32]
     dll.xlle_apu_reference_create.restype = c.c_void_p
     dll.xlle_apu_reference_destroy.argtypes = [c.c_void_p]
+    dll.xlle_apu_reference_kernel_handoff.argtypes = [c.c_void_p]
     dll.xlle_apu_reference_error.argtypes = [c.c_void_p]
     dll.xlle_apu_reference_error.restype = c.c_char_p
     dll.xlle_apu_reference_write.argtypes = [c.c_void_p, c.c_uint32, c.c_int, c.c_uint32]
@@ -70,7 +101,7 @@ def check(xbe, library, output):
     dll.xlle_apu_reference_frame.argtypes = [c.c_void_p, c.c_uint64]
     lives = []
     for lifetime, voice in enumerate(expected['handles']):
-        ram = (c.c_ubyte*0x20000)()
+        ram = (c.c_ubyte*(0x40000 if runtime_sge else 0x20000))()
         instance = dll.xlle_apu_reference_create(ram, len(ram))
         assert instance
         transactions = []
@@ -89,7 +120,12 @@ def check(xbe, library, output):
         def word(off): return struct.unpack_from('<I', ram, off)[0]
         def store(off, value): struct.pack_into('<I', ram, off, value)
         try:
-            original = Publication(blob, lifetime, ram, transaction)
+            original = (RuntimePublication if runtime_sge else Publication)(blob, lifetime, ram, transaction)
+            slot = [0, 17, 2046][lifetime] if runtime_sge else 0
+            if runtime_sge:
+                assert dll.xlle_apu_reference_kernel_handoff(instance)
+                write(0x1100, 0x88); write(0x1138, 0x7ff)
+                write(0x1510, 0); write(0x1100, 0x100f)
             obj, settings, device, counter, wfex = 0x30000000, 0x30001000, 0x30002000, 0x30003000, 0x3000a000
             # Prepared zeroed class storage and live reference-counted device.
             # The original constructors establish all voice/settings defaults.
@@ -111,22 +147,48 @@ def check(xbe, library, output):
                 original.put(device+off, device+off); original.put(device+off+4, device+off)
             original.put(0x17df38, 0x3100a000)
             original.put(0x17df28, 0x31001000)
-            write(0x202c, 0x1000); write(0x2030, 0xf000); write(0x115c, 0xa000)
+            write(0x202c, 0x1000); write(0x2030, 0x10000 if runtime_sge else 0xf000); write(0x115c, 0xa000)
             for off in (0x2054,0x2060,0x206c): write(off, 0xffff)
-            store(0xf000, 0x10000); store(0xf008, 0x11000)
-            ram[0x10000:0x12000] = struct.pack('<hh', 8192, -12288)*expected['frames']
+            if runtime_sge:
+                # Authored owned source bytes, never a substituted driver callee.
+                source_va = original.allocate('contiguous', 0x2000)
+                source_pa = original.owned(source_va)['physical']
+                source_bytes = struct.pack('<hh', 8192, -12288)*expected['frames']
+                original.cpu.mem_write(source_va, source_bytes)
+                ram[source_pa:source_pa+len(source_bytes)] = source_bytes
+                ram[0x10000:0x14000] = b'\xa5'*0x4000
+                write(0x2000, 15)  # Runtime SE, without relabelling it idle.
+                before_mapping = bytes(ram); transactions.clear()
+                original.call(0x17acbf, [slot, source_va, 2])
+                mapping = list(transactions)
+                expected_mapping = []
+                for page in range(2):
+                    expected_mapping.extend([
+                        dict(op='R', address=0xfe820010, value=0x80),
+                        dict(op='W', address=0xfe820804, value=slot+page),
+                        dict(op='W', address=0xfe820808, value=source_pa+page*4096)])
+                assert mapping == expected_mapping
+                expected_ram = bytearray(before_mapping)
+                for page in range(2): struct.pack_into('<I', expected_ram, 0x10000+(slot+page)*8, source_pa+page*4096)
+                assert bytes(ram) == expected_ram  # Includes descriptor DWORD1 and surrounding RAM.
+                assert original.pins == {source_va: 8192}
+            else:
+                store(0xf000, 0x10000); store(0xf008, 0x11000)
+                ram[0x10000:0x12000] = struct.pack('<hh', 8192, -12288)*expected['frames']
             base = 0x1000+voice*128
             store(base+0x50, 0xffffffff); store(base+0x70, 0xffffffff)
             # Declared free-running reason policy, not hardware raw-value
             # equivalence. Original mode RMW must preserve these uninterpreted
             # fields and follow exactly the same supported control path.
-            control = 0x7100f | (expected['nontrapped_reason_fields'][lifetime]<<8)
-            write(0x1100, control)
-            original.call(0x17bc43,[0],device+8)
-            assert transaction('R',0xfe801100,4,0) == control|0x80
-            original.call(0x17bc43,[1],device+8)
-            assert transaction('R',0xfe801100,4,0) == control
-            mode_transactions = list(transactions[-6:])
+            mode_transactions = []
+            if not runtime_sge:
+                control = 0x7100f | (expected['nontrapped_reason_fields'][lifetime]<<8)
+                write(0x1100, control)
+                original.call(0x17bc43,[0],device+8)
+                assert transaction('R',0xfe801100,4,0) == control|0x80
+                original.call(0x17bc43,[1],device+8)
+                assert transaction('R',0xfe801100,4,0) == control
+                mode_transactions = list(transactions[-6:])
             before = bytes(ram)
             transactions.clear()
             assert original.call(0x1795f1, ecx=obj) == 0
@@ -155,7 +217,7 @@ def check(xbe, library, output):
             assert original.get(counter) == 255-voice
             # Explicit pre-existing source mapping, then the whole original
             # start helper owns list insertion and ACTIVE/notifier transition.
-            write(0x202f8, voice); write(0x203a0, 0); write(0x203dc, expected['frames']-1)
+            write(0x202f8, voice); write(0x203a0, slot*4096); write(0x203dc, expected['frames']-1)
             original.call(0x179c4b, ecx=obj)
             assert word(base+0x54)&(1<<21) and ram[notify+15] == 0x80
             samples = []; count = c.c_uint32(); done = c.c_int(); bins = (c.c_float*1024)()
@@ -179,12 +241,24 @@ def check(xbe, library, output):
             original.call(0x177d7d,[obj],device) # void; verify actual handle ownership below
             assert original.get(counter) == 256-voice and original.get(device+0x328+voice*4) == 0
             assert int.from_bytes(original.cpu.mem_read(obj+0xc,2),'little') == 0xffff
-            assert not original.allocations and not original.kernel_calls
+            if runtime_sge:
+                # Only after actual processing, original list retirement and
+                # handle release may the original counterpart unpin the source.
+                original.call(0x17ad2c, [source_va, 2])
+                assert not original.pins
+                assert [row['ordinal'] for row in original.kernel_calls] == [175, 173, 173, 175]
+                original.call(0x800000ab, [source_va])  # Explicit kernel fixture frees its allocation.
+                assert all(not allocation['live'] for allocation in original.allocations)
+            else:
+                assert not original.allocations and not original.kernel_calls
             identity = original.source_identity()
             assert all(bytes(original.cpu.mem_read(int(r['address'],16),r['bytes'])) == original.source(int(r['address'],16),r['bytes']) for r in identity)
             lives.append(dict(voice=voice,publication=publication,calls=original.calls,mode_transactions=mode_transactions,
                 output_frames=len(samples),maximum_error=maximum,source_identity=identity,
                 original_handle_released=True,original_list_retired=True,transactions=transactions))
+            if runtime_sge:
+                lives[-1].update(input_sge_mapping=mapping, source_slot=slot,
+                    kernel_services=original.kernel_calls, source_unpinned_after_retirement=True)
         except BaseException as exc:
             (output/f'failure-{lifetime}.aot-private.json').write_text(json.dumps(
                 dict(error=repr(exc),voice=voice,transactions=transactions,calls=original.calls),indent=2)+'\n')
@@ -192,15 +266,17 @@ def check(xbe, library, output):
         finally:
             dll.xlle_apu_reference_destroy(instance)
     def pin(p): return dict(path=str(p.resolve()),sha256=hashlib.sha256(p.read_bytes()).hexdigest())
-    result = dict(result='original-ordinary-publication-and-consumers-passed',lifetimes=lives,
+    result = dict(result='original-runtime-input-sge-and-consumers-passed' if runtime_sge else 'original-ordinary-publication-and-consumers-passed',lifetimes=lives,
         pins=[pin(xbe),pin(library),pin(output/'expectations.aot-private.json')],
         hardware_operations=0,playback=False,
-        scope='Prepared DISPATCH_LEVEL device allocator/notifier/source mappings; whole original constructors, allocation/publication/reentry/start/unlink/handle release; maintained source/envelope/mix. No busy FE timing, GP/EP output, enclosing initializer or complete title claim.')
+        scope='Prepared DISPATCH_LEVEL device allocator/notifier context; whole original constructors, allocation/publication/reentry/start/unlink/handle release; maintained source/envelope/mix. Runtime mode also executes whole17ACBF pin/publish and17AD2C unpin with an explicit kernel pin floor. No busy FE timing, GP/EP output, enclosing initializer or complete title claim.')
     (output/'original-publication.aot-private.json').write_text(json.dumps(result,indent=2)+'\n')
-    print('PASS 3 complete original voice publications, allocation/reentry/start/retirement, and independent 2048-frame processing per lifetime')
+    print('PASS 3 complete original voice publications, allocation/reentry/start/retirement, and independent 2048-frame processing per lifetime' +
+          ('; whole original runtime pin/publish/unpin at slots0/17/2046' if runtime_sge else ''))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','library','output'): parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--runtime-sge', action='store_true')
     check(**vars(parser.parse_args()))

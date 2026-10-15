@@ -370,6 +370,13 @@ static uc_err owned_cpu_write(uc_engine *engine,uint32_t address,const void *buf
 }
 static void forbidden(uc_engine *engine,const char *reason)
 {failure=reason;uc_emu_stop(engine);}
+static void device_mmio_failure(uc_engine *engine,uint32_t address,unsigned size,int write,uint32_t value,const char *error)
+{
+    uint32_t pc=0;const unsigned known=uc_reg_read(engine,UC_X86_REG_EIP,&pc)==UC_ERR_OK;
+    if(write)fprintf(stderr,"[ORIGINAL DEVICE MMIO FAILURE] pc=%08x pc_known=%u address=%08x bytes=%u write value=%08x: %s\n",pc,known,address,size,value,error);
+    else fprintf(stderr,"[ORIGINAL DEVICE MMIO FAILURE] pc=%08x pc_known=%u address=%08x bytes=%u read: %s\n",pc,known,address,size,error);
+    forbidden(engine,error);
+}
 static uint64_t device_mmio_read(uc_engine *engine,uint64_t offset,unsigned size,void *data)
 {
     struct DeviceMmio *owner=data;uint32_t value=0;
@@ -381,7 +388,7 @@ static uint64_t device_mmio_read(uc_engine *engine,uint64_t offset,unsigned size
     device_bus_borrow=1;device_bus_dma_lease=owner->dma_lease;
     const char *error=owner->callback(owner->first+(uint32_t)offset,size,0,&value);
     device_bus_borrow=0;device_bus_dma_lease=0;
-    if(error)forbidden(engine,error);
+    if(error)device_mmio_failure(engine,owner->first+(uint32_t)offset,size,0,0,error);
     return value;
 }
 static void device_mmio_write(uc_engine *engine,uint64_t offset,unsigned size,uint64_t value,void *data)
@@ -403,7 +410,7 @@ static void device_mmio_write(uc_engine *engine,uint64_t offset,unsigned size,ui
     device_bus_borrow=1;device_bus_dma_lease=owner->dma_lease;
     const char *error=owner->callback(owner->first+(uint32_t)offset,size,1,&word);
     device_bus_borrow=0;device_bus_dma_lease=0;
-    if(error)forbidden(engine,error);
+    if(error)device_mmio_failure(engine,owner->first+(uint32_t)offset,size,1,(uint32_t)value,error);
 }
 #ifdef PILOT_FILES_LLE
 #include "io_storage_lle.inc"

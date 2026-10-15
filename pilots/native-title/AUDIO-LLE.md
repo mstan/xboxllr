@@ -3367,3 +3367,52 @@ bytes. `.113.31` has satisfied its bounded original method-group acceptance;
 operation or HLE processing change occurred. Private evidence is under
 `build/blinx/audio-original-publication-20261015/`. Families remain6/9;
 the append-only queues now retain31 IDs /30 deferred scopes.
+
+## Runtime input SGE publication - 2026-10-15
+
+The diagnostic identifies original PC17AD06 writing FE820804=0 inside the
+complete17ACBF source-page publication loop. At that point FE=100F, SE=0F,
+GP=EP=3, FE control=0 and two VP quanta have completed. This is runtime work;
+it cannot be admitted by declaring the device to be in its stopped startup
+scope. The diagnostic retains the original PC, access width/value and first
+device failure without issuing extra hardware reads.
+
+The existing APU owner now accepts the input804 selector/808 pointer pair
+under a free FE and serialized device work. The configured selector limit,
+aligned physical table and page, actual writable RAM, preserved descriptor
+DWORD1 and distinct output table remain enforced. Held/trapped/pending FE,
+reentrant work, invalid addresses, partial transactions and readback fail.
+Output methods and cold configuration retain their previous guards. Existing
+source pulls observe the same RAM table; already fetched samples and GP MIX
+ownership are not discarded. Native MMIO still settles the single device clock.
+
+`native_audio_publication_reference.py --runtime-sge` executes the whole
+original17ACBF loop at slots0,17 and2046. Each lifetime performs the original
+pin call, two physical-address queries and both complete selector/pointer pairs,
+then original ordinary voice publication/start,2048 independently authored
+stereo frames through maintained source/envelope/mix, original list/handle
+retirement and original17AD2C unpin. Kernel memory/pin services are explicit
+bounded fixture inputs; no original driver callee is replaced. Surrounding RAM
+and descriptor DWORD1 are compared in full. The first runtime fixture also
+attempted an unrelated active FE mode-status check and correctly hit its guard;
+that failed receipt is retained. The final runtime group excludes that separate
+mode test, preserving the active FE-status guard. The prior ordinary-publication
+mode/reason fixture still passes unchanged in its original context.
+
+Ten native/core checks pass in3.28s. These include real cross-page/remapped PCM
+fetches, retirement before backing removal,12 failure cases, both DSPs running
+on the shared clock, and native publication after24 GP quanta/three EP events
+without extra time or cycles. The input-SGE contract also builds and passes
+with MinGW. No HLE processing or default selection changes.
+
+One changed muted/headless title ran60.297s and crossed the previous runtime
+publication boundary. Both capture partials now contain8192 accepted bytes in
+eight real1024-byte blocks, codec frames1015..1022, separated by6000 PIT ticks.
+The bytes are all zero; this is initial transport evidence, not sustained music
+or whole audio qualification. Original codec ISR17CA08 ->17C8DB next faults on
+the native16-bit read at FEC00116. The native MMIO decoder currently covers byte
+and DWORD instructions; `.113.33` owns the full codec status/ack/refill group.
+`.113.32` has met its runtime input-publication acceptance. A03-A05 remain open.
+Evidence: `build/blinx/audio-runtime-publication-20261015/`; final title SHA256
+`5a918b35d9221938d7d8dc2b45983371165b55348c2494413fa6766b2d859293`.
+No Xbox operation or new precision deferral. Families6/9;31 IDs /30 scopes.

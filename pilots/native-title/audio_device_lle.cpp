@@ -26,6 +26,14 @@ const char *fail(const char *why) {
     if(failure.empty())failure=why;
     return failure.c_str();
 }
+const char *access_failure(uint32_t address,unsigned size,int write,uint32_t supplied,const char *phase) {
+    // Retain the first device/clock cause with the attempted transaction. Do
+    // not issue diagnostic MMIO reads or inspect a read's uninitialized output.
+    char context[160];
+    if(write)std::snprintf(context,sizeof(context)," [audio %s: address=%08x width=%u write value=%08x]",phase,address,size,supplied);
+    else std::snprintf(context,sizeof(context)," [audio %s: address=%08x width=%u read]",phase,address,size);
+    failure+=context;return failure.c_str();
+}
 struct Owner {
     xlle::McpxApu apu{[](const std::string& why){fail(why.c_str());}};
     xlle::McpxAci aci{[](const std::string& why){fail(why.c_str());}};
@@ -166,8 +174,8 @@ extern "C" const char *pilot_audio_device_lle_access(uint32_t address,unsigned s
     if(owner->busy)return fail("original audio device callback reentry");
     // Settle elapsed guest time under the preceding device configuration.
     // A read at unchanged time supplies no instruction budget or completion.
-    if(pilot_audio_device_lle_sample())return failure.c_str();
     const uint32_t supplied=write?*value:0; // A read's output need not be initialized.
+    if(pilot_audio_device_lle_sample())return access_failure(address,size,write,supplied,"before access");
     const bool apu=address>=xlle::McpxApu::kBase && address<xlle::McpxApu::kBase+xlle::McpxApu::kSize;
     const bool aci=address>=xlle::McpxAci::kBase && address<xlle::McpxAci::kBase+xlle::McpxAci::kSize;
     if((!apu && !aci) || (apu && !pilot_original_apu_admitted(address-xlle::McpxApu::kBase,size,write,supplied)) ||
@@ -194,7 +202,8 @@ extern "C" const char *pilot_audio_device_lle_access(uint32_t address,unsigned s
         if(write)owner->aci.mmio_write(address,int(size),*value);
         else {uint32_t observed=owner->aci.mmio_read(address,int(size));if(failure.empty())*value=observed;}
     }
-    return pilot_audio_device_lle_error();
+    if(!failure.empty())return access_failure(address,size,write,supplied,"device access");
+    return nullptr;
 }
 extern "C" const char *pilot_audio_device_lle_sample(void) {
     if(!failure.empty())return failure.c_str();

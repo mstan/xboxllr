@@ -141,7 +141,25 @@ static void admission_and_failure() {
     CHECK(reentrant.pcm.empty() && !reentrant.aci.consumed_pcm_words() && !reentrant.aci.completed_descriptors());
 }
 
+static void runtime_input_sge() {
+    Fixture f;f.ram.resize(0x30000,0xa5);
+    f.reg(0x1100,0x88);f.reg(0x1138,0x7ff);f.reg(0x2030,0x10000);
+    f.reg(0x1510,0);f.reg(0x1100,0x100f);
+    f.configure();f.reg(0x2000,15);
+    CHECK(f.clock->advance(61537) && f.apu.voice_mix_quanta()==2);
+    const auto before=f.ram;
+    const auto gp=f.clock->retired(false),ep=f.clock->retired(true),tick=f.clock->ticks();
+    f.reg(0x20804,17);f.reg(0x20808,0x20000);
+    CHECK(f.error.empty() && f.clock->ticks()==tick && f.apu.voice_mix_quanta()==2);
+    CHECK(f.clock->retired(false)==gp && f.clock->retired(true)==ep);
+    auto expected=before;const uint32_t page=0x20000;
+    std::memcpy(expected.data()+0x10000+17*8,&page,4);
+    CHECK(f.ram==expected && f.gp->phase()==xlle::ApuGpPhase::Yielded && f.ep->phase()==xlle::ApuGpPhase::Running);
+    CHECK(f.clock->advance(66037) && f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    CHECK(f.error.empty());
+}
+
 int main() {
-    stopped_epoch();partitioned_active_output();admission_and_failure();
+    stopped_epoch();partitioned_active_output();admission_and_failure();runtime_input_sge();
     puts("PASS authored shared audio timeline: epoch, actual GP/EP events, partition-independent PCM bytes/stamps and failure retention");
 }
