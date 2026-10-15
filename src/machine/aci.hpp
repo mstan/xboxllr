@@ -54,6 +54,7 @@ public:
     }
     void set_frame(uint64_t frame) {
         if (servicing_ || pcm_inflight_) { device_fault("reentrant PCM device work"); return; }
+        frame_clock_primed_ = true;
         servicing_ = true;
         while (!faulted_ && frame_ < frame) {
             ++frame_;
@@ -64,12 +65,22 @@ public:
     uint64_t completed_descriptors() const { return completed_descriptors_; }
     uint64_t consumed_pcm_words() const { return consumed_pcm_words_; }
     uint64_t current_frame() const { return frame_; }
+    bool faulted() const { return faulted_; }
+    // Prime once before configuration or consumption, without traversing elapsed
+    // frames before this codec owner's explicit initialized-kernel handoff.
+    bool prime_frame_clock(uint64_t frame) {
+        if (faulted_ || !kernel_handoff_ || state_used_ || frame_clock_primed_ ||
+            servicing_ || pcm_inflight_) {
+            device_fault("codec frame clock requires a fresh stopped kernel handoff");return false;
+        }
+        frame_ = frame;frame_clock_primed_ = true;return true;
+    }
 
     // Explicit post-kernel handoff, not a cold-reset default. The owned4983
     // kernel releases AC_RESET# before waiting for the physical codec. The
     // stopped console observation is GLOB_CNT=2, GLOB_STA=00300100.
     bool initialize_kernel_audio_handoff() {
-        if (faulted_ || kernel_handoff_ || state_used_ || frame_ || clock_known_) {
+        if (faulted_ || kernel_handoff_ || state_used_ || frame_clock_primed_ || frame_ || clock_known_) {
             device_fault("codec handoff requires a fresh stopped owner"); return false;
         }
         kernel_handoff_ = true;
@@ -461,6 +472,7 @@ private:
     int irq_num_ = 6;
     bool irq_level_ = false, faulted_ = false;
     bool servicing_ = false, pcm_inflight_ = false;
+    bool frame_clock_primed_ = false;
     uint64_t frame_ = 0, completed_descriptors_ = 0;
     uint64_t consumed_pcm_words_ = 0;
     int unk_logged_ = 0;

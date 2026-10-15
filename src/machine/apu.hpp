@@ -146,10 +146,25 @@ public:
     }
     // Advance to an absolute 5.333 ms APU-frame number.
     void set_frame(uint64_t frame) {
+        frame_clock_primed_=true;
         while (frame_ < frame) {
             ++frame_;
             frame_step();
         }
+    }
+
+    // Establish the absolute clock phase once, before original startup work.
+    // Time before this owner's creation must not be replayed as device work.
+    bool prime_frame_clock(uint64_t frame) {
+        if(faulted_ || frame_clock_primed_ || !kernel_audio_control_idle()) {
+            device_fault("APU frame clock requires a fresh stopped kernel handoff");return false;
+        }
+        frame_=frame;frame_clock_primed_=true;return true;
+    }
+    // Internal scheduling observes the canonical controls, not a guest FECTL
+    // read whose active status bits still require independent qualification.
+    bool setup_processing_enabled()const {
+        return !faulted_ && (reg32(kSectl)&0x18)==8 && !(reg32(kFectl)&kFectlMethodMode);
     }
 
     // Source-side pull for the VP's resampler. A frame is one source sample per
@@ -405,13 +420,21 @@ public:
     // The control bit may be read/toggled only before processing starts.
     bool initialize_kernel_audio_handoff() {
         if(faulted_)return false;
-        if(fe_state_used_ || frame_ || voice_mix_quanta_ || !fe_work_idle()) {
+        if(fe_state_used_ || frame_clock_primed_ || frame_ || voice_mix_quanta_ || !fe_work_idle()) {
             device_fault("kernel audio handoff requires a fresh device");return false;
         }
         set_reg32(kSectl,7);set_reg32(kIen,0xafa);set_reg32(kFeFenceControl,1);
         // Original idle retirement and retained pre-video/network observations
         // agree. These are initialized-kernel values, not cold-reset defaults.
         set_reg32(kGpReset,0);set_reg32(kEpReset,1);dsp_reset_context_known_=true;
+        // Original4983 retirement80067442(1) writes all nine list pointers
+        // to FFFF. Blinx17C2AD repeats these writes before allocating audio.
+        // This initialized handoff must not inherit zero (voice0) from the
+        // generic register-file reset, including the unused3D/MP lists.
+        for(size_t i=0;i<kVoiceTop.size();++i) {
+            set_reg32(kVoiceTop[i],kNullVoice);set_reg32(kVoiceCurrent[i],kNullVoice);
+            set_reg32(kVoiceNext[i],kNullVoice);
+        }
         // Recovered running-probe observations supply the unused GP output
         // base fields for this explicit warm profile. They are not universal
         // cold-reset defaults. The original driver writes FIFO0 itself.
@@ -431,7 +454,7 @@ public:
     // A used device cannot discard its history by importing this idle floor.
     bool capture_fe_idle_context(uint32_t fectl,uint32_t sectl,uint32_t control,uint32_t gp_reset) {
         if(faulted_)return false;
-        if(fe_context_known_ || fe_state_used_ || frame_ || voice_mix_quanta_ ||
+        if(fe_context_known_ || fe_state_used_ || frame_clock_primed_ || frame_ || voice_mix_quanta_ ||
            !fe_work_idle() || fectl!=kObservedIdleFectl || sectl!=kObservedIdleSectl ||
            control!=1 || gp_reset!=0) {
             device_fault("FE captured idle context remains unqualified");return false;
@@ -1001,7 +1024,7 @@ private:
     bool startup_input_sge_known_=false,startup_output_sge_known_=false;
     bool kernel_audio_control_idle()const {
         return kernel_audio_startup_ && !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
-               !frame_ && !voice_mix_quanta_ && !processing_quantum_ && !gp_mix_admitting_ &&
+               !voice_mix_quanta_ && !processing_quantum_ && !gp_mix_admitting_ &&
                !gp_frame_outstanding() && !dsp_work_active() && !gp_dma_.work_pending() &&
                !dsp_work_pending(ApuDspKind::Ep) && !fe_fence_pending_ &&
                !gp_program_revision_ && !ep_program_revision_;
@@ -1326,6 +1349,9 @@ private:
         if((reg32(kSectl)&0x18)!=8) {
             device_fault("active APU sequencer modes2/3 remain unqualified");return;
         }
+        // The absolute cursor also advances while stopped. Only real active
+        // processing (or the existing active register/CPU paths) revokes init.
+        kernel_audio_startup_=false;
 
         uint32_t voice_base = reg32(kVpvaddr);
         for (size_t list = 0; list < kVoiceTop.size(); ++list) {
@@ -1387,6 +1413,7 @@ private:
     bool fe_fence_pending_=false,fe_fence_working_=false;
     uint64_t fe_fences_published_=0;
     uint64_t frame_ = 0;
+    bool frame_clock_primed_=false;
     uint64_t voice_on_methods_ = 0;
     uint64_t voice_off_methods_ = 0;
     uint64_t voice_release_methods_ = 0;

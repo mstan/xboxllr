@@ -4,8 +4,12 @@
 #include "machine/apu_gp_processor.hpp"
 #include "machine/apu_ep_processor.hpp"
 #include "machine/apu_dsp_clock.hpp"
+#include "machine/apu_device_clock.hpp"
+#include <array>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -25,39 +29,77 @@ static bool decode(const std::string& line,uint8_t* bytes,size_t n) {
     }
     return true;
 }
-int main() {
+int main(int argc,char** argv) {
+    const bool active=argc==3 && std::string(argv[1])=="--active";
+    if(argc!=1 && !active)return 2;
     std::string error;uint64_t reads=0,writes=0;
+    {
+    // Destruction can reject pending ownership. Inspect its result before
+    // choosing the final exit code, not after a successful return is fixed.
     xlle::McpxApu apu([&](const std::string& s){if(error.empty())error=s;});
     if(!apu.initialize_kernel_audio_handoff())return 2;
+    xlle::McpxAci aci([&](const std::string& s){if(error.empty())error=s;});
+    if(active) {
+        // The source caller verifies the retained physical image's digest.
+        // Install this immutable owner before constructing the sole EP CPU.
+        std::ifstream image(argv[2],std::ios::binary|std::ios::ate);
+        std::array<uint8_t,8192> bytes{};std::array<uint32_t,2048> words{};
+        if(!image || image.tellg()!=std::streampos(bytes.size()))return 2;
+        image.seekg(0);
+        if(!image.read(reinterpret_cast<char*>(bytes.data()),std::streamsize(bytes.size())))return 2;
+        for(size_t i=0;i<words.size();++i) {
+            const auto* p=bytes.data()+i*4;
+            words[i]=uint32_t(p[0])|(uint32_t(p[1])<<8)|(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
+        }
+        if(!apu.install_ep_y_lookup(words.data(),words.size()) || !aci.initialize_kernel_audio_handoff())return 2;
+    }
     xlle::ApuGpProcessor gp(apu,[&](const std::string& s){if(error.empty())error=s;});
     xlle::ApuEpProcessor ep(apu,[&](const std::string& s){if(error.empty())error=s;});
     apu.set_time(0,1125000);
-    xlle::ApuDspClock clock(apu,gp,ep,0,1125000,[&](const std::string& s){if(error.empty())error=s;});
-    apu.set_mem_access([&](uint32_t a,void* data,size_t n) {
+    std::unique_ptr<xlle::ApuDspClock> stopped_clock;
+    std::unique_ptr<xlle::ApuDeviceClock> active_clock;
+    auto fault=[&](const std::string& s){if(error.empty())error=s;};
+    if(active)active_clock=std::make_unique<xlle::ApuDeviceClock>(apu,gp,ep,aci,0,1125000,fault);
+    else stopped_clock=std::make_unique<xlle::ApuDspClock>(apu,gp,ep,0,1125000,fault);
+    auto ticks=[&]{return active?active_clock->ticks():stopped_clock->ticks();};
+    auto retired=[&](bool ep){return active?active_clock->retired(ep):stopped_clock->retired(ep);};
+    auto last=[&](bool ep)->const xlle::ApuGpRun& {return active?active_clock->last(ep):stopped_clock->last(ep);};
+    auto read_memory=[&](uint32_t a,void* data,size_t n) {
         if(!n || n>4096 || uint64_t(a)+n>0x4000000)return false;
         ++reads;std::printf("MEMR %08x %zu\n",a,n);std::fflush(stdout);
         std::string line;if(!std::getline(std::cin,line) || line.rfind("DATA ",0)!=0)return false;
         return decode(line.substr(5),static_cast<uint8_t*>(data),n);
-    },[&](uint32_t a,const void* data,size_t n) {
+    };
+    apu.set_mem_access(read_memory,[&](uint32_t a,const void* data,size_t n) {
         if(!n || n>4096 || uint64_t(a)+n>0x4000000)return false;
         ++writes;std::printf("MEMW %08x %zu %s\n",a,n,hex(static_cast<const uint8_t*>(data),n).c_str());std::fflush(stdout);
         std::string line;return std::getline(std::cin,line) && line=="DONE";
     });
+    aci.set_mem_access(read_memory);
     if(!error.empty()){std::printf("FAIL %s\n",error.c_str());return 2;}
     std::puts("READY");std::fflush(stdout);
     std::string line;
     while(std::getline(std::cin,line)) {
         std::istringstream in(line);std::string op,extra;in>>op;
         if(op=="T") {
-            uint64_t ticks=0;
-            if(!(in>>ticks) || (in>>extra))return 2;
-            if((apu.mmio_read(0xfe802000,4)&0x18) || !clock.advance(ticks)) {
-                std::printf("FAIL stopped DSP clock %s\n",error.c_str());std::fflush(stdout);return 2;
+            uint64_t target=0;
+            if(!(in>>target) || (in>>extra))return 2;
+            const bool advanced=active?active_clock->advance(target):
+                !(apu.mmio_read(0xfe802000,4)&0x18) && stopped_clock->advance(target);
+            if(!advanced) {
+                std::printf("FAIL %s DSP clock %s\n",active?"active":"stopped",error.c_str());std::fflush(stdout);return 2;
             }
             std::printf("TIME %llu %u %u %llu %llu %u %u %llu\n",
-                static_cast<unsigned long long>(clock.ticks()),unsigned(gp.phase()),unsigned(ep.phase()),
-                static_cast<unsigned long long>(clock.retired(false)),static_cast<unsigned long long>(clock.retired(true)),
-                clock.last(false).pc,clock.last(true).pc,static_cast<unsigned long long>(apu.ep_frame_events()));
+                static_cast<unsigned long long>(ticks()),unsigned(gp.phase()),unsigned(ep.phase()),
+                static_cast<unsigned long long>(retired(false)),static_cast<unsigned long long>(retired(true)),
+                last(false).pc,last(true).pc,static_cast<unsigned long long>(apu.ep_frame_events()));
+        }else if(op=="ACTIVE") {
+            if(!active || (in>>extra))return 2;
+            std::printf("ACTIVE %llu %llu %llu %llu %llu %llu %u %u\n",
+                static_cast<unsigned long long>(ticks()),static_cast<unsigned long long>(apu.voice_mix_quanta()),
+                static_cast<unsigned long long>(apu.ep_frame_events()),static_cast<unsigned long long>(apu.gp_dma_nodes()),
+                static_cast<unsigned long long>(apu.ep_dma_nodes()),static_cast<unsigned long long>(aci.consumed_pcm_words()),
+                unsigned(apu.gp_frame_outstanding()),unsigned(apu.dsp_work_pending(xlle::ApuDspKind::Ep)));
         }else if(op=="STATE") {
             if(in>>extra)return 2;
             std::printf("STATE %u %u %llu %llu %llu %llu\n",unsigned(gp.phase()),unsigned(ep.phase()),
@@ -82,5 +124,7 @@ int main() {
         }
         std::fflush(stdout);
     }
+    }
+    if(!error.empty())std::fprintf(stderr,"FAIL device owner disposal: %s\n",error.c_str());
     return error.empty()?0:2;
 }

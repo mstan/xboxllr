@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: enclosing original GP/EP setup and10ms wait execute both DSPs in three live-memory lifetimes; active frame cadence, methods/table consumers and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: original SE start/stop completes24 active EP events and171 GP quanta across three live-memory lifetimes; native adoption, reached runtime consumers and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration and original AC97 startup crossed; title now stops at GP write FE83FF00; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -94,6 +94,18 @@ not a newly measured oscillator or an EP708000-threshold qualification.
 [Stopped-clock evidence and the remaining active group](../pilots/native-title/AUDIO-LLE.md#stopped-dsp-execution-from-shared-time---2026-10-14).
 Active32-sample GP /256-sample EP events, shared codec ordering and original
 FE/output/reset remain required. No changed title or new hardware batch ran.
+
+The subsequent active-clock/source batch now passes34 focused checks and three
+original lifetimes with eight EP events and57 GP quanta each. Actual GP/EP DMA
+uses current original allocations, and admitted work finishes after the original
+SE stop helper before fixture disposal. The first active prefix exposed missing
+warm voice-list initialization; original kernel/title retirement supplies all
+nine FFFF pointers, now reflected in the handoff. Four kernel source cases and
+three title control lifetimes also pass. Builds/runs began after the game exited.
+Native clock/lookup adoption and original active reset remain required. Source
+also establishes that startup starts SPDIF before PCM; the retained active-SPDIF
+guard is required A05 work, not a precision deferral. Family status remains6/9.
+See the [active clock evidence and remaining integration](../pilots/native-title/AUDIO-LLE.md#active-gpep-clock-and-original-source-execution---2026-10-14).
 
 ## Original AC97 startup crossed - 2026-10-14
 

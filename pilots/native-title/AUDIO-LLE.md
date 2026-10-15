@@ -2866,3 +2866,78 @@ ownership and install the separately verified EP lookup before CPU creation.
 Then cross the original active FE/status/notification and stop/reuse paths.
 Native released-DSP/active-SE sampling retains its guard until that group is
 qualified. Family total stays6/9; the existing30 IDs /29 deferred scopes remain.
+
+## Active GP/EP clock and original source execution - 2026-10-14
+
+Tracking `beads-xbox.1.113.9`. `ApuDeviceClock` coordinates the existing APU,
+sole GP/EP CPUs and ACI on one guest timeline. One-guest-tick GP/EP dispatch
+makes nominal shared-RAM ordering independent of caller catch-up partitions.
+Actual32-sample GP work and256-sample EP/codec boundaries use their existing
+owners; work preceding each event runs first, and newly admitted DSP work
+runs afterward. PCM callbacks can observe each serviced event's tick instead
+of the final catch-up target. The clock neither supplies completion nor banks
+held/yielded time. Unsupported GP overruns, reentry, backward time and failed
+owners stop processing. This remains a nominal scheduling policy, not a new
+claim about exact silicon edge phase or DSP oscillator identity.
+
+Once-only stopped-handoff frame priming excludes time before ownership. A
+nonzero absolute APU cursor no longer revokes startup by itself; actual active
+processing and the existing register/CPU paths retain that history. The first
+original active attempt exposed a missing initialized-kernel condition:
+all nine voice-list pointers inherited register-file zero. Unchanged original
+4983 retirement80067442(1) writes FFFF to every top/current/next pointer, and
+Blinx17C2AD repeats those writes before resource allocation. The explicit warm
+handoff now supplies these source-derived values. General cold-reset state
+is unchanged. The source fixture now calls the complete original17C2AD at
+its actual position before17C031, instead of using only the FE-halt helper.
+
+`native_audio_dsp_startup_reference.py --execute-active --ep-y-lookup PATH`
+requires the retained physical high-Y image digest and installs its immutable
+owner before constructing EP. Every DMA read/write resolves into the original
+caller's live allocations. After the unchanged10ms wait it calls original
+17BC9E(1), advances through eight absolute EP boundaries, calls17BC9E(0), then
+supplies one further period for already admitted work. All three selectors
+return through actual GP yield and EP polling at PC31, with no outstanding
+GP lease or EP peripheral work before fixture disposal. Repeating the final
+timestamp adds no work. Original resource destructors subsequently free every
+allocation. This does not qualify the complete original active reset path.
+
+| Original selector | GP quanta | EP events | GP DMA nodes | EP DMA nodes | Live RAM transactions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0 | 57 | 8 | 456 | 58 | 1043 |
+| 1 | 57 | 8 | 456 | 58 | 1059 |
+| 2 | 57 | 8 | 456 | 298 | 1715 |
+
+Each lifetime performs124 device transactions and finishes at shared tick60000.
+GP retires26089 actual cycles; EP retires7110002/7110003/7110003. The first
+active event is a partial interval of the absolute clock, followed by seven
+full periods. These source runs execute the actual shared producer/consumer
+code; they do not establish new PCM/AC3 numerical comparisons or precise
+physical first-event phase. The codec remains stopped in this source group.
+
+Thirty-four focused current-source checks pass in19.81s, including the new
+clock, native capture/ownership cases and GP processor/frame plus EP counter
+regressions. The authored clock test compares single-tick,750-tick and whole-
+interval servicing using real DSP instructions, three exact PCM frames and
+per-event timestamps. It also covers epoch history, held-GP EP events and
+failed completion/reentry. The maintained kernel source proof passes four
+incoming-control cases with deliberately non-null voice-pointer seeds, plus
+three title control lifetimes. Three original stopped-wait lifetimes pass too.
+The observer now evaluates destructor ownership faults before choosing its
+exit status, preventing a successful return from concealing failed disposal.
+
+Edits were prepared while Gundam Evolution ran; builds and execution began
+only after its game process exited. Evidence is under
+`build/blinx/audio-active-clock-20261014/`: the first failed active prefix,
+current kernel proof,34 checks and all three corrected active lifetimes.
+No title, hardware operation or speaker output ran. HLE processing is unchanged.
+
+Next: install the verified lookup in the selected native LLE owner and adopt
+this clock there, then finish required codec/FE/output/reset composition. The
+native sampler still uses its previous stopped clock and active guard. Source
+audit confirms another required A05 dependency: the enclosing caller starts
+owner+18 (SPDIF) before owner+14 (PCM). Original17C73A(-1) unconditionally
+writes stream CR=1D after conditional status handling. Shared admission and
+ACI still guard active SPDIF; that reached operation must be implemented and
+qualified. Skipping it would hide original startup work. Family qualification
+remains6/9, with30 retained IDs /29 deferred scopes; no new deferral is added.

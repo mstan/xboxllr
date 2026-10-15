@@ -44,6 +44,8 @@ class KernelHandoff:
         self.cpu.mem_write(0x8003da60, b'\x02')
         self.put(SECTL, seed)
         self.put(FE_CONTROL, control_seed)
+        for offset in range(0x2054,0x2078,4):
+            self.put(0xfe800000+offset,0xa5a50000|offset)
         self.events, self.calls, self.sources = [], [], {}
         self.cpu.hook_add(UC_HOOK_CODE, self.instruction)
         self.cpu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self.memory,
@@ -129,6 +131,10 @@ def check(kernel, xbe, observation, fe_observation, output):
         assert owner.get(IEN) == captured['ien']
         assert owner.get(FE_CONTROL) == 1
         assert owner.get(0xfe83fffc) == 0 and owner.get(0xfe85fffc) == 1
+        for offset in range(0x2054,0x2078,4):
+            writes = [e for e in stop['mmio'] if e['write'] and e['address'] == 0xfe800000+offset]
+            assert len(writes) == 1 and writes[0]['value'] == 0xffff
+            assert owner.get(0xfe800000+offset) == 0xffff
         # The actual idle FE fence takes its no-work branch. Never substitute
         # successful active notification or borrow this as an active-work proof.
         assert not any(e['write'] and e['address'] in (0xfe820104, 0xfe82010c)
@@ -188,6 +194,7 @@ def check(kernel, xbe, observation, fe_observation, output):
     result = dict(kernel=pin(kernel), title=pin(xbe), physical_observation=pin(observation),
         tool=pin(Path(__file__)), kernel_cases=cases, title_control_lifetimes=lives,
         handoff_sectl=7, handoff_ien=0xafa, handoff_fe_control=1,
+        handoff_voice_lists={hex(0xfe800000+offset):0xffff for offset in range(0x2054,0x2078,4)},
         physical_fe_observation=fe_pins,
         preserved_fe_bits=dict(calls=preserved.calls, instructions=preserved.sources),
         full_boot_qualified=False, active_fence_qualified=False,
