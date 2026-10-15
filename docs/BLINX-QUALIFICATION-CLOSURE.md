@@ -50,6 +50,28 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## FE method quiet-context observation - 2026-10-15
+
+The original2010C=0 /20104=2 pair now has a physical observation in a fresh
+owned notification allocation, with DSPs held, SE7, codec streams stopped and
+interrupts masked. After2010C the decoded method is10C/0 and PIO capacity80;
+after20104 capacity is7C, decode remains10C/0, and the actual original status
+byte remains80. The complete64KiB isolation check passes. This establishes a
+pending queue entry under the quiet context, not active completion or its
+progress trigger. An immediate emulated status1 is not supported by this result.
+
+Diagnostic writes stopped at that unexpected capacity result. Remote DASH,
+dashboard SMC restart and fresh probe PING/INFO have since completed; no owner
+action is needed. Probe commit `d55c1c1` retains the observer and seven actual-x86
+checks. Private receipt `results/fe-notification-20261015/reviewed-observation.aot-private.json`
+pins the source, payloads, raw observations and recovery.
+
+The original live startup trace already supplies the next reached context:
+FE control1510=0 and SECTL15 before retirement, unlike the quiet comparison's
+1/7. Test that context on a fresh owner next. Required pending-work ordering,
+actual original consumer completion and DPC/FEMEM composition remain A04/A05;
+no repeat of the stopped-context experiment or new precision matrix is needed.
+
 ## Original drained DSP retirement and reentry - 2026-10-15
 
 The configured-reset observations are now adopted by the existing sole GP/EP
@@ -118,7 +140,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Open: original active caller contract established; real queue/notification ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer observes completion and returns; representative pending/failure checks prevent false success, without an exhaustive fault matrix |
+| A04 | Open: quiet hardware submission stays queued/status80; original active control0/SE15 context and ordering next | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer observes completion and returns; representative pending/failure checks prevent false success, without an exhaustive fault matrix |
 | A05 | Captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; sends/mix/GP/EP and digital-ring content agree; complete output/timing/retirement and analog ring evidence remain | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits

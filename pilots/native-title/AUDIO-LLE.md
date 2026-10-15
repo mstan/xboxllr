@@ -190,6 +190,35 @@ before any original call and is retained. Reuse these cases; AUDIO-D14 defers
 the broader fault matrix. The real queue, required pending ordering and normal
 original retirement remain A04/A05. No HLE behavior or playback changed.
 
+## Physical FE methods in the quiet profile - 2026-10-15
+
+Probe `d55c1c1` executes the original retirement method pair with a fresh pinned
+64KiB notification owner. Its five separate device stores mask IEN, install only
+the new notifier mapping, select the previously observed free FE mode, then
+submit2010C=0 and20104=2. GP/EP remain held; SE7 and both codec controls0 prevent
+audio output. No inherited RAM, storage or startup files are accessed.
+
+After2010C, PIO capacity is80 and decoded method/parameter10C/0. After20104,
+capacity falls to7C while the decode remains10C/0 and the actual first notifier's
+status remains80. All other bytes outside the permitted16-byte notifier and
+observer window remain intact across the64KiB allocation. FECTL7100F,
+control1510=1, SE7 and ISTS/IEN0/0 remain unchanged. These are raw observations;
+they indicate a queued entry in this context, not its precise service trigger.
+
+The changed PIO capacity stopped further diagnostic writes. The owner was
+retained until separate remote DASH/SMC restart and fresh probe observation
+completed. No manual interaction was needed. The initial RB transport rejected
+the capture RAM range before any device write; fixed ARM-guarded DWORD loads
+retrieved the already captured fields without retrying allocation or RB.
+
+Seven actual-x86 observer checks pass12.470s. Reviewed private receipt:
+probe `results/fe-notification-20261015/reviewed-observation.aot-private.json`,
+SHA256 `d6868abfff94526d257765fc46f1aa11400b1b4e2a8d8bafac93ca6c6f4e119f`.
+The unchanged original startup trace uses1510=0 and SE15 before active
+retirement. That distinct reached context is next; this quiet result cannot
+justify an immediate status1, close A04, or replace original DPC/consumer
+completion. Reuse it as pending-state evidence rather than repeating the case.
+
 ## Original drained DSP reset and reentry - 2026-10-15
 
 The configured GP0/EP1 hardware observations now drive the maintained CPU reset
