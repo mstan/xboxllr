@@ -111,6 +111,9 @@ static int spdif_contract(const char *mode,const char *directory) {
         puts("PASS paused/rejected digital output retains original DMA owner and unchanged accepted prefix");return 0;
     }
     CHECK(positive && state.pcm_words==512 && state.descriptors==1);
+    // This mixed-stream fixture captures exactly one analog frame. The
+    // hardware ring repeats, so pause it explicitly while retaining its IRQ.
+    access(0xfec0011b,1,0x1c);
     CHECK(!pilot_usb_pit_time(96000));CHECK(!pilot_audio_device_lle_sample());
     CHECK(read(0xfec00176)==12 && read(0xfec00178,2)==1024 && !read(0xfec00174) && !read(0xfec0017a));
     CHECK((read(0xfec00130,4)&0x50)==0x50);
@@ -138,7 +141,7 @@ static int spdif_contract(const char *mode,const char *directory) {
             stamps[i].byte_offset==i*1024 && stamps[i].bytes==1024 &&
             stamps[i].reserved==(i<8?0x02000000u:0x02000002u));
     }
-    access(0xfec0011b,1,0);access(0xfec0017b,1,0);access(0xfec0017b,1,2);
+    access(0xfec0011b,1,0);access(0xfec0011b,1,2);access(0xfec0017b,1,0);access(0xfec0017b,1,2);
     CHECK(!pilot_audio_device_lle_close());CHECK(!pilot_audio_device_lle_spdif_consumer_attached(digital));
     CHECK(!pilot_pcm_capture_finish(digital,1));CHECK(!pilot_pcm_capture_finish(analog,1));
     FILE *file=fopen(path.c_str(),"rb");CHECK(file);PilotPcmCaptureHeader header{};

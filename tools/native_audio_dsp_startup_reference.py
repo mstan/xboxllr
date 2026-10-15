@@ -370,7 +370,7 @@ def check(args):
         if not args.execute_reset_reentry:original.destroy_startup()
         report['original_allocations_freed'] = not any(a['live'] for a in original.allocations)
         save()
-    detail = ('; two processed generations, original668us retirement timeout drains actual work before holds/reentry/free; no fabricated notifier success; codec output separate'
+    detail = ('; two processed generations, original668us timeout retires drained transfers and held computation before reentry/free; no fabricated notifier success; codec output separate'
               if args.execute_timeout_retirement else
               '; two processed generations on the same owners, original drained retirement/reentry and free; active FE notification and codec output remain separate'
               if args.execute_reset_reentry else '; original SE start/stop, eight shared-clock EP events and actual GP/EP DMA; codec output and reset remain separate'

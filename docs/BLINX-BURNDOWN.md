@@ -28,12 +28,22 @@ for the evidence and remaining gates.
 The active FE hardware comparison now establishes original2010C=0 stopping
 SE15->7. Releasing FE control allows the following20104 submission to reclaim
 PIO space, but the real notifier remains pending beyond10ms. The maintained
-model now executes the original668us timeout with actual work. Selectors0/1
-pass two generations of retirement/reentry and original cleanup; selector2
-still executes its EP frame when that timeout expires and remains guarded.
-Next resolve that reached normal-retirement case and the separate DPC FEMEM
-completion. The timeout does not yet justify deferring early completion for
-the whole profile. No HLE runtime or accepted visuals changed.
+model now executes the original668us timeout with actual work. All3
+configurations pass two generations of retirement/reentry and original cleanup.
+Selector2 stops its remaining computation through the original reset, after
+transfers drain; no ready flag or completion is fabricated. DPC FEMEM completion
+and connected output remain. Earlier notification completion no longer blocks
+the isolated shutdown component; connected output acceptance still determines
+the full-profile deferral. No HLE runtime or accepted visuals changed.
+
+Analog cyclic traversal is now independently observed on the Xbox for one- and
+two-node rings. The LLE no longer halts after the initial8KiB;51 affected checks
+and three original codec stream/interrupt lifetimes pass, including repeating
+nonzero data, acknowledgement, stop/restart and original allocation cleanup.
+The changed muted title now captures1,389,568 analog bytes, exactly matching
+digital PCM;387 blocks also match actual EP FIFO0 writes with zero differences.
+This closes cyclic-output issue `.113.34`. DPC memory fence ordering and complete
+output/timing/retirement still prevent audio closure; the capture is partial.
 
 The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 preserves every question/evidence/reopening trigger and identifies promoted work.

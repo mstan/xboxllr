@@ -70,8 +70,9 @@ static void independent_streams() {
         CHECK(f.irq==std::vector<bool>{true}); // PCM still owns the shared level.
         f.wr(0x116,2,0xc);CHECK((f.irq==std::vector<bool>{true,false}));
         f.aci.set_frame(2);const auto first_pass=digital;digital.insert(digital.end(),first_pass.begin(),first_pass.end());
+        const auto analog_pass=analog;analog.insert(analog.end(),analog_pass.begin(),analog_pass.end());
         CHECK(f.digital==digital && f.pcm==analog && f.rd(0x176)==12);
-        f.wr(0x17b,1,0);CHECK(f.rd(0x176)==13);f.aci.set_frame(100);
+        f.wr(0x17b,1,0);f.wr(0x11b,1,0);CHECK(f.rd(0x176)==13);f.aci.set_frame(100);
         CHECK(f.digital==digital && f.pcm==analog);
     }
 }

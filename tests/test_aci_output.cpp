@@ -51,8 +51,8 @@ static void append(std::vector<uint8_t>& a,const std::vector<uint8_t>& b){a.inse
 static void mixed_lifetimes() {
     for(unsigned life=0;life<3;++life) {
         Fixture f;auto a=f.samples(0x2ffc,768,life),b=f.samples(0x6000,256,life+4),c=f.samples(0x8000,1024,life+9);
-        f.descriptor(0,0x2ffc,768);f.descriptor(1,0,0,0);f.descriptor(2,0x6000,256);f.descriptor(3,0x8000,1024,0xc0000000);
-        const auto ram=f.ram;f.run(3);const unsigned initial_reads=f.reads;
+        f.descriptor(0,0x2ffc,768);f.descriptor(1,0x6000,256);f.descriptor(2,0x8000,1024,0xc0000000);
+        const auto ram=f.ram;f.run(2);const unsigned initial_reads=f.reads;
         for(unsigned n=0;n<32;++n){CHECK(f.read(0x118,2)==768);CHECK(!f.read(0x114));}
         CHECK(f.reads==initial_reads && f.output.empty());f.aci.set_frame(1);
         CHECK(f.output==std::vector<uint8_t>(a.begin(),a.begin()+1024));CHECK(f.read(0x118,2)==256 && !f.aci.completed_descriptors());
@@ -60,14 +60,18 @@ static void mixed_lifetimes() {
         const unsigned paused_reads=f.reads;f.reg(0x11b,1,0x1d);f.reg(0x11b,1,0x19);
         CHECK(f.reads==paused_reads && !f.read(0x114) && f.read(0x118,2)==256);
         f.aci.set_frame(3);std::vector<uint8_t> expected=a;append(expected,b);
-        CHECK(f.output==expected && f.aci.completed_descriptors()==3 && f.read(0x114)==3 && f.read(0x118,2)==1024);
+        CHECK(f.output==expected && f.aci.completed_descriptors()==2 && f.read(0x114)==2 && f.read(0x118,2)==1024);
         CHECK(f.irq==std::vector<bool>({true}));f.reg(0x116,2,0x0c);CHECK(f.irq==std::vector<bool>({true,false}));
-        f.aci.set_frame(5);append(expected,c);CHECK(f.output==expected && f.aci.completed_descriptors()==4);
-        CHECK((f.read(0x116,2)&15)==15 && f.read(0x114)==3 && !f.read(0x118,2));
-        const unsigned halted_reads=f.reads;f.reg(0x115,1,3);f.aci.set_frame(6);
-        CHECK(f.reads==halted_reads && f.output==expected);CHECK(f.ram==ram);
-        auto d=f.samples(0xa000,512,life+18);f.descriptor(4,0xa000,512);f.reg(0x115,1,4);f.aci.set_frame(7);append(expected,d);
-        CHECK(f.output==expected && f.aci.completed_descriptors()==5 && f.aci.consumed_pcm_words()==2560 && f.error.empty());
+        f.aci.set_frame(5);append(expected,c);CHECK(f.output==expected && f.aci.completed_descriptors()==3);
+        CHECK((f.read(0x116,2)&15)==12 && !f.read(0x114) && f.read(0x118,2)==768);
+        f.reg(0x115,1,2);f.aci.set_frame(6);expected.insert(expected.end(),a.begin(),a.begin()+1024);
+        CHECK(f.output==expected && f.read(0x118,2)==256 && f.ram==ram);
+        // Pause retains the prefetched descriptor. Reset retires it before
+        // a new ring/base may supply this lifetime's next samples.
+        f.reg(0x11b,1,0x1c);f.reg(0x11b,1,2);
+        auto d=f.samples(0xa000,512,life+18);f.put(0x1800,0xa000);f.put(0x1804,0xc0000200);
+        f.reg(0x110,4,0x1800);f.reg(0x115,1,0);f.reg(0x11b,1,0x1d);f.aci.set_frame(7);append(expected,d);
+        CHECK(f.output==expected && f.aci.completed_descriptors()==4 && f.aci.consumed_pcm_words()==3072 && f.error.empty());
         f.reg(0x11b,1,0x1c);f.reg(0x11b,1,2);CHECK(!f.read(0x114) && !f.read(0x11a) && !f.read(0x118,2));
         CHECK((f.read(0x116,2)&15)==1 && f.read(0x11b)==0x1c);const auto count=f.output.size();f.aci.set_frame(10);CHECK(f.output.size()==count);
     }
@@ -75,11 +79,12 @@ static void mixed_lifetimes() {
 static void ring_wrap_and_headless() {
     Fixture f;std::vector<uint8_t> expected;
     for(unsigned i=0;i<32;++i){auto bytes=f.samples(0x2000+i*64,16,i);append(expected,bytes);f.descriptor(i,0x2000+i*64,16);}
-    f.run(31);f.aci.set_frame(1);CHECK(f.output==expected && f.aci.completed_descriptors()==32 && f.read(0x114)==31 && !f.read(0x11a));
-    // New descriptor backing at the same ring index, after actual last-buffer halt.
+    f.run(31);f.aci.set_frame(1);CHECK(f.output==expected && f.aci.completed_descriptors()==32 && !f.read(0x114) && !f.read(0x11a));
+    // Explicit reset retires the already-prefetched next ring descriptor.
+    f.reg(0x11b,1,0x1c);f.reg(0x11b,1,2);
     auto bytes=f.samples(0x8000,512,77);f.put(0x1800,0x8000);f.put(0x1804,0xc0000200);
-    f.reg(0x110,4,0x1800);f.reg(0x115,1,0);f.aci.set_frame(2);append(expected,bytes);
-    CHECK(f.output==expected && f.aci.completed_descriptors()==33 && !f.read(0x114) && f.read(0x11a)==1 && f.error.empty());
+    f.reg(0x110,4,0x1800);f.reg(0x115,1,0);f.reg(0x11b,1,0x1d);f.aci.set_frame(2);append(expected,bytes);
+    CHECK(f.output==expected && f.aci.completed_descriptors()==33 && !f.read(0x114) && !f.read(0x11a) && f.error.empty());
     Fixture headless(false);headless.samples(0x4000,512,19);headless.descriptor(0,0x4000,512,0);headless.run(0);headless.aci.set_frame(1);
     CHECK(headless.payload_reads==1 && headless.aci.consumed_pcm_words()==512 && headless.aci.completed_descriptors()==1 && headless.error.empty());
 }
@@ -89,7 +94,7 @@ static void failure_ownership() {
         if(which==0)f.failed_address=0x4000;
         if(which==1)f.reject=true;if(which==2)f.mutate=true;if(which==3)f.reenter=true;if(which==4)f.rebind=true;
         f.aci.set_frame(1);CHECK(!f.error.empty() && f.output.empty() && !f.aci.consumed_pcm_words() && !f.aci.completed_descriptors());
-        CHECK(f.read(0x118,2)==512 && !f.read(0x114) && f.read(0x11a)==1 && !(f.read(0x130,4)&64));
+        CHECK(f.read(0x118,2)==512 && !f.read(0x114) && !f.read(0x11a) && !(f.read(0x130,4)&64));
         const auto reads=f.reads;f.reg(0x11b,1,0x1d);f.reg(0x115,1,1);f.aci.set_frame(4);CHECK(f.reads==reads && f.output.empty());
     }
     for(unsigned which=0;which<4;++which) {
@@ -98,24 +103,42 @@ static void failure_ownership() {
     }
     Fixture next;auto bytes=next.samples(0x4000,4,99);next.descriptor(0,0x4000,4);next.descriptor(1,0x6000,4);next.failed_address=0x1008;
     next.run(1);next.aci.set_frame(1);CHECK(!next.error.empty() && next.output==bytes && next.aci.completed_descriptors()==1);
-    CHECK(next.aci.consumed_pcm_words()==4 && !next.read(0x114) && next.read(0x11a)==1 && !next.read(0x118,2));
+    CHECK(next.aci.consumed_pcm_words()==4 && !next.read(0x114) && !next.read(0x11a) && !next.read(0x118,2));
     CHECK((next.read(0x116,2)&8) && next.irq==std::vector<bool>({true}));
     Fixture wrap;wrap.reg(0x110,4,0xfffffffcu);wrap.reg(0x11b,1,1);CHECK(!wrap.error.empty() && !wrap.reads && !wrap.aci.completed_descriptors());
 }
 static void completion_reentry() {
-    Fixture f;auto expected=f.samples(0x4000,512,51);append(expected,f.samples(0x8000,512,71));
+    Fixture f;auto first=f.samples(0x4000,512,51),second=f.samples(0x8000,512,71);
+    auto expected=first;append(expected,first);append(expected,second);
     f.descriptor(0,0x4000,512);f.descriptor(1,0x8000,512);unsigned deliveries=0;
     f.aci.set_irq([&](int line,bool level){CHECK(line==6);if(!level)return;
         CHECK(f.aci.consumed_pcm_words()*2==f.output.size());
         ++deliveries;f.reg(0x116,2,0x0c);if(deliveries==1)f.reg(0x115,1,1);
     },6);
-    f.run(0);f.aci.set_frame(1);CHECK(f.read(0x114)==1 && f.read(0x11a)==2 && f.read(0x118,2)==512);
-    f.aci.set_frame(2);CHECK(f.output==expected && f.aci.completed_descriptors()==2 && deliveries==2 && f.error.empty());
+    f.run(0);f.aci.set_frame(1);CHECK(!f.read(0x114) && !f.read(0x11a) && f.read(0x118,2)==512);
+    // IRQ callback updates the bound for the next completion, preserving the
+    // descriptor that was already fetched before that callback.
+    f.aci.set_frame(3);CHECK(f.output==expected && f.aci.completed_descriptors()==3 && deliveries==3 && f.error.empty());
+}
+static void observed_rings() {
+    for(unsigned nodes:{1u,2u}) {
+        Fixture f;auto a=f.samples(0x4000,nodes==1?4096:1024,31),b=f.samples(0x8000,2048,63);
+        f.descriptor(0,0x4000,nodes==1?4096:1024,0xc0000000);
+        if(nodes==2)f.descriptor(1,0x8000,2048,0xc0000000);
+        f.run(nodes-1);f.aci.set_frame(nodes==1?24:18);
+        std::vector<uint8_t> expected;
+        for(unsigned cycle=0;cycle<3;++cycle){append(expected,a);if(nodes==2)append(expected,b);}
+        CHECK(f.output==expected && f.aci.completed_descriptors()==3*nodes && f.error.empty());
+        CHECK(f.read(0x116,2)==12 && !f.read(0x114) && !f.read(0x11a) && f.read(0x118,2)==(nodes==1?4096:1024));
+    }
+    Fixture empty;empty.descriptor(0,0x4000,0);empty.run(0);
+    CHECK(empty.error.find("zero-length cyclic")!=std::string::npos && empty.output.empty());
+    CHECK(!empty.aci.completed_descriptors() && !empty.aci.consumed_pcm_words());
 }
 static void other_stream_registers() {
     Fixture f;f.descriptor(0,0x4000,3,0);f.reg(0x120,4,0x1000);f.reg(0x12b,1,1);
     CHECK(f.read(0x128,2)==3 && f.read(0x12a)==1 && f.error.empty());
     f.aci.set_frame(2);CHECK(f.read(0x128,2)==3 && f.output.empty() && !f.aci.consumed_pcm_words());
 }
-int main(){mixed_lifetimes();ring_wrap_and_headless();failure_ownership();completion_reentry();other_stream_registers();
-    std::puts("ACI output: real PCM bytes, partial/pause/resume, zero node, ring wrap/remap, headless reads and terminal ownership failures passed");}
+int main(){mixed_lifetimes();ring_wrap_and_headless();failure_ownership();completion_reentry();observed_rings();other_stream_registers();
+    std::puts("ACI output: cyclic PCM bytes, observed one/two-node rings, pause/reset/reuse, zero-node guard, headless reads and terminal ownership failures passed");}

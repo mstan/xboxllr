@@ -534,7 +534,7 @@ int main(int argc,char **argv) {
             stamps[i].byte_offset==i*1024 && stamps[i].bytes==1024);
         pilot_audio_device_lle_state(&state);CHECK(state.clock_ticks==78000 && state.pcm_words==1536 && state.descriptors==1);
         CHECK(!pilot_audio_device_lle_sample());capture_view_check(3072,3,guest+va+256);
-        access(0xfec0011b,1,0);CHECK(!pilot_audio_device_lle_close());
+        access(0xfec0011b,1,0);access(0xfec0011b,1,2);CHECK(!pilot_audio_device_lle_close());
         CHECK(!pilot_pcm_capture_finish(capture,1));capture_readback(destination,3072,3,0,guest+va+256);
         CHECK(!pilot_pcm_capture_destroy(capture));capture=nullptr;call(171,&va);
         puts("PASS native catch-up: three exact PCM frames retain their individual serviced timestamps and retire cleanly");return 0;
@@ -614,7 +614,7 @@ int main(int argc,char **argv) {
     CHECK(pilot_usb_pic_vector(1)==0x36);
     access(0xfec00116,2,0x1c);uint32_t eoi=0x20;CHECK(!pilot_usb_pic_port(0x20,1,1,&eoi));
     CHECK(pilot_usb_pic_vector(0)==-1);
-    access(0xfec0011b,1,0);CHECK(!pilot_audio_device_lle_close());
+    access(0xfec0011b,1,0);access(0xfec0011b,1,2);CHECK(!pilot_audio_device_lle_close());
     if(capture) {
         CHECK(!pilot_pcm_capture_finish(capture,1));CHECK(GetFileAttributesA((destination+".partial").c_str())==INVALID_FILE_ATTRIBUTES);
         capture_readback(destination,1024,1,0,guest+va+256);CHECK(!pilot_pcm_capture_destroy(capture));capture=nullptr;

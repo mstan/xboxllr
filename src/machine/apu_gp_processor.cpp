@@ -83,7 +83,8 @@ bool ApuDspProcessor::reset_cpu(bool original_hold) {
     if(apu_.dsp_work_pending(kind_))return fail("GP CPU reset with pending peripheral work remains unqualified");
     if(kind_==ApuDspKind::Gp && apu_.gp_frame_outstanding())return fail("GP CPU reset with an outstanding frame remains unqualified");
     if(kind_==ApuDspKind::Ep && ((apu_.ep_frame_status_&2u) ||
-       (apu_.ep_control_written_ && !apu_.ep_frame_requested_)))
+       (apu_.ep_control_written_ && !apu_.ep_frame_requested_)) &&
+       !(original_hold && apu_.ep_computation_retirement_allowed()))
         return fail("EP CPU reset with an outstanding frame remains unqualified");
     const bool configured=counter_profile_.touched() ||
                           (kind_==ApuDspKind::Ep && apu_.ep_control_written_);

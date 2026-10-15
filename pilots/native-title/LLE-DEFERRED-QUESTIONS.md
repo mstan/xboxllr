@@ -55,6 +55,15 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | AUDIO-D13 | What happens for reset at arbitrary instruction boundaries, unreached pending-DMA cancellation, or additional warm-state combinations? | The normal original retirement caller submits FE control/notification before GP0/EP1. Source-bound caller evidence and the configured reset observer isolate that required contract. Both physical GP/EP no-DMA experiments now complete reset and fresh reexecution. Unsupported pending work retains its guards; actual drain, normal connected retirement and model adoption remain required A03-A05. | The bounded title reaches reset with pending work after its real retirement sequence, a supported lifecycle exposes stale work, or broader reset/cancellation support is added. Establish the reached case before widening admission; do not claim cancellation from a drained reset. |
 | AUDIO-D14 | What additional malformed-command, timeout and failure combinations need independent qualification? | Nine unchanged original FE helper cases already distinguish success, timeout, no notifier, stopped state and release under explicit synthetic replies. Return1 and final status80 do not prove completion. This is a representative caller contract, not hardware queue evidence. Required real notification ordering, actual consumer completion and safe failure/ownership checks stay A04/A05; an exhaustive fault matrix is outside the bounded goal. | A required original caller takes an uncovered failure path, a regression reveals false success or premature release, or wider error recovery becomes supported. Retain existing failure guards and replay the relevant original consumer. |
 
+AUDIO-D11 follow-up,2026-10-15: independent analog one/two-node ring traversal
+and explicit stop/reset are resolved and adopted. Original stream/ISR/DPC helpers
+and native ownership checks pass. Unreached zero-length codec descriptors,
+live LVI changes beyond the exercised prefetched-descriptor behavior and exact
+bus/cursor transition phase stay outside this bounded profile. Reopen when a
+supported original caller reaches those cases or output/ownership differs.
+Zero-length cyclic descriptors retain a guard; required connected title output
+and the separate APU DPC FEMEM consumer are not deferred.
+
 AUDIO-D14 follow-up,2026-10-15: the fresh active-control hardware comparison
 observes setup halt and PIO reclamation, but its actual NOTIFY byte remains80
 past10ms. Original17C2AD does not branch on17C1B1's result, and the retained
@@ -88,6 +97,17 @@ not every warm-status transition. Reopen if a supported original caller consumes
 that raw bit, if the normal connected lifecycle differs, or when exact warm-state
 readback becomes supported. No pending frame, DMA EOL, acknowledgement or required
 consumer completion is deferred by this detail.
+
+AUDIO-D13/D14 follow-up,2026-10-15: the reached selector2 computation-only
+retirement is now supported after the actual stop controls and transfer drain.
+The independent reset source and retained no-DMA hardware reset/rebootstrap
+evidence support stopping the CPU without fabricating computation completion.
+All3 original configurations pass two timeout/hold/reentry generations and
+original free; further time performs no RAM access. Pending DMA/events and
+unreached reset interleavings retain their guards. Early NOTIFY completion is
+unnecessary for this isolated stopped-codec component, but full-profile deferral
+still awaits A05 output acceptance. No new hardware measurement or deferred
+scope is claimed; the separate DPC FEMEM consumer remains required.
 
 Initial FP values no longer need a console query. Original/native callback state
 transport and the scheduling idle/compute clock path were required integration

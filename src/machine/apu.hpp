@@ -587,7 +587,8 @@ public:
         }
         if(ApuDspHostRegisters::touches(off,size))return dsp_host_read(off,size);
         if(touches_fe_fence(off,size)) {
-            if(off==kFeFenceControl && size==4 && (audio_control_drained() || fe_context_idle()))return reg32(off);
+            if(off==kFeFenceControl && size==4 &&
+               (audio_control_drained() || retirement_control_accessible() || fe_context_idle()))return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
         }
         if(off>=0x30000 && off<0x40000) {
@@ -688,7 +689,7 @@ public:
             if(off==kEpReset)ep_host_status_known_=false;
             if(value==3)kernel_audio_startup_=false;
             // The original bounded timeout may proceed without status1.
-            // Both real CPU owners must accept their drained holds before
+            // Both real CPU owners must accept their holds after transfer drain before
             // this generation's uncompleted request can lose its RAM owner.
             if(reg32(kGpReset)==0 && reg32(kEpReset)==1 && audio_control_drained()) {
                 retirement_notify_pending_=false;retirement_halted_=false;
@@ -702,7 +703,8 @@ public:
         if(touches_fe_fence(off,size)) {
             // Knowing the startup control register supplies no notification
             // address/data admission or completion of pending work.
-            if(off==kFeFenceControl && size==4 && value<=1 && audio_control_drained()) {
+            if(off==kFeFenceControl && size==4 && value<=1 &&
+               (audio_control_drained() || (value==1 && retirement_control_accessible()))) {
                 set_reg32(off,value);return;
             }
             if(size==4 && (off==kFeFenceControl || off==kFememaddr || off==kFememdata) &&
@@ -1155,12 +1157,32 @@ private:
         return audio_control_drained() && (kernel_audio_startup_ || held);
     }
     bool audio_control_drained()const {
+        return audio_transfers_drained() && (!ep_control_written_ || ep_frame_requested_);
+    }
+    bool audio_transfers_drained()const {
         return dsp_reset_context_known_ && fectl_initialized_ &&
                !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
                !processing_quantum_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
                !gp_frame_outstanding() && !dsp_work_active() && !dsp_work_pending(ApuDspKind::Gp) &&
-               !(ep_frame_status_&2u) && (!ep_control_written_ || ep_frame_requested_) &&
+               !(ep_frame_status_&2u) &&
                !dsp_work_pending(ApuDspKind::Ep) && !fe_fence_pending_ && !fe_fence_working_;
+    }
+    bool retirement_control_accessible()const {
+        // Original17C2AD controls FE after its bounded notification wait.
+        // Reading/setting the control is not an EP computation-complete flag.
+        return retirement_halted_ && retirement_notify_pending_ &&
+               retirement_notify_address_==reg32(kFenaddr) && reg32(kSectl)==7 &&
+               audio_transfers_drained();
+    }
+    bool ep_computation_retirement_allowed()const {
+        // Reset stops the sole CPU; it need not reach another ready request.
+        // Admit this only after the original retirement controls and list
+        // disconnect, with no unacknowledged event or pending RAM transfer.
+        // No DSP result, peripheral completion or notifier success is supplied.
+        if(!retirement_control_accessible() || reg32(kFeFenceControl)!=1 ||
+           (reg32(kFectl)&kFectlMethodMode)!=0x80 || reg32(kGpReset)!=0)return false;
+        for(uint32_t off=0x2054;off<=0x2074;off+=4)if(reg32(off)!=0xffff)return false;
+        return true;
     }
     bool fe_status_observable()const {
         const uint32_t setup=reg32(kSectl);

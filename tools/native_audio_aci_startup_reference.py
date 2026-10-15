@@ -6,7 +6,7 @@ prepared memory/IRQL floor is inherited from the existing GP/EP source fixture;
 KeStallExecutionProcessor advances its explicit guest clock, never a CAS read.
 Interrupt registration and the enclosing initializer are checked by the native
 title, not substituted inside this prepared helper proof.
-Optional active-streams mode connects the corrected digital transport and
+Optional active-streams mode connects the observed analog/digital transport and
 unchanged start/stop/restart helpers to currently owned original RAM.
 """
 import argparse
@@ -151,14 +151,34 @@ def physical_stream(folder):
     return [pin(manifest_path),pin(folder/'capture.aot-private.bin')]
 
 
-def check(xbe, observer, evidence, output, active_streams=False, stream_evidence=None, interrupts=False):
+def physical_pcm(folder):
+    assert folder is not None, 'active streams require independent analog ring evidence'
+    manifest_path = folder/'reviewed-observation.aot-private.json'
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest['status'] == 'analog one/two-node cyclic traversal and stopped retirement observed; native integration separate'
+    assert manifest['mmio_stores'] == 12 and manifest['storage_operations'] == 0
+    assert manifest['dsp_release'] is False and manifest['owner_bytes_retained'] == 24576
+    for item in manifest['pins']:
+        path = Path(item['path']).resolve()
+        assert path.is_relative_to(folder.resolve()) or path == (
+            folder.parent/'pcm-ring-20261015/qualified-offline.aot-private.json').resolve()
+        assert pin(path) == item
+    assert [row['nodes'] for row in manifest['reviews']] == [1,2]
+    for row in manifest['reviews']:
+        assert row['samples'] == row['stable_samples'] == 64 and row['traversals'] > 1
+        assert row['status'] == 12 and row['piv_equals_civ']
+        assert row['paused_unchanged'] and row['reset_and_original_base_restored']
+    return [pin(manifest_path)]
+
+
+def check(xbe, observer, evidence, output, active_streams=False, stream_evidence=None, interrupts=False, pcm_evidence=None):
     assert not interrupts or active_streams
     assert 'build' in output.resolve().parts and not output.exists()
     output.mkdir(parents=True)
     blob = xbe.read_bytes()
     assert hashlib.sha256(blob).hexdigest() == IMAGE_SHA256
     pins = physical(evidence)
-    if active_streams:pins += physical_stream(stream_evidence)
+    if active_streams:pins += physical_stream(stream_evidence)+physical_pcm(pcm_evidence)
     lives = []
     for lifetime in range(3):
         original = CodecStartup(blob, lifetime)
@@ -192,9 +212,10 @@ def check(xbe, observer, evidence, output, active_streams=False, stream_evidence
                             kind, format_value, data = parts[1],int(parts[2],16),bytes.fromhex(parts[3])
                             assert format_value == (stream_format if kind == 'S' else 0)
                             assert 0 < len(data) <= 1024 and len(data)%4 == 0
-                            # Two full digital traversals plus the stopped
-                            # prefix; analog retains its independent bound.
-                            assert len(captured[kind])+len(data) <= (16384 if interrupts else 17408 if kind == 'S' else 8192)
+                            # Both outputs repeat. Digital pauses for one frame
+                            # and restarts its partial traversal; analog keeps
+                            # consuming its own ring throughout that interval.
+                            assert len(captured[kind])+len(data) <= (16384 if interrupts else 17408 if kind == 'S' else 18432)
                             captured[kind].extend(data)
                             output_chunks.append(dict(stream=kind,format=format_value,bytes=len(data),ticks=original.ticks))
                             process.stdin.write('ACCEPTED\n');process.stdin.flush()
@@ -256,9 +277,11 @@ def check(xbe, observer, evidence, output, active_streams=False, stream_evidence
                     original.call(0x17c73a,(0xffffffff,),ecx=streams[1])
                     for frame in range(3,19):
                         original.ticks = frame*6000;transport('T',original.ticks,0,0)
-                    assert captured['S'] == expected[:1024]+expected*2 and captured['P'] == expected
-                    assert transport('R',0xfec00116,1,0) == 15
-                    assert transport('R',0xfec00118,2,0) == 0
+                    assert captured['S'] == expected[:1024]+expected*2
+                    assert captured['P'] == expected*2+expected[:2048]
+                    assert transport('R',0xfec00116,1,0) == 12
+                    assert transport('R',0xfec00118,2,0) == 3072
+                    assert transport('R',0xfec00114,1,0) == transport('R',0xfec0011a,1,0) == 0
                     assert transport('R',0xfec00176,1,0) == 12
                     assert transport('R',0xfec00178,2,0) == 4096
                     assert transport('R',0xfec00174,1,0) == transport('R',0xfec0017a,1,0) == 0
@@ -312,7 +335,8 @@ def check(xbe, observer, evidence, output, active_streams=False, stream_evidence
                         assert after == [value+4096 for value in before], (before,after)
                         assert not original.queued
                         assert sum(row['ordinal']==119 for row in original.irq_services[count_before:]) == int(not immediate)
-                        assert transport('R',0xfec00116,2,0)==3
+                        assert transport('R',0xfec00116,2,0)==0
+                        assert transport('R',0xfec00118,2,0)==4096
                         assert transport('R',0xfec00176,2,0)==0
                         for stream in streams:original.call(0x17c455,ecx=stream)
                         irq_results.append(dict(period=period,immediate=immediate,before=before,after=after,
@@ -363,4 +387,5 @@ if __name__ == '__main__':
     parser.add_argument('--active-streams',action='store_true')
     parser.add_argument('--interrupts',action='store_true')
     parser.add_argument('--stream-evidence',type=Path)
+    parser.add_argument('--pcm-evidence',type=Path)
     check(**vars(parser.parse_args()))

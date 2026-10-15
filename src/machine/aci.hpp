@@ -378,22 +378,22 @@ private:
 
     bool advance_bd(BmRegs& r) {
         BmRegs next = r;
-        const bool digital = &r == &bm_[7];
-        if (digital) {
-            // Owned Xbox one/two-node observations: the valid ring repeats,
-            // SR stays0C after completion, and stable PIV equals CIV. This
-            // replaces the generic ICH last-buffer halt for SPDIF only.
+        const bool output = &r == &bm_[1] || &r == &bm_[7];
+        if (output) {
+            // Independent analog and digital one/two-node observations:
+            // the valid ring repeats, SR stays0C after completion, and
+            // stable PIV equals CIV. LVI is a wrap bound, not a halt request.
             next.civ = r.bd_valid ? (r.civ == r.lvi ? 0 : (r.civ + 1) % 32) : 0;
             next.piv = next.civ;
         } else {
             next.civ = r.piv;
             next.piv = (r.piv + 1) % 32;
         }
-        if (!fetch_bd(next, &r == &bm_[1] || &r == &bm_[7])) return false;
+        if (!fetch_bd(next, output)) return false;
         // Reached original buffers are nonempty. An unqualified zero-length
         // cyclic descriptor must not create an unbounded completion loop.
-        if (digital && !next.picb) {
-            device_fault("zero-length cyclic SPDIF descriptor remains unqualified");
+        if (output && !next.picb) {
+            device_fault("zero-length cyclic output descriptor remains unqualified");
             return false;
         }
         r = next;
@@ -475,10 +475,9 @@ private:
             const bool last = r.civ == r.lvi;
             if (last) {
                 new_sr |= SR_LVBCI;
-                if (!digital) new_sr |= SR_DCH | SR_CELV;
             }
             r.sr = new_sr;
-            if ((digital || !last) && !advance_bd(r)) {
+            if (!advance_bd(r)) {
                 // A successfully consumed old descriptor still owns its
                 // completion, even if fetching the successor fails.
                 update_irq(); return;

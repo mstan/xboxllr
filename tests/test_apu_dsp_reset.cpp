@@ -172,6 +172,40 @@ static void configured_pending_frame() {
         CHECK(f.apu.RegFileMmio::mmio_read(0xfe85fffc,4)==3); // inspect retained register after terminal fault
     }
 }
+static void retirement_computation() {
+    for(bool halted_fe:{false,true}) {
+        Fixture f;xlle::ApuGpProcessor gp(f.apu,[&](const std::string& s){f.fault(s);});
+        xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});
+        // A real event is acknowledged, then this program deliberately keeps
+        // computing without publishing another ready request. Reset, not a
+        // fabricated ready/completion, must stop those instructions.
+        const std::vector<unsigned> p={0x07f432,0xffffff,0x07f430,1,0x07f431,1,
+            0x08f485,0xfff,0x08f484,1,0x0a8581,10,0x08f485,2,0x0d10c0,0};
+        f.program(true,p);f.reg(0x5fffc,3);xlle::ApuGpRun run;
+        CHECK(ep.run(512,run) && f.error.empty());
+        f.reg(0x115c,0x4000);f.ram[0x400f]=0x80;f.reg(0x1510,0);
+        f.reg(0x1100,0x100f);f.reg(0x2000,15);f.apu.set_frame(1);
+        CHECK(ep.run(512,run) && f.apu.ep_frame_events()==1 && f.get(0x5ff10)==0);
+        uint32_t status=0;CHECK(f.apu.ep_read(0xffffc5,status) && status==0x100);
+        f.reg(0x2010c,0);f.reg(0x20104,2);CHECK(f.error.empty());
+        const auto before=f.ram;const auto reads=f.reads;const auto boots=ep.bootstraps();
+        CHECK(f.get(0x1510)==0);f.reg(0x1510,1);CHECK(f.get(0x1510)==1);
+        if(halted_fe)f.reg(0x1100,0x108f);
+        f.reg(0x3fffc,0);f.reg(0x5fffc,1);
+        CHECK(f.ram==before && f.reads==reads && !f.writes && ep.bootstraps()==boots);
+        if(!halted_fe) {
+            CHECK(f.apu.faulted() && ep.phase()==xlle::ApuGpPhase::Failed &&
+                  f.apu.retirement_notification_pending());continue;
+        }
+        CHECK(f.error.empty() && ep.phase()==xlle::ApuGpPhase::Held &&
+              !f.apu.retirement_notification_pending() && f.get(0x5ff10)==0);
+        CHECK(f.ram[0x400f]==0x80 && f.apu.ep_frame_events()==1);
+        // A new bootstrap on the same owner reaches its own actual C4.
+        f.reg(0x5fffc,3);CHECK(ep.run(512,run) && f.get(0x5ff10)==1);
+        CHECK(ep.bootstraps()==boots+1 && f.error.empty());f.reg(0x5fffc,1);
+        CHECK(ep.phase()==xlle::ApuGpPhase::Held && f.error.empty());
+    }
+}
 static void original_reexecution(const char* gp_path,const char* ep_path) {
     Fixture f;xlle::ApuGpProcessor gp(f.apu,[&](const std::string& s){f.fault(s);});
     xlle::ApuEpProcessor ep(f.apu,[&](const std::string& s){f.fault(s);});
@@ -211,6 +245,6 @@ int main(int argc,char** argv){
     if(argc==2 && std::string(argv[1])=="--warm-ep-read"){configured_reexecution(true);return 1;}
     if(argc==4 && std::string(argv[1])=="--original-restart"){original_reexecution(argv[2],argv[3]);return 0;}
     if(argc==3){original_images(argv[1],argv[2]);return 0;}
-    CHECK(argc==1);lifetimes();configured_reexecution();configured_pending_frame();guards();
+    CHECK(argc==1);lifetimes();configured_reexecution();configured_pending_frame();retirement_computation();guards();
     puts("PASS GP/EP reset MMIO: six CPU lifetimes, twelve real mapped boots, instruction markers, preserved banks, failed-fetch atomicity and history/width/owner guards");
 }

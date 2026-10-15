@@ -1,15 +1,27 @@
 # Bounded original audio contract
 
+Latest A05 component,2026-10-15: physical one/two-node analog rings repeat past
+LVI; pause preserves the descriptor and reset retires it. The maintained model
+now follows that behavior. All51 affected native/device checks and three
+unchanged original codec stream/ISR/DPC lifetimes pass, with explicit stop/reset
+and original allocation cleanup. The affected muted title captures1,389,568
+analog bytes matching digital PCM exactly;387 blocks match actual EP FIFO0 writes
+with zero differences. Cyclic-output issue `.113.34` closes. This is a bounded
+partial capture; the separate APU DPC FEMEM consumer and complete
+connected title output/timing remain required. See the
+[analog checkpoint](../../docs/BLINX-QUALIFICATION-CLOSURE.md#analog-cyclic-output-and-original-codec-retirement---2026-10-15).
+
 Latest A04 evidence,2026-10-15: the observed2010C setup stop and explicitly
 pending20104 notification now execute against maintained GP/EP owners. The
-unchanged original668us timeout safely retires selectors0/1 across two processed
-generations each, warm bootstrap and original cleanup. Selector2 is still
-executing an EP frame when that timeout expires; its next original control
-read remains guarded. No synthetic completion or extra drain is supplied.
-Resolve that reached normal-retirement case and the separate DPC FEMEM fence
-next. Earlier NOTIFY completion remains a deferral candidate, not an accepted
-waiver for the whole profile. See the current
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-notification-timeout-retirement-boundary---2026-10-15).
+unchanged original668us timeout safely retires all3 configurations across two
+processed generations each, warm bootstrap and original cleanup. Selector2's
+remaining computation is stopped by reset after memory work drains; the same
+owner retains its actual request0 until new startup publishes its own request.
+Pending transfers/events and an incomplete original stop sequence remain
+guarded. No synthetic completion or extra drain is supplied. DPC FEMEM and
+connected output remain required. See the source/physical evidence distinction
+and scope in the current
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-timeout-retirement-now-passes-all-configurations---2026-10-15).
 
 Tracked by `beads-xbox.1.113`. Audio is the active independent offline family;
 the original-scheduler/GPU startup experiments are not prerequisites. The family
@@ -26,7 +38,7 @@ selector2 retains the ten-transfer Y:0FC9 stop. The earlier malformed-descriptor
 closing checklist for the current evidence and timing/reset requirements.
 
 The native title continues to select its real XAudio2/DSP implementation.
-The audio LLE floor still needs GP/EP restart, active FE ordering and whole-driver
+The audio LLE floor still needs active FE ordering and whole-driver
 integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.

@@ -50,6 +50,78 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## Analog cyclic output and original codec retirement - 2026-10-15
+
+Independent physical one-node4096-word and two-node1024/2048-word analog
+rings both repeat beyond LVI without software refill. Each bounded observation
+retains64 timestamped samples, SR0C, PIV=CIV and6112 consumed words. Explicit
+stop preserves the remaining count/cursor; reset retires the descriptor before
+the original base is restored. Both streams are stopped. The two12KiB diagnostic
+owners remain pinned until a separate recovery; no unexpected write occurred.
+Probe `docs/PCM-RING.md` records the sanitized result and physical evidence hash.
+
+The maintained analog model now wraps at LVI, matching the independently
+established digital behavior. Pause preserves the prefetched descriptor; reset
+is required before replacing its backing. Output rejection, source failures,
+completion ordering and zero-length descriptor guards remain explicit.
+All51 affected native/device checks pass. Three unchanged original codec
+helper lifetimes each transport18432 analog bytes while digital pauses/restarts;
+three original ISR/DPC lifetimes each transport16384 bytes on both outputs,
+acknowledge real completion, reject duplicate retirement, stop/restart, and
+release all original allocations through original destructors. The helper
+fixture retains its explicit single-CPU kernel queue/synchronization floor;
+it does not replace the separate APU DPC FEMEM requirement.
+
+Evidence: `build/blinx/audio-pcm-cyclic-20261015/streams-bound/`, `irq-bound/`
+and `ctest-final.aot-private.log`. All3 original DSP timeout/reentry cases also
+pass against the rebuilt transport in `dsp-bound/`. The changed muted title
+finishes its609.110s bounded observation without a runtime guard. Both outputs
+contain1,389,568 bytes in1357 identical-timestamp blocks, including582,566
+nonzero bytes. Analog and digital payloads match exactly;387 blocks inside
+the retained stage window also match the actual EP FIFO0 writes with zero byte
+differences. The initial analyzer compared the streams' intentionally different
+format tags; explicit analog0/digital02000000 checks and comparison of their
+common timestamp fields resolve that observer-only mismatch without another run.
+This closes `.113.34`'s cyclic traversal/output/codec-lifecycle component.
+The journal reached its64MiB capacity; this partial observation does not close
+whole-attract output/timing, normal title teardown or APU DPC ordering in A04/A05.
+The family count stays6/9. Zero-length rings, live LVI reconfiguration
+and precise AC-link phase remain guarded or deferred with reopening triggers;
+no HLE processing or accepted appearance changed.
+
+## Original timeout retirement now passes all configurations - 2026-10-15
+
+The selector2 stop is resolved for the original transfer-idle shutdown route.
+The previous guard conflated stopping a DSP computation with completing it.
+The pinned independent [reset implementation](https://github.com/xemu-project/xemu/blob/482088490c2d5983ed5e1eafbd09906157c1eca0/hw/xbox/mcpx/apu/dsp/gp_ep.c#L251)
+resets the processor when reset is asserted, without requiring another ready
+request. The retained physical configured-reset comparison independently
+establishes stopping/rebootstrap of running processors with no DMA. Combining
+those contracts supports stopping computation once memory work is idle; this
+is a source-supported composition, not a new silicon measurement of every
+mid-frame reset state.
+
+Admission is restricted to the actual retirement sequence: stopped setup,
+retained notification owner, cleared event/transfer work, FE control1 and halted
+mode, disconnected voice lists and GP0 before EP1. Pending DMA, unacknowledged
+events, an incomplete control sequence and unrelated reset remain guarded.
+EP reset retains the request latch instead of fabricating a ready1, and stops
+the same CPU before RAM can be released. No extra clock advance is introduced.
+
+All three unchanged original configurations now pass two processed generations,
+the actual668us timeout, GP0/EP1 holds, warm bootstrap and original cleanup.
+Selector2 has request0 before its hold; new startup reaches its own real C4
+request. All18 affected regressions pass, including actual authored computation
+interruption and the missing-FE-halt rejection. The prior drained route retains
+its unchanged acceptance evidence. No new hardware experiment or HLE change was
+needed for this correction.
+
+Evidence: `build/blinx/audio-compute-retirement-20261015/`. This completes the
+isolated original retirement/reentry component of A04. DPC FEMEM completion and
+connected audio output/retirement remain required. Earlier NOTIFY completion
+no longer blocks this stopped-codec component; its full-profile deferral still
+depends on connected output acceptance. Families remain6/9.
+
 ## Original notification-timeout retirement boundary - 2026-10-15
 
 The maintained FE now implements the observed setup-stop method, preserves an
@@ -221,8 +293,8 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Open: original timeout retires selectors0/1; selector2 still has an executing EP frame at668us. Required normal retirement and DPC memory fence remain | `.115` | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
-| A05 | Captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; sends/mix/GP/EP and digital-ring content agree; complete output/timing/retirement and analog ring evidence remain | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A04 | Original timeout retirement/reentry component complete for all3 configurations; DPC memory fence and connected composition remain | `.115` | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
+| A05 | Analog cyclic hardware/model and original codec lifecycle pass; captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; complete connected output/timing/retirement remain | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -2415,7 +2487,7 @@ whole graphics/audio runs between observations:
 | Shared audio prerequisite | Reuse the qualified owned allocation/SG mechanism, validating each fresh physical/alias/pin binding | Fresh-session ownership remains mandatory; do not repeat completed mapping research or reuse an old allocation address |
 | A03 original DSP warm reset | Reuse completed configured GP/EP hold/rebootstrap observations; adapt the sole owners and exercise normal original retirement/reinitialization | No-DMA reset evidence does not establish cancellation of pending work or identical GP/EP counter retention |
 | A04 active FE ordering | Bounded original2010C/20104 active control/consumer group, plus required1510/FEMEMDATA ordering with independently visible work | Idle token publication and a fixture that already stopped SE do not establish active queue completion or original retirement |
-| A05 analog PCM ring traversal | Prepared `.113.34` single/two-node silent PCM rings;64 timestamped CIV/PIV/PICB/SR samples followed by separate stop/reset/restore phases |12 offline methods validate instrumentation only; SPDIF traversal and generic PC AC97 halt behavior do not establish analog Xbox semantics |
+| A05 analog PCM ring traversal | Physical single/two-node silent analog rings now establish cyclic traversal and explicit stop/reset/restore;51 affected native/device checks and original codec stream/ISR lifetimes pass | Analog behavior now has its own hardware evidence; complete connected title output/timing remains A05 |
 | G03/G04 reached graphics state | Capture the first real context image/queue after G02; resolve only consumed unknown fields and the enabled-noise primitive | A default-only load, method replay or disabled noise cannot replace required state transfer/pixels |
 
 Each observation preserves its own bounded stop conditions and source identity.

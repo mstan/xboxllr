@@ -41,7 +41,7 @@ int main() {
 
     CHECK(fault.empty());
     CHECK((aci.mmio_read(base + 0x116, 2) & 1) == 0);
-    CHECK(aci.mmio_read(base + 0x118, 4) == 0x1d011000);
+    CHECK(aci.mmio_read(base + 0x118, 4) == 0x1d001000);
     CHECK(irq.empty());
 
     // Eight 5.333 ms frames consume 4096 stereo words (8192 bytes).
@@ -52,15 +52,19 @@ int main() {
 
     aci.set_frame(8);
     CHECK(aci.completed_descriptors() == 1);
-    CHECK((aci.mmio_read(base + 0x116, 2) & 0x0f) == 0x0f);
+    CHECK((aci.mmio_read(base + 0x116, 2) & 0x0f) == 0x0c);
+    CHECK(aci.mmio_read(base + 0x118, 2) == 0x1000);
     CHECK((aci.mmio_read(base + 0x130, 4) & (1u << 6)) != 0);
     CHECK(irq.size() == 1 && irq[0] == std::make_pair(6, true));
 
-    // BCIS/LVBCI are W1C. DCH/CELV remain read-only and the level IRQ falls.
+    // BCIS/LVBCI are W1C; clearing IRQ does not halt the repeating ring.
     aci.mmio_write(base + 0x116, 2, 0x0c);
-    CHECK((aci.mmio_read(base + 0x116, 2) & 0x0f) == 0x03);
+    CHECK((aci.mmio_read(base + 0x116, 2) & 0x0f) == 0);
     CHECK((aci.mmio_read(base + 0x130, 4) & (1u << 6)) == 0);
     CHECK(irq.size() == 2 && irq[1] == std::make_pair(6, false));
+    aci.set_frame(16);
+    CHECK(aci.completed_descriptors() == 2 && aci.consumed_pcm_words() == 8192);
+    CHECK(aci.mmio_read(base + 0x118, 2) == 0x1000 && fault.empty());
 
     std::printf(fails ? "test_aci: %d checks failed\n" : "test_aci: ok\n", fails);
     return fails ? 1 : 0;
