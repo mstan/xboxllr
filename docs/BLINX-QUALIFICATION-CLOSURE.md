@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Physical SPDIF contradicts candidate last-buffer halt: SR0C and changing PICB with CIV/PIV0; stop/ack/reset observed. Correct traversal and native digital capture/integration before admission. Current title checkpoint still stops at FEC00176 | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Physical SPDIF now establishes repeated two-node wrap, SR0C/CR1 and stable PIV=CIV; stop/reset/restore succeeds. Correct candidate traversal and native digital capture/integration before admission. Current title checkpoint still stops at FEC00176 | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -170,6 +170,20 @@ multi-node ring will distinguish wrap from last-node repetition. Six payload
 test methods pass; no title run or family closure is claimed. Evidence and
 the successful retirement are in probe `docs/SPDIF-STREAM.md` and the private
 `results/spdif-completion-context-20261015/` receipts.
+
+The subsequent fresh two-node observation resolves that traversal question:
+64 coherent samples over63.678ms show1->0->1->0->1, SR0C/CR1 throughout, and
+PIV=CIV at every sample. Different descriptor lengths1024/2048 words and the
+observed countdowns establish repeated traversal of both nodes. A separate
+read-only retrieval worked around the bulk command's high-alias rejection;
+no capture or start was repeated. Guarded retirement then gave stable partial
+PICB1312 with CR0/SR0D, reset cleared pending completion/base/indices/count,
+and the original stopped base was restored. No hardware recovery is pending.
+Eleven payload test methods pass. The candidate must now replace its digital
+last-buffer halt and always-next PIV behavior; native capture/teardown and
+one changed connected title remain next. Families6/9 and deferred30 IDs /
+29 scopes are unchanged. Probe evidence: `results/spdif-ring-20261015/` and
+`docs/SPDIF-STREAM.md`; no full build, title launch or speaker output ran.
 
 The physical codec identifies as WM9709, matching the manufacturer's fixed48kHz
 DAC with zero ordinary mixer/rate/power readbacks. The maintained ACI replaces

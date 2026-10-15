@@ -3151,3 +3151,33 @@ Probe documentation: `docs/SPDIF-STREAM.md`; private evidence:
 `results/spdif-stream-20261015/` and
 `results/spdif-completion-context-20261015/`. Families6/9 and deferred30 IDs /
 29 scopes are unchanged; no new deferral is introduced.
+
+## Physical two-node SPDIF wrap established - 2026-10-15
+
+A fresh silent ring with1024-word BD0,2048-word BD1 and LVI1 was observed
+for63.678ms. All64 timestamped samples were coherent across paired CIV reads;
+SR stayed0C, CR1, and PIV equalled CIV. The sequence1->0->1->0->1 with the
+corresponding distinct countdowns establishes repeated whole-ring traversal
+for this two-node case. It rules out merely repeating the last descriptor and
+contradicts the candidate's always-next PIV view. Within-node samples suggest
+about96062 words/s, consistent with the nominal96000-word/s contract without
+qualifying exact wire phase or timing granularity.
+
+Bulk retrieval rejected the high RAM alias before a hardware read. A distinct
+fixed-payload read-only retrieval verified ownership and recovered the existing
+capture; the failed receipt remains intact, and no start/capture was repeated.
+Guarded stop then gave CR0/SR0D with PICB1312 and CIV/PIV1 stable across two
+series. Reset cleared pending flags, BDBAR, indices and count; the original
+stopped base was restored. Six MMIO stores total, zero storage writes, no
+unexpected write result and no recovery pending. The unreferenced12KiB owner
+is retained until a later application recovery.
+
+The candidate correction is now concrete: cyclic digital traversal instead
+of last-buffer halt, with the observed stable cursor semantics. Preserve PCM
+behavior pending its own evidence, distinct accepted-byte ownership, shared
+clock/IRQ and bounded failure when a cyclic ring makes no progress. Native
+digital capture/close ownership and a changed connected-title run still
+follow that correction. Eleven compiled-payload test methods pass; they test
+the observer, not physical equivalence of the candidate. Evidence is in probe
+`results/spdif-ring-20261015/` and `docs/SPDIF-STREAM.md`. Families6/9 and
+deferred30 IDs /29 scopes are unchanged; no new deferral or HLE change.
