@@ -180,7 +180,26 @@ static void coherent_lifetimes() {
             f.descriptor(true,0x20,0x4000,0x4402,64,0x600);
             const auto ram=f.ram;const auto cursor=f.apu.mmio_read(0xfe80402c,4);
             const auto gp_bank=std::vector<uint32_t>(f.apu.gp_word(0x1400),f.apu.gp_word(0x1400)+1024);
+            unsigned input_observed=0,output_observed=0;
+            f.apu.set_observer([&](const xlle::ApuObservation& event){
+                if(event.kind==xlle::ApuObservationKind::EpInput) {
+                    CHECK(event.id==0 && event.metadata_words==1 && event.metadata[0]==0x2ffd && event.bytes==256);
+                    for(unsigned i=0;i<64;++i) {
+                        uint32_t value=0;std::memcpy(&value,static_cast<const uint8_t*>(event.data)+i*4,4);
+                        CHECK(value==expected[i<32?i*2:(i-32)*2+1]);
+                    }
+                    ++input_observed;
+                } else {
+                    CHECK(event.kind==xlle::ApuObservationKind::EpFifo && event.id==0 && event.metadata_words==6);
+                    CHECK(event.metadata[0]==0 && event.metadata[1]==1 && event.metadata[2]==0 && event.metadata[3]==0x2000);
+                    CHECK(event.metadata[4]==cursor && event.metadata[5]==(cursor+128)%0x2000 && event.bytes==128);
+                    const auto* bytes=static_cast<const uint8_t*>(event.data);
+                    for(unsigned i=0;i<128;++i)CHECK(bytes[i]==uint8_t(expected[i/2]>>(8+8*(i%2))));
+                    ++output_observed;
+                }
+            });
             xlle::ApuEpRun e;CHECK(ep->run(5000,e) && e.returned && e.power==2 && !e.yielded && !e.sp);
+            CHECK(input_observed==1 && output_observed==1);f.apu.set_observer({});
             CHECK(f.events(true)==0 && f.events(false)==0x80 && f.apu.ep_dma_nodes()==2*(frame+1) && f.apu.gp_dma_nodes()==frame+1);
             std::vector<uint8_t> expected_ram=ram;
             for(unsigned i=0;i<64;++i) {

@@ -57,12 +57,22 @@ int main() {
         else for(unsigned a=base;a<end;++a)f.ram[f.physical(a)]=uint8_t(a*13+7);
         const auto before=f.ram;auto expected=before;std::vector<uint32_t> input(count);
         const unsigned start=cur<base?base:cur;
+        unsigned observations=0;
+        f.apu.set_observer([&](const xlle::ApuObservation& e){
+            CHECK(e.kind==xlle::ApuObservationKind::GpFifo && e.id==index && e.metadata_words==6);
+            CHECK(e.metadata[0]==index && e.metadata[1]==unsigned(output) && e.metadata[2]==base && e.metadata[3]==end);
+            CHECK(e.metadata[4]==start && e.metadata[5]==base+(start-base+count*width)%(end-base));
+            CHECK(e.bytes==count*width);const auto* data=static_cast<const uint8_t*>(e.data);
+            for(unsigned b=0;b<e.bytes;++b)CHECK(data[b]==(output?golden[b%(width*2)]:before[f.physical(base+(start-base+b)%(end-base))]));
+            ++observations;
+        });
         for(unsigned b=0;b<count*width;++b) {
             const unsigned a=base+(start-base+b)%(end-base),physical=f.physical(a);
             if(output)expected[physical]=golden[b%(width*2)];
             else input[b/width]|=uint32_t(before[physical])<<((b%width)*8);
         }
         CHECK(f.go() && f.error.empty() && f.apu.gp_dma_nodes()==1);
+        CHECK(observations==1);
         CHECK(f.ram==expected); // verifies all non-FIFO RAM and scratch unchanged
         if(!output)for(unsigned i=0;i<count;++i)
             CHECK(f.word(0x1880+i)==(format==1?input[i]<<8:format==2?input[i]>>8:input[i]&0xffffff));

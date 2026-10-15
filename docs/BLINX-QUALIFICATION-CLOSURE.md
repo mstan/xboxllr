@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Codec IRQ/refill validated; controlled title capture retains6.779s of digital output including nonzero samples; analog stops after8 silent blocks and needs its own ring-semantics evidence | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Captured audible source prefix meets tolerances; sends/mix/GP/EP input and digital-ring transport agree; live selector2 PCM transform needs its own oracle; analog still needs ring-semantics evidence | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -56,16 +56,29 @@ serialized observation stop now persists both incomplete streams. The changed
 the initial8,192 silent bytes/eight blocks. Original17BB1C configures both for
 cyclic use without software refill; this makes analog ring traversal a required
 final hardware question. The physical SPDIF observation cannot settle it.
-Offline raw-source comparison now records RMSE0.06732/0.05960 and correlation
-0.40182/0.37166 for the candidate initial Microsoft movie. The live voice and
-GP/EP observations needed to derive expected output are absent, so this is
-diagnosis rather than waveform acceptance or an established emulation failure.
-Before another long title run, capture those boundaries together to locate
-the first divergence; retain original active FE/reset/timing/attract acceptance.
-No new title run or hardware operation occurred during this analysis.
+The subsequent passive stage journal now captures those missing boundaries.
+The first title journal filled on silent startup voices; a validated nonzero
+source trigger then retains the audible prefix without truncation. At its actual
+cursor96, the independent movie source comparison meets0.02/0.99 tolerances:
+RMSE0.008986/0.008479, correlation0.998368/0.998091 across72,032 frames. All2,251
+mix banks match reconstructed sends,13,500 GP main transfers match their input
+banks,3,069 comparable EP reads match GP content and274 comparable digital
+chunks match the actual EP ring. These are bounded content checks, not full
+ownership/timing or output-transform acceptance.
+
+All281 live PCM program loads and47 control contexts identify original EP
+selector2. Its754-word PCM filter program differs from the selector0/1 matrix
+used in the failed diagnostic. Existing selector2 checks cover AC-3, leaving
+its stereo PCM oracle unqualified; the mismatch is not an established emulator
+defect. Next derive that contract from the saved program/context and use the
+retained tone and live captures before another title run. Original active
+FE/reset/timing/attract acceptance remains required. No hardware operation
+occurred; the analog question stays in the final hardware batch.
 AUDIO-D12 defers only raw nontrapped FE reason values/timing; required active
 IRQ/DPC/queue behavior remains A03-A05. Families6/9; deferred31 IDs /30 scopes.
-See the [digital prefix diagnosis](../pilots/native-title/AUDIO-LLE.md#digital-prefix-diagnosis---2026-10-15),
+See the [audible stage and mode diagnosis](../pilots/native-title/AUDIO-LLE.md#audible-stage-diagnosis-and-ep-mode-identity---2026-10-15),
+[passive stage journal](../pilots/native-title/AUDIO-LLE.md#passive-audio-stage-observation---2026-10-15),
+[earlier digital prefix diagnosis](../pilots/native-title/AUDIO-LLE.md#digital-prefix-diagnosis---2026-10-15),
 [bounded output evidence](../pilots/native-title/AUDIO-LLE.md#bounded-output-observation---2026-10-15),
 [codec interrupt evidence](../pilots/native-title/AUDIO-LLE.md#codec-interrupts-and-original-callback-pcr---2026-10-15)
 and [runtime publication evidence](../pilots/native-title/AUDIO-LLE.md#runtime-input-sge-publication---2026-10-15).

@@ -4,6 +4,7 @@
  * transactions, reset/bootstrap, shared GP/EP cadence and codec consumption.
  * Active FE and complete original DSP reset remain separate work. */
 #include "audio_device_lle.h"
+#include "audio_device_trace.hpp"
 extern "C" {
 #include "io_device_lle.h"
 #include "usb_lle.h"
@@ -40,6 +41,7 @@ struct Owner {
     std::unique_ptr<xlle::ApuGpProcessor> gp;
     std::unique_ptr<xlle::ApuEpProcessor> ep;
     std::unique_ptr<xlle::ApuDeviceClock> clock;
+    std::unique_ptr<PilotAudioStageTrace> trace;
     PilotAudioDevicePcm pcm=nullptr;
     void *context=nullptr;
     PilotAudioDeviceSpdif spdif=nullptr;
@@ -99,7 +101,24 @@ extern "C" const char *pilot_audio_device_lle_close(void) {
     // than leave a registered callback pointing into destroyed storage.
     owner->aci.set_irq({},6);owner->apu.set_irq({},5);
     pilot_usb_pic_raise(5,0);pilot_usb_pic_raise(6,0);
-    owner.reset();return nullptr;
+    const char *trace_error=pilot_audio_device_lle_trace_finish();
+    owner.reset();return trace_error;
+}
+extern "C" const char *pilot_audio_device_lle_trace_start(const char *path) {
+    if(!path || !*path)return nullptr;
+    if(!owner || owner->busy || owner->trace || owner->clock->ticks()!=owner->epoch ||
+       owner->reads || owner->writes || owner->apu.voice_mix_quanta())
+        return "original audio stage trace requires a fresh idle device owner";
+    const char *error=PilotAudioStageTrace::create(owner->trace,path,owner->lifetime,owner->epoch);
+    if(error)return error;
+    owner->apu.set_observer([](const xlle::ApuObservation& event){
+        owner->trace->record(owner->clock->ticks(),event);
+    });
+    return nullptr;
+}
+extern "C" const char *pilot_audio_device_lle_trace_finish(void) {
+    if(owner && owner->busy)return "original audio stage trace persistence during device work";
+    return owner && owner->trace?owner->trace->finish():nullptr;
 }
 extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void *context) {
     return pilot_audio_device_lle_open_outputs(pcm,context,nullptr,nullptr);

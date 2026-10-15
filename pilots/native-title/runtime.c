@@ -1258,6 +1258,8 @@ int main(int argc,char **argv)
         audio_error=pilot_pcm_capture_bind(original_spdif_capture);
         if(audio_error)stop(audio_error,0xfe800000u);
     }
+    audio_error=pilot_audio_device_lle_trace_start(getenv("XLLE_PILOT_AUDIO_STAGE_TRACE"));
+    if(audio_error)stop(audio_error,0xfe800000u);
     audio_error=pilot_audio_device_observation_start(getenv("XLLE_PILOT_ORIGINAL_CAPTURE_MS"),
         original_pcm_capture,original_spdif_capture);
     if(audio_error)stop(audio_error,0xfe800000u);

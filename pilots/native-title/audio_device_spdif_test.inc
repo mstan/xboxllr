@@ -30,6 +30,11 @@ static int spdif_contract(const char *mode,const char *directory) {
         absent?nullptr:pilot_spdif_capture_consume,digital));
     if(!absent)CHECK(!pilot_pcm_capture_bind(digital));
     if(analog)CHECK(!pilot_pcm_capture_bind(analog));
+    if(observe) {
+        CHECK(!pilot_audio_device_lle_trace_start(nullptr));
+        CHECK(!pilot_audio_device_lle_trace_start((path+".stages").c_str()));
+        CHECK(pilot_audio_device_lle_trace_start((path+".duplicate").c_str()));
+    }
     CHECK(pilot_audio_device_lle_spdif_consumer_attached(digital)==!absent);
     CHECK(!pilot_audio_device_lle_consumer_attached(digital));
     if(!strcmp(mode,"spdif-kind") || !strcmp(mode,"spdif-format")) {

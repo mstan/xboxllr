@@ -28,6 +28,7 @@
 #include "machine/apu_gp_dma.hpp"
 #include "machine/apu_envelope_curve.hpp"
 #include "machine/apu_ssl.hpp"
+#include "machine/apu_observation.hpp"
 
 namespace xlle {
 
@@ -95,13 +96,13 @@ public:
     explicit McpxApu(FaultFn fault)
         : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)),
           gp_dma_([this](uint32_t a){return gp_word(a);},
-                  [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2040,0x20d4,a,data,n,output);},
+                  [this](uint32_t a,void* data,uint32_t n,bool output){return gp_scratch_transfer(a,data,n,output);},
                   [this](unsigned i,void* data,uint32_t n,bool output){return dsp_fifo(ApuDspKind::Gp,i,data,n,output);},
                   [this](const std::string& why){device_fault(why);},
                   [this]{return gp_program_write(true);},
                   [this]{return gp_mix_publication(false,true);}),
           ep_dma_([this](uint32_t a){return ep_word(a);},
-                  [this](uint32_t a,void* data,uint32_t n,bool output){return gp_sge(0x2048,0x20dc,a,data,n,output);},
+                  [this](uint32_t a,void* data,uint32_t n,bool output){return ep_scratch_transfer(a,data,n,output);},
                   [this](unsigned i,void* data,uint32_t n,bool output){return dsp_fifo(ApuDspKind::Ep,i,data,n,output);},
                   [this](const std::string& why){device_fault(why);},
                   [this]{return ep_program_write(true);},{},ApuDspKind::Ep) {}
@@ -111,6 +112,9 @@ public:
     using MemReadFn = std::function<bool(uint32_t, void*, size_t)>;
     using MemWriteFn = std::function<bool(uint32_t, const void*, size_t)>;
     using IrqFn = std::function<void(int, bool)>;
+
+    // Bind only outside device work; the callback must not throw or reenter.
+    void set_observer(ApuObserver observer) { observer_=std::move(observer); }
 
     void set_mem_access(MemReadFn rd, MemWriteFn wr) {
         mem_read_ = std::move(rd);
@@ -938,6 +942,22 @@ private:
         }
         return true;
     }
+    bool gp_scratch_transfer(uint32_t address,void* data,uint32_t bytes,bool output) {
+        if(!gp_sge(0x2040,0x20d4,address,data,bytes,output))return false;
+        if(observer_ && output) {
+            const uint32_t metadata[]={address};
+            observer_({ApuObservationKind::GpOutput,0,metadata,1,data,bytes});
+        }
+        return true;
+    }
+    bool ep_scratch_transfer(uint32_t address,void* data,uint32_t bytes,bool output) {
+        if(!gp_sge(0x2048,0x20dc,address,data,bytes,output))return false;
+        if(observer_ && !output) {
+            const uint32_t metadata[]={address};
+            observer_({ApuObservationKind::EpInput,0,metadata,1,data,bytes});
+        }
+        return true;
+    }
     bool dsp_fifo(ApuDspKind kind,unsigned index,void* data,uint32_t bytes,bool output) {
         if(index>=(output?4u:2u))return false;
         const uint32_t registers=(kind==ApuDspKind::Gp?0x3000:0x4000)+(output?0x24:0x64)+index*16;
@@ -949,6 +969,7 @@ private:
         if((base|end|cursor)&0xff000000 || ((base|end)&255) || base>=end || cursor>=end)
             return false;
         if(cursor<base)cursor=base;
+        const uint32_t initial=cursor,total=bytes;
         auto* next=static_cast<uint8_t*>(data);
         while(bytes) {
             const uint32_t n=bytes<(end-cursor)?bytes:end-cursor;
@@ -958,7 +979,13 @@ private:
         }
         // No fabricated progress on failed DMA. Physical writes before a later
         // page fault can remain; the strict device then faults without EOL.
-        set_reg32(registers+8,cursor);return true;
+        set_reg32(registers+8,cursor);
+        if(observer_) {
+            const uint32_t metadata[]={index,output?1u:0u,base,end,initial,cursor};
+            observer_({kind==ApuDspKind::Gp?ApuObservationKind::GpFifo:ApuObservationKind::EpFifo,
+                       index,metadata,6,data,total});
+        }
+        return true;
     }
     bool resample_source_impl(uint16_t voice,float* stereo,uint32_t capacity,
                               uint32_t& count,bool& ended,double pitch_modulation);
@@ -1515,6 +1542,7 @@ private:
     std::array<bool,kMaxVoices> voice_locked_{};
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
     std::array<std::array<apu_envelope_curve::ReleaseHistory,2>,kMaxVoices> voice_envelopes_{};
+    ApuObserver observer_;
     std::array<uint8_t,32> submix_headroom_{};
     uint8_t hrtf_headroom_=0;
     bool hrtf_headroom_known_=false;
@@ -1578,6 +1606,11 @@ inline bool McpxApu::mix_2d_samples(uint16_t voice,const float* stereo,uint32_t 
         const float gain=attenuation==4095?0.0f:
             static_cast<float>(std::pow(10.0,-double(attenuation)/1280.0)/double(1u<<submix_headroom_[bin]));
         for(uint32_t n=0;n<frames;++n)bins[bin*32+n]+=stereo[n*2+(slot%channels)]*gain;
+    }
+    if(observer_) {
+        uint32_t metadata[37]={route,format,packed[0],packed[1],packed[2]};
+        for(unsigned i=0;i<32;++i)metadata[5+i]=submix_headroom_[i];
+        observer_({ApuObservationKind::Send,voice,metadata,37,stereo,uint32_t(frames*2*sizeof(float))});
     }
     return true;
 }
@@ -1661,7 +1694,11 @@ inline bool McpxApu::source_frames(uint16_t voice,float* stereo,uint32_t capacit
             device_fault("source cursor DMA failed");return false;
         }
         stereo[count*2]=sample[0];stereo[count*2+1]=sample[1];++count;
-        if(finished){ended=true;return true;}
+        if(finished){ended=true;break;}
+    }
+    if(observer_ && count) {
+        const uint32_t metadata[]={format,base,current,loop,last,cursor,ended?1u:0u};
+        observer_({ApuObservationKind::Source,voice,metadata,7,stereo,uint32_t(count*2*sizeof(float))});
     }
     return true;
 }

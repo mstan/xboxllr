@@ -44,6 +44,12 @@ def check(program, snapshot, output):
             assert data[128:1152] == bytes((i*multiplier+offset)&255 for i in range(1024))
             assert struct.unpack_from('<8s2Q2I', data, 1152) == (b'XLLEEND1', 1024, 1, 1, 0)
             rows.append(dict(mode=mode, kind=magic.decode(), incomplete=True, pin=pin(path)))
+        trace = digital[0].with_name(digital[0].name.removesuffix('.partial')+'.stages.partial')
+        data = trace.read_bytes()
+        assert len(data) == 88 and not trace.with_suffix('').exists()
+        assert struct.unpack_from('<8s4I5Q', data) == (b'XLLESTG1', 1, 64, 1, 0, header[7], 60000, 0, 0, 0)
+        assert struct.unpack_from('<8s2Q', data, 64) == (b'XLLEEND1', 0, 0)
+        rows.append(dict(mode=mode, kind='XLLESTG1', incomplete=True, pin=pin(trace)))
     report = dict(status='dual-output-observation-stop-validated', outputs=rows,
                   pins=[pin(program), pin(Path(__file__))],
                   limits='Two actual serialized owner exits; no title, playback or hardware. '

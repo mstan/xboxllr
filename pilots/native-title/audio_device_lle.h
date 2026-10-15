@@ -24,6 +24,11 @@ const char *pilot_audio_device_lle_close(void);
 const char *pilot_audio_device_lle_access(uint32_t address,unsigned size,int write,uint32_t *value);
 const char *pilot_audio_device_lle_sample(void);
 const char *pilot_audio_device_lle_error(void);
+/* Optional bounded passive stage journal, selected before device processing.
+ * It borrows existing samples/settings, never guest reads or another clock.
+ * finish preserves a diagnostic .partial file and leaves device owners live. */
+const char *pilot_audio_device_lle_trace_start(const char *path);
+const char *pilot_audio_device_lle_trace_finish(void);
 /* Passive diagnostics remain available after a terminal guard. */
 typedef struct PilotAudioDeviceState {
     uint64_t pcm_words,descriptors,clock_ticks,dma_reads,dma_writes;

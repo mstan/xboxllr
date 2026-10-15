@@ -20,6 +20,108 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Passive audio stage observation - 2026-10-15
+
+`XLLE_PILOT_AUDIO_STAGE_TRACE=<path>` selects a diagnostic journal on the existing
+original audio owner before any DMA or elapsed device time. The portable APU
+lends data that its ordinary work has already produced or transferred. The
+observer performs no extra guest reads, MMIO, allocation, file I/O, processing
+or clock advancement. The default HLE route does not construct this journal.
+
+The Windows pilot allocates at most64MiB once, begins recording at the first
+decoded source block containing a nonzero sample, and retains at most four
+guest seconds. The block's real cursor is retained; prior silence is not
+invented or counted as captured source. Capacity
+exhaustion stops recording and marks truncation while device processing
+continues. The existing serialized observation stop flushes the journal along
+with both output captures, even if another capture fails. An invalid borrowed
+event or persistence failure is reported. Every journal remains `.partial`;
+neither a finished window nor a process exit means original device retirement.
+
+The little-endian v1 journal has a64-byte `XLLESTG1` header,32-byte record headers
+and24-byte `XLLEEND1` footer. It records the device lifetime, epoch, shared PIT
+ticks and a journal serial. Header flags distinguish nonzero-source-triggered recording,
+capacity truncation, invalid events and elapsed-window stopping. Record payloads
+are borrowed binary32 samples or actual DMA/bank bytes:
+
+| Kind | Boundary | Metadata |
+| --- | --- | --- |
+| 1 | Decoded stereo source before rate conversion | Format, source base, initial CBO word, loop/end words, final cursor, ended |
+| 2 | Rate output before amplitude | Pitch/link word, format/base/loop/end/initial-CBO binding, binary64 pitch modulation |
+| 3 | Amplitude-adjusted input to final sends | Routing/format, three packed attenuation words,32 per-bin headrooms |
+| 4 | Published32-bin x32-sample GP mix bank | Publication ordinal, visited and contributing voice counts |
+| 5 | Completed GP FIFO transfer | FIFO index, direction, base/end, initial/final cursor |
+| 6 | Completed EP scratch input | Logical scratch byte address |
+| 7 | Completed EP FIFO transfer | FIFO index, direction, base/end, initial/final cursor |
+| 8 | Completed GP scratch output | Logical scratch byte address |
+
+Source cursors describe actual prefetch and do not replace the output clock.
+Scratch addresses belong to the existing scatter/gather owners; equal logical
+addresses alone do not establish physical aliasing. Mix publication precedes
+voice retirement and is not a completion grant.
+
+Observed/unobserved VP executions retain identical RAM, complete DMA counts,
+IRQs and mix words. Real GP FIFO/scratch and EP input/FIFO fixtures check the
+borrowed bytes against independent channel/lane expectations and retained
+cursor/ownership results. All11 focused regressions pass in5.96s. Four separate
+storage cases check exact persisted bytes, source trigger, window/capacity
+limits, invalid time and immutable finalization; both actual controlled-exit
+cases also preserve an untriggered journal, including PCM persistence failure.
+Evidence: `build/blinx/audio-stage-trace-20261015/`. Both changed muted title
+runs stop successfully through the serialized observer without a runtime guard.
+The first journal triggered on silent startup voices and reached its capacity
+before audible input. That retained result prompted the nonzero-source trigger;
+the corrected storage and both controlled-exit checks pass. The second run
+lasts605.797 host seconds and retains47,825,692 journal bytes without truncation,
+plus1,050,624 digital payload bytes. Analog again retains only8,192 silent bytes.
+Neither partial output nor observation finalization establishes guest retirement.
+
+## Audible stage diagnosis and EP mode identity - 2026-10-15
+
+The corrected journal starts at PIT10552500 on voice68: stereo PCM16, pitch0,
+zero pitch modulation and source cursor96. The independent Microsoft movie's
+first nonzero sample103 corresponds to sample7 of this captured source. At the
+cursor-derived offset,72,032 frames meet the existing0.02 RMSE /0.99 correlation
+limits: RMSE0.008986/0.008479, correlation0.998368/0.998091. This establishes
+only the captured source prefix, with no fitted gain or rate. The rate comparison
+has a32-frame diagnostic prefetch lag and RMSE0.000500/0.000550; it does not
+independently establish source-to-output timing.
+
+| Observed boundary | Result and scope |
+| --- | --- |
+| Rate to amplitude-adjusted send input | Bit-identical samples; retained envelope gain1 |
+| Sends to published mix | All2,251 banks match the independently reconstructed ordered sends exactly |
+| Mix to GP main scratch output | All13,500 transfers /432,000 words match the original main-channel order0,2,1,4,5,3 |
+| GP output to EP scratch input | All3,069 comparable1024-byte reads match previously observed GP content; logical ranges8000..AFFF and10000..12FFF differ and do not alone prove physical ownership |
+| EP FIFO0 to digital codec | All274 comparable1024-byte chunks match the actual retained8KiB output ring after every byte is known |
+
+The remaining stereo comparison used the wrong program's oracle. All281 live
+PCM program loads match the original **selector2**754-word program, SHA256
+`6ed8f14b4113024b85bd1243df47ffd6dc923289831bfdf2f40f2abc78aced5d`;
+all47 loaded24-word control contexts match the original prepared selector2
+fixture exactly. Existing numerical qualification checks PCM for selectors0/1
+and AC-3 for selector2. It does not establish selector2's FIFO0 PCM filtering
+and matrix contract. The failed mode0 comparison is retained as a diagnostic,
+not a proven emulator defect. The original driver program was not substituted.
+
+Next derive that selector2 PCM contract from the saved program/context, then
+compare the retained authored tones and live EP input/output. Another title
+run or Xbox probe is unnecessary for this next step. Actual original FE ordering,
+active reset, timing, full attract output and the final analog-ring hardware
+question remain required; A03-A05 stay open, families6/9 and deferrals31 IDs /
+30 scopes unchanged. HLE processing is unchanged.
+
+Current reports in the evidence directory are `audible-source-comparison`,
+`dsp-diagnosis-refined`, `live-ep-mode` and `analysis-v2/stage-analysis`
+(`.aot-private.json`). `output-boundaries` used an incorrect default GP logical
+base and mode0 matrix; the refined and mode-identity reports reconcile those
+assumptions. The first silent analysis retains undefined correlation as NaN
+and supplies no waveform acceptance. Separate title launches differ in onset
+by505 frames, so the observed/unobserved fixture equality is not a claim of
+whole-title bit identity. All builds and title runs were serial, muted and
+limited to four CPUs with the game absent; offline analysis uses one CPU and
+no playback. No hardware operations occurred.
+
 ## Digital prefix diagnosis - 2026-10-15
 
 Offline analysis reuses the retained digital capture without another title run.

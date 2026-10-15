@@ -62,6 +62,11 @@ bool McpxApu::process_2d_quantum(ApuVoiceQuantum& result) {
     // Publish the entire block before any DONE status or completion IRQ.
     std::copy(words.begin(),words.end(),gp_words_.begin()+0x1400);
     result.published=true;
+    if(observer_) {
+        const uint64_t sequence=voice_mix_quanta_+1;
+        const uint32_t metadata[]={uint32_t(sequence),uint32_t(sequence>>32),result.visited,result.contributed};
+        observer_({ApuObservationKind::Mix,0,metadata,4,words.data(),uint32_t(words.size()*sizeof(words[0]))});
+    }
     set_reg32(kVoiceCurrent[0],kNullVoice);set_reg32(kVoiceNext[0],kNullVoice);
     for(unsigned i=0;i<total;++i)if(retiring[i]) {
         if(!retire_buffer(voices[i]) || faulted_)return false;

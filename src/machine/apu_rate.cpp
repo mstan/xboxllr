@@ -5,6 +5,7 @@
 #include <samplerate.h>
 #include <algorithm>
 #include <array>
+#include <cstring>
 
 namespace xlle {
 struct ApuRateState {
@@ -82,6 +83,12 @@ bool McpxApu::resample_source_impl(uint16_t voice,float* stereo,uint32_t capacit
             rate.binding[4]=cursor&0xffffff;
             if(!rate.available && !rate.source_end) {device_fault("source-rate source made no progress");return false;}
         }
+    }
+    if(observer_ && count) {
+        uint32_t metadata[8]={pitch,binding[0],binding[1],binding[2],binding[3],binding[4],0,0};
+        static_assert(sizeof(pitch_modulation)==8,"observation double encoding");
+        std::memcpy(metadata+6,&pitch_modulation,8);
+        observer_({ApuObservationKind::Rate,voice,metadata,8,stereo,uint32_t(count*2*sizeof(float))});
     }
     return true;
 }

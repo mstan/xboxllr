@@ -17,17 +17,19 @@ struct Fixture {
     std::vector<uint8_t> ram=std::vector<uint8_t>(0x90000,0xa5);
     std::string error;
     uint32_t fail_read=UINT32_MAX,fail_write=UINT32_MAX;
-    unsigned source_reads=0,irqs=0;
+    unsigned source_reads=0,irqs=0,reads=0,writes=0;
     xlle::ApuVoiceQuantum* current=nullptr;
     xlle::McpxApu apu{[this](const std::string& why){error=why;}};
     Fixture() {
         apu.set_mem_access(
             [this](uint32_t a,void* p,size_t n){
+                ++reads;
                 if(a==fail_read || uint64_t(a)+n>ram.size())return false;
                 if(a>=0x10000 && a<0x60000)++source_reads;
                 std::memcpy(p,ram.data()+a,n);return true;
             },
             [this](uint32_t a,const void* p,size_t n){
+                ++writes;
                 if(a==fail_write || uint64_t(a)+n>ram.size())return false;
                 std::memcpy(ram.data()+a,p,n);return true;
             });
@@ -129,7 +131,17 @@ static void mixed_waveforms_and_dma() {
         f.reg(0x2040,0xc000);f.reg(0x20d4,1);
         const uint32_t descriptor[]={0x4000,0x4000|(6<<10)|(14<<5)|16|2,32,0x1400,0,4093,127};
         for(unsigned i=0;i<7;++i)*f.apu.gp_word(0x20+i)=descriptor[i];
+        unsigned output_observed=0;
+        f.apu.set_observer([&](const xlle::ApuObservation& event){
+            CHECK(event.kind==xlle::ApuObservationKind::GpOutput && event.id==0);
+            CHECK(event.metadata_words==1 && event.metadata[0]==4093 && event.bytes==128);
+            const auto* data=static_cast<const uint8_t*>(event.data);
+            for(unsigned n=0;n<32;++n)for(unsigned b=0;b<4;++b)
+                CHECK(data[n*4+b]==(b==3?0:uint8_t(*f.apu.gp_word(0x1400+n)>>(b*8))));
+            ++output_observed;
+        });
         CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1) && f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
+        CHECK(output_observed==1);f.apu.set_observer({});
         for(unsigned n=0;n<32;++n)for(unsigned b=0;b<4;++b) {
             const unsigned linear=4093+n*4+b,physical=(linear<4096?0x60000:0x64000)+(linear&4095);
             const uint8_t expected=b==3?0:uint8_t(*f.apu.gp_word(0x1400+n)>>(b*8));
@@ -242,7 +254,50 @@ static void admission_and_failures() {
     for(unsigned i=0;i<7;++i){uint32_t value=123;CHECK(xlle::apu_mix_word(levels[i],value) && value==words[i]);}
 }
 
+static void passive_observation() {
+    Fixture baseline,observed;
+    for(auto* f:{&baseline,&observed}) {
+        f->add(96,2,2048,true,0,8192,-16384);
+        f->method(0x360,0x000f000f);
+    }
+    unsigned counts[8]={},q=0;
+    observed.apu.set_observer([&](const xlle::ApuObservation& e){
+        const unsigned kind=unsigned(e.kind);CHECK(kind>=1 && kind<=4);++counts[kind];
+        if(e.kind==xlle::ApuObservationKind::Mix) {
+            CHECK(e.id==0 && e.metadata_words==4 && e.metadata[0]==q+1 && !e.metadata[1]);
+            CHECK(e.metadata[2]==1 && e.metadata[3]==1 && e.bytes==4096);
+            CHECK(!std::memcmp(e.data,observed.apu.gp_word(0x1400),4096));return;
+        }
+        CHECK(e.id==96 && e.bytes && e.bytes<=256 && !(e.bytes%8));
+        const auto* samples=static_cast<const float*>(e.data);
+        if(e.kind==xlle::ApuObservationKind::Source) {
+            CHECK(e.metadata_words==7 && e.metadata[1]==32768 && !e.metadata[6]);
+            CHECK((e.metadata[2]&0xffffff)+e.bytes/8==e.metadata[5]);
+            for(unsigned i=0;i<e.bytes/8;++i)CHECK(samples[2*i]==0.25f && samples[2*i+1]==-0.5f);
+        } else if(e.kind==xlle::ApuObservationKind::Rate) {
+            CHECK(e.metadata_words==8 && !(e.metadata[0]>>16) && e.bytes==256);
+            CHECK(!e.metadata[6] && !e.metadata[7]);
+        } else {
+            CHECK(e.metadata_words==37 && e.metadata[2]==0x000f000f && e.bytes==256);
+            for(unsigned i=5;i<37;++i)CHECK(!e.metadata[i]);
+            if(q>=8)for(unsigned i=0;i<32;++i)
+                CHECK(std::fabs(samples[2*i]-.25f)<0.000002 && std::fabs(samples[2*i+1]+.5f)<0.000002);
+        }
+    });
+    for(q=0;q<16;++q) {
+        xlle::ApuVoiceQuantum a,b;CHECK(baseline.quantum(a) && observed.quantum(b));
+        CHECK(a.sequence==b.sequence && a.visited==b.visited && a.completed==b.completed);
+        CHECK(baseline.ram==observed.ram && baseline.reads==observed.reads && baseline.writes==observed.writes);
+        CHECK(baseline.source_reads==observed.source_reads && baseline.irqs==observed.irqs);
+        CHECK(!std::memcmp(baseline.apu.gp_word(0x1400),observed.apu.gp_word(0x1400),4096));
+    }
+    CHECK(counts[1]>=16 && counts[2]==16 && counts[3]==16 && counts[4]==16);
+    observed.apu.set_observer({});
+    xlle::ApuVoiceQuantum a,b;CHECK(baseline.quantum(a) && observed.quantum(b));
+    CHECK(counts[4]==16 && baseline.ram==observed.ram && baseline.reads==observed.reads && baseline.writes==observed.writes);
+}
 int main() {
+    passive_observation();
     mixed_waveforms_and_dma();finite_and_idle_ownership();admission_and_failures();
     std::puts("PASS: device-owned ordinary VP/GP quanta; 3 mixed-waveform lifetimes, 3 finite/idle lifetimes, shared GP DMA, publication before IRQ, preflight and terminal partial failures; no bootstrap/EP/clock qualification");
 }

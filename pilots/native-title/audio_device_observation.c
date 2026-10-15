@@ -25,14 +25,17 @@ static const char *observe(void)
     pilot_pcm_capture_view(observation.spdif,NULL,&spdif_bytes,NULL,&spdif_stamps);
     const char *pcm_error=pilot_pcm_capture_finish(observation.pcm,0);
     const char *spdif_error=pilot_pcm_capture_finish(observation.spdif,0);
+    const char *trace_error=pilot_audio_device_lle_trace_finish();
     fprintf(stderr,"[OBSERVATION STOP] partial=1 status=%s host_ms=%llu ticks=%llu codec_frame=%llu pcm_bytes=%llu pcm_stamps=%llu spdif_bytes=%llu spdif_stamps=%llu owned=%u pcm_error=%s spdif_error=%s\n",
-        pcm_error||spdif_error?"error":"ok",(unsigned long long)elapsed,
+        pcm_error||spdif_error||trace_error?"error":"ok",(unsigned long long)elapsed,
         (unsigned long long)state.clock_ticks,(unsigned long long)state.codec_frame,
         (unsigned long long)pcm_bytes,(unsigned long long)pcm_stamps,
         (unsigned long long)spdif_bytes,(unsigned long long)spdif_stamps,state.owned,
         pcm_error?pcm_error:"none",spdif_error?spdif_error:"none");
     fflush(stderr);
+    if(trace_error)fprintf(stderr,"[AUDIO STAGE TRACE] error=%s\n",trace_error);
     if(pcm_error || spdif_error)return pcm_error?pcm_error:spdif_error;
+    if(trace_error)return trace_error;
     ExitProcess(0);
 }
 
