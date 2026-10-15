@@ -214,6 +214,30 @@ remain6/9 with31 deferred IDs /30 scopes; the question was already required A05
 work. The short serial payload compilation/tests ran with the game absent,
 normal priority and affinity limited to four logical CPUs, without playback.
 
+The configured-reset comparison is now also prepared in the probe repository:
+`host/dsp_reset_build.py`, `src/dsp_reset_payload.c` and
+`docs/DSP-CONFIGURED-RESET.md`. Authored GP/EP programs configure the original
+B2/B0/B1 sequence and record raw B3 values; EP additionally checks CA=0 and
+publishes C4=1 with setup clocks stopped. They introduce no DMA or output.
+After completion, a separate GP0/EP1 hold is followed by a change to one owned
+source literal and a fresh reset3 bootstrap. A distinct warm marker and full
+loaded-program comparison prevent stale completion from qualifying reexecution.
+Held snapshots accept either preserved or cleared DSP banks. Every mutating
+payload ends at its sole device store/readback; allocations remain pinned for
+separate recovery. No network runner or automatic retry/restoration is present.
+
+Six focused methods pass in27.255s with no skips, including actual x86 ownership,
+lifecycle, capture and failure checks and both generations of the actual authored
+GP/EP instructions against synthetic replies. The first capture compilation
+failure and corrected run are retained. This prepares the configured, drained
+reset observation; it does not establish physical reset, pending-DMA cancellation
+or active FE2010C/20104 ordering. Those guards remain. Evidence is probe
+`results/dsp-reset-20261015/qualified-offline.aot-private.json`. The short serial
+build/tests ran on four logical CPUs at Normal priority with Gundam Evolution
+absent; no title, console or playback operation. Families6/9 and31 deferred IDs
+/30 scopes are unchanged. Active FE method/consumer preparation is next; do not
+rerun whole-title output before its required hardware dependencies are resolved.
+
 ## Digital prefix diagnosis - 2026-10-15
 
 Offline analysis reuses the retained digital capture without another title run.

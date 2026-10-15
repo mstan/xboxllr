@@ -86,6 +86,15 @@ probe is now prepared under `.113.34`: original single-node and distinguishing
 two-node silent rings, one-write phases and64 timestamped samples. All12 focused
 offline methods pass; no analog hardware result or emulator correction is yet
 claimed. See the [retirement contract and preparation](../pilots/native-title/AUDIO-LLE.md#remaining-retirement-contract-and-analog-probe-preparation---2026-10-15).
+
+The GP/EP configured-reset observer is now prepared as well: fresh pinned owner,
+finite counter/control program with no DMA/output, separate GP0/EP1 hold, changed
+source marker, and verified fresh bootstrap. Six offline methods pass, including
+actual emitted x86 and DSP instructions and held-bank preservation/clearing
+alternatives. This is instrumentation evidence only; configured reset and active
+FE ordering still require the final physical batch. Probe plan:
+`docs/DSP-CONFIGURED-RESET.md`; receipt:
+`results/dsp-reset-20261015/qualified-offline.aot-private.json`.
 AUDIO-D12 defers only raw nontrapped FE reason values/timing; required active
 IRQ/DPC/queue behavior remains A03-A05. Families6/9; deferred31 IDs /30 scopes.
 See the [selector2 PCM proof](../pilots/native-title/AUDIO-LLE.md#selector2-stereo-pcm-contract---2026-10-15),
