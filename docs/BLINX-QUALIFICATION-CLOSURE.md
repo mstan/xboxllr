@@ -19,6 +19,61 @@ the append-only queues. Required routing, startup, ownership, clocks and process
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
 
+## Owner goal and stopping rule - 2026-10-15
+
+The active goal is 9/9 qualified families for this bounded Blinx attract profile.
+Close the remaining audio and combined GPU/graphics tracks when actual selected
+LLE execution, required output, ordering, ownership and normal lifecycle pass
+representative independent checks. Preserve the performant default HLE and reuse
+unchanged evidence. No all-LLE executable or exhaustive hardware model is required.
+
+Each new blocking question must identify a supported original consumer and the
+output, forward-progress or lifetime consequence that prevents acceptance. A new
+raw register observation alone does not establish a new closing requirement.
+Establish whether it affects a required consumer; if it does not, retain the
+observation and defer its interpretation with a reopening trigger. Hardware
+stop-after-unexpected-write and fresh-owner/recovery requirements remain intact.
+
+Normal drained DSP reset/reinitialization and actual pending notification ordering
+remain required. Exhaustive reset interleavings, unreached in-flight cancellation,
+malformed-command combinations and broader encoder/boot coverage are extensions
+in LLE-D06/AUDIO-D13/AUDIO-D14. Existing guards remain on unsupported cases.
+Support one coherent startup profile; never transplant live D4 encoder values
+into retained 8A state or manufacture ready/completion values to cross a guard.
+
+Use focused affected checks while implementing, then one coherent acceptance
+sequence per changed selection covering representative output and the required
+normal stop/reuse/reentry/retirement transitions. Reuse qualified component and
+HLE appearance evidence when dependencies are unchanged. Do not expand the run
+matrix or requalify completed families for bookkeeping. Additional precision and
+coverage findings go to the append-only queues unless the consumer test above
+demonstrates a blocker. These rules do not close a currently incomplete route.
+Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
+
+## Configured reset hardware question resolved - 2026-10-15
+
+After confirmed remote dashboard/SMC restart and fresh probe startup, the bounded
+GP and EP experiments each complete cold configuration, hold, a changed source
+marker, fresh bootstrap/reexecution, and final hold. Each uses six single-store
+phases and its own pinned owner. Full2048-word P comparisons and distinct warm
+markers establish real reload, with no DMA, setup event or audio output.
+
+Both processors reproduce B3=0 immediately after B1 and20 after the fixed gap
+on both generations. GP host request/status become0/0 while held; EP retains
+1/100. EP B3 before reconfiguration remains nonzero and differs across the two
+generations; do not infer that EP reset clears its counter from the GP result.
+Held bank reads remain raw evidence, not a new memory-retention requirement.
+
+This resolves the isolated configured-reset/reexecution observation, not normal
+original retirement or pending-work cancellation. Next adapt the existing sole
+CPU owners to the supported reset path and verify the original stop/reuse caller;
+retain unsupported-state guards and AUDIO-D13. No further hardware measurement
+of this same no-DMA reset case is required for bookkeeping. A04 and analog A05
+remain distinct required questions. Physical receipts are in probe
+`results/qualification-final-audio-20261015/gp-reset-bounded/` and
+`ep-reset-bounded/`; eight focused observer methods pass (one checker-path error
+was corrected by rerunning only its failed method). No HLE runtime changed.
+
 ## Remaining work and closing evidence
 
 | ID | Current status | Owner | Required work / evidence | Passing condition |
@@ -33,8 +88,8 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
+| A03 | Open: physical configured GP/EP reset and fresh bootstrap observed; runtime adoption and original active retirement remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A04 | Open: original active caller contract established; real queue/notification ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer observes completion and returns; representative pending/failure checks prevent false success, without an exhaustive fault matrix |
 | A05 | Captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; sends/mix/GP/EP and digital-ring content agree; complete output/timing/retirement and analog ring evidence remain | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
@@ -2224,9 +2279,9 @@ whole graphics/audio runs between observations:
 
 | Required dependency | Smallest next evidence | What that evidence must not be used to claim |
 | --- | --- | --- |
-| G02 encoder startup | Fixed original-kernel SMBus byte reads of encoder C4 and6C, with raw HAL status and read-mode ambiguity retained | Legacy Status bytes or present dashboard settings do not establish an old warm capture's register state |
+| G02 encoder startup | Establish one coherent original startup profile from source or matching context; the Oct13 8A/C4 read failed and is not repeated; live D4 selection differs | Legacy Status bytes, live D4 values or present dashboard settings do not establish the retained 8A warm state |
 | Shared audio prerequisite | Reuse the qualified owned allocation/SG mechanism, validating each fresh physical/alias/pin binding | Fresh-session ownership remains mandatory; do not repeat completed mapping research or reuse an old allocation address |
-| A03 original DSP warm reset | After bounded completed work and stopped SE admission, observe the original GP0/EP1 reset and fresh bootstrap/counter/control sequence with the same retained owners | Initial startup, idle request clearing and fixture disposal do not establish reset after counter/control publication or cancellation of pending DMA |
+| A03 original DSP warm reset | Reuse completed configured GP/EP hold/rebootstrap observations; adapt the sole owners and exercise normal original retirement/reinitialization | No-DMA reset evidence does not establish cancellation of pending work or identical GP/EP counter retention |
 | A04 active FE ordering | Bounded original2010C/20104 active control/consumer group, plus required1510/FEMEMDATA ordering with independently visible work | Idle token publication and a fixture that already stopped SE do not establish active queue completion or original retirement |
 | A05 analog PCM ring traversal | Prepared `.113.34` single/two-node silent PCM rings;64 timestamped CIV/PIV/PICB/SR samples followed by separate stop/reset/restore phases |12 offline methods validate instrumentation only; SPDIF traversal and generic PC AC97 halt behavior do not establish analog Xbox semantics |
 | G03/G04 reached graphics state | Capture the first real context image/queue after G02; resolve only consumed unknown fields and the enabled-noise primitive | A default-only load, method replay or disabled noise cannot replace required state transfer/pixels |

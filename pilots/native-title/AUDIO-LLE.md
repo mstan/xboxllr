@@ -167,6 +167,29 @@ hardware batch. A03-A05 remain open, families6/9 and deferrals31 IDs /30 scopes.
 This step used short one-core BelowNormal file analysis, with no build, title,
 hardware or playback operation.
 
+## Original active FE caller contract - 2026-10-15
+
+`tools/native_audio_fe_retirement_reference.py` executes unchanged original
+17C1B1 and its actual callees with explicitly authored MMIO/notification replies
+and a no-time-progress kernel stall floor at ordinal151. Nine cases pass:
+immediate/delayed completion, pending/zero/other-status timeout, no notifier,
+already-held FE, stopped SE and release. This is a caller contract; it does not
+qualify real hardware notification ordering or connected title retirement.
+
+The active caller submits2010C=0, writes notifier byte15 to80, submits20104=2,
+then its actual179E0E consumer polls byte15 for1. It writes80 again afterward.
+The routine returns1 whenever it entered the active branch, including timeout;
+neither that return nor final byte80 proves completion. Representative acceptance
+must retain the consumer's actual status1 read before cleanup. Expiry takes668
+polls/stalls; no notifier uses one667us requested stall. These counts describe
+original code under synthetic replies, not measured hardware latency.
+
+Evidence is `build/blinx/audio-active-fe-20261015/caller-v2/summary.aot-private.json`
+and its nine source-bound reports. The initial wrong ordinal assertion failed
+before any original call and is retained. Reuse these cases; AUDIO-D14 defers
+the broader fault matrix. The real queue, required pending ordering and normal
+original retirement remain A04/A05. No HLE behavior or playback changed.
+
 ## Remaining retirement contract and analog probe preparation - 2026-10-15
 
 The unchanged original17C2AD retirement caller has a larger contract than
