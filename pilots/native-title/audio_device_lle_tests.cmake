@@ -2,11 +2,14 @@ add_executable(pilot_audio_device_lle_test audio_device_lle_test.cpp audio_devic
 target_compile_definitions(pilot_audio_device_lle_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX PILOT_PCM_CAPTURE_TEST)
 target_link_libraries(pilot_audio_device_lle_test PRIVATE pilot_audio_device_lle)
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/audio-capture-private")
-foreach(case positive startup startup-width startup-active startup-mappings startup-methods host-controls codec-startup counter counter-unknown configuration reset-bootstrap reset-clock reset-clock-active unknown unknown-read gap absent reject paused rollback invalid engine-fault capture-full capture-stamps capture-failed capture-closed capture-engine capture-rollback)
+foreach(case positive startup startup-width startup-active startup-mappings startup-methods host-controls codec-startup counter counter-unknown configuration reset-bootstrap reset-clock reset-clock-active clock-active unknown unknown-read gap absent reject paused rollback invalid engine-fault capture-full capture-stamps capture-failed capture-closed capture-engine capture-rollback capture-catchup)
   pilot_add_test(NAME pilot_audio_device_${case} COMMAND pilot_audio_device_lle_test
     "${case}" "${PILOT_IO_DEVICE_SNAPSHOT}" "${CMAKE_CURRENT_BINARY_DIR}/audio-capture-private")
   set_tests_properties(pilot_audio_device_${case} PROPERTIES TIMEOUT 20)
 endforeach()
+pilot_add_test(NAME pilot_audio_device_ep-lookup COMMAND pilot_audio_device_lle_test
+  ep-lookup "${PILOT_IO_DEVICE_SNAPSHOT}" "${PILOT_AUDIO_EP_Y_LOOKUP}")
+set_tests_properties(pilot_audio_device_ep-lookup PROPERTIES TIMEOUT 20)
 add_executable(pilot_aci_startup_test aci_startup_test.cpp)
 add_executable(pilot_dsp_host_test ../../tests/test_apu_dsp_host.cpp)
 add_executable(pilot_audio_dsp_startup_transport audio_dsp_startup_transport.cpp)

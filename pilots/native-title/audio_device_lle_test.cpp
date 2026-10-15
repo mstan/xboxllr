@@ -101,6 +101,56 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"ep-lookup")) {
+        CHECK(argc==4);std::vector<uint8_t> image(8192);
+        FILE *file=fopen(argv[3],"rb");CHECK(file && fread(image.data(),1,image.size(),file)==image.size() && fgetc(file)==EOF);CHECK(!fclose(file));
+        uint32_t bytes=5*4096,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
+        memset(guest+va,0,bytes);
+        for(unsigned i=0;i<4;++i)word(va+i*8)=pa+4096+i*4096;
+        for(unsigned i=0;i<2048;++i)word(va+4096+i*4)=0x87;
+        // Actual EP instructions copy the entire immutable Y0800 image into
+        // X200, then the real DSP DMA publishes it to original allocated RAM.
+        std::vector<uint32_t> program={0x60f400,0x800,0x61f400,0x200,0x060098,4,0x4cd800,0x445900,0,
+            0x08f496,2,0x08f494,0x2e00,0x08f496,1};
+        const auto wait=uint32_t(program.size());
+        program.insert(program.end(),{0x0a8587,wait,0x08f485,0x80,0x08f496,2,0x87});
+        for(unsigned i=0;i<program.size();++i)word(va+4096+i*4)=program[i];
+        const uint32_t node[]={0x4000,0x59e2,2048,0x200,0x2000};
+        memcpy(guest+va+4096+0x600*4,node,sizeof(node));
+        access(0xfe802048,4,pa);access(0xfe8020dc,4,3);access(0xfe85fffc,4,3);
+        ticks+=750;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+        PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+        CHECK(s.gp_held && s.ep_phase==4 && s.ep_cycles && s.dma_writes && !s.pcm_words);
+        CHECK(!memcmp(guest+va+12288,image.data(),image.size()));
+        const auto reads=s.dma_reads,writes=s.dma_writes,cycles=s.ep_cycles;
+        CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);
+        CHECK(s.dma_reads==reads && s.dma_writes==writes && s.ep_cycles==cycles);
+        CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&s);CHECK(s.owned && s.work_binding);
+        puts("PASS selected native EP lookup: all2048 actual CPU reads and exact owned DMA bytes; released owner retained for pending reset qualification");return 0;
+    }
+    if(!strcmp(mode,"clock-active")) {
+        uint32_t bytes=3*4096,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
+        memset(guest+va,0,bytes);word(va)=pa+4096;word(va+8)=pa+8192;
+        const uint32_t program[]={0x08f485,0xfff,0x08f484,1,0x0a8581,4,0x08f485,2,0x08f484,1,0x0af080,4};
+        memcpy(guest+va+4096,program,sizeof(program));
+        access(0xfe80200c,4,0);access(0xfe801100,4,0x7130f);
+        access(0xfe802040,4,pa);access(0xfe8020d4,4,1);
+        access(0xfe802048,4,pa);access(0xfe8020dc,4,1);
+        access(0xfe83fffc,4,1);access(0xfe83fffc,4,3);access(0xfe85fffc,4,3);
+        ticks+=200;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+        PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+        CHECK(s.gp_phase==3 && s.ep_phase==2 && !s.gp_quanta && !s.ep_events);
+        access(0xfe802000,4,15);ticks=78037;
+        CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);
+        CHECK(s.gp_quanta==24 && s.ep_events==3 && s.gp_phase==3 && s.ep_phase==2 && !s.pcm_words);
+        const auto gp_cycles=s.gp_cycles,ep_cycles=s.ep_cycles;
+        CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);
+        CHECK(s.gp_cycles==gp_cycles && s.ep_cycles==ep_cycles && s.gp_quanta==24 && s.ep_events==3);
+        access(0xfe802000,4,7);ticks+=6000;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+        pilot_audio_device_lle_state(&s);CHECK(s.gp_quanta==24 && s.ep_events==3 && s.gp_phase==3 && s.ep_phase==2);
+        CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&s);CHECK(s.owned && s.work_binding);
+        puts("PASS native shared clock:24 actual GP frames,3 EP events, no repeated-time work and retained active-reset ownership");return 0;
+    }
     if(!strcmp(mode,"host-controls")) {
         auto read=[](uint32_t address){uint32_t value=0;CHECK(!pilot_audio_device_lle_access(address,4,0,&value));return value;};
         for(unsigned life=0;life<3;++life) {
@@ -108,7 +158,8 @@ int main(int argc,char **argv) {
             for(uint32_t address:{0xfe83ff00u,0xfe83ff04u,0xfe85ff00u,0xfe85ff04u,0xfe85ff5cu}) {
                 access(address,4,0);CHECK(read(address)==0);
             }
-            access(0xfe83fffc,4,1);access(0xfe83ff10,4,0xfffffff1);
+            const uint32_t requests[]={0xfffffff1,0xd000b815,0xfffffff5};
+            access(0xfe83fffc,4,1);access(0xfe83ff10,4,requests[life]);
             CHECK(read(0xfe83ff10)==1);access(0xfe83ff10,4,0);CHECK(read(0xfe83ff10)==1);
             access(0xfe83ff14,4,0xff);CHECK(read(0xfe83ff14)==0);
             access(0xfe83fffc,4,0);CHECK(read(0xfe83ff10)==0);
@@ -239,6 +290,7 @@ int main(int argc,char **argv) {
     }
     if(!strcmp(mode,"reset-bootstrap") || !strcmp(mode,"reset-clock") || !strcmp(mode,"reset-clock-active")) {
         access(0xfe80200c,4,0);
+        if(!strcmp(mode,"reset-clock-active"))access(0xfe801100,4,0x7130f);
         uint32_t bytes=12288,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
         word(va)=pa+4096;word(va+8)=pa+8192;
         for(unsigned i=0;i<2048;++i)word(va+4096+i*4)=0xa7000087; // Authored STOP image.
@@ -262,9 +314,13 @@ int main(int argc,char **argv) {
         }
         if(!strcmp(mode,"reset-clock-active")) {
             access(0xfe802000,4,15);
-            CHECK(pilot_audio_device_lle_sample());CHECK(pilot_audio_device_lle_close());
+            CHECK(!pilot_audio_device_lle_sample()); // no elapsed time or invented frame
+            ticks+=750;CHECK(!pilot_usb_pit_time(ticks));
+            const char *error=pilot_audio_device_lle_sample();CHECK(error && strstr(error,"overrun remains unqualified"));
+            CHECK(pilot_audio_device_lle_close());
             pilot_audio_device_lle_state(&s);CHECK(s.owned && s.work_binding && !s.pcm_words && s.dma_reads==8);
-            puts("PASS active DSP frame cadence remains guarded and retains released owners");return 0;
+            CHECK(!s.gp_quanta && !s.ep_events);
+            puts("PASS active clock cannot invent a completion for a stopped GP; released owners retained");return 0;
         }
         access(0xfe83fffc,4,0);access(0xfe85fffc,4,1);
         pilot_audio_device_lle_state(&s);CHECK(s.gp_held && s.ep_held && s.dma_reads==8);
@@ -336,6 +392,21 @@ int main(int argc,char **argv) {
     memset(guest+va,0,4096);word(va)=pa+256;word(va+4)=0x80000200;
     for(unsigned i=0;i<1024;++i)guest[va+256+i]=uint8_t(i*17);
     access(0xfec00110,4,pa);access(0xfec00115,1,0);
+    if(!strcmp(mode,"capture-catchup")) {
+        word(va+4)=0x80000600;
+        for(unsigned i=0;i<3072;++i)guest[va+256+i]=uint8_t(i*17);
+        access(0xfec0011b,1,0x11);ticks=78000;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+        capture_view_check(3072,3,guest+va+256);
+        const PilotPcmCaptureStamp *stamps=nullptr;pilot_pcm_capture_view(capture,nullptr,nullptr,&stamps,nullptr);
+        for(unsigned i=0;i<3;++i)CHECK(stamps[i].observed_pit_ticks==66000+i*6000 && stamps[i].codec_frame==11+i &&
+            stamps[i].byte_offset==i*1024 && stamps[i].bytes==1024);
+        pilot_audio_device_lle_state(&state);CHECK(state.clock_ticks==78000 && state.pcm_words==1536 && state.descriptors==1);
+        CHECK(!pilot_audio_device_lle_sample());capture_view_check(3072,3,guest+va+256);
+        access(0xfec0011b,1,0);CHECK(!pilot_audio_device_lle_close());
+        CHECK(!pilot_pcm_capture_finish(capture,1));capture_readback(destination,3072,3,0,guest+va+256);
+        CHECK(!pilot_pcm_capture_destroy(capture));capture=nullptr;call(171,&va);
+        puts("PASS native catch-up: three exact PCM frames retain their individual serviced timestamps and retire cleanly");return 0;
+    }
     if(!strcmp(mode,"capture-full") || !strcmp(mode,"capture-stamps") || !strcmp(mode,"capture-failed") || !strcmp(mode,"capture-closed")) {
         word(va+4)=0x80000400;for(unsigned i=1024;i<2048;++i)guest[va+256+i]=uint8_t(i*17);
         access(0xfec0011b,1,0x11);CHECK(!pilot_usb_pit_time(66000));CHECK(!pilot_audio_device_lle_sample());

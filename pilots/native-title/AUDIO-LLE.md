@@ -20,6 +20,84 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Native shared clock and immutable EP image - 2026-10-14
+
+The selected original audio device now adopts the validated shared GP/EP/ACI
+clock. It installs the verified EP high-Y image before constructing its sole EP
+CPU. `PILOT_AUDIO_EP_Y_LOOKUP` names the privately owned8192-byte image; selected
+LLE configuration requires its retained physical digest
+`9f2cb3fdbb541a80f4b2b49de094949c88b4edcd4305d3c764ff0de2a852a414`.
+Missing, short and unreviewed images fail before header generation. Explicit
+little-endian decoding generates constants only in the private build directory,
+with no runtime replacement or guest-memory alias. Native HLE selection does
+not acquire this input requirement or any DSP scheduling work.
+
+The native owner now services active wakeups using the existing GP/EP CPUs and
+keeps actual event time observable during codec callbacks. It no longer applies
+the blanket active-cadence guard. Specific unsupported completion, active FE,
+SPDIF and reset behavior still stop; a stopped GP cannot be reported as having
+completed its next frame. No alternate register file, decoder or clock is added.
+
+All41 focused checks pass in23.31s. The native EP executes actual instructions
+that read all2048 immutable words and publishes them through real DSP DMA into
+originally allocated RAM; the entire8192 bytes match the independent input file.
+An active native lifetime services24 GP quanta and three EP events, with no work
+on repeated timestamps. A single delayed codec service produces three exact
+1024-byte frames stamped at PIT ticks66000,72000 and78000, rather than assigning
+all frames the final catch-up time. Capture retirement, ownership failures and
+compiled MMIO regressions also pass. Released active DSP owners remain retained
+until their required original reset path is established.
+
+Evidence: `build/blinx/audio-native-clock-20261014/`. Builds and checks ran with
+the Gundam game process absent, serially within four CPUs at normal priority.
+No speaker output or hardware operations were used. Full title output, active
+FE and original reset remain required; this integration checkpoint does not
+close A03-A05 or change the6/9 family total.
+
+One subsequent muted title checkpoint, with the unchanged runtime recompiled
+against the current state header, stops after56.98s at GP FF10 with low nibble5.
+It crosses the prior FF00 guard but does not yet reach active output. The real
+owner is DWORD-aligned; the earlier source fixture's16-byte alignment concealed
+bit2 in the original `(owner & ~8) | 1` request. Existing physical patterns
+ending1 do not establish bit2. The guard remains until independent evidence
+supports this reached input; the full title is not relabeled as passing from
+the separate native integration checks.
+
+A subsequent held-GP physical batch establishes that reached low-nibble5
+pattern: the actual owner request and FFFFFFF5 both read1, zero retains1,
+and GP reset0 clears it. Both DSPs remain held and surrounding controls are
+preserved. The first preflight sent zero stores because EP request had changed
+to1; two matching read-only snapshots established the new context before a
+distinct five-store GP batch. No cause is asserted for that EP change. The
+final batch passed and leaves no recovery pending.
+
+Admission now ignores bit2 in the original DWORD-aligned request profile;
+bits1/3 and active reset stay guarded. Six affected direct/native/compiled-MMIO
+checks pass in8.23s. The original source fixture now uses owner low nibbles0,
+4 andC across its three selectors, exercising the actual clear-bit3/set-bit0
+code. All three active startup/start/stop lifetimes pass with the same57 GP
+quanta and eight EP events each, then release every original allocation after
+fixture disposal. This fixes the fixture's hidden alignment assumption without
+claiming original active reset. Probe evidence is documented in
+`docs/DSP-HOST-CONTROLS.md` in the probe repository.
+
+The changed second title reaches original startup stall ordinal151 without
+the GP guard, then hits the observer's120s cutoff with no explicit runtime
+fault. Source review finds the next integration dependency: selected original
+audio retains `original_clock_input`'s host-QPC timeline. Slow DSP servicing
+therefore becomes more elapsed input on the next call. The last two progress
+samples advance PIT56298906to67211052 while CPU calls increase by only one
+and device-clock cost grows by32.14s. This is not an LLE performance pass/fail.
+
+`PilotReferenceClock` already supplies a qualified stopped input and common
+nominal TSC for the reference audio profile, but its runtime binding is gated
+by `PILOT_AUDIO_REFERENCE`, not `PILOT_AUDIO_DEVICE_LLE`. Next, connect original
+audio to the same input contract across original CPU/compiled timestamp/PIT/
+DSP/codec consumers. Preserve the existing sole owners and per-event servicing;
+host delay must not recursively create device work. Qualify the real original
+stall return before proceeding through required SPDIF and FE/output/reset.
+Do not rerun the unchanged120s attempt or treat faster DSP execution as closure.
+
 ## CPU DSP host controls connected - 2026-10-14
 
 The maintained APU now admits the original held GP/EP zero fields, aligned

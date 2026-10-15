@@ -32,7 +32,7 @@ static void observed_lifetimes() {
             f.put(offset,0);CHECK(f.get(offset)==0);
         }
         f.put(0x3fffc,1);
-        for(uint32_t input:{0x30000001u,0xfffffff1u,0u}) {
+        for(uint32_t input:{0x30000001u,0xfffffff1u,0xd000b815u,0xfffffff5u,0u}) {
             f.put(0x3ff10,input);CHECK(f.get(0x3ff10)==1);
         }
         f.put(0x3ff14,0xff);CHECK(f.get(0x3ff14)==0);
@@ -57,7 +57,7 @@ static void guards() {
      f.ep=std::make_unique<xlle::ApuEpProcessor>(f.apu,[&](const std::string& s){f.error=s;});
      CHECK(!f.error.empty() && f.ep->phase()==xlle::ApuEpPhase::Failed);}
     {Fixture f;CHECK(!f.apu.capture_ep_host_status(0));CHECK(f.apu.faulted());}
-    for(unsigned variant=0;variant<9;++variant) {
+    for(unsigned variant=0;variant<10;++variant) {
         Fixture f;
         if(variant==0)f.put(0x3ff00,1);
         if(variant==1)f.put(0x3ff10,9);
@@ -68,6 +68,7 @@ static void guards() {
         if(variant==6)f.apu.mmio_write(0xfe85ff5c,2,0);
         if(variant==7){f.put(0x200c,0);f.put(0x2000,15);f.put(0x3ff00,0);}
         if(variant==8){f.put(0x5ff14,0xffffffff);f.apu.set_time(100,1125000);f.get(0x5ff14);}
+        if(variant==9)f.put(0x3ff10,3);
         CHECK(f.apu.faulted() && !f.reads && !f.writes);
     }
     std::string failure;xlle::McpxApu cold([&](const std::string& s){failure=s;});

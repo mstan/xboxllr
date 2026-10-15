@@ -79,7 +79,10 @@ class Startup(OriginalStartup):
     def prepare(self):
         for entry in (0x177784, 0x17778f, 0x17b14e, 0x17b159):
             self.call(entry)
-        self.owner, self.settings = 0x30000000, 0x30003000
+        # Actual title owners need only DWORD alignment. Vary both bit2 and
+        # bit3 so the original request mask is exercised without a fixed
+        #16-byte-aligned fixture hiding the reached low-nibble5 request.
+        self.owner, self.settings = 0x30000000+(0,4,12)[self.format_selector], 0x30003000
         self.cpu.mem_write(self.owner, bytes(0x100))
         self.cpu.mem_write(self.settings, bytes(0x100))
         self.put(self.settings+8, self.format_selector)
@@ -182,6 +185,7 @@ def check(args):
                     assert command('T 11250') == reply and len(ram_events) == count
                 if args.execute_stall:original.stall = stall
                 original.prepare()
+                report['original_owner'] = original.owner
                 entries = [(0x17bf66,(),original.owner),(0x17b79f,(),0)]
                 entries += [(0x17be82,(),original.owner)] if args.execute_stall else [(0x17b870,(),original.owner),(0x17b999,(),original.owner)]
                 for entry, argv, ecx in entries:

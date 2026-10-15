@@ -27,6 +27,7 @@ typedef struct PilotAudioDeviceState {
     unsigned owned,apu_mapping,aci_mapping,work_binding,gp_held,ep_held;
     uint64_t gp_cycles,ep_cycles;
     unsigned gp_phase,ep_phase;
+    uint64_t gp_quanta,ep_events;
 } PilotAudioDeviceState;
 void pilot_audio_device_lle_state(PilotAudioDeviceState *state);
 /* Passive lifetime check; no locking, services, clock input or device work. */
