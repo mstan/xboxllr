@@ -55,6 +55,19 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | AUDIO-D13 | What happens for reset at arbitrary instruction boundaries, unreached pending-DMA cancellation, or additional warm-state combinations? | The normal original retirement caller submits FE control/notification before GP0/EP1. Source-bound caller evidence and the configured reset observer isolate that required contract. Both physical GP/EP no-DMA experiments now complete reset and fresh reexecution. Unsupported pending work retains its guards; actual drain, normal connected retirement and model adoption remain required A03-A05. | The bounded title reaches reset with pending work after its real retirement sequence, a supported lifecycle exposes stale work, or broader reset/cancellation support is added. Establish the reached case before widening admission; do not claim cancellation from a drained reset. |
 | AUDIO-D14 | What additional malformed-command, timeout and failure combinations need independent qualification? | Nine unchanged original FE helper cases already distinguish success, timeout, no notifier, stopped state and release under explicit synthetic replies. Return1 and final status80 do not prove completion. This is a representative caller contract, not hardware queue evidence. Required real notification ordering, actual consumer completion and safe failure/ownership checks stay A04/A05; an exhaustive fault matrix is outside the bounded goal. | A required original caller takes an uncovered failure path, a regression reveals false success or premature release, or wider error recovery becomes supported. Retain existing failure guards and replay the relevant original consumer. |
 
+AUDIO-D13 update,2026-10-15: configured reset is adopted and original drained
+retirement/reentry now passes for three configurations, two processed generations
+each, on retained owners. The original final free precedes an observed interval
+with no device RAM access. Active FE retirement remains A04/A05. A narrower
+precision question is retained here: exact EP C5 background bit8 retention and
+latency around warm reset/FFF clearing were not measured. The current declared
+W1C policy follows pinned xemu's shared peripheral semantics; independent physical
+observations establish ordinary frame102/100 and no-DMA configured reexecution,
+not every warm-status transition. Reopen if a supported original caller consumes
+that raw bit, if the normal connected lifecycle differs, or when exact warm-state
+readback becomes supported. No pending frame, DMA EOL, acknowledgement or required
+consumer completion is deferred by this detail.
+
 Initial FP values no longer need a console query. Original/native callback state
 transport and the scheduling idle/compute clock path were required integration
 work, not deferrals. They are now covered by completed Q01-Q03 in the closing

@@ -159,7 +159,33 @@ static void runtime_input_sge() {
     CHECK(f.error.empty());
 }
 
+static void drained_control() {
+    Fixture f;f.configure();f.reg(0x1100,0x100f);f.reg(0x2000,15);
+    CHECK(f.clock->advance(66037) && f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    f.reg(0x2000,7);CHECK(f.clock->advance(67000));
+    const auto gp=f.clock->retired(false),ep=f.clock->retired(true),tick=f.clock->ticks();
+    const auto reads=f.reads,writes=f.writes;
+    const auto value=f.apu.mmio_read(f.apu.kBase+0x1100,4);
+    CHECK(value==0x7100f && f.error.empty());
+    f.reg(0x1100,value|0x80);CHECK(f.apu.mmio_read(f.apu.kBase+0x1100,4)==0x7108f);
+    CHECK(f.apu.mmio_read(f.apu.kBase+0x1510,4)==1);
+    f.reg(0x1510,0);CHECK(f.apu.mmio_read(f.apu.kBase+0x1510,4)==0 && f.error.empty());
+    CHECK(f.clock->ticks()==tick && f.clock->retired(false)==gp && f.clock->retired(true)==ep);
+    CHECK(f.reads==reads && f.writes==writes && f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    // Stopping admission at a boundary leaves a real GP frame outstanding.
+    // Reads must not consume that work or claim the drained encoding.
+    for(bool release_gp:{false,true}) {
+        Fixture pending;pending.configure(Fixture::event_program(),release_gp);
+        pending.reg(0x1100,0x100f);pending.reg(0x2000,15);
+        CHECK(pending.clock->advance(66000) && pending.apu.gp_frame_outstanding()==release_gp);
+        CHECK(pending.apu.ep_frame_events()==1);
+        pending.reg(0x2000,7);const auto before=pending.ram;
+        pending.apu.mmio_read(pending.apu.kBase+0x1100,4);
+        CHECK(pending.apu.faulted() && pending.apu.gp_frame_outstanding()==release_gp && pending.ram==before);
+    }
+}
+
 int main() {
-    stopped_epoch();partitioned_active_output();admission_and_failure();runtime_input_sge();
+    stopped_epoch();partitioned_active_output();admission_and_failure();runtime_input_sge();drained_control();
     puts("PASS authored shared audio timeline: epoch, actual GP/EP events, partition-independent PCM bytes/stamps and failure retention");
 }

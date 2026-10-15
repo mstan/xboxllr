@@ -438,7 +438,7 @@ int main(int argc,char **argv) {
         puts("PASS real pinned-SG GP/EP bootstrap, repeated release/passive reads, hold and clean teardown");return 0;
     }
     if(!strcmp(mode,"startup-active")) {
-        access(0xfe802000,4,15);access(0xfe802000,4,7);
+        access(0xfe802000,4,15);
         uint32_t value=0xa5a55a5a;
         const char *error=pilot_audio_device_lle_access(0xfe801510,4,0,&value);CHECK(error);CHECK(value==0xa5a55a5a);
         const std::string first=error;
@@ -448,7 +448,7 @@ int main(int argc,char **argv) {
         PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
         CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words);
         CHECK(!pilot_audio_device_lle_close());
-        puts("PASS processing history revokes startup FE control; failed read preserves caller value");return 0;
+        puts("PASS active admission rejects FE control read; failed read preserves caller value");return 0;
     }
     if(!strcmp(mode,"startup") || !strcmp(mode,"startup-width")) {
         uint32_t value=0xa5a5a5a5;

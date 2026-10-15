@@ -163,7 +163,10 @@ if(pilot_audio_dsp OR pilot_audio_device_lle)
   add_executable(pilot_dsp_reset_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_apu_dsp_reset.cpp")
   target_link_libraries(pilot_dsp_reset_test PRIVATE xlle_apu_gp_processor)
   pilot_add_test(NAME pilot_dsp_reset_contract COMMAND pilot_dsp_reset_test)
-  set_tests_properties(pilot_dsp_reset_contract PROPERTIES TIMEOUT 20)
+  pilot_add_test(NAME pilot_dsp_reset_guards COMMAND "${CMAKE_COMMAND}"
+    "-DPROGRAM=$<TARGET_FILE:pilot_dsp_reset_test>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/apu_dsp_reset_guards.cmake")
+  set_tests_properties(pilot_dsp_reset_contract pilot_dsp_reset_guards PROPERTIES TIMEOUT 20)
 endif()
 if(pilot_audio_device_lle)
   include(audio_device_rom.cmake)

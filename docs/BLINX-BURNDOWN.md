@@ -7,7 +7,7 @@ now governs remaining work and family acceptance. Exhaustive scene numerical
 proof stays deferred; working LLE routing/processing and connected title evidence
 remain required. Existing blocked-fence/full64-slot evidence is reused.
 
-**Current status, 2026-10-14: 6/9 bounded families qualified.** Movies and
+**Current status, 2026-10-15: 6/9 bounded families qualified.** Movies and
 scheduling now close alongside input, display, memory and files. The full Q03
 capture completed 600 GP seconds with all seven numeric gates passing. Two
 natural openings, actual later movie interruption, title return and fresh demo
@@ -16,7 +16,14 @@ also closes; the audio family still requires original device startup/output.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 30 retained IDs; 29 contain deferred scope, including AUDIO-D09 sample phase, AUDIO-D10 AC-link transaction phase and AUDIO-D11 unreached output configuration encodings. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio A04/A05, with A03 drained reset/reentry component complete; GPU/graphics G02-G05 | 34 retained IDs; 33 contain deferred scope, including additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+
+The configured-reset model now admits original drained GP/EP retirement and
+reentry on the same CPU/RAM owners. Three original driver configurations each
+complete two processed generations and original allocation cleanup. Active FE
+notification and complete connected output remain required; this component
+closure does not change the6/9 family count. See the current closing checklist
+for the evidence and remaining gates.
 
 The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 preserves every question/evidence/reopening trigger and identifies promoted work.

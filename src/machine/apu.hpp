@@ -428,7 +428,7 @@ public:
     // Explicit pinned-kernel application handoff, separate from board reset
     // and the captured FE notification experiment. Original init/retirement
     // establishes SECTL/IEN; retained physical idle control is exactly1.
-    // The control bit may be read/toggled only before processing starts.
+    // The control bit may be read/toggled only with stopped, drained work.
     bool initialize_kernel_audio_handoff() {
         if(faulted_)return false;
         if(fe_state_used_ || frame_clock_primed_ || frame_ || voice_mix_quanta_ || !fe_work_idle()) {
@@ -559,7 +559,7 @@ public:
             return reg32(off); // one canonical register owner, including future active updates
         }
         if(off==kFectl && size==4 && dsp_reset_context_known_) {
-            if(!fectl_initialized_ || !kernel_audio_control_idle()) {
+            if(!fectl_initialized_ || !audio_control_drained()) {
                 char diagnostic[192];
                 std::snprintf(diagnostic,sizeof(diagnostic),
                     "original FE control/status remains unqualified: known=%u startup=%u fectl=%08x sectl=%08x gp=%x ep=%x",
@@ -567,8 +567,9 @@ public:
                 device_fault(diagnostic);return 0;
             }
             // The original88/8/100F writes physically read70088/70008/7100F
-            // with no active SE/DSP work. Do not export these empty-state bits
-            // as an acknowledgement of unqualified active work.
+            // with no active SE/DSP work. The same empty-state encoding is
+            // applicable after actual work drains, without erasing history or
+            // treating SE stop alone as acknowledgement of pending work.
             return (reg32(kFectl)&~0x70000u)|0x70000u;
         }
         if(touches_sample_counter(off,size)) {
@@ -583,7 +584,7 @@ public:
         }
         if(ApuDspHostRegisters::touches(off,size))return dsp_host_read(off,size);
         if(touches_fe_fence(off,size)) {
-            if(off==kFeFenceControl && size==4 && (kernel_audio_control_idle() || fe_context_idle()))return reg32(off);
+            if(off==kFeFenceControl && size==4 && (audio_control_drained() || fe_context_idle()))return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
         }
         if(off>=0x30000 && off<0x40000) {
@@ -681,7 +682,7 @@ public:
         if(touches_fe_fence(off,size)) {
             // Knowing the startup control register supplies no notification
             // address/data admission or completion of pending work.
-            if(off==kFeFenceControl && size==4 && value<=1 && kernel_audio_control_idle()) {
+            if(off==kFeFenceControl && size==4 && value<=1 && audio_control_drained()) {
                 set_reg32(off,value);return;
             }
             if(size==4 && (off==kFeFenceControl || off==kFememaddr || off==kFememdata) &&
@@ -1126,11 +1127,20 @@ private:
     bool startup_output_base_known_=false;
     bool input_sge_known_=false,input_sge_publishing_=false,startup_output_sge_known_=false;
     bool kernel_audio_control_idle()const {
-        return kernel_audio_startup_ && !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
-               !voice_mix_quanta_ && !processing_quantum_ && !gp_mix_admitting_ &&
-               !gp_frame_outstanding() && !dsp_work_active() && !gp_dma_.work_pending() &&
-               !dsp_work_pending(ApuDspKind::Ep) && !fe_fence_pending_ &&
-               !gp_program_revision_ && !ep_program_revision_;
+        // Startup programming can be repeated after the observed original
+        // holds retire both configured CPU generations. Lifetime counters
+        // describe past work; they are not outstanding ownership.
+        const bool held=dsp_reset_context_known_ && reg32(kGpReset)!=3 && reg32(kEpReset)==1 &&
+                        !gp_counter_profile_touched_ && !ep_counter_profile_touched_ && !ep_control_written_;
+        return audio_control_drained() && (kernel_audio_startup_ || held);
+    }
+    bool audio_control_drained()const {
+        return dsp_reset_context_known_ && fectl_initialized_ &&
+               !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
+               !processing_quantum_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
+               !gp_frame_outstanding() && !dsp_work_active() && !dsp_work_pending(ApuDspKind::Gp) &&
+               !(ep_frame_status_&2u) && (!ep_control_written_ || ep_frame_requested_) &&
+               !dsp_work_pending(ApuDspKind::Ep) && !fe_fence_pending_ && !fe_fence_working_;
     }
     bool fe_work_idle()const {
         return !processing_quantum_ && !gp_mix_admitting_ && !gp_frame_outstanding() &&
@@ -1548,8 +1558,10 @@ private:
     bool hrtf_headroom_known_=false;
     std::array<uint32_t,0x3800> gp_words_{};
     friend class ApuDspProcessor;
-    // Retained across CPU detach/rebind. No qualified warm-reset profile exists.
+    // Retained across detach/rebind; only an observed drained hold revokes the
+    // configured generation. EP's unconfigured warm counter is not known zero.
     bool gp_counter_profile_touched_=false,ep_counter_profile_touched_=false;
+    bool ep_counter_initial_known_=true;
     bool ep_control_written_=false;
     bool gp_host_requested_=false,dsp_host_used_=false,ep_host_status_known_=false;
     uint32_t ep_control_value_=0;

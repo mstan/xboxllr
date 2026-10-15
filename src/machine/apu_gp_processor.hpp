@@ -44,6 +44,7 @@ protected:
     bool start_gp_frame(ApuVoiceQuantum& result);
 private:
     bool reset_control(uint32_t previous,uint32_t next);
+    bool reset_cpu(bool original_hold);
     bool fail(const char* why);
     bool permit_program_write();
     bool dispatch_work();

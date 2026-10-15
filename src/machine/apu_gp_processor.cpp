@@ -64,7 +64,7 @@ bool ApuDspProcessor::reset_control(uint32_t previous,uint32_t next) {
     if(phase_==ApuGpPhase::Failed)return false;
     if(executing_ || working_ || resetting_ || apu_.dsp_work_active())return fail("reentrant GP reset control");
     struct ResetScope {bool& busy;ResetScope(bool& b):busy(b){busy=true;}~ResetScope(){busy=false;}} scope(resetting_);
-    if(next!=3)return reset_cpu();
+    if(next!=3)return reset_cpu(next==(kind_==ApuDspKind::Gp?0u:1u));
     // Rewriting released control does not refetch P or restart the CPU.
     if(previous==3) {
         if(phase_==ApuGpPhase::Held)return fail("GP reset control disagrees with held CPU");
@@ -73,15 +73,40 @@ bool ApuDspProcessor::reset_control(uint32_t previous,uint32_t next) {
     return bootstrap_from_scratch();
 }
 bool ApuDspProcessor::reset_cpu() {
+    // A direct fixture reset has no observed hardware control transition.
+    return reset_cpu(false);
+}
+bool ApuDspProcessor::reset_cpu(bool original_hold) {
     if(phase_==ApuGpPhase::Failed)return false;
     if(apu_.faulted())return fail("GP CPU reset on a faulted APU");
     if(executing_ || working_ || apu_.dsp_work_active())return fail("reentrant GP CPU reset");
     if(apu_.dsp_work_pending(kind_))return fail("GP CPU reset with pending peripheral work remains unqualified");
     if(kind_==ApuDspKind::Gp && apu_.gp_frame_outstanding())return fail("GP CPU reset with an outstanding frame remains unqualified");
-    if(counter_profile_.touched())return fail("GP CPU reset after counter configuration remains unqualified");
-    if(kind_==ApuDspKind::Ep && apu_.ep_control_written_)
-        return fail("EP CPU reset after control publication remains unqualified");
+    if(kind_==ApuDspKind::Ep && ((apu_.ep_frame_status_&2u) ||
+       (apu_.ep_control_written_ && !apu_.ep_frame_requested_)))
+        return fail("EP CPU reset with an outstanding frame remains unqualified");
+    const bool configured=counter_profile_.touched() ||
+                          (kind_==ApuDspKind::Ep && apu_.ep_control_written_);
+    if(configured && (!original_hold || !counter_profile_.active()))
+        return fail(kind_==ApuDspKind::Ep && apu_.ep_control_written_?
+                    "EP CPU reset after control publication requires the observed configured hold":
+                    "GP CPU reset after counter configuration requires the observed complete profile");
+    if(configured && (apu_.reg32(McpxApu::kSectl)&0x18))
+        return fail("GP configured reset requires stopped setup admission");
     xlle_dsp_core_reset(core_);
+    if(configured) {
+        counter_profile_={};
+        if(kind_==ApuDspKind::Gp)apu_.gp_counter_profile_touched_=false;
+        else {
+            apu_.ep_counter_profile_touched_=false;
+            // The physical EP counter remains nonzero before reconfiguration.
+            // Its unknown warm epoch must not become the GP's known zero.
+            apu_.ep_counter_initial_known_=false;
+            // Revoke the old CPU's control publication, retaining the raw CPU
+            // request latch observed across EP1. A new C4 arms the new program.
+            apu_.ep_control_written_=false;apu_.ep_control_value_=0;
+        }
+    }
     initializing_=false;retired_work_instructions_=0;phase_=ApuGpPhase::Held;
     return true;
 }
@@ -186,6 +211,10 @@ uint32_t ApuDspProcessor::read(void* opaque,uint32_t address) {
         if(!owner.executing_ || owner.phase_==ApuGpPhase::Failed) {
             owner.fail("GP counter read requires the serialized CPU owner");std::abort();
         }
+        if(owner.kind_==ApuDspKind::Ep && !owner.apu_.ep_counter_initial_known_ &&
+           !owner.counter_profile_.active()) {
+            owner.fail("EP warm counter read before reconfiguration remains unqualified");std::abort();
+        }
         return owner.counter_profile_.observe(owner.retired_before_instruction_);
     }
     uint32_t value=0;
@@ -245,20 +274,23 @@ void ApuDspProcessor::write(void* opaque,uint32_t address,uint32_t value) {
         return;
     }
     if(owner.kind_==ApuDspKind::Ep && address==0xffffc5 && value==0xfff) {
-        // Shared C5 write-one-to-clear contract, restricted to the original
-        // initial empty-event clear. This admits no EP event producer, wake,
-        // warm acknowledgement or unknown status bits. Only the executing
-        // bootstrap owner may cross this boundary before its first yield.
+        // The original bootstrap clears C5 on cold entry and after its
+        // drained reset. Apply the existing W1C contract to retained bit8;
+        // neither a pending frame nor DMA EOL may be discarded by this path.
+        // The warm epoch must come from the observed configured hold, on the
+        // same retained CPU owner, before its new control publication.
         uint32_t events=0;
+        const bool warm=!owner.apu_.ep_counter_initial_known_;
         if(!owner.executing_ || !owner.initializing_ ||
-           owner.phase_==ApuGpPhase::Failed || owner.apu_.ep_dma_nodes() ||
-           owner.apu_.dsp_dma_pending(ApuDspKind::Ep) ||
-           !owner.apu_.ep_read(address,events) || events) {
+           owner.phase_==ApuGpPhase::Failed || (!warm && owner.apu_.ep_dma_nodes()) ||
+           owner.apu_.dsp_work_pending(ApuDspKind::Ep) ||
+           !owner.apu_.ep_read(address,events) || (events&~(warm?0x100u:0u))) {
             owner.fail("EP startup event clear requires an empty initial context");std::abort();
         }
         if(!owner.apu_.ep_write(address,0x80)) {
             owner.fail("EP startup event acknowledgement failed");std::abort();
         }
+        owner.apu_.ep_frame_status_&=~0x100u;
         return;
     }
     if(!(owner.kind_==ApuDspKind::Gp?owner.apu_.gp_write(address,value):owner.apu_.ep_write(address,value))) {

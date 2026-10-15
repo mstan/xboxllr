@@ -33,12 +33,17 @@ int main(int argc,char** argv) {
     const bool active=argc==3 && std::string(argv[1])=="--active";
     if(argc!=1 && !active)return 2;
     std::string error;uint64_t reads=0,writes=0;
+    auto fault=[&](const std::string& s){
+        if(error.empty()) {
+            error=s;std::fprintf(stderr,"FAIL device: %s\n",s.c_str());std::fflush(stderr);
+        }
+    };
     {
     // Destruction can reject pending ownership. Inspect its result before
     // choosing the final exit code, not after a successful return is fixed.
-    xlle::McpxApu apu([&](const std::string& s){if(error.empty())error=s;});
+    xlle::McpxApu apu(fault);
     if(!apu.initialize_kernel_audio_handoff())return 2;
-    xlle::McpxAci aci([&](const std::string& s){if(error.empty())error=s;});
+    xlle::McpxAci aci(fault);
     if(active) {
         // The source caller verifies the retained physical image's digest.
         // Install this immutable owner before constructing the sole EP CPU.
@@ -53,12 +58,11 @@ int main(int argc,char** argv) {
         }
         if(!apu.install_ep_y_lookup(words.data(),words.size()) || !aci.initialize_kernel_audio_handoff())return 2;
     }
-    xlle::ApuGpProcessor gp(apu,[&](const std::string& s){if(error.empty())error=s;});
-    xlle::ApuEpProcessor ep(apu,[&](const std::string& s){if(error.empty())error=s;});
+    xlle::ApuGpProcessor gp(apu,fault);
+    xlle::ApuEpProcessor ep(apu,fault);
     apu.set_time(0,1125000);
     std::unique_ptr<xlle::ApuDspClock> stopped_clock;
     std::unique_ptr<xlle::ApuDeviceClock> active_clock;
-    auto fault=[&](const std::string& s){if(error.empty())error=s;};
     if(active)active_clock=std::make_unique<xlle::ApuDeviceClock>(apu,gp,ep,aci,0,1125000,fault);
     else stopped_clock=std::make_unique<xlle::ApuDspClock>(apu,gp,ep,0,1125000,fault);
     auto ticks=[&]{return active?active_clock->ticks():stopped_clock->ticks();};

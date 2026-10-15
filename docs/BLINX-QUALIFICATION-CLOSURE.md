@@ -50,6 +50,36 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## Original drained DSP retirement and reentry - 2026-10-15
+
+The configured-reset observations are now adopted by the existing sole GP/EP
+CPU owners. Original GP0/EP1 holds admit only a complete configured profile,
+stopped admission and drained peripheral/frame work. EP retains its request
+latch; a warm B3 read before original reconfiguration still rejects because
+hardware did not establish a zero counter. No owner, DMA engine or clock is
+replaced to discard history.
+
+The unchanged original driver now executes two processed generations on the
+same owners for each of its three configurations. Each generation runs eight
+real EP events and57 GP quanta, then the original SE stop helper, actual drain
+and whole17C2AD retirement. Warm setup reloads all2048 P words on each CPU,
+executes original configuration and processes another generation. After final
+retirement, original destructors free all allocations while held devices stay
+alive; further guest time performs no RAM access. Codec streams remain stopped.
+
+FE control reads/programming now distinguish actual outstanding work from past
+processing. The original warm C5=FFF clear applies the independently sourced
+write-one-to-clear policy only in a drained bootstrap; pending frame/DMA/EOL
+cannot be discarded. Exact unconsumed warm background-bit behavior remains a
+precision detail under AUDIO-D13. Actual active2010C/20104 notification ordering
+and connected original output still belong to A04/A05.
+
+Private source/executable identities and receipts are retained under
+`build/blinx/audio-configured-reset-20261015/`. This completes the drained DSP
+reset/reentry component of A03; it is not full audio-family acceptance or proof
+of the active FE branch. The earlier configured hardware experiment is reused;
+no additional hardware operations or audible playback were needed.
+
 ## Configured reset hardware question resolved - 2026-10-15
 
 After confirmed remote dashboard/SMC restart and fresh probe startup, the bounded
@@ -64,10 +94,9 @@ on both generations. GP host request/status become0/0 while held; EP retains
 generations; do not infer that EP reset clears its counter from the GP result.
 Held bank reads remain raw evidence, not a new memory-retention requirement.
 
-This resolves the isolated configured-reset/reexecution observation, not normal
-original retirement or pending-work cancellation. Next adapt the existing sole
-CPU owners to the supported reset path and verify the original stop/reuse caller;
-retain unsupported-state guards and AUDIO-D13. No further hardware measurement
+This resolves the isolated configured-reset/reexecution observation. The runtime
+adoption and original drained stop/reuse check above now follow it; pending-work
+cancellation remains guarded under AUDIO-D13. No further hardware measurement
 of this same no-DMA reset case is required for bookkeeping. A04 and analog A05
 remain distinct required questions. Physical receipts are in probe
 `results/qualification-final-audio-20261015/gp-reset-bounded/` and
@@ -88,7 +117,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: physical configured GP/EP reset and fresh bootstrap observed; runtime adoption and original active retirement remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: original active caller contract established; real queue/notification ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer observes completion and returns; representative pending/failure checks prevent false success, without an exhaustive fault matrix |
 | A05 | Captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; sends/mix/GP/EP and digital-ring content agree; complete output/timing/retirement and analog ring evidence remain | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 

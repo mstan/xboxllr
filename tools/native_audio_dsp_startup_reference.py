@@ -6,8 +6,9 @@ inputs. No original driver return, device read, bootstrap or completion is
 substituted. The optional enclosing-call check advances guest time through the
 original stall service and executes both real DSPs with the sequencer stopped.
 The active extension runs the original SE start/stop helper over the same
-live allocations and immutable physical EP lookup. Codec streams stay stopped;
-this does not qualify complete original audio output or active reset.
+live allocations and immutable physical EP lookup. The reset extension invokes
+original retirement after admitted work drains, then reenters on the same owners.
+Codec output and retirement with pending FE notification remain separate.
 """
 import argparse
 import hashlib
@@ -94,6 +95,8 @@ class Startup(OriginalStartup):
 
 
 def check(args):
+    if args.execute_reset_reentry:
+        args.execute_active = True
     if args.execute_active:
         args.execute_stall = True
         assert args.ep_y_lookup is not None, 'active DSPs require the verified immutable EP image'
@@ -111,6 +114,7 @@ def check(args):
                     driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     guest_time_advanced=args.execute_stall, dsp_execution=args.execute_stall,
                     active_clock_requested=args.execute_active,
+                    drained_reset_reentry_requested=args.execute_reset_reentry,
                     ep_y_lookup_sha256=EP_Y_LOOKUP_SHA256 if args.execute_active else None)
     reports = []
     for life in range(3):
@@ -160,45 +164,50 @@ def check(args):
                     assert reply.startswith('OK ') and len(reply) == 11, reply
                     return int(reply[3:], 16)
                 original.transport = transport
+                generation, boot_report = 1, report
+                baseline = dict(ticks=0, gp_cycles=0, ep_cycles=0, events=0)
                 def verify_bootstrap():
-                    report['bootstrap_state'] = command('STATE')
-                    state = report['bootstrap_state'].split()
+                    boot_report['bootstrap_state'] = command('STATE')
+                    state = boot_report['bootstrap_state'].split()
                     assert len(state) == 7 and state[0] == 'STATE'
-                    assert list(map(int,state[1:5])) == [1,1,1,1], 'both actual CPUs must be ready after exactly one bootstrap'
+                    assert list(map(int,state[1:5])) == [1,1,generation,generation], 'both actual CPUs must have one fresh bootstrap per generation'
                     for kind, slot in (('GP',0x17dfb8),('EP',0x17dfd8)):
                         reply = command('P '+kind); assert reply.startswith('P ')
                         actual = bytes.fromhex(reply[2:]); assert len(actual) == 8192
                         source = bytes(original.cpu.mem_read(original.get(slot),8192))
                         expected = b''.join(struct.pack('<I',v&0xffffff) for v, in struct.iter_unpack('<I', source))
                         assert actual == expected, 'actual CPU bootstrap must match the current original source pages'
-                        report[kind.lower()+'_bootstrap_sha256'] = hashlib.sha256(actual).hexdigest()
+                        boot_report[kind.lower()+'_bootstrap_sha256'] = hashlib.sha256(actual).hexdigest()
                 def stall(us):
-                    assert us == 10000 and 'dsp_clock' not in report
+                    assert us == 10000 and 'dsp_clock' not in boot_report
                     verify_bootstrap()
-                    reply = command('T 11250')
+                    target = baseline['ticks']+11250
+                    reply = command(f'T {target}')
                     state = clock_result(reply)
-                    assert state['ticks'] == 11250 and state['gp_phase'] == 3 and state['ep_phase'] == 2
-                    assert 0 < state['gp_cycles'] < 1333125 and 1333125 <= state['ep_cycles'] <= 1333128
-                    assert state['ep_pc'] in (0x31,0x32) and state['events'] == 0
-                    report['dsp_clock'] = state
+                    assert state['ticks'] == target and state['gp_phase'] == 3 and state['ep_phase'] == 2
+                    assert 0 < state['gp_cycles']-baseline['gp_cycles'] < 1333125
+                    assert 1333125 <= state['ep_cycles']-baseline['ep_cycles'] <= 1333128
+                    assert state['ep_pc'] in (0x31,0x32) and state['events'] == baseline['events']
+                    boot_report['dsp_clock'] = state
                     count = len(ram_events)
-                    assert command('T 11250') == reply and len(ram_events) == count
+                    assert command(f'T {target}') == reply and len(ram_events) == count
                 if args.execute_stall:original.stall = stall
                 original.prepare()
                 report['original_owner'] = original.owner
                 entries = [(0x17bf66,(),original.owner),(0x17b79f,(),0)]
                 entries += [(0x17be82,(),original.owner)] if args.execute_stall else [(0x17b870,(),original.owner),(0x17b999,(),original.owner)]
-                for entry, argv, ecx in entries:
-                    report['current_original_entry'] = entry; save()
-                    original.call(entry, argv, ecx)
-                report['device_state'] = command('STATE')
-                if not args.execute_stall:verify_bootstrap()
-                else:assert 'dsp_clock' in report
-                if args.execute_active:
+                def setup():
+                    for entry, argv, ecx in entries:
+                        report['current_original_entry'] = entry; save()
+                        original.call(entry, argv, ecx)
+                    boot_report['device_state'] = command('STATE')
+                    if not args.execute_stall:verify_bootstrap()
+                    else:assert 'dsp_clock' in boot_report
+                def active_cycle():
                     start = active_result(command('ACTIVE'))
-                    assert start['ticks'] == 11250 and not start['gp_frames'] and not start['ep_events']
+                    assert start['ticks'] == boot_report['dsp_clock']['ticks']
                     assert not start['pcm_words']
-                    report['active_start'] = start
+                    boot_report['active_start'] = start
                     report['current_original_entry'] = 0x17bc9e; save()
                     original.call(0x17bc9e,(1,),original.owner)
                     assert rows[-1]['operation'] == 'W' and rows[-1]['address'] == 0xfe802000 and rows[-1]['value'] == 15
@@ -206,34 +215,68 @@ def check(args):
                     # advance across eight EP boundaries, not eight fabricated
                     # complete periods beginning at this CPU helper's return.
                     target = (start['ticks']//6000+8)*6000
-                    report['active_target_ticks'] = target; save()
+                    boot_report['active_target_ticks'] = target; save()
                     run_reply = command(f'T {target}')
                     run = clock_result(run_reply)
                     progress = active_result(command('ACTIVE'))
-                    report['active_run'] = dict(clock=run,devices=progress); save()
-                    assert run['ticks'] == target and run['ep_phase'] == 2 and run['events'] == 8
-                    assert progress['gp_frames'] == target//750-start['ticks']//750
-                    assert progress['ep_events'] == 8 and not progress['pcm_words']
+                    boot_report['active_run'] = dict(clock=run,devices=progress); save()
+                    assert run['ticks'] == target and run['ep_phase'] == 2 and run['events']-start['ep_events'] == 8
+                    assert progress['gp_frames']-start['gp_frames'] == target//750-start['ticks']//750
+                    assert progress['ep_events']-start['ep_events'] == 8 and not progress['pcm_words']
                     # Stop admission through the original SE helper, then
                     # retain every allocation while actual admitted work runs.
-                    # Device disposal afterward is not an original DSP reset.
                     original.call(0x17bc9e,(0,),original.owner)
                     assert rows[-1]['operation'] == 'W' and rows[-1]['address'] == 0xfe802000 and rows[-1]['value'] == 7
                     drain_reply = command(f'T {target+6000}')
                     drained = clock_result(drain_reply)
                     final = active_result(command('ACTIVE'))
-                    report['active_drain'] = dict(clock=drained,devices=final); save()
+                    boot_report['active_drain'] = dict(clock=drained,devices=final); save()
                     assert drained['ticks'] == target+6000 and drained['gp_phase'] == 3 and drained['ep_phase'] == 2
                     assert drained['ep_pc'] in (0x31,0x32), 'original EP must return to its real event poll before fixture disposal'
-                    assert drained['events'] == 8 and final['gp_frames'] == progress['gp_frames'] and final['ep_events'] == 8
-                    assert drained['gp_cycles'] > report['dsp_clock']['gp_cycles']
-                    assert final['gp_dma_nodes'] > 0 and final['ep_dma_nodes'] > 0
+                    assert drained['events'] == start['ep_events']+8 and final['gp_frames'] == progress['gp_frames'] and final['ep_events'] == start['ep_events']+8
+                    assert drained['gp_cycles'] > boot_report['dsp_clock']['gp_cycles']
+                    assert final['gp_dma_nodes'] > start['gp_dma_nodes'] and final['ep_dma_nodes'] > start['ep_dma_nodes']
                     assert not final['pcm_words']
                     assert not final['gp_outstanding'] and not final['ep_work_pending']
                     count = len(ram_events)
                     assert command(f'T {target+6000}') == drain_reply and len(ram_events) == count
+                    return drained
+                def retire_drained():
+                    # SE admission is already stopped and all admitted work
+                    # drained. The active FE notification branch is not claimed.
+                    first = len(rows)
+                    report['current_original_entry'] = 0x17c2ad; save()
+                    original.call(0x17c2ad,ecx=original.owner)
+                    controls = [(r['address'],r['value']) for r in rows[first:]
+                                if r['operation']=='W' and r['address'] in (0xfe83fffc,0xfe85fffc)]
+                    assert controls == [(0xfe83fffc,0),(0xfe85fffc,1)]
+                    state = command('STATE')
+                    assert list(map(int,state.split()[1:5])) == [0,0,generation,generation]
+                    boot_report['drained_retirement_state'] = state
+                    save()
+                setup()
+                if args.execute_active:
+                    baseline = active_cycle()
+                if args.execute_reset_reentry:
+                    allocations = [dict(a) for a in original.allocations]
+                    retire_drained()
+                    assert original.allocations == allocations, 'retirement must retain backing through reentry'
+                    generation = 2
+                    boot_report = report['reentry'] = {}
+                    setup()
+                    baseline = active_cycle()
+                    retire_drained()
+                    original.destroy_startup()
+                    report['original_allocations_freed'] = not any(a['live'] for a in original.allocations)
+                    # Still-live but held devices must not touch freed RAM.
+                    count = len(ram_events)
+                    after = clock_result(command(f"T {baseline['ticks']+6000}"))
+                    assert after['gp_phase'] == 0 and after['ep_phase'] == 0
+                    assert after['events'] == baseline['events'] and len(ram_events) == count
+                    report['after_original_free'] = after
                 report['source_identity'] = original.source_identity()
-                report['status'] = 'original-startup-active-clock-returned' if args.execute_active else 'original-startup-returned'
+                report['status'] = ('original-drained-reset-reentry-returned' if args.execute_reset_reentry else
+                                    'original-startup-active-clock-returned' if args.execute_active else 'original-startup-returned')
             except BaseException as error:
                 report.update(status='stopped', error=repr(error), source_identity=original.source_identity()); save(); raise
             finally:
@@ -244,10 +287,11 @@ def check(args):
         # Device owners have been retired before original caller resources are
         # destroyed. This is not an original active stop/reset qualification.
         original.transport = lambda op,address,size,value: (_ for _ in ()).throw(AssertionError('unexpected cleanup MMIO'))
-        original.destroy_startup()
+        if not args.execute_reset_reentry:original.destroy_startup()
         report['original_allocations_freed'] = not any(a['live'] for a in original.allocations)
         save()
-    detail = ('; original SE start/stop, eight shared-clock EP events and actual GP/EP DMA; codec output and reset remain separate'
+    detail = ('; two processed generations on the same owners, original drained retirement/reentry and free; active FE notification and codec output remain separate'
+              if args.execute_reset_reentry else '; original SE start/stop, eight shared-clock EP events and actual GP/EP DMA; codec output and reset remain separate'
               if args.execute_active else '; original10000us wait runs GP to yield and EP into polling without frame events'
               if args.execute_stall else '; execution/cadence still separate')
     print('PASS three unchanged original GP/EP setup returns and actual owned bootstrap images'+detail)
@@ -259,5 +303,6 @@ if __name__ == '__main__':
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--execute-stall',action='store_true',help='Execute the unchanged enclosing setup and its real10000us wait')
     parser.add_argument('--execute-active',action='store_true',help='Also execute original SE start/stop and eight active EP events; implies --execute-stall')
+    parser.add_argument('--execute-reset-reentry',action='store_true',help='Original retirement after drained work, warm setup, processing and original free on the same device owners; implies --execute-active')
     parser.add_argument('--ep-y-lookup',type=Path,help='Required verified private EP Y0800 image for --execute-active')
     check(parser.parse_args())

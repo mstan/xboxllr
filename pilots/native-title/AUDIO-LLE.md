@@ -190,6 +190,37 @@ before any original call and is retained. Reuse these cases; AUDIO-D14 defers
 the broader fault matrix. The real queue, required pending ordering and normal
 original retirement remain A04/A05. No HLE behavior or playback changed.
 
+## Original drained DSP reset and reentry - 2026-10-15
+
+The configured GP0/EP1 hardware observations now drive the maintained CPU reset
+path. Complete B2/B0/B1 configuration can be retired with SE admission stopped
+and all frame/DMA/acknowledgement work drained. A GP frame lease, EP event or
+unfinished EP computation still blocks reset. The same CPU and physical RAM
+owners remain; the original next release fetches fresh P pages and restarts
+actual instructions. EP request retention and its unknown preconfiguration
+warm counter are preserved, rather than copying GP's observed zero epoch.
+
+`native_audio_dsp_startup_reference.py --execute-reset-reentry` exercises whole
+original17C2AD after actual GP/EP processing has drained, then repeats original
+setup and processing on the same owners. All three driver configurations run
+two generations, each with57 GP quanta and eight EP events. Every bootstrap
+compares all2048 words per DSP to current original source RAM. Final original
+retirement precedes original resource destruction while device owners remain
+alive; later elapsed time produces no access to freed RAM.
+
+The reached FE control read/programming paths now test current drained ownership
+instead of rejecting any device with processing history. CPU MMIO reads do not
+advance work. Original C5=FFF uses the W1C contract in pinned xemu
+`482088490c2d5983ed5e1eafbd09906157c1eca0`, `hw/xbox/mcpx/apu/dsp/dsp.c`, on the
+retained warm bit8 only; actual frame/EOL and queued acknowledgements remain
+guarded. This is source-backed warm-clear behavior, not a new silicon
+measurement of background-bit timing; AUDIO-D13 retains that precision question.
+
+Private receipts: `build/blinx/audio-configured-reset-20261015/`. The original
+active2010C/20104 notification branch, codec output and final connected title
+acceptance remain A04/A05. HLE processing/defaults are unchanged, and no speaker
+audio or new console operation is required by this offline component check.
+
 ## Remaining retirement contract and analog probe preparation - 2026-10-15
 
 The unchanged original17C2AD retirement caller has a larger contract than
@@ -204,15 +235,13 @@ stopping SE admission. Its source order is now explicit:
 |17BC43(0),17BC9E(0) | Preserve unrelated FE fields while selecting mode80, then clear SE bits18 |
 | Nine list words, GP/EP reset | Clear the original lists toFFFF, then GP reset0 and EP reset1 while retaining original allocations |
 
-The earlier fixture stops SE and disposes its owners without reexecuting17C2AD.
-It never exercises that active2010C/20104 path and cannot stand in for the
-enclosing retirement. `reset_cpu()` also deliberately rejects a configured
-counter, EP control publication or pending work. Existing silicon receipts cover
-initial hold/release and idle request clearing, not those active histories.
-Required A03/A04 evidence must cover the consumed active method/notification
-ordering and the original drained reset/reinitialization profile. No production
-guard is relaxed from caller intent or a similar device's behavior. These remain
-required hardware questions in the final batch, not new precision deferrals.
+The original earlier fixture stopped SE and disposed its owners without
+reexecuting17C2AD. The new drained reset/reentry extension above now executes
+that whole routine and original reinitialization after processing. It still
+does not enter the active2010C/20104 branch: actual notification ordering and
+the original consumer's status1 read remain A04. Pending-work reset/cancellation
+stays guarded. Reuse the completed configured reset observation; no repeat of
+that experiment is needed to settle the distinct active FE question.
 
 The caller inventory is retained in
 `build/blinx/audio-retirement-contract-20261015/caller-inventory.aot-private.json`,
