@@ -111,6 +111,20 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"headroom") || !strcmp(mode,"headroom-read")) {
+        access(0xfe820280,4,0);
+        for(unsigned slot=0;slot<32;++slot)access(0xfe820200+slot*4,4,slot&7);
+        if(!strcmp(mode,"headroom-read")) {
+            uint32_t value=0xa5a55a5a;CHECK(pilot_audio_device_lle_access(0xfe820280,4,0,&value));
+            CHECK(value==0xa5a55a5a); // write-only method never invents readback
+        } else {
+            uint32_t capacity=0;CHECK(!pilot_audio_device_lle_access(0xfe820010,4,0,&capacity) && capacity==0x80);
+        }
+        PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
+        CHECK(state.gp_held && state.ep_held && !state.dma_reads && !state.dma_writes && !state.pcm_words && !state.spdif_words);
+        CHECK(state.clock_ticks==60000);CHECK(!pilot_audio_device_lle_close());
+        puts("PASS native headroom startup group, idle ownership and explicit write-only boundary");return 0;
+    }
     if(!strcmp(mode,"runtime-clock") || !strcmp(mode,"runtime-clock-input-failure")) {
         uint64_t counter=UINT64_MAX;
         CHECK(pilot_audio_device_timeline_counter(&counter) && counter==UINT64_MAX);

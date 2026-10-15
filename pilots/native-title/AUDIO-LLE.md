@@ -3232,3 +3232,47 @@ alone does not close the family. Evidence, binaries and source snapshots:
 `build/blinx/audio-spdif-cyclic-20261015/`. Families6/9 and deferred30 IDs /
 29 scopes remain unchanged. No new hardware operation, precision deferral
 or HLE processing change occurred.
+
+## Original headroom startup group - 2026-10-15
+
+The original helper at17815A waits for one FE slot, masks its argument to
+three bits and writes method280. The enclosing caller at178646 passes0,
+then178653..178665 invokes178191 for all32 ordinary mix bins. That second
+helper reads each settings byte at14..33, masks it to three bits and writes
+method200+4*slot. This is one33-write initialization group.
+
+Pinned xemu482088490c2d5983ed5e1eafbd09906157c1eca0 names280 HRTF headroom,
+but its spatial gain implementation retains uncertainty about the interaction
+with other headrooms. The maintained APU now stores explicit known HRTF
+state under its existing owner; it does not invent method readback or admit
+spatial processing. Ordinary voices continue using their existing per-bin
+gain. Spatial/multipass lists and voices below64 retain their processing
+guards. Reached spatial processing would remain required work, not an
+implicit deferral or silence substitution.
+
+Three prepared original-helper groups each execute35 complete calls and70
+actual model MMIO transactions: the33 startup writes and two subsequent
+HRTF changes. All32 ordinary gains match independently fixed expectations
+and remain isolated from HRTF changes. Original instructions, settings,
+stack, callee-saved registers and IRQL are preserved; no kernel service or
+allocation is substituted. The caller/settings and synchronous FE capacity
+are explicit fixture limits; this does not establish busy-queue latency.
+
+The MinGW contract and12 focused native checks pass, covering all headroom
+amounts/bins, rejected widths/readback/value/spatial input, terminal state,
+native idle ownership, original startup and shared-clock regressions. One
+muted/headless title attempt ran94.922s, crossed the headroom group and
+stopped at `FE820350` DWORD write0. Both capture partials contain zero
+accepted bytes. Private evidence is under
+`build/blinx/audio-fe-methods-20261015/`.
+
+The next original voice-publication group writes350 from object2C,370 from
+object34, and31C=FFFF alongside the already supported format, envelope,
+filter, routing, volume and pitch methods. Xemu does not define350/370 in
+the pinned register header. Their hardware effects must be established;
+zero arguments do not justify ignoring them or storing generic MMIO bytes.
+Audit this whole publication group and its consumers before another title
+attempt. Active FE ordering, original DSP/reset/output and audio-family
+acceptance remain open. Families6/9 and deferred30 IDs /29 scopes are
+unchanged. No hardware operation, new precision deferral or HLE processing
+change occurred.

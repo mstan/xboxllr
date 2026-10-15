@@ -26,6 +26,7 @@ inline bool pilot_original_apu_admitted(uint32_t off,unsigned size,int write,uin
     if(((off>=0x3024 && off<=0x307c) || (off>=0x4024 && off<=0x407c)) &&
        (off&15))return true; // lane +4/+8/+C only; +0 is not a register
     if(off>=0x20200 && off<=0x2027c)return true;
+    if(off==0x20280)return value<=7; // Original17815A masks before this write-only method.
     switch(off) {
     case 0x2040:case 0x2044:case 0x2048:case 0x204c:
     case 0x20d4:case 0x20d8:case 0x20dc:case 0x20e0:

@@ -180,6 +180,13 @@ public:
     // each with 32 frame slots. This stage neither pulls source nor retires it.
     // Slot order selects source channel; repeated destination bins add.
     bool mix_2d_samples(uint16_t voice,const float* stereo,uint32_t frames,float* bins);
+    // Explicit method-owned state for a future spatial consumer. Ordinary
+    // voices do not use this field; spatial processing keeps its own guard.
+    // No hardware readback is invented for the write-only method aperture.
+    bool hrtf_headroom(uint8_t& amount)const {
+        if(!hrtf_headroom_known_)return false;
+        amount=hrtf_headroom_;return true;
+    }
 
     // Source -> nominal pitch conversion, with persistent interpolation history.
     // Real source end drains the filter; no silence is substituted for starvation.
@@ -507,6 +514,9 @@ public:
     uint32_t mmio_read(uint32_t addr, int size) override {
         uint32_t off = addr - base_;
         if (faulted_) return 0;
+        if(size>0 && off<0x20284 && uint64_t(off)+unsigned(size)>0x20280) {
+            device_fault("HRTF headroom method has no qualified register readback");return 0;
+        }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
         if(touches_gp_output_base(off,size)) {
@@ -584,6 +594,10 @@ public:
     void mmio_write(uint32_t addr, int size, uint32_t value) override {
         uint32_t off = addr - base_;
         if (faulted_) return;
+        if(size>0 && off<0x20284 && uint64_t(off)+unsigned(size)>0x20280 &&
+           (off!=0x20280 || size!=4 || value>7)) {
+            device_fault("HRTF headroom requires the original masked DWORD amount");return;
+        }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
         if(touches_gp_output_base(off,size)) {
@@ -710,6 +724,10 @@ public:
             if (configure_voice(method, value)) return;
             if(method>=0x200 && method<=0x27c && (method&3)==0) {
                 submix_headroom_[(method-0x200)/4]=value&7;
+                return;
+            }
+            if(method==0x280) {
+                hrtf_headroom_=uint8_t(value);hrtf_headroom_known_=true;
                 return;
             }
             if (method == 0x140) {
@@ -1427,6 +1445,8 @@ private:
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
     std::array<std::array<apu_envelope_curve::ReleaseHistory,2>,kMaxVoices> voice_envelopes_{};
     std::array<uint8_t,32> submix_headroom_{};
+    uint8_t hrtf_headroom_=0;
+    bool hrtf_headroom_known_=false;
     std::array<uint32_t,0x3800> gp_words_{};
     friend class ApuDspProcessor;
     // Retained across CPU detach/rebind. No qualified warm-reset profile exists.
