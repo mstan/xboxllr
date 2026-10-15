@@ -33,7 +33,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: stopped VP initializer and CPU DSP host controls implemented; remaining startup dependencies, shared cadence, active methods/table consumers and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: original GP/EP setup returns in three live-memory lifetimes with exact bootstraps; shared cadence, active methods/table consumers and reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
 | A05 | Integration and original AC97 startup crossed; title now stops at GP write FE83FF00; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
@@ -62,6 +62,26 @@ mask/zero/reset batch passed. A later read also found EP status100 again, so
 elapsed-time status reads remain guarded rather than exporting a permanent0.
 See the [implementation and remaining limits](../pilots/native-title/AUDIO-LLE.md#cpu-dsp-host-controls-connected---2026-10-14).
 No changed title was launched; complete startup/shared scheduling remains next.
+
+The subsequent live-memory source check now completes both unchanged GP/EP
+setup entrypoints in three lifetimes. Each performs102 actual device
+transactions and eleven accesses to currently owned original RAM; each sole
+DSP CPU loads one exact8192-byte bootstrap and remains ready, without executing
+instructions or advancing guest time. Original destructors free every allocation
+after the fixture retires its device owners. This is not an active reset proof.
+
+Physical observations corrected the reference emulator's ignored1000/1004
+output methods: base programming also resets the end/cursor, and the original
+length2000 command restores end2000. The model updates its existing FIFO owner.
+An extra length2100 experiment trapped and remains rejected. All unexpected
+write stops were followed by confirmed remote recovery. Ten focused current-
+source checks pass, including real FIFO transfer regressions; the connected
+title checkpoint above predates this change. See the
+[startup proof and limits](../pilots/native-title/AUDIO-LLE.md#original-gpep-setup-connected---2026-10-14).
+Shared DSP execution/cadence, then active FE/output/reset, is the next group.
+The family total remains6/9. New AUDIO-D11 retains unreached output encodings
+and trap behavior; the queues now hold30 IDs /29 deferred scopes. Required
+shared execution and output are not deferred.
 
 ## Original AC97 startup crossed - 2026-10-14
 

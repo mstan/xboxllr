@@ -163,6 +163,11 @@ int main(int argc,char **argv) {
             CHECK(word(va+0x3ff8)==pa+0xe000 && word(va+0x3ffc)==0xa5a5a5a5);
             CHECK(word(va+0x4008)==pa+0xf000 && word(va+0x400c)==0xa5a5a5a5);
             CHECK(word(va+8)==0xa5a5a5a5); // Output belongs to GPF, independently of VPSGE.
+            access(0xfe803024,4,0);access(0xfe803028,4,0x2000);
+            access(0xfe821000,4,0);access(0xfe821004,4,0x2000);
+            for(uint32_t offset:{0x3024u,0x3034u,0x3044u,0x3054u}) {
+                uint32_t value=99;CHECK(!pilot_audio_device_lle_access(0xfe800000+offset,4,0,&value));CHECK(value==0);
+            }
             PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
             CHECK(s.gp_held && s.ep_held && s.dma_writes==2 && !s.pcm_words && received.empty());
             CHECK(!pilot_audio_device_lle_close());call(171,&va);

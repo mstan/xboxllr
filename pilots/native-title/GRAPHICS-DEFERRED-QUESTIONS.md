@@ -31,10 +31,10 @@ supersedes the original deferral status where a reopening trigger has fired:
 - The other twelve graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
-Together with the fifteen entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **29 retained question IDs: 28 with deferred scope, and one fully
-promoted to required work**. Of those 28, GFX-D04 also has the required portion
-above. AUDIO-D09/D10 were added after the initial reconciliation. Earlier reports
+Together with the sixteen entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
+there are **30 retained question IDs: 29 with deferred scope, and one fully
+promoted to required work**. Of those 29, GFX-D04 also has the required portion
+above. AUDIO-D09/D10/D11 were added after the initial reconciliation. Earlier reports
 calling all 27 then-recorded questions "precision deferrals" were imprecise;
 they are historical counts, not 27 currently waived closing requirements.
 The current family count is **6/9**; this reconciliation qualifies no new work.

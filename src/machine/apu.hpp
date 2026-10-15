@@ -412,6 +412,11 @@ public:
         // Original idle retirement and retained pre-video/network observations
         // agree. These are initialized-kernel values, not cold-reset defaults.
         set_reg32(kGpReset,0);set_reg32(kEpReset,1);dsp_reset_context_known_=true;
+        // Recovered running-probe observations supply the unused GP output
+        // base fields for this explicit warm profile. They are not universal
+        // cold-reset defaults. The original driver writes FIFO0 itself.
+        for(uint32_t offset:{0x3034u,0x3044u,0x3054u})set_reg32(offset,0);
+        gp_output_base_known_=0x0e;
         // The same pre-video/network entry capture supplies the retained FE
         // status/trap fields. Original kernel init/retirement supplies108F;
         // the capture supplies70000/F00. This is not a board-reset default.
@@ -481,6 +486,13 @@ public:
         if (faulted_) return 0;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
+        if(touches_gp_output_base(off,size)) {
+            const int index=gp_output_base_index(off);
+            if(size!=4 || index<0 || !(gp_output_base_known_&(1u<<index)) || reg32(kGpReset)==3) {
+                device_fault("GP output base read requires known held configuration");return 0;
+            }
+            return reg32(off);
+        }
         const int startup_register=ApuStartupMethods::register_index(off);
         if(startup_register>=0) {
             if(size!=4 || !kernel_audio_control_idle() || !(startup_method_known_&(1u<<startup_register))) {
@@ -551,6 +563,15 @@ public:
         if (faulted_) return;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
+        if(touches_gp_output_base(off,size)) {
+            const int index=gp_output_base_index(off);
+            if(size!=4 || index<0 || (value&0xff0000ffu)) {
+                device_fault("GP output base requires an aligned low24 DWORD");return;
+            }
+            gp_output_base_known_|=1u<<index;
+            if(index==0)startup_output_base_known_=false;
+        }
+        if(size>0 && off<0x3030 && uint64_t(off)+unsigned(size)>0x3028)startup_output_base_known_=false;
         if(ApuStartupMethods::touches(off,size)) {
             startup_method(off,size,value);return;
         }
@@ -897,6 +918,15 @@ private:
         return size>0 && off<kXgscnt+4 && uint64_t(off)+unsigned(size)>kXgscnt;
     }
     static constexpr uint32_t kObservedIdleFectl=0x00071f8f, kObservedIdleSectl=7;
+    static int gp_output_base_index(uint32_t off) {
+        return off>=0x3024 && off<=0x3054 && (off&15)==4?int((off-0x3024)/16):-1;
+    }
+    static bool touches_gp_output_base(uint32_t off,int size) {
+        if(size<=0)return false;
+        for(uint32_t base:{0x3024u,0x3034u,0x3044u,0x3054u})
+            if(off<base+4 && uint64_t(off)+unsigned(size)>base)return true;
+        return false;
+    }
     void startup_method(uint32_t off,int size,uint32_t value) {
         if(size!=4 || (off&3) || !kernel_audio_control_idle() ||
            reg32(kGpReset)!=0 || reg32(kEpReset)!=1) {
@@ -924,6 +954,21 @@ private:
         if(method==0x2c0) {
             if(value&~0x1f1f1f1fu){device_fault("APU HRTF submix encoding remains unqualified");return;}
             set_reg32(0x20ac,value);startup_method_known_|=1u<<5;
+        }else if(method==0x1000) {
+            if(value!=0 && value!=0x100) {
+                device_fault("APU output base method value remains unqualified");return;
+            }
+            // Physical stopped-core comparison: this command replaces all
+            // three FIFO0 fields, even when a larger end was set previously.
+            set_reg32(0x3024,value);set_reg32(0x3028,value+0x100);set_reg32(0x302c,value);
+            gp_output_base_known_|=1;startup_output_base_known_=true;
+        }else if(method==0x1004) {
+            if(value!=0x2000 || !startup_output_base_known_ || reg32(0x3024)!=0 || reg32(0x302c)!=0) {
+                device_fault("APU output length method requires observed original base0/length2000");return;
+            }
+            // The original pair restores end2000. A separate length2100
+            // comparison trapped the physical FE; do not silently accept it.
+            set_reg32(0x3028,0x2000);
         }else if(method==0x804 || method==0x1800) {
             const bool input=method==0x804;
             if((input && (!startup_configuration_.known(0x1138) || value>reg32(0x1138))) ||
@@ -951,6 +996,8 @@ private:
         set_reg32(kFedecmeth,method);set_reg32(kFedecparam,value);
     }
     uint32_t startup_method_known_=0,startup_input_sge_=0,startup_output_sge_=0;
+    uint8_t gp_output_base_known_=0;
+    bool startup_output_base_known_=false;
     bool startup_input_sge_known_=false,startup_output_sge_known_=false;
     bool kernel_audio_control_idle()const {
         return kernel_audio_startup_ && !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&

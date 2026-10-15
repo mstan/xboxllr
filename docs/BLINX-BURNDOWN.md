@@ -16,7 +16,7 @@ also closes; the audio family still requires original device startup/output.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 29 retained IDs; 28 contain deferred scope, including AUDIO-D09 sample phase and AUDIO-D10 AC-link transaction phase. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 30 retained IDs; 29 contain deferred scope, including AUDIO-D09 sample phase, AUDIO-D10 AC-link transaction phase and AUDIO-D11 unreached output configuration encodings. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
 The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 preserves every question/evidence/reopening trigger and identifies promoted work.
@@ -51,7 +51,15 @@ muted title run crosses the enclosing original codec initialization/IRQ setup
 and reaches GP DWORD WRITE FE83FF00=0, with zero captured PCM. Remote SMC
 restart and probe launch recovered the earlier immediate-CAS experiment without
 manual input; the bounded follow-up passes. No manual recovery remains pending.
-Remaining audio work is active VP methods/tables, DSP host controls, shared-clock execution, active
+The subsequent CPU host controls and physically observed1000/1004 output
+methods now let the unchanged original GP/EP setup return in three lifetimes.
+Each uses102 maintained device transactions and eleven live owned RAM accesses,
+with one exact bootstrap per DSP. Ten focused checks pass, including current
+GP/EP and actual FIFO transfer regressions. All three stopped hardware
+experiments recovered remotely; the console is listening with no manual action
+pending. The extra length2100 trap remains guarded and recorded as AUDIO-D11.
+The connected title checkpoint still predates these changes.
+Remaining audio work is active VP methods/tables, shared-clock execution, active
 reset/FE ordering and actual title output. See the
 [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#original-ac97-startup-crossed---2026-10-14).
 

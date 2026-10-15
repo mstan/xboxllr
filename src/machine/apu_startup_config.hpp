@@ -71,7 +71,7 @@ public:
         if(bytes<=0)return false;
         const uint64_t end=uint64_t(offset)+unsigned(bytes);
         for(uint32_t field:{0x1148u,0x202a0u,0x202a4u,0x202a8u,0x202acu,0x202b0u,
-                           0x202c0u,0x20804u,0x20808u,0x21800u,0x21808u})
+                           0x202c0u,0x20804u,0x20808u,0x21000u,0x21004u,0x21800u,0x21808u})
             if(offset<field+4 && end>field)return true;
         return false;
     }

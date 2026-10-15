@@ -94,8 +94,11 @@ int main() {
         if(kind==9){const uint32_t bad=0x20000;std::memcpy(f.ram.data()+0x1800,&bad,4);}
         if(kind==10){const uint32_t bad=0x13001;std::memcpy(f.ram.data()+0x1800,&bad,4);}
         if(kind==11)f.reg(0x2044,0xfffffffdu);
-        const auto before=f.ram;const auto cursor=f.reg(0x302c);
-        CHECK(!f.go() && !f.error.empty() && !f.apu.gp_dma_nodes());
+        // Invalid base programming can fault before GO. Inspect retained
+        // owner state here without asking a faulted device for guest readback.
+        const auto before=f.ram;const auto cursor=f.apu.xlle::RegFileMmio::mmio_read(0xfe80302c,4);
+        if(kind==2)CHECK(f.apu.faulted() && !f.error.empty() && !f.apu.gp_dma_nodes());
+        else CHECK(!f.go() && !f.error.empty() && !f.apu.gp_dma_nodes());
         // Device reads fail closed after a fault; inspect owner via the base
         // register storage only in this negative fixture, not a production API.
         CHECK(f.apu.xlle::RegFileMmio::mmio_read(0xfe80302c,4)==cursor);

@@ -13,6 +13,7 @@ inline bool pilot_original_apu_admitted(uint32_t off,unsigned size,int write,uin
     if(off==0x200c && write)return value==0; // Device also requires mode0.
     if(off==0x3fffc || off==0x5fffc)return !write || value==1 || value==3 || (off==0x3fffc && value==0);
     if(!write) {
+        if(off>=0x3024 && off<=0x3054 && (off&15)==4)return true;
         if(off>=0x2054 && off<=0x2074)return true;
         switch(off) {
         case 0x2000:case 0x200c:case 0x1000:case 0x1004:case 0x1100:case 0x1110:case 0x1300:case 0x1304:

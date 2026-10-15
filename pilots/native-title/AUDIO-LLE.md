@@ -2766,3 +2766,55 @@ supported title route reaches it. C5/CA/D5 event behavior, wake/reset, cadence,
 EP708000 threshold, active FE ordering and connected output remain required.
 Hardware stays deferred, HLE processing is unchanged, and the total stays6/9
 with27 accepted precision deferrals.
+## Original GP/EP setup connected - 2026-10-14
+
+Tracking `beads-xbox.1.113.9`. The new
+`tools/native_audio_dsp_startup_reference.py` executes unchanged original GP
+and EP setup entrypoints against `audio_dsp_startup_transport.cpp`. The
+transport owns the maintained APU and sole GP/EP CPUs from the first MMIO
+transaction. Device memory callbacks resolve into the original instruction
+caller's currently live allocations; they do not consume a prepared RAM mirror.
+The authored kernel allocation services and borrowed settings remain explicit
+fixture inputs. No original driver return or MMIO read is substituted.
+
+All three lifetimes/selectors return. Each issues102 device transactions,
+three owned RAM writes and eight reads. Both CPUs perform exactly one bootstrap,
+and their actual8192-byte P images match the current original scratch bytes
+masked to24 bits. Device owners are disposed before unchanged original
+destructors release every allocation. Active stop/reset and the enclosing
+post-setup wait are not established by this lifecycle.
+
+The missing1000/1004 methods were measured on a stopped Xbox. Unlike the local
+xemu reference's ignored commands,1000=0 changes FIFO0 base/end/cursor to
+0/100/0;1004=2000 changes them to0/2000/0. A later1000=100 replaces them with
+100/200/100 even after length2000. The implementation updates those same
+canonical registers consumed by the existing DSP FIFO transport. It adds no
+second FIFO or playback shortcut. Only the observed stopped values/context
+are admitted. A separate2100 length write trapped the physical FE and stays
+outside the contract. The held base reads also require an explicitly written
+value or the recovered warm profile's unused base1..3 zeros, not an implicit
+cold-reset floor.
+
+Private physical receipts: probe `results/dsp-output-config-20261014/`;
+sanitized explanation: probe `docs/DSP-OUTPUT-CONFIG.md`. Three unexpected
+write stops were followed by separate DASH/dashboard SMC restart/remote probe
+return sequences, all confirmed. The final read-only context shows held GP0,
+EP1, SE7, restored FE/fence controls and all four GP output bases0. No manual
+recovery is pending.
+
+Ten focused current-source checks pass: the new physical output-method
+composition, native startup methods/mappings/host controls/reset/bootstrap,
+and current GP processor/frame/FIFO plus EP counter regressions. The FIFO
+negative fixture now inspects retained state when invalid base programming
+faults before GO. Its positive physical transfer coverage remains intact.
+Evidence is under `build/blinx/audio-dsp-startup-20261014/`; `source-first`
+retains the original1000 admission failure and `source-connected` retains all
+three completed setup lifetimes. Small serial builds/tests used one idle core.
+No title, renderer or speaker output was launched for this checkpoint.
+
+This closes the original GP/EP setup programming group, not A03-A05. Neither
+DSP has executed in this fixture; shared guest-clock scheduling, reached active
+FE work, actual codec output and original stop/reuse still need composition.
+The default HLE implementation and performance path are unchanged. Family
+qualification remains6/9. The new AUDIO-D11 entry retains unreached output
+encodings/trap behavior; the queues now contain30 IDs /29 deferred scopes.
