@@ -3121,3 +3121,33 @@ or title launch occurred. The native digital capture/teardown connection and
 bounded active physical check remain required before admitting the complete
 stream group and retrying the title. Family count6/9 and30 question IDs /
 29 deferred scopes are unchanged.
+
+## Physical SPDIF completion contradicts candidate halt - 2026-10-15
+
+The first silent single-descriptor hardware batch stopped after two matched
+stores when SR returned0C instead of the candidate0F. A separate authorized
+dashboard/SMC-restart/probe-launch recovery completed and was observed. A
+fresh pinned12KiB owner then supplied the same8192-byte silent descriptor.
+Two later observations both show SR0C, CR1 and CIV/PIV0; PICB changes3712 to
+1872. This contradicts the candidate's exhausted-ring halt and finite8192-byte
+capture assumption. The earlier device/source checks remain historical model
+checks, not independent physical equivalence for that terminal behavior.
+
+The separate retirement observes stop CR0/SR0D with PICB848 stable across two
+samples. Byte W1C0C returns SR1. Reset clears the base/cursors/count; restoring
+the original stopped base succeeds. Both streams are stopped, no controller
+references the retained12KiB owner, and no recovery or human action is pending.
+The allocation is deliberately retained until application recovery. There
+were six MMIO stores in this successful fresh group and no storage writes.
+
+Correct the candidate's traversal/continuation before native admission.
+Single-node behavior does not distinguish whole-ring wrap from repeating the
+last node, so a bounded multi-node silent observation is the next independent
+question. The current native guard prevents this known-wrong termination from
+being treated as qualified title output. Digital capture/teardown and the
+connected title checkpoint remain required. Six hardware-free payload test
+methods pass, with each actual dispatched payload checked before dispatch.
+Probe documentation: `docs/SPDIF-STREAM.md`; private evidence:
+`results/spdif-stream-20261015/` and
+`results/spdif-completion-context-20261015/`. Families6/9 and deferred30 IDs /
+29 scopes are unchanged; no new deferral is introduced.

@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Candidate SPDIF transport and original start/stop/restart pass; native digital capture/integration and physical active transport remain. Current title checkpoint still stops at FEC00176 | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Physical SPDIF contradicts candidate last-buffer halt: SR0C and changing PICB with CIV/PIV0; stop/ack/reset observed. Correct traversal and native digital capture/integration before admission. Current title checkpoint still stops at FEC00176 | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -158,6 +158,18 @@ no hardware writes ran. Native title admission remains guarded pending its
 digital consumer/teardown connection and active physical transport evidence.
 No title retry or family closure is claimed. Families6/9 and deferred30 IDs /
 29 scopes are unchanged. See the [candidate SPDIF evidence](../pilots/native-title/AUDIO-LLE.md#candidate-spdif-transport-and-original-stream-lifetimes---2026-10-15).
+
+The subsequent silent hardware group contradicts the candidate's end-of-ring
+halt: after completion, SR is0C, CR remains1, PICB continues changing and both
+CIV/PIV stay0. After a separately confirmed recovery, a fresh observation
+reproduced this state. Stop gives SR0D with stable partial PICB; byte W1C gives
+SR1; reset clears BDBAR/indices/count, and restoring the original stopped base
+succeeds. No manual recovery is pending. The native guard remains necessary
+until traversal/continuation and digital capture are corrected together. A
+multi-node ring will distinguish wrap from last-node repetition. Six payload
+test methods pass; no title run or family closure is claimed. Evidence and
+the successful retirement are in probe `docs/SPDIF-STREAM.md` and the private
+`results/spdif-completion-context-20261015/` receipts.
 
 The physical codec identifies as WM9709, matching the manufacturer's fixed48kHz
 DAC with zero ordinary mixer/rate/power readbacks. The maintained ACI replaces
