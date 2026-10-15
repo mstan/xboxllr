@@ -8,6 +8,7 @@
 #include "audio_device_lle.h"
 #include "audio_device_pcm_capture.h"
 #include "audio_device_timeline.h"
+#include "audio_device_observation.h"
 #include <string>
 extern "C" {
 #include "io_device_lle.h"

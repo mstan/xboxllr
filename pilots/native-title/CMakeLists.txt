@@ -168,7 +168,7 @@ endif()
 if(pilot_audio_device_lle)
   include(audio_device_rom.cmake)
   add_library(pilot_audio_device_lle STATIC audio_device_lle.cpp audio_device_pcm_capture.cpp
-    audio_device_timeline.c reference_clock.c)
+    audio_device_timeline.c audio_device_observation.c reference_clock.c)
   target_include_directories(pilot_audio_device_lle PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
     "${CMAKE_CURRENT_BINARY_DIR}/audio-device-private")
   target_link_libraries(pilot_audio_device_lle PUBLIC xlle_apu_gp_processor pilot_io_device_lle pilot_usb_lle)

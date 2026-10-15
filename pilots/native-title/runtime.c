@@ -18,6 +18,7 @@
 #include "audio_device_lle.h"
 #include "audio_device_pcm_capture.h"
 #include "audio_device_timeline.h"
+#include "audio_device_observation.h"
 #include "input_host.h"
 static PilotPcmCapture *original_pcm_capture;
 static PilotPcmCapture *original_spdif_capture;
@@ -1257,6 +1258,9 @@ int main(int argc,char **argv)
         audio_error=pilot_pcm_capture_bind(original_spdif_capture);
         if(audio_error)stop(audio_error,0xfe800000u);
     }
+    audio_error=pilot_audio_device_observation_start(getenv("XLLE_PILOT_ORIGINAL_CAPTURE_MS"),
+        original_pcm_capture,original_spdif_capture);
+    if(audio_error)stop(audio_error,0xfe800000u);
 #endif
     scheduling_lle_run();
 #ifdef PILOT_AUDIO_DEVICE_LLE

@@ -20,6 +20,51 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Bounded output observation - 2026-10-15
+
+With original audio and both capture consumers selected,
+`XLLE_PILOT_ORIGINAL_CAPTURE_MS` accepts a decimal host duration from 1 to 3600000
+milliseconds. At the existing serialized device-work boundary, it finalizes
+both captures as incomplete, reports `[OBSERVATION STOP]` and exits. This
+elective observation limit does not drive guest time, reset devices or claim
+original teardown. Without the variable, no observer is registered; the normal
+HLE path does not use it. External termination can still discard buffered data.
+
+Both output files keep their `.partial` suffix and incomplete header/footer.
+A persistence failure on either stream is reported, while the other stream
+still gets its finalization attempt. The device and DMA lifetimes remain
+registered until process disposal. The original application's actual
+stop/reset/retirement remains a separate qualification requirement.
+
+`tools/native_audio_observation_check.py` runs the maintained native fixture
+with `--program`, `--snapshot` and a fresh private `--output` directory. It
+checks the normal serialized exit and injected PCM persistence failure,
+independently reads both files, and verifies exact patterned bytes, real
+timestamps, incomplete status and absence of complete-file publication.
+Both cases pass, along with eight existing output/capture/clock regressions
+in 2.81s. The first fixture used a host sleep shorter than GetTickCount64's
+granularity; its retained failure is corrected without advancing guest time.
+Evidence is `build/blinx/audio-observation-stop-20261015/`.
+
+The changed muted title exits through this observer after 604.0 host seconds
+with no runtime guard. Both partial files flush and close successfully.
+Digital output contains 1,301,504 bytes in 1,271 consecutive 256-frame blocks
+(6.779 seconds at 48kHz), with 503,769 nonzero bytes. Its first/last codec
+frames are 1015/2285 at PIT ticks 6,090,000/13,710,000; format stays02000000.
+Analog PCM contains only the initial 8,192 silent bytes/eight blocks. No
+waveform or full-attract acceptance is inferred from this prefix alone.
+
+Static original-byte review identifies the next required hardware question.
+17BB1C constructs both streams with flags0, installs null refill callbacks,
+and supplies one descriptor each. With format02000000, both reference the
+same 8KiB buffer. Original17C884 retains the cyclic count and calls17C484
+with both hardware-index write flags0. This suggests the generic PC AC97
+halt-at-LVI behavior still used for analog PCM is unsuitable for this Xbox
+route. The earlier physical ring measurement covered only SPDIF. A bounded
+analog PCM traversal/status/stop comparison joins the final hardware batch;
+its answer remains required for A05. The accepted precision-deferral count
+stays unchanged. Digital waveform/ownership analysis can proceed offline.
+
 ## Codec interrupts and original callback PCR - 2026-10-15
 
 The complete reached codec interrupt group now has native word MMIO transport:

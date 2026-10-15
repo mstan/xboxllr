@@ -23,7 +23,8 @@ static int spdif_contract(const char *mode,const char *directory) {
         CHECK(!pilot_io_device_mmio_bind(0xfec00000,0x1000,nullptr));
         puts("PASS digital open rollback leaves no callback into destroyed capture");return 0;
     }
-    const bool positive=!strcmp(mode,"spdif-positive"),absent=!strcmp(mode,"spdif-absent");
+    const bool observe=!strcmp(mode,"spdif-observation") || !strcmp(mode,"spdif-observation-failure");
+    const bool positive=!strcmp(mode,"spdif-positive") || observe,absent=!strcmp(mode,"spdif-absent");
     if(positive)CHECK(!pilot_pcm_capture_create(&analog,(path+".pcm").c_str(),4096,8));
     CHECK(!pilot_audio_device_lle_open_outputs(analog?pilot_pcm_capture_consume:consume,analog,
         absent?nullptr:pilot_spdif_capture_consume,digital));
@@ -69,6 +70,27 @@ static int spdif_contract(const char *mode,const char *directory) {
     pilot_pcm_capture_view(digital,&data,&bytes,&stamps,&count);
     CHECK(bytes==1024 && count==1 && !memcmp(data,guest+va+8192,1024));
     CHECK(stamps[0].reserved==0x02000000 && stamps[0].codec_frame==11 && stamps[0].observed_pit_ticks==66000);
+    if(observe) {
+        CHECK(!pilot_audio_device_observation_start(nullptr,nullptr,nullptr));
+        CHECK(!pilot_audio_device_observation_start("",nullptr,nullptr));
+        for(const char *bad:{"0","-1","+1"," 1","1x","3600001","18446744073709551616"})
+            CHECK(pilot_audio_device_observation_start(bad,analog,digital));
+        CHECK(pilot_audio_device_observation_start("1",nullptr,digital));
+        CHECK(pilot_audio_device_observation_start("1",digital,analog));
+        CHECK(!pilot_audio_device_observation_start("1",analog,digital));
+        CHECK(pilot_audio_device_observation_start("1",analog,digital));
+        if(!strcmp(mode,"spdif-observation-failure"))pilot_pcm_capture_test_fail(analog,2);
+        ticks=66000;CHECK(!pilot_io_device_clock_bind(clock_input,nullptr));
+        Sleep(20); // Exceed GetTickCount64 granularity; guest clock stays fixed.
+        uint32_t result=0;const char *error=pilot_io_device_lle(103,guest,nullptr,&result);
+        if(error)fprintf(stderr,"observation return: %s\n",error);
+        CHECK(!strcmp(mode,"spdif-observation-failure") && error && strstr(error,"partial capture write failed"));
+        PilotAudioDeviceState after;pilot_audio_device_lle_state(&after);
+        CHECK(after.owned && after.clock_ticks==66000 && after.pcm_words==512 && after.spdif_words==512);
+        CHECK(pilot_audio_device_lle_consumer_attached(analog) && pilot_audio_device_lle_spdif_consumer_attached(digital));
+        CHECK(!pilot_pcm_capture_error(digital));
+        puts("PASS failed PCM persistence still finalizes digital prefix, retains original owners and supplies no work or time");return 0;
+    }
     if(!strcmp(mode,"spdif-paused") || !strcmp(mode,"spdif-capacity")) {
         if(!strcmp(mode,"spdif-paused"))access(0xfec0017b,1,0);
         CHECK(!pilot_usb_pit_time(72000));
