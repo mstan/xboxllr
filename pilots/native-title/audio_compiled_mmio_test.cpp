@@ -62,12 +62,19 @@ static LONG CALLBACK fault(EXCEPTION_POINTERS *exception) {
     if(exception->ExceptionRecord->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION)return EXCEPTION_CONTINUE_SEARCH;
     const char *error=nullptr;
     int result=pilot_mmio_fault_range(exception,guest,0xfe800000,0xfe87ffff,pilot_io_device_compiled_mmio,&error);
+    if(!result)result=pilot_mmio_fault_range(exception,guest,0xfec00000,0xfec00fff,pilot_io_device_compiled_mmio,&error);
     if(!result)result=pilot_mmio_fault_range(exception,guest,0xfe100000,0xfe100fff,pilot_io_device_compiled_mmio,&error);
     CHECK(result==1 && !error);++faults;
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 __declspec(noinline) static uint32_t compiled_load(uint32_t address) {
     return *reinterpret_cast<volatile uint32_t*>(guest+address);
+}
+__declspec(noinline) static uint16_t compiled_load_word(uint32_t address) {
+    return *reinterpret_cast<volatile uint16_t*>(guest+address);
+}
+__declspec(noinline) static void compiled_store_word(uint32_t address,uint16_t value) {
+    *reinterpret_cast<volatile uint16_t*>(guest+address)=value;
 }
 static const char *decoded_rejection(uint32_t address,int write,uint32_t value) {
     unsigned char code[15]={0x8b,0x03};if(write)code[0]=0x89;
@@ -106,6 +113,8 @@ static const char *continuation(uint32_t entry,uint32_t regs[8],bool dpc) {
     }
     unsigned work_before=work_calls;
     CHECK(compiled_load(0xfe80200c)==48); // retained device counter, not absolute PIT uptime
+    CHECK(compiled_load_word(0xfec00116)==1); // Real held codec status through native MOVZX.
+    compiled_store_word(0xfec00116,9); // W1C bit3 does not replace read-only DCH.
     HANDLE thread=CreateThread(nullptr,0,wrong_thread,nullptr,0,nullptr);CHECK(thread);
     CHECK(WaitForSingleObject(thread,1000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
     CHECK(compiled_load(0xfe100000)==0x31415926);
@@ -163,7 +172,7 @@ int main(int argc,char **argv) {
         puts("PASS terminal compiled rejection preserves first error, host context and registered lifetime");return 0;
     }
     if(error)fprintf(stderr,"IRQ: %s\n",error);
-    CHECK(!error && delivered && faults==7 && dpcs==1 && nested_isrs==1 &&
+    CHECK(!error && delivered && faults==11 && dpcs==1 && nested_isrs==1 &&
         dma_calls==2 && nested_checks==2 && wrong_thread_checks==2);
     outside=0x12345678;CHECK(pilot_io_device_compiled_mmio(0xfe80200c,4,0,&outside) && outside==0x12345678);
     CHECK(!pilot_io_device_work_unbind(work));CHECK(!pilot_io_device_clock_bind(nullptr,nullptr));

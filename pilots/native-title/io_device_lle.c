@@ -80,6 +80,7 @@ static unsigned owner_count;
 static struct {uint64_t token;uint32_t base;} resource_references[MAX_PUBLISHED];
 static uint64_t resource_reference_sequence;
 static int gpu_bootstrap_published;
+static int kernel_pcr_published;
 static struct {uint32_t base,bytes,count;} pin_ranges[MAX_PUBLISHED];
 static uint32_t image_start,image_bytes;
 /* Admission window supplied only by a successful original VM commit. It does
@@ -773,7 +774,7 @@ static void initialize(unsigned char *guest)
      * architectural frame glue follows our existing UnicornFloor injector. */
     /* FS uses the captured kernel's real PCR for SEH and allocator locks.
      * Its current thread/exception chain are preserved by synchronous calls. */
-    const uint32_t pcr=0x8003da3cu;
+    const uint32_t pcr=PILOT_IO_PCR_BASE;
     const uint64_t fs=0x00c093000000ffffull|((uint64_t)(pcr&0xffffff)<<16)|((uint64_t)(pcr>>24)<<56);
     const uint64_t gdt[]={0,0x00cf9b000000ffffull,0x00cf93000000ffffull,fs};
     IO_UC(uc_mem_write(cpu,SCRATCH+0xf000,gdt,sizeof(gdt)));
@@ -1003,6 +1004,16 @@ static void publish_range(uint32_t object,uint32_t bytes)
         owners[owner_count].resource_references=0;++owner_count;
     }
     refresh_mappings();
+}
+static void publish_kernel_pcr(void)
+{
+    /* All original continuations share the captured CPU's actual PCR page.
+     * IRQ/DPC delivery can precede thread creation. Retain one session owner
+     * so repeated dispatch never adds duplicate publication lifetimes. */
+    if(!failure && !kernel_pcr_published) {
+        publish_range(PILOT_IO_PCR_BASE&~4095u,4096);
+        if(!failure)kernel_pcr_published=1;
+    }
 }
 static void retire_owner(uint32_t object)
 {
@@ -1258,6 +1269,7 @@ resume_translation:
         error=uc_context_save(cpu,context);
         if(error){uc_context_free(context);failure=uc_strerror(error);return;}
         check_publications(0);
+        publish_kernel_pcr();
         InterlockedExchange(&current_irql,(LONG)(kernel_word(0x8003da60u)&255));
         if(!failure) {
             struct CompiledMmioScope scope={context,execution_depth};

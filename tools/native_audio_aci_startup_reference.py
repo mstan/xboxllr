@@ -35,6 +35,14 @@ class CodecStartup(OriginalStartup):
     def __init__(self, blob, lifetime):
         super().__init__(blob, lifetime, lifetime)
         self.cpu.mem_map(0xfec00000, 0x1000)
+        self.irq_floor = False
+        self.queued = False
+        self.irq_services = []
+        self.sync_saved = None
+        self.irq_trace = []
+        # Authored kernel return trampoline, away from the mapped-page edge.
+        # RET terminates Unicorn's decode block; its hook restores the caller.
+        self.cpu.mem_write(0x80000f00,b'\xc3')
 
     def _read(self, cpu, access, address, size, value, unused):
         if self.transport and 0xfec00000 <= address < 0xfec01000:
@@ -48,6 +56,39 @@ class CodecStartup(OriginalStartup):
         super()._write(cpu, access, address, size, value, unused)
 
     def _instruction(self, cpu, address, size, unused):
+        if self.irq_floor:
+            self.irq_trace.append(address)
+            self.irq_trace = self.irq_trace[-32:]
+        if self.irq_floor and address == 0x80000f00:
+            # Return from the actual original synchronization callback. The
+            # single offline CPU has no competing interrupt; only the kernel
+            # lock/queue floor is authored, never the driver callback body.
+            assert self.sync_saved is not None
+            stack, target = self.sync_saved
+            assert cpu.reg_read(UC_X86_REG_ESP)==stack and cpu.reg_read(UC_X86_REG_EAX)&255==1
+            self.sync_saved = None
+            cpu.reg_write(UC_X86_REG_ESP, stack+16)
+            cpu.reg_write(UC_X86_REG_EIP, target)
+            return
+        if self.irq_floor and address in (0x80000077, 0x80000099):
+            stack = cpu.reg_read(UC_X86_REG_ESP)
+            args = [self.get(stack+4+i*4) for i in range(3)]
+            if address == 0x80000077:
+                assert args == [self.owner+0x14+0x1c,0,0]
+                result = int(not self.queued)
+                self.queued = True
+                self.irq_services.append(dict(ordinal=119,args=args,result=result))
+                cpu.reg_write(UC_X86_REG_EAX,result)
+                cpu.reg_write(UC_X86_REG_ESP,stack+16)
+                cpu.reg_write(UC_X86_REG_EIP,self.get(stack))
+            else:
+                assert args == [0x17ddd8,0x17c573,self.owner+0x14] and self.sync_saved is None
+                self.irq_services.append(dict(ordinal=153,args=args,callback_executed=True))
+                self.sync_saved = (stack,self.get(stack))
+                self.put(stack-8,0x80000f00);self.put(stack-4,args[2])
+                cpu.reg_write(UC_X86_REG_ESP,stack-8)
+                cpu.reg_write(UC_X86_REG_EIP,args[1])
+            return
         if self.transport and address == 0x80000097:
             sp = cpu.reg_read(UC_X86_REG_ESP)
             ret, us = struct.unpack('<II', cpu.mem_read(sp, 8))
@@ -110,7 +151,8 @@ def physical_stream(folder):
     return [pin(manifest_path),pin(folder/'capture.aot-private.bin')]
 
 
-def check(xbe, observer, evidence, output, active_streams=False, stream_evidence=None):
+def check(xbe, observer, evidence, output, active_streams=False, stream_evidence=None, interrupts=False):
+    assert not interrupts or active_streams
     assert 'build' in output.resolve().parts and not output.exists()
     output.mkdir(parents=True)
     blob = xbe.read_bytes()
@@ -152,7 +194,7 @@ def check(xbe, observer, evidence, output, active_streams=False, stream_evidence
                             assert 0 < len(data) <= 1024 and len(data)%4 == 0
                             # Two full digital traversals plus the stopped
                             # prefix; analog retains its independent bound.
-                            assert len(captured[kind])+len(data) <= (17408 if kind == 'S' else 8192)
+                            assert len(captured[kind])+len(data) <= (16384 if interrupts else 17408 if kind == 'S' else 8192)
                             captured[kind].extend(data)
                             output_chunks.append(dict(stream=kind,format=format_value,bytes=len(data),ticks=original.ticks))
                             process.stdin.write('ACCEPTED\n');process.stdin.flush()
@@ -189,7 +231,7 @@ def check(xbe, observer, evidence, output, active_streams=False, stream_evidence
                             assert transport('R',0xfec0017c,4,0) == value
                     rings.append(dict(index=index,virtual=ring,physical=pa,buffer=target,
                                       descriptor=struct.pack('<II',target,0xc0001000).hex()))
-                if active_streams:
+                if active_streams and not interrupts:
                     streams = [original.get(original.owner+0x14+index*4) for index in range(2)]
                     stream_format = (0x02000000,0x02000002,0x02000000)[lifetime]
                     original.call(0x17c514,(stream_format,),ecx=streams[1])
@@ -220,6 +262,62 @@ def check(xbe, observer, evidence, output, active_streams=False, stream_evidence
                     assert transport('R',0xfec00176,1,0) == 12
                     assert transport('R',0xfec00178,2,0) == 4096
                     assert transport('R',0xfec00174,1,0) == transport('R',0xfec0017a,1,0) == 0
+                irq_results = []
+                if interrupts:
+                    original.irq_floor = True
+                    streams = [original.get(original.owner+0x14+index*4) for index in range(2)]
+                    original.call(0x17c514,(stream_format,),ecx=streams[1])
+                    # Both supported original delivery branches: immediate
+                    # retirement or queued work through the real DPC body.
+                    immediate = lifetime == 0
+                    original.put(original.owner+0x1c,int(immediate))
+                    target = rings[0]['buffer'];assert target == rings[1]['buffer']
+                    owners = [a for a in original.allocations if a['live'] and a['physical'] <= target and target+8192 <= a['physical']+a['extent']]
+                    assert len(owners)==1
+                    virtual = owners[0]['virtual']+target-owners[0]['physical']
+                    expected = bytearray()
+                    for period in range(2):
+                        payload = bytes((i*17+period*53+lifetime*29)&255 for i in range(8192))
+                        original.cpu.mem_write(virtual,payload);expected.extend(payload)
+                        for stream in reversed(streams):original.call(0x17c73a,(0xffffffff,),ecx=stream)
+                        before = [original.get(stream+4) for stream in streams]
+                        for frame in range(1,9):
+                            original.ticks = (period*8+frame)*6000
+                            transport('T',original.ticks,0,0)
+                        assert captured['P']==expected and captured['S']==expected
+                        assert transport('I',0,0,0)==1
+                        # Summary writes cannot acknowledge either stream's
+                        # still-pending completion or suppress its level IRQ.
+                        transport('W',0xfec00130,4,0x50)
+                        assert transport('I',0,0,0)==1
+                        count_before = len(original.irq_services)
+                        assert original.call(0x17ca08,(0,original.owner+0x14))&255 == 1
+                        assert transport('I',0,0,0)==0
+                        # Original ISR clears real status; a second entry at
+                        # unchanged time cannot retire a descriptor twice.
+                        assert original.call(0x17ca08,(0,original.owner+0x14))&255 == 0
+                        if not immediate:
+                            assert original.queued and [original.get(stream+4) for stream in streams]==before
+                            original.queued=False
+                            try:
+                                original.call(0x17ca19,(0,original.owner+0x14,0,0))
+                            except BaseException as exc:
+                                (output/f'irq-failure-{lifetime}.aot-private.json').write_text(json.dumps(dict(
+                                    error=repr(exc),pc=hex(original.cpu.reg_read(UC_X86_REG_EIP)),
+                                    stack=hex(original.cpu.reg_read(UC_X86_REG_ESP)),trace=[hex(a) for a in original.irq_trace],
+                                    sync_saved=original.sync_saved,services=original.irq_services),indent=2)+'\n')
+                                raise
+                            assert original.sync_saved is None
+                        after = [original.get(stream+4) for stream in streams]
+                        assert after == [value+4096 for value in before], (before,after)
+                        assert not original.queued
+                        assert sum(row['ordinal']==119 for row in original.irq_services[count_before:]) == int(not immediate)
+                        assert transport('R',0xfec00116,2,0)==3
+                        assert transport('R',0xfec00176,2,0)==0
+                        for stream in streams:original.call(0x17c455,ecx=stream)
+                        irq_results.append(dict(period=period,immediate=immediate,before=before,after=after,
+                            services=original.irq_services[count_before:],duplicate_isr_returned_unhandled=True,
+                            irq_cleared_by_original_word_ack=True))
                 original.call(0x17cae2,ecx=original.owner+0x14)
                 assert not original.get(original.owner+0x14) and not original.get(original.owner+0x18)
                 if active_streams:
@@ -239,23 +337,30 @@ def check(xbe, observer, evidence, output, active_streams=False, stream_evidence
                 original.transport = None
                 process.stdin.close();assert process.wait(timeout=10) == 0
         original.destroy_startup()
+        identity = original.source_identity()
+        assert all(bytes(original.cpu.mem_read(int(row['address'],16),row['bytes'])) ==
+                   original.source(int(row['address'],16),row['bytes']) for row in identity)
         lives.append(dict(lifetime=lifetime,rings=rings,transactions=rows,calls=original.calls,
             active_streams=active_streams,ram_reads=ram_reads,output_chunks=output_chunks,
+            interrupts=interrupts,irq_results=irq_results,
             captured={kind:dict(bytes=len(data),sha256=hashlib.sha256(data).hexdigest()) for kind,data in captured.items()},
-            source_identity=original.source_identity(),stalls=original.stalls,
+            source_identity=identity,stalls=original.stalls,
             original_codec_helpers_returned=True,original_held_semaphore_timeout=True,
             original_destructors_release_all_allocations=True))
-    result = dict(status='original-aci-startup-helpers-observed',lifetimes=lives,
+    if interrupts:
+        assert all(life['interrupts'] and len(life['irq_results'])==2 for life in lives)
+    result = dict(status='original-aci-interrupt-retirement-observed' if interrupts else 'original-aci-startup-helpers-observed',lifetimes=lives,
         pins=pins+[pin(xbe),pin(observer),pin(Path(__file__))],
-        limits='Prepared memory/IRQL caller and explicit initialized-kernel codec profile. Original codec/stream helpers are unchanged; stalls and optional stream dispatch service an authored guest clock. Silent physical one/two-node observations support digital continuation; this helper proof covers live original RAM, restart and destructor ownership. No replacement IRQ-registration return, full cold boot, physical nonzero output/enabled IRQ/format02000002 equivalence, precise AC-link phase, digital wire/decode or connected title-output claim.')
+        limits='Prepared memory/IRQL caller and initialized-kernel codec profile. Original codec/stream/ISR/DPC helpers are unchanged; optional IRQ mode has an explicit single-CPU kernel queue/synchronization floor and executes the actual synchronization callback. Stalls/stream dispatch service authored guest time. Source refill/restart, IRQ acknowledgement, completion and destructor ownership are covered. Real kernel interrupt registration/dispatch, physical nonzero output/enabled IRQ/format02000002 equivalence, precise AC-link phase, digital wire/decode and connected title output are separate evidence.')
     report = output/'original-aci-startup.aot-private.json'
     report.write_text(json.dumps(result,indent=2)+'\n')
-    print(f'PASS three original codec helper groups, six owned rings, asynchronous waits and three original semaphore timeouts; active_streams={active_streams}; {report}')
+    print(f'PASS three original codec helper groups, six owned rings, asynchronous waits and three original semaphore timeouts; active_streams={active_streams}; interrupts={interrupts}; {report}')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','observer','evidence','output'):parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--active-streams',action='store_true')
+    parser.add_argument('--interrupts',action='store_true')
     parser.add_argument('--stream-evidence',type=Path)
-    args = parser.parse_args();check(args.xbe,args.observer,args.evidence,args.output,args.active_streams,args.stream_evidence)
+    check(**vars(parser.parse_args()))

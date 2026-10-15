@@ -35,26 +35,30 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Runtime input-SGE publication/consumption validated; title emits eight silent codec blocks per stream, then faults at original codec ISR word read FEC00116 | `.113`, `.113.9`, `.113.33` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Runtime input-SGE and codec IRQ/refill groups validated; title passes original ISR and reaches frame swap without a guard in120s; sustained captured output remains | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
-Latest audio checkpoint: original17ACBF now pins and publishes both source
-pages through the existing input-SGE/RAM owner while processing is enabled.
-Three complete original lifetimes consume2048 authored frames each, retire the
-voice/list/handle, then execute original17AD2C unpin. Ten native/core checks and
-MinGW pass, including publication with both sole DSPs active and no invented
-clock progress. One60.297s muted title passes the previous17AD06/804 boundary
-and accepts8192 bytes/eight timestamped blocks on each codec output. All bytes
-are zero; sustained music and timing are not established. The original codec
-ISR17CA08 ->17C8DB then faults on FEC00116. `.113.33` owns the complete word-MMIO,
-codec interrupt/acknowledgement and refill group. No new hardware operation occurred.
+Latest audio checkpoint: native word MMIO and the complete original codec
+IRQ/refill group pass independent patterned-output, acknowledgement, duplicate
+ISR, queued DPC, restart and destruction checks across three lifetimes. Actual
+kernel callback tests also pass. The first changed title exposed an ISR FS:[24]
+fault; all original continuations now borrow the same captured PCR with one
+canonical session publication, including callbacks entered without host TLS.
+The final120.125s muted title has no runtime guard, passes the original codec
+completion path and reaches D3DDevice_Swap. The host cutoff leaves its capture
+buffers unflushed, so it establishes no new output measurements. The prior
+8192-byte silent output on each stream remains historical evidence, not a
+sustained-output pass. Next, retain bounded output at a controlled observation
+stop and continue A03-A05 through the original title's active lifecycle.
+No new hardware operation occurred.
 AUDIO-D12 defers only raw nontrapped FE reason values/timing; required active
 IRQ/DPC/queue behavior remains A03-A05. Families6/9; deferred31 IDs /30 scopes.
-See the [runtime publication evidence](../pilots/native-title/AUDIO-LLE.md#runtime-input-sge-publication---2026-10-15).
+See the [codec interrupt evidence](../pilots/native-title/AUDIO-LLE.md#codec-interrupts-and-original-callback-pcr---2026-10-15)
+and [runtime publication evidence](../pilots/native-title/AUDIO-LLE.md#runtime-input-sge-publication---2026-10-15).
 
 The next GP/EP host-control batch has a
 [source-bound register inventory](../pilots/native-title/AUDIO-LLE.md#dsp-host-control-source-audit---2026-10-14).

@@ -10,6 +10,8 @@ int main(int argc,char** argv) {
     std::string error;xlle::McpxAci aci([&](const std::string& why){error=why;});
     CHECK(aci.mmio_read(base+0x12c,4)==0 && aci.mmio_read(base+0x130,4)==0);
     CHECK(aci.initialize_kernel_audio_handoff());aci.set_time(0,1125000);
+    bool irq=false;
+    aci.set_irq([&](int line,bool level){CHECK(line==6);irq=level;},6);
     const bool streams=argc==2 && !std::strcmp(argv[1],"--stream-transport");
     if(argc==2 && (!std::strcmp(argv[1],"--transport") || streams)) {
         if(streams) {
@@ -36,7 +38,8 @@ int main(int argc,char** argv) {
         }
         char operation;unsigned address,width,value;std::puts("READY");std::fflush(stdout);
         while(std::scanf(" %c %x %u %x",&operation,&address,&width,&value)==4) {
-            if(operation=='T') {aci.set_time(address,1125000);if(streams)aci.set_frame(address/6000);value=0;}
+            if(operation=='I')value=irq;
+            else if(operation=='T') {aci.set_time(address,1125000);if(streams)aci.set_frame(address/6000);value=0;}
             else {
                 CHECK(operation=='R' || operation=='W');
                 CHECK(address>=base && address<base+aci.kSize);
@@ -100,6 +103,9 @@ int main(int argc,char** argv) {
     CHECK(pilot_original_aci_admitted(0x17b,1,true,0x1d));
     CHECK(pilot_original_aci_admitted(0x176,1,false,0));
     CHECK(pilot_original_aci_admitted(0x176,1,true,0xc));
+    CHECK(pilot_original_aci_admitted(0x116,2,true,0xf));
+    CHECK(pilot_original_aci_admitted(0x130,4,true,0x50));
+    CHECK(!pilot_original_aci_admitted(0x130,4,true,0x100));
     CHECK(!pilot_original_aci_admitted(0x178,1,false,0));
     CHECK(!pilot_original_aci_admitted(0x176,1,true,0x20));
     CHECK(!pilot_original_aci_admitted(0x18,2,true,0));

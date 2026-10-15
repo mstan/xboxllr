@@ -7,6 +7,9 @@ static volatile LONG usb_dpc_calls;
 static void test_usb_dpc(void)
 {
     CHECK(pilot_io_device_irql()==2);
+    /* This mixed fixture keeps native DPC scheduling; only its ISR borrows
+     * the original CPU. The original DPC PCR is checked by timer-dpc-lle. */
+    CHECK(MEM8(g_fs_base+0x24)==2);
     CHECK(MEM32(g_esp+4)==0x19a00 && MEM32(g_esp+8)==0x12345678);
     InterlockedIncrement(&usb_dpc_calls);g_esp+=20;
 }
@@ -14,9 +17,11 @@ static void test_usb_isr(void)
 {
     CHECK(MEM32(g_esp+4)==0x19800 && MEM32(g_esp+8)==0x98765432);
     CHECK(pilot_io_device_irql()==25);++usb_isr_calls;
+    CHECK(g_fs_base==PILOT_IO_PCR_BASE && MEM8(g_fs_base+0x24)==25);
     /* A nested original service cannot overwrite the suspended IRQ frame. */
     g_esp-=4;MEM32(g_esp)=0x12420;next_kernel_ordinal=103;kernel_dispatch();
     CHECK((g_eax&255)==25);
+    CHECK(g_fs_base==PILOT_IO_PCR_BASE && MEM8(g_fs_base+0x24)==25);
     CHECK(usb_test_read(0x0c)&64);
     usb_test_write(0x54,0x1f0000);usb_test_write(0x0c,64);
     g_esp-=16;MEM32(g_esp)=0x12430;MEM32(g_esp+4)=0x19a00;
@@ -39,7 +44,10 @@ static void test_usb_irq(void)
     CHECK(usb_test_read(0x0c)&64);CHECK(pilot_usb_pic_vector(0)==0x31);
     usb_poll();CHECK(!usb_isr_calls && !usb_dpc_calls && pilot_io_device_irql()==31);
     CHECK(pilot_usb_pic_vector(0)<0); // actual kernel deferred/masked the IRQ
+    const uint32_t caller_fs=g_fs_base;
+    g_fs_base=0; // A raw original CPU owner can enter generated IRQ work without host TLS.
     g_ecx=0;call_kernel(161,NULL,0);
+    CHECK(!g_fs_base);g_fs_base=caller_fs;
     CHECK(usb_isr_calls==1 && pilot_io_device_irql()==0);
     uint64_t deadline=GetTickCount64()+2000;
     while(!usb_dpc_calls && GetTickCount64()<deadline){scheduler_checkpoint();Sleep(1);}

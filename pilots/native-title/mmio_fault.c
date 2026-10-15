@@ -27,14 +27,18 @@ static int decode(EXCEPTION_POINTERS *exception,unsigned char *guest,
     unsigned char code[15];SIZE_T read=0;
     if(!ReadProcessMemory(GetCurrentProcess(),(void*)context->Rip,code,sizeof(code),&read) ||
        read!=sizeof(code))return 0;
-    unsigned at=0,rex=0;
+    unsigned at=0,rex=0,operand16=0;
+    if(code[at]==0x66){operand16=1;++at;}
     if((code[at]&0xf0)==0x40)rex=code[at++];
     if(rex&8)return 0; // No 64-bit register transactions or destinations.
     unsigned opcode=code[at++];
-    if(opcode==0x0f){if(code[at++]!=0xb6)return 0;opcode=0x0fb6;}
+    if(opcode==0x0f){unsigned extension=code[at++];if(extension!=0xb6 && extension!=0xb7)return 0;opcode=0x0f00|extension;}
     if(opcode!=0x8b && opcode!=0x89 && opcode!=0xc7 &&
-       opcode!=0x8a && opcode!=0x88 && opcode!=0xc6 && opcode!=0x0fb6)return 0;
-    unsigned size=(opcode==0x8b || opcode==0x89 || opcode==0xc7)?4:1;
+       opcode!=0x8a && opcode!=0x88 && opcode!=0xc6 && opcode!=0x0fb6 && opcode!=0x0fb7)return 0;
+    // The reached word forms are MOV r/m16,r16 (including imm16) and
+    // MOVZX r32,r/m16. Other operand-prefix combinations remain unhandled.
+    if(operand16 && opcode!=0x8b && opcode!=0x89 && opcode!=0xc7)return 0;
+    unsigned size=(opcode==0x8b || opcode==0x89 || opcode==0xc7)?(operand16?2:4):opcode==0x0fb7?2:1;
     if(!sized && size!=4)return 0;
     if(fault+size>base+(uint64_t)last+1)return 0;
     int write=opcode==0x89 || opcode==0xc7 || opcode==0x88 || opcode==0xc6;
@@ -56,17 +60,19 @@ static int decode(EXCEPTION_POINTERS *exception,unsigned char *guest,
     if(size==1 && opcode!=0x0fb6 && !rex && reg>=4){reg-=4;shift=8;}
     uint32_t value=(uint32_t)(*host_register(context,reg)>>shift);
     if(size==1)value&=255;
-    if(opcode==0xc7){memcpy(&value,code+at,4);at+=4;}
+    if(size==2)value&=65535;
+    if(opcode==0xc7){value=0;memcpy(&value,code+at,size);at+=size;}
     if(opcode==0xc6)value=code[at++];
     if(rip_relative)address+=context->Rip+at;
-    if(address!=fault || (size==4 && ((address-base)&3)))return 0;
+    if(address!=fault || ((address-base)&(size-1)))return 0;
     *failure=sized?sized((uint32_t)(address-base),size,write,&value):
                    access((uint32_t)(address-base),write,&value);
     if(*failure)return -1;
     if(!write) {
         DWORD64 *target=host_register(context,reg);
         if(opcode==0x8a)*target=(*target&~(0xffull<<shift))|((value&255ull)<<shift);
-        else *target=size==1?value&255:value; // Dword destination clears upper bits.
+        else if(operand16)*target=(*target&~0xffffull)|(value&65535ull);
+        else *target=size==1?value&255:size==2?value&65535:value; // Dword destination clears upper bits.
     }
     context->Rip+=at;
     return 1;

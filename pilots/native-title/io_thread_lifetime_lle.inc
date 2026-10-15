@@ -31,10 +31,7 @@ static struct OriginalThread *thread_retain_created(unsigned ordinal,const uint3
     thread->context[0]=args[ordinal==254?3:5];thread->context[1]=ordinal==254?0:args[6];
     thread->bytes=0x140u+(ordinal==254?0:args[1]);
     publish_range(thread->object,thread->bytes);
-    /* The real PCR page lasts for the kernel session. */
-    if(!failure && !thread_pcr_published) {
-        publish_range(0x8003d000u,4096);if(!failure)thread_pcr_published=1;
-    }
+    publish_kernel_pcr();
     return failure?NULL:thread;
 }
 static void thread_cpu_birth_prepare(struct OriginalThread *parent,uint32_t *entry)

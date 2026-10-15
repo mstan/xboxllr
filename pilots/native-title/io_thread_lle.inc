@@ -27,7 +27,6 @@ static struct OriginalThread {
 static PilotIoThread thread_callback;
 static struct OriginalThread *pending_thread,*pending_thread_return,*pending_cpu_service,*pending_cpu_birth;
 static __declspec(thread) struct OriginalThread *native_thread_worker;
-static int thread_pcr_published;
 static unsigned original_cpu_threads;
 static uint32_t original_trace_entry;
 static unsigned original_trace_hits;

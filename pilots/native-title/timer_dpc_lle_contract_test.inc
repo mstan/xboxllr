@@ -14,6 +14,7 @@ static void test_timer_lle_dpc(void)
 {
     uint32_t object=MEM32(g_esp+4),context=MEM32(g_esp+8);
     CHECK(dispatch_in_dpc && pilot_io_device_irql()==2 && MEM8(g_fs_base+0x24)==2);
+    CHECK(g_fs_base==PILOT_IO_PCR_BASE);
     CHECK(!MEM8(object+2) && timer_callback_lle_call(121,NULL,0)!=0);
     CHECK(g_esp>=0xd001e000u && g_esp<0xd0021000u); // qualified original stack, never relocated
     if(object==0x19540) {

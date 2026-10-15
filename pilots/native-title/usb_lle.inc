@@ -50,7 +50,10 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     cpu_interrupt_flag=1;cpu_interrupt_shadow=0;pilot_io_device_set_if(1);
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
-    if(thread_arguments)g_fs_base=0x8003da3cu;
+    // ISR/DPC continuations borrow the same original CPU PCR as threads.
+    // A host worker may enter with no generated TLS at all; retaining that
+    // host's zero/private FS base would break original FS:[IRQL]/SEH reads.
+    g_fs_base=PILOT_IO_PCR_BASE;
     g_df=0; /* The original interrupt thunk executed CLD. */
     if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
     if(is_dpc)dispatch_in_dpc=1;

@@ -20,6 +20,51 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Codec interrupts and original callback PCR - 2026-10-15
+
+The complete reached codec interrupt group now has native word MMIO transport:
+MOV16 loads, stores and immediates preserve the upper destination bits, while
+MOVZX32 clears them. Exact instruction length, flags, alignment, range and
+terminal callback failure remain checked. Original17C8DB echoes read-only
+DCH/CELV alongside stream W1C status and writes global summary50; admission
+permits these transactions while the existing ACI owner retains the actual
+read-only/W1C/derived-IRQ semantics. A summary write cannot clear a stream IRQ.
+The independent local reference is xemu482088490c2d5983ed5e1eafbd09906157c1eca0,
+`hw/audio/ac97.c`; no reference implementation body was copied.
+
+Three original driver lifetimes exercise six completed periods, immediate and
+queued retirement, original ISR17CA08/17C8DB, original DPC17CA19/17C9AF and
+the actual synchronization callback17C573/17C40C. Each output consumes two
+distinct8192-byte patterns per lifetime, with exact bytes, real level IRQ,
+word acknowledgement, duplicate ISR rejection, descriptor counts, restart,
+stop and original destruction. The offline fixture explicitly supplies the
+single-CPU kernel queue/lock floor; it does not claim original kernel dispatch.
+Compiled native MMIO tests separately use the actual kernel IRQ/DPC owner.
+
+The first changed title passed the word access, then faulted in original177B77
+at FS:[24]: its host callback entered with no generated TLS. All original
+thread/ISR/DPC continuations now borrow the captured CPU's real PCR and restore
+the caller's FS afterward. One session publication exposes the actual PTE/RAM
+page even before thread creation. No private substitute PCR is introduced.
+The mixed USB fixture retains its native DPC path; exact original DPC PCR
+identity is asserted in the original timer/DPC fixture instead.
+
+Two focused ten-case native batches pass, including four overlapping compiled
+MMIO cases; the final callback batch takes1.15s. MinGW decoder checks pass.
+The final changed title runs120.125s without a runtime guard, passes the codec
+completion/critical-section path, continues controller/resource initialization
+and reaches D3DDevice_Swap. Its host cutoff leaves both capture files unflushed;
+empty files establish neither zero accepted output nor output correctness.
+The earlier faulted run retains a valid8192-byte silent PCM prefix and an
+unflushed digital file. Sustained output, active FE/reset, timing and full
+attract remain required under A03-A05. HLE processing is unchanged.
+
+Evidence: `build/blinx/audio-codec-irq-20261015/`. Only `original-irq-v5`
+establishes the new interrupt fixture: v1/v2 accidentally omitted its CLI flag;
+v3/v4 exposed an authored return-trampoline boundary and remain failure records.
+Builds/runs were serial within four logical CPUs with the game absent, muted,
+and without hardware operations. Families remain6/9; deferrals31 IDs/30 scopes.
+
 ## Original audio input timeline - 2026-10-14
 
 The original-device selection now binds the existing `PilotReferenceClock`

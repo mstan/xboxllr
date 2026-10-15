@@ -12,6 +12,9 @@
 #define PILOT_IO_SERVICE_STRIDE 0x4000u
 #define PILOT_IO_CLOCK_BASE 0xe6000000u
 #define PILOT_IO_CLOCK_BYTES 0x20000u
+/* PCR of the hash-checked captured kernel, shared by its sole CPU and every
+ * generated continuation of that CPU (thread, ISR and DPC). */
+#define PILOT_IO_PCR_BASE 0x8003da3cu
 /* Private loader-to-SystemRoutine transport, outside title address ranges. */
 #define PILOT_IO_BOOTSTRAP_ENTRY (PILOT_IO_BRIDGE_BASE+0x9800u)
 /* Authored native-renderer DPC transport. Only an initialized original KDPC
