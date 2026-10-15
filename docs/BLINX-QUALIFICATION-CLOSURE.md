@@ -50,6 +50,57 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## Reuse saved observations and stop on events - 2026-10-15
+
+Reviewing the saved646.203s capture requires no new title execution. Its92 video
+records identify85 distinctive frames of `h_title02a`, source frames0..52. This
+is the silent title-background video, not an opening movie. Relative source-PTS
+error is16ms at p95 and33ms maximum, inside the existing two-frame allowance.
+The110 original position queries cover four wraps of the actual stereo PCM16
+65536-byte ring; every write cursor has the original128-byte lead. CBO includes
+prefetch, so its residual is reported without inventing a silicon timing limit.
+`build/blinx/audio-hotplug-service-stack-20261015/connected-prefix-review.aot-private.json`
+SHA256 `f06270bd4aea599609bd7db8277d7e5fa91289a0260e8c92da644f1afc0372af`
+binds the review and original constructor/caller evidence. It does not establish
+opening-movie A/V synchronization or a normal voice lifecycle.
+
+The remaining measurement gap is actual game input receipt. The optional journal
+now observes the already-reviewed108-byte XDK4831 `XInputGetState` body at183B28,
+verifies its complete source hash, and records its22-byte state only after a
+successful original return. Failed calls do not read an output. Caller and entry
+stack are included in the journal and paired by the report. Existing block hooks,
+guest clocks, DSP execution and default HLE processing are unchanged. The retained
+607-call journal still parses; authored successful input and changed-caller checks
+validate the report, not live input correctness. The changed title builds with
+retained AOT objects, recompiling only runtime/audio-binding/input-host sources.
+
+One changed muted capture at `build/blinx/audio-neutral-lifecycle-20261015/`
+keeps the actual controller neutral after its9s hotplug and records input, audio
+and video together. Its runner checks the journal every five host seconds and
+requests cooperative finalization after a successful Play/Stop/final Release,
+a later successful Play, and two seconds of additional output on both streams.
+This is a review checkpoint, never family acceptance or synthetic guest teardown.
+Six host-observer checks take0.60s: the saved prefix, failed Stop, nonfinal Release,
+missing later Play and an insufficient stream cannot trigger it. The hour ceiling
+is a safety bound, not a required capture duration; inspect progress and stop on
+a measurement blocker. Do not repeat this sequence unchanged or require a title
+transition that the actual bounded profile does not exercise. Original retirement
+component evidence remains reusable. This capture is still pending acceptance.
+Its first successful original input read occurs at9.131 guest seconds, followed
+by further successful neutral-state reads. Thus host delivery and original game
+receipt are now distinguished in the live route. The immutable
+`audio-neutral-lifecycle-20261015/input-feedback-progress.aot-private.json`
+records this prefix, build/source identities and observer checks; it is not a
+completed title capture or A05 closure.
+
+A separate subsecond analysis of the retained output against a two-second FFmpeg
+decode of `title.adx` does not meet the existing waveform limits. That candidate
+comparison uses the observed pitch and -300 volume, but does not yet bind the
+complete source-to-DSP configuration. It is diagnostic evidence requiring that
+binding, not proof of a new device defect or grounds for another title run. The
+result and the corrected capture-framing analysis remain private beside the
+saved prefix. No new deferral or family closure;6/9 remains.
+
 ## Idle interrupt feedback and service-stack ownership - 2026-10-15
 
 The hotplug guard has a short reproducer: an actual IRQ interrupts original

@@ -16,6 +16,7 @@ def summarize(path, live=False):
         raise ValueError('missing original audio journal schema')
     active={};seen=set();counts=Counter();played=set();stopped=set();restarted=set()
     releases=0;fences=pcm=spdif=ticks=0;footer=None;records=0;had_play=had_stop=False
+    input_success=input_failed=input_start=0;input_first=None;input_first_start=None
     for row in rows[1:]:
         if footer is not None:raise ValueError('records after journal footer')
         if row.get('footer'):
@@ -36,7 +37,25 @@ def summarize(path, live=False):
         enter=active.pop(identity)
         if any(enter[k]!=row[k] for k in ('entry','name','address','thread')):
             raise ValueError('return identity or thread changed')
+        for key in ('caller','entry_esp'):
+            if key in enter or key in row:
+                if enter.get(key)!=row.get(key):raise ValueError('return caller or entry stack changed')
         counts[name]+=1
+        if name=='XInputGetState':
+            if row['eax']:
+                input_failed+=1
+            else:
+                outputs=row.get('outputs',[])
+                if len(outputs)!=1 or outputs[0].get('arg')!=1:
+                    raise ValueError('successful input read lacks its actual state')
+                pad=bytes.fromhex(outputs[0].get('gamepad',''))
+                if len(pad)!=18 or not 0<=outputs[0].get('packet',-1)<=0xffffffff:
+                    raise ValueError('invalid original input state layout')
+                input_success+=1
+                if input_first is None:input_first=row['ticks']
+                if int.from_bytes(pad[:2],'little')&0x10:
+                    input_start+=1
+                    if input_first_start is None:input_first_start=row['ticks']
         obj=enter['args'][0] if enter['args'] else None
         if row['eax']==0 and name=='IDirectSoundBuffer_Play':
             had_play=True
@@ -55,6 +74,8 @@ def summarize(path, live=False):
         journal_finalized=footer is not None,records=records,calls=len(seen),active_calls=len(active),
         completed_calls=dict(counts),milestones=milestones,last_device_ticks=ticks,
         fences=fences,pcm_words=pcm,spdif_words=spdif,
+        input_observations=dict(successful_reads=input_success,failed_reads=input_failed,
+            start_reads=input_start,first_success_ticks=input_first,first_start_ticks=input_first_start),
         lifecycle_candidate=all(milestones.values()),
         limits='API return/counter observations only. Candidate requests review; it does not prove DSP output, movie-relative timing, internal ownership or whole-family acceptance.')
 

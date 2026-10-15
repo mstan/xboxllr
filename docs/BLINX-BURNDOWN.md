@@ -37,7 +37,19 @@ guard. Its607 completed original calls, movie observations and matching
 1,169,408-byte audio streams are retained. `.113.36` closes. Actual Stop/restart,
 final release and movie-relative timing still require A05 review; input delivery
 alone does not prove those transitions. Reuse this saved prefix before deciding
-whether a further capture is needed. The title is terminal; families remain6/9.
+whether a further capture is needed. That title is terminal; families remain6/9.
+
+Saved-prefix review now identifies silent `h_title02a` background footage with
+16ms p95 relative PTS error and four PCM-ring wraps with the original128-byte
+write-cursor lead. It cannot establish opening-movie A/V. The next changed
+capture adds passive, source-bound original XInputGetState results, keeps the
+controller neutral after hotplug, and collects all observations together. An
+automatic lifecycle/output checkpoint can request cooperative early finalization;
+its six host-observer checks pass in0.60s. The title builds using retained AOT
+objects and is pending acceptance at `audio-neutral-lifecycle-20261015`.
+A saved-output/decoded-ADX comparison remains diagnostic until the complete DSP
+configuration is bound; it neither closes A05 nor establishes a new device bug.
+See the first section of the closing checklist. No hardware work or new deferral.
 
 Prior audio milestone: `.115` closes for supported serialized FE work. The
 original kernel now executes its queued DPC, actual device token publication
