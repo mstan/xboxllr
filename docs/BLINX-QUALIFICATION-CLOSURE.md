@@ -42,6 +42,12 @@ can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
+The next GP/EP host-control batch has a
+[source-bound register inventory](../pilots/native-title/AUDIO-LLE.md#dsp-host-control-source-audit---2026-10-14).
+GP FF10 receives an owner-derived value, not a fixed1; generic emulator
+readback storage does not establish these register effects. This inventory is
+preparation only and leaves A03-A05 open.
+
 ## Original AC97 startup crossed - 2026-10-14
 
 The physical codec identifies as WM9709, matching the manufacturer's fixed48kHz

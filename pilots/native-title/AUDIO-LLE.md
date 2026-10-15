@@ -20,6 +20,44 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## DSP host-control source audit - 2026-10-14
+
+Tracked in `.113.9`. The connected title's next stop is the first GP FF00
+write. Review of the retained unchanged original setup identifies this finite
+group before implementing or probing it. All addresses below are DWORD CPU
+MMIO addresses; the observed original write value is not a register definition.
+
+| CPU address | Original instruction | Written value / ordering | Still required |
+| --- | --- | --- | --- |
+| FE83FF00 / FE83FF04 | 17B883 / 17B889 | Both0, before GP reset1 | Effect of the zero writes and relation to held GP state |
+| FE83FF10 | 17B953 | `(owner & ~8) \| 1`, after GP reset1 | Which bits affect hardware; the authored owner30000000 explains the prepared value30000001 and is not a hardware constant |
+| FE83FF14 | 17B958 | FF, before GP reset3 | Write effects and CPU status/readback semantics |
+| FE85FF00 / FE85FF04 | 17B9F0 / 17B9F6 | Both0, after EP reset1 | Effect of the zero writes and relation to held EP state |
+| FE85FF5C | 17BAF3 | 0, before EP FF10/FF14 and reset3 | Effect of the original zero write |
+| FE85FF10 / FE85FF14 | 17BAFA / 17BB05 | 1 / FFFFFFFF, before EP reset3 | Control/status behavior and the supported write masks |
+
+Pinned xemu4820884 `hw/xbox/mcpx/apu/dsp/gp_ep.c` routes these offsets through
+generic register storage; only FFFC has an explicit reset transition there.
+That implementation supplies no independent explanation of these control
+effects. In particular, do not admit the group by copying its generic storage
+fallback or by expecting every register to read back the written value.
+The retained physical EP configuration observation already distinguishes CPU
+FF14=100 from DSP C5=0. Neither view can be substituted for the other.
+
+The existing maintained APU owns the CPU aperture and binds reset callbacks
+to the sole GP/EP CPUs. Extend that ownership when semantics are established;
+do not add a second register file or DSP execution owner to the title adapter.
+Batch the remaining host controls with the reached FIFO/setup dependencies,
+then connect shared-clock execution before another title run. Active execution
+and FE ordering remain separate required behavior, not waived by held-state
+register evidence. Source evidence is retained in
+`build/blinx/audio-reset-startup-20261014/original-control.aot-private.txt`
+and `tools/native_ep_startup_reference.py`.
+
+This was source review only while the owner was gaming: no builds, tests,
+title launches or hardware operations. No new qualification pass or deferral
+is claimed; the overall count remains6/9.
+
 ## Original codec initialization connected - 2026-10-14
 
 Tracked in `.113.29`. Physical vendor574D/4C09 and ordinary zero register
