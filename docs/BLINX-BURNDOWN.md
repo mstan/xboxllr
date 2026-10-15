@@ -26,6 +26,9 @@ checks take seconds, and live API observations plus cooperative early capture
 finalization replace blind fixed-duration title runs. An early125s check caught
 and retained an incorrect compiled-wrapper observer; recording now targets the
 actual original CPU. See the current closing checklist for scope and evidence.
+The corrected capture then stops at controller connection after402.797s with
+an original idle-callback stack owner/bounds guard. That is the next focused
+integration investigation; no unchanged long rerun or A05 closure is warranted.
 
 Prior audio milestone: `.115` closes for supported serialized FE work. The
 original kernel now executes its queued DPC, actual device token publication

@@ -111,7 +111,17 @@ is rejected. `.113.35` closes the diagnostic feedback controls, not A05.
 binds the retained sources, native artifacts, nine checks and actual journal
 prefix, SHA256
 `7692358eaa658490af38f3a19e9fc9afc53c71183099bfc6fce0bd1f9cf42147`.
-The continuing capture is `build/blinx/audio-connected-live32-20261015/`.
+The corrected capture is `build/blinx/audio-connected-live32-20261015/`.
+It subsequently stops after402.797 host seconds at actual controller connection
+(9 guest seconds), with `device LLE idle callback stack owner or bounds changed`.
+The run is terminal, not waiting; do not restart it unchanged. Its31-call journal
+prefix and both partial audio captures are retained. The previously accepted
+hotplug run reached further, so this guard requires diagnosis before attributing
+it to a changed component or accepting the connected lifecycle. The next step
+is the existing focused idle-IRQ/DPC stack fixture and original USB callback
+path. Failure-only diagnostics now report the expected/actual idle owner,
+stack bounds and candidate frame; admission and the failure condition are
+unchanged. No extra title run is needed merely to recheck the capture controls.
 
 Families remain6/9. A05 still needs actual connected output/timing and normal
 stop/reuse/reentry acceptance; initial-connected USB calibration remains open.

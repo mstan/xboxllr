@@ -1049,10 +1049,11 @@ static void publish_idle_callback_stack(uint32_t sp,unsigned frame_bytes)
         if(!guest_page(sp&~4095u))failure="device LLE ISR stack has no published owner";
         return;
     }
-    if(kernel_word(0x8003da6cu)!=idle_stack.object ||
-       kernel_word(idle_stack.object+0x1c)!=idle_stack.top ||
-       kernel_word(idle_stack.object+0x20)!=idle_stack.base ||
+    uint32_t idle=kernel_word(0x8003da6cu),top=kernel_word(idle_stack.object+0x1c),base=kernel_word(idle_stack.object+0x20);
+    if(idle!=idle_stack.object || top!=idle_stack.top || base!=idle_stack.base ||
        sp<idle_stack.base || (uint64_t)sp+frame_bytes>idle_stack.top) {
+        fprintf(stderr,"[ORIGINAL IDLE STACK GUARD] expected_owner=%08x actual_idle=%08x expected=%08x..%08x actual=%08x..%08x frame=%08x bytes=%u\n",
+            idle_stack.object,idle,idle_stack.base,idle_stack.top,base,top,sp,frame_bytes);
         failure="device LLE idle callback stack owner or bounds changed";return;
     }
     if(failure || idle_stack.published)return;
