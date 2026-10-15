@@ -56,11 +56,17 @@ serialized observation stop now persists both incomplete streams. The changed
 the initial8,192 silent bytes/eight blocks. Original17BB1C configures both for
 cyclic use without software refill; this makes analog ring traversal a required
 final hardware question. The physical SPDIF observation cannot settle it.
-Next, analyze digital waveform/ownership offline and retain original active
-FE/reset/timing/attract acceptance. No new hardware operation occurred.
+Offline raw-source comparison now records RMSE0.06732/0.05960 and correlation
+0.40182/0.37166 for the candidate initial Microsoft movie. The live voice and
+GP/EP observations needed to derive expected output are absent, so this is
+diagnosis rather than waveform acceptance or an established emulation failure.
+Before another long title run, capture those boundaries together to locate
+the first divergence; retain original active FE/reset/timing/attract acceptance.
+No new title run or hardware operation occurred during this analysis.
 AUDIO-D12 defers only raw nontrapped FE reason values/timing; required active
 IRQ/DPC/queue behavior remains A03-A05. Families6/9; deferred31 IDs /30 scopes.
-See the [bounded output evidence](../pilots/native-title/AUDIO-LLE.md#bounded-output-observation---2026-10-15),
+See the [digital prefix diagnosis](../pilots/native-title/AUDIO-LLE.md#digital-prefix-diagnosis---2026-10-15),
+[bounded output evidence](../pilots/native-title/AUDIO-LLE.md#bounded-output-observation---2026-10-15),
 [codec interrupt evidence](../pilots/native-title/AUDIO-LLE.md#codec-interrupts-and-original-callback-pcr---2026-10-15)
 and [runtime publication evidence](../pilots/native-title/AUDIO-LLE.md#runtime-input-sge-publication---2026-10-15).
 

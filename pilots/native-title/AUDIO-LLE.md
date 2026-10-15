@@ -20,6 +20,38 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Digital prefix diagnosis - 2026-10-15
+
+Offline analysis reuses the retained digital capture without another title run.
+The initial Microsoft movie is a candidate source: the historical Q03 capture
+records its first stereo voice at48000Hz, and the independent decoded media is
+also48000Hz. This does not establish the current original title's voice settings
+or the gain/routing through its GP/EP graph.
+
+A diagnostic comparison uses that unchanged source rate, unity gain and one
+fixed alignment. Across134,324 overlapping stereo frames, raw-source RMSE is
+0.06732/0.05960 and correlation is0.40182/0.37166. These do not meet the existing
+0.02/0.99 waveform limits. They also cannot yet be interpreted as a qualified
+emulation failure: the capture lacks the live source/Play/pitch and GP/EP
+boundary observations needed to derive the expected digital output. Existing
+movie qualification compares the reference GP route; it is not a substitute
+for the original GP/EP graph's contract.
+
+Separate local-window phase searches are retained only as diagnostics. They
+do not establish a stable delay or permit per-window alignment, fitted gain,
+rate fitting or relaxed acceptance limits. Neither analysis qualifies audio.
+Before another long title run, add bounded observations of current voice
+format/pitch/send/headroom, source cursor and actual VP-to-GP/GP-to-EP/output
+boundaries, so one changed run can locate the first divergent stage. The
+observations must borrow existing owners and leave their ordering unchanged.
+
+Scripts and reports are under
+`build/blinx/audio-observation-stop-20261015/`: `compare-digital-prefix.aot-private.py`,
+`digital-prefix-comparison.aot-private.json`, `diagnose-digital-phase.aot-private.py`
+and `digital-phase-diagnostic.aot-private.json`. This was serial offline file
+analysis, with one CPU/thread and no playback, build, title or hardware operation.
+A03-A05 remain required; the family count stays6/9 and deferrals31 IDs/30 scopes.
+
 ## Bounded output observation - 2026-10-15
 
 With original audio and both capture consumers selected,
