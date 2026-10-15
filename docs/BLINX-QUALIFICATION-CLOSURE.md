@@ -89,6 +89,23 @@ binds28 source/binary/report/prior-evidence identities, SHA256
 `d51c2cc5d5173de851c31708402506fb43daeb09b4035982938a59abcbb0c644`.
 No Xbox operation or additional precision matrix was needed.
 
+The first connected-controller title attempt stops after71.234 host seconds,
+before playback: original USB DPC1890A2 calls188A8E and reads FE80200C before
+the original audio initialization establishes XGSCNT. This is USB/audio clock
+calibration: it compares48 times the USB frame number with the audio counter,
+retains an offset and may adjust the OHCI frame interval. The early read cannot
+be silently replaced with zero or granted the prior generic uptime behavior.
+`title/run.aot-private.json` and `usb-counter.aot-private.json` retain the actual
+failure and original source spans; no family acceptance follows from this run.
+
+A separate affected check reuses the exact binary with the previously working
+disconnected-controller startup, actual hotplug at9 guest seconds and Start/
+release at10/10.5 seconds. It does not qualify a controller connected at entry.
+The inherited counter/calibration profile remains an explicit A05 scope question
+until its consumer consequences are resolved; no new deferral is silently granted.
+Evidence is under `build/blinx/audio-dpc-fence-20261015/title-hotplug/`. Its
+30-minute host observer is bounded and muted; no result is claimed yet.
+
 ## Analog cyclic output and original codec retirement - 2026-10-15
 
 Independent physical one-node4096-word and two-node1024/2048-word analog

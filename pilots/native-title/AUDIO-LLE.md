@@ -14,6 +14,14 @@ overall6/9. Default HLE evidence is unchanged and reused. See
 [the current milestone](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-queued-audio-dpc-and-serialized-fe-fence---2026-10-15).
 Earlier checkpoints below retain their historical remaining-work descriptions.
 
+A05 integration follow-up: controller-connected startup now reaches original
+USB/audio clock calibration before XGSCNT initialization and correctly remains
+guarded. The original consumer compares the USB frame count and audio counter
+and can adjust the OHCI interval. A separate check preserves the established
+disconnected startup and uses actual later hotplug, with no binary change or
+guessed counter. The initial-connected profile remains an explicit open scope
+question; no whole-family or additional deferral acceptance is claimed.
+
 Latest A05 component,2026-10-15: physical one/two-node analog rings repeat past
 LVI; pause preserves the descriptor and reset retires it. The maintained model
 now follows that behavior. All51 affected native/device checks and three

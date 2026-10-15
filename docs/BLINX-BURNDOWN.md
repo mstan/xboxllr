@@ -23,8 +23,11 @@ original kernel now executes its queued DPC, actual device token publication
 and completion consumer; four original cases pass, including retained ownership
 after the original timeout. All55 affected native/device checks pass. A04's
 isolated ordering/retirement components are complete. A05's actual connected
-output/timing and normal stop/reuse/reentry remain; a changed muted title check
-is prepared, with no result claimed yet. This reuses prior physical token and
+output/timing and normal stop/reuse/reentry remain. The first controller-connected
+title check exposes an early USB/audio counter-calibration read before XGSCNT
+initialization. A separate muted check reuses the same binary and established
+disconnected startup with actual later hotplug; initial-connected startup remains
+an explicit scope question, with no new acceptance or deferral claimed. This reuses prior physical token and
 HLE output/ownership evidence; arbitrary queued work and exact latency remain
 guarded or deferred. See the latest section of the closing checklist. The
 following dated checkpoints retain their earlier remaining-work descriptions.
