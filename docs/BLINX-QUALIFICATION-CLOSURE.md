@@ -35,20 +35,23 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Cyclic SPDIF/capture and the33-write headroom group validated. Muted title crossed FE820280 and now stops at FE820350 DWORD write0 in original voice publication, before output | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30`, `.113.31` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Cyclic SPDIF/capture and headroom validated; stopped350/370 zero publications implemented. Last title stops at350; whole publication/31C and consumers remain | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30`, `.113.31` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
-Latest audio checkpoint: explicit HRTF method state and all32 ordinary
-headroom writes pass three whole-original-helper groups and12 focused native
-checks. The94.922s muted title reaches the independent voice-publication
-group:350/370 and31C require source/device semantics before another run.
-Both output captures remain empty partials. Spatial processing stays guarded;
-no family or precision question was silently deferred. See the
-[headroom evidence and next group](../pilots/native-title/AUDIO-LLE.md#original-headroom-startup-group---2026-10-15).
+Latest audio checkpoint: physical owned-RAM observations establish350=0 and
+370=0 at voice fields50/70. The maintained owners implement these publications
+and reject nonzero processing; five focused native checks and the MinGW
+contract pass. A terminal31C observation retained targetFFFF and changing FE
+reason fields with free mode and ISTS0 at both samples. Its status/ordering
+contract and whole original publication/consumers remain open. All five
+physical lifetimes were remotely recovered; no user recovery is pending.
+No changed title was launched: the94.922s prior title still ends at350, with
+both captures empty partials. Spatial processing stays guarded. See the
+[publication evidence and limits](../pilots/native-title/AUDIO-LLE.md#stopped-voice-publications---2026-10-15).
 
 The next GP/EP host-control batch has a
 [source-bound register inventory](../pilots/native-title/AUDIO-LLE.md#dsp-host-control-source-audit---2026-10-14).

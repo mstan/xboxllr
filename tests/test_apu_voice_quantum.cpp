@@ -176,7 +176,7 @@ static void finite_and_idle_ownership() {
 }
 
 static void admission_and_failures() {
-    for(unsigned scenario=0;scenario<8;++scenario) {
+    for(unsigned scenario=0;scenario<12;++scenario) {
         Fixture f;f.add(71,1,128,true,0,4096);f.add(96,1,128,true,1,8192);
         const unsigned object=Fixture::object(71);
         switch(scenario) {
@@ -188,6 +188,10 @@ static void admission_and_failures() {
         case 5:f.put(object+4,f.word(object+4)&~0xe000u);break;
         case 6:f.put(object+4,f.word(object+4)|(1u<<24));break;
         case 7:f.put(object,f.word(object)|0x8000);break;
+        case 8:f.put(object+0x50,1);break;
+        case 9:f.put(object+0x70,1);break;
+        case 10:f.fail_read=object+0x50;break;
+        case 11:f.fail_read=object+0x70;break;
         }
         auto before=f.ram;std::vector<uint32_t> gp(f.apu.gp_word(0x1400),f.apu.gp_word(0x1400)+1024);
         xlle::ApuVoiceQuantum result;
@@ -195,6 +199,13 @@ static void admission_and_failures() {
         CHECK(!result.published && !result.visited && !result.completed && !f.apu.voice_mix_quanta());
         CHECK(f.ram==before && !f.source_reads && !f.irqs);
         CHECK(std::equal(gp.begin(),gp.end(),f.apu.gp_word(0x1400)));
+    }
+    for(unsigned offset:{0x50u,0x70u}) {
+        Fixture f;f.add(71,1,128,true,0,4096);f.put(Fixture::object(71)+offset,1);
+        const auto before=f.ram;float bins[1024]={};uint32_t count=99;bool completed=true;
+        CHECK(!f.apu.process_2d_voice(71,bins,count,completed));
+        CHECK(!count && !completed && !f.source_reads && !f.irqs && f.ram==before);
+        for(float value:bins)CHECK(value==0);
     }
     Fixture partial;partial.add(71,1,128,true,0,4096);partial.add(96,1,128,true,1,8192);
     // The top voice completes real source work before the lower voice faults.

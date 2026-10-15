@@ -3276,3 +3276,43 @@ attempt. Active FE ordering, original DSP/reset/output and audio-family
 acceptance remain open. Families6/9 and deferred30 IDs /29 scopes are
 unchanged. No hardware operation, new precision deferral or HLE processing
 change occurred.
+
+## Stopped voice publications - 2026-10-15
+
+Five separately recovered hardware lifetimes establish the missing zero
+publications:350=0 clears the selected voice's DWORD50 and370=0 clears DWORD70.
+Each starts from all ones in fresh uncached, pinned RAM, first calibrates a
+known route write, and compares the complete60KiB table/guard region after
+each command. No voice starts and neither DSP is released. The maintained
+APU now writes those fields through its existing selected-voice/RAM owner;
+native admission accepts only the observed zero DWORD commands. Wrong width,
+misalignment, nonzero value, readback and failed DMA stop without fabricated
+completion. Ordinary processing preflights both fields before source progress
+and rejects nonzero values. No second device owner or HLE processing change
+was introduced.
+
+The original1795F1 publication also writes31C=FFFF unconditionally, including
+ordinary voices. Four diagnostic profiles stopped on status checks and were
+separately recovered. Their failed receipts and source snapshots are retained.
+The final terminal observation retained the actual result: voice1C changed
+from0 to0000FFFF, the full RAM comparison passed, FECTL changed from7190F to
+7130F across the RAM scan, and both sampled ISTS values were0. Both sampled
+method modes were free-running. This corroborates the null target destination
+in the pinned reference; it does not establish arbitrary high-bit preservation,
+continuous absence of IRQ, or the changing status fields' contract. No status
+sample selected another device write. The owner remained pinned until a fifth
+confirmed separate remote recovery; no manual recovery remains pending.
+
+Five focused native checks pass in2.97s, including the actual shared clock and
+voice quantum paths. The publication contract also passes MinGW. Six compiled
+payload test methods pass; every live payload separately passed its exact
+constant check. Private implementation evidence is under
+`build/blinx/audio-voice-publication-20261015/`; probe evidence and frozen
+observer sources are under the five directories listed in probe
+`docs/VOICE-PUBLICATION.md`. A source/evidence manifest pins both sets.
+
+The full original publication/consumer group remains `.113.31`, including
+31C status/ordering. No changed title was launched and31C remains guarded.
+The previous title boundary at350 is historical evidence, not a new pass.
+Families6/9 and deferred30 IDs /29 scopes remain unchanged. These required
+startup questions were not moved into the precision deferral queue.

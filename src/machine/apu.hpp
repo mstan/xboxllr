@@ -517,6 +517,9 @@ public:
         if(size>0 && off<0x20284 && uint64_t(off)+unsigned(size)>0x20280) {
             device_fault("HRTF headroom method has no qualified register readback");return 0;
         }
+        if(touches_zero_voice_control(off,size)) {
+            device_fault("voice control method has no qualified register readback");return 0;
+        }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
         if(touches_gp_output_base(off,size)) {
@@ -597,6 +600,10 @@ public:
         if(size>0 && off<0x20284 && uint64_t(off)+unsigned(size)>0x20280 &&
            (off!=0x20280 || size!=4 || value>7)) {
             device_fault("HRTF headroom requires the original masked DWORD amount");return;
+        }
+        if(touches_zero_voice_control(off,size) &&
+           (size!=4 || (off!=0x20350 && off!=0x20370) || value)) {
+            device_fault("voice control publication is qualified only for the original zero DWORD");return;
         }
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
@@ -1165,6 +1172,10 @@ private:
     // MCPX method/register encodings cross-checked against the original XDK
     // emitter and xemu apu_regs.h/vp.c (see AUDIO-LLE.md). This updates real
     // voice-table RAM; it does not assert playback or sample consumption.
+    static bool touches_zero_voice_control(uint32_t off,int size) {
+        return size>0 && ((off<0x20354 && uint64_t(off)+unsigned(size)>0x20350) ||
+                         (off<0x20374 && uint64_t(off)+unsigned(size)>0x20370));
+    }
     bool configure_voice(uint32_t method, uint32_t value) {
         struct Field { uint32_t method, offset, mask; };
         static constexpr Field fields[] = {
@@ -1172,6 +1183,9 @@ private:
             {0x308,0x08,0xffffffff}, {0x30c,0x0c,0xffffffff},
             {0x310,0x10,0xffffffff}, {0x314,0x14,0xffffffff},
             {0x318,0x18,0xffffffff},
+            // Owned, stopped hardware observations establish these zero
+            // publications. Nonzero values and their processing stay guarded.
+            {0x350,0x50,0xffffffff}, {0x370,0x70,0xffffffff},
             {0x360,0x60,0xffffffff}, {0x364,0x64,0xffffffff},
             {0x368,0x68,0xffffffff}, {0x36c,0x6c,0xffffffff},
             {0x374,0x74,0xffffffff}, {0x378,0x78,0xffffffff},

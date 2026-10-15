@@ -27,15 +27,16 @@ bool McpxApu::process_2d_quantum(ApuVoiceQuantum& result) {
             device_fault("VP quantum invalid ordinary voice list/cycle");return false;
         }
         seen[voice]=true;
-        uint32_t state=0,format=0,misc=0,route=0,link=0;
+        uint32_t state=0,format=0,misc=0,route=0,link=0,control50=0,control70=0;
         if(!read_voice_word(voice,0x54,state) || !read_voice_word(voice,4,format) ||
            !read_voice_word(voice,0x18,misc) || !read_voice_word(voice,0,route) ||
-           !read_voice_word(voice,kVoicePitchLink,link)) {
+           !read_voice_word(voice,kVoicePitchLink,link) ||
+           !read_voice_word(voice,0x50,control50) || !read_voice_word(voice,0x70,control70)) {
             device_fault("VP quantum list/configuration DMA failed");return false;
         }
         if(!(state&kVoiceActive)) {if(idle==kNullVoice)idle=voice;}
         else if(!(state&(1u<<18)) && !voice_locked_[voice] &&
-                ((misc&0x30000) || ((format>>13)&7)!=7 ||
+                (control50 || control70 || (misc&0x30000) || ((format>>13)&7)!=7 ||
                  (format&((1u<<21)|(1u<<22)|(1u<<24))) || (route&0x80008000))) {
             device_fault("VP quantum filter/headroom/owner mode remains unqualified");return false;
         }

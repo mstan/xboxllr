@@ -125,15 +125,16 @@ bool McpxApu::process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,b
     if(voice<64 || voice>=kMaxVoices || !bins) {
         device_fault("invalid 2D processing voice/output");return false;
     }
-    uint32_t state=0,format=0,misc=0,route=0;
+    uint32_t state=0,format=0,misc=0,route=0,control50=0,control70=0;
     if(!read_voice_word(voice,0x54,state) || !read_voice_word(voice,4,format) ||
-       !read_voice_word(voice,0x18,misc) || !read_voice_word(voice,0,route)) {
+       !read_voice_word(voice,0x18,misc) || !read_voice_word(voice,0,route) ||
+       !read_voice_word(voice,0x50,control50) || !read_voice_word(voice,0x70,control70)) {
         device_fault("2D processing configuration DMA failed");return false;
     }
     if(!(state&kVoiceActive) || (state&(1u<<18)) || voice_locked_[voice])return true;
     // This executable composition covers the ordinary original 2D defaults.
     // Other filter/headroom/spatial modes must acquire their real stages first.
-    if((misc&0x30000) || ((format>>13)&7)!=7 ||
+    if(control50 || control70 || (misc&0x30000) || ((format>>13)&7)!=7 ||
        (format&((1u<<21)|(1u<<22)|(1u<<24))) || (route&0x80008000)) {
         device_fault("2D filter/headroom/owner mode remains unqualified");return false;
     }
