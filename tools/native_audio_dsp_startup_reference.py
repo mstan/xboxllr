@@ -3,7 +3,8 @@
 
 Offline only. Kernel memory services and the settings caller are explicit
 inputs. No original driver return, device read, bootstrap or completion is
-substituted. This transport does not yet advance DSP execution or guest time.
+substituted. The optional enclosing-call check advances guest time through the
+original stall service and executes both real DSPs with the sequencer stopped.
 """
 import argparse
 import hashlib
@@ -11,13 +12,26 @@ import json
 from pathlib import Path
 import struct
 import subprocess
-from unicorn.x86_const import UC_X86_REG_EIP
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EIP, UC_X86_REG_ESP
 from native_ep_startup_reference import OriginalStartup
 from native_ep_reference import IMAGE_SHA256
 
 
 class Startup(OriginalStartup):
     transport = None
+    stall = None
+
+    def _instruction(self, cpu, address, size, unused):
+        if address == 0x80000097 and self.stall is not None:
+            stack = cpu.reg_read(UC_X86_REG_ESP)
+            ret, us = struct.unpack('<II', cpu.mem_read(stack,8))
+            self.stall(us)
+            self.kernel_calls.append(dict(ordinal=151, service='stall', args=[us], result=0))
+            cpu.reg_write(UC_X86_REG_EAX,0)
+            cpu.reg_write(UC_X86_REG_ESP,stack+8)
+            cpu.reg_write(UC_X86_REG_EIP,ret)
+            return
+        super()._instruction(cpu,address,size,unused)
 
     def _read(self, cpu, access, address, size, value, unused):
         if 0xfe800000 <= address < 0xfe860000:
@@ -61,7 +75,7 @@ def check(args):
     identity = dict(xbe_sha256=IMAGE_SHA256,
                     observer_sha256=hashlib.sha256(args.observer.read_bytes()).hexdigest(),
                     driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                    guest_time_advanced=False, dsp_execution=False)
+                    guest_time_advanced=args.execute_stall, dsp_execution=args.execute_stall)
     reports = []
     for life in range(3):
         original = Startup(blob, life, life)
@@ -108,23 +122,41 @@ def check(args):
                     assert reply.startswith('OK ') and len(reply) == 11, reply
                     return int(reply[3:], 16)
                 original.transport = transport
+                def verify_bootstrap():
+                    report['bootstrap_state'] = command('STATE')
+                    state = report['bootstrap_state'].split()
+                    assert len(state) == 7 and state[0] == 'STATE'
+                    assert list(map(int,state[1:5])) == [1,1,1,1], 'both actual CPUs must be ready after exactly one bootstrap'
+                    for kind, slot in (('GP',0x17dfb8),('EP',0x17dfd8)):
+                        reply = command('P '+kind); assert reply.startswith('P ')
+                        actual = bytes.fromhex(reply[2:]); assert len(actual) == 8192
+                        source = bytes(original.cpu.mem_read(original.get(slot),8192))
+                        expected = b''.join(struct.pack('<I',v&0xffffff) for v, in struct.iter_unpack('<I', source))
+                        assert actual == expected, 'actual CPU bootstrap must match the current original source pages'
+                        report[kind.lower()+'_bootstrap_sha256'] = hashlib.sha256(actual).hexdigest()
+                def stall(us):
+                    assert us == 10000 and 'dsp_clock' not in report
+                    verify_bootstrap()
+                    reply = command('T 11250')
+                    values = reply.split(); assert len(values) == 9 and values[0] == 'TIME', reply
+                    tick,gp_phase,ep_phase,gp_cycles,ep_cycles,gp_pc,ep_pc,events = map(int,values[1:])
+                    assert tick == 11250 and gp_phase == 3 and ep_phase == 2
+                    assert 0 < gp_cycles < 1333125 and 1333125 <= ep_cycles <= 1333128
+                    assert ep_pc in (0x31,0x32) and events == 0
+                    report['dsp_clock'] = dict(ticks=tick,gp_phase=gp_phase,ep_phase=ep_phase,
+                                              gp_cycles=gp_cycles,ep_cycles=ep_cycles,gp_pc=gp_pc,ep_pc=ep_pc,events=events)
+                    count = len(ram_events)
+                    assert command('T 11250') == reply and len(ram_events) == count
+                if args.execute_stall:original.stall = stall
                 original.prepare()
-                for entry, argv, ecx in ((0x17bc43,(0,),original.owner),
-                                         (0x17bf66,(),original.owner),(0x17b79f,(),0),
-                                         (0x17b870,(),original.owner),(0x17b999,(),original.owner)):
+                entries = [(0x17bc43,(0,),original.owner),(0x17bf66,(),original.owner),(0x17b79f,(),0)]
+                entries += [(0x17be82,(),original.owner)] if args.execute_stall else [(0x17b870,(),original.owner),(0x17b999,(),original.owner)]
+                for entry, argv, ecx in entries:
                     report['current_original_entry'] = entry; save()
                     original.call(entry, argv, ecx)
                 report['device_state'] = command('STATE')
-                state = report['device_state'].split()
-                assert len(state) == 7 and state[0] == 'STATE'
-                assert list(map(int,state[1:5])) == [1,1,1,1], 'both actual CPUs must be ready after exactly one bootstrap'
-                for kind, slot in (('GP',0x17dfb8),('EP',0x17dfd8)):
-                    reply = command('P '+kind); assert reply.startswith('P ')
-                    actual = bytes.fromhex(reply[2:]); assert len(actual) == 8192
-                    source = bytes(original.cpu.mem_read(original.get(slot),8192))
-                    expected = b''.join(struct.pack('<I',v&0xffffff) for v, in struct.iter_unpack('<I', source))
-                    assert actual == expected, 'actual CPU bootstrap must match the current original source pages'
-                    report[kind.lower()+'_bootstrap_sha256'] = hashlib.sha256(actual).hexdigest()
+                if not args.execute_stall:verify_bootstrap()
+                else:assert 'dsp_clock' in report
                 report['source_identity'] = original.source_identity()
                 report['status'] = 'original-startup-returned'
             except BaseException as error:
@@ -140,11 +172,13 @@ def check(args):
         original.destroy_startup()
         report['original_allocations_freed'] = not any(a['live'] for a in original.allocations)
         save()
-    print('PASS three unchanged original GP/EP setup returns and actual owned bootstrap images; execution/cadence still separate')
+    print('PASS three unchanged original GP/EP setup returns and actual owned bootstrap images'+
+          ('; original10000us wait runs GP to yield and EP into polling without frame events' if args.execute_stall else '; execution/cadence still separate'))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','observer','output'):
         parser.add_argument('--'+name, type=Path, required=True)
+    parser.add_argument('--execute-stall',action='store_true',help='Execute the unchanged enclosing setup and its real10000us wait')
     check(parser.parse_args())

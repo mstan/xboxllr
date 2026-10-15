@@ -3,6 +3,7 @@
 #include "audio_device_apu_contract.hpp"
 #include "machine/apu_gp_processor.hpp"
 #include "machine/apu_ep_processor.hpp"
+#include "machine/apu_dsp_clock.hpp"
 #include <cstdio>
 #include <iostream>
 #include <sstream>
@@ -30,6 +31,8 @@ int main() {
     if(!apu.initialize_kernel_audio_handoff())return 2;
     xlle::ApuGpProcessor gp(apu,[&](const std::string& s){if(error.empty())error=s;});
     xlle::ApuEpProcessor ep(apu,[&](const std::string& s){if(error.empty())error=s;});
+    apu.set_time(0,1125000);
+    xlle::ApuDspClock clock(apu,gp,ep,0,1125000,[&](const std::string& s){if(error.empty())error=s;});
     apu.set_mem_access([&](uint32_t a,void* data,size_t n) {
         if(!n || n>4096 || uint64_t(a)+n>0x4000000)return false;
         ++reads;std::printf("MEMR %08x %zu\n",a,n);std::fflush(stdout);
@@ -45,7 +48,17 @@ int main() {
     std::string line;
     while(std::getline(std::cin,line)) {
         std::istringstream in(line);std::string op,extra;in>>op;
-        if(op=="STATE") {
+        if(op=="T") {
+            uint64_t ticks=0;
+            if(!(in>>ticks) || (in>>extra))return 2;
+            if((apu.mmio_read(0xfe802000,4)&0x18) || !clock.advance(ticks)) {
+                std::printf("FAIL stopped DSP clock %s\n",error.c_str());std::fflush(stdout);return 2;
+            }
+            std::printf("TIME %llu %u %u %llu %llu %u %u %llu\n",
+                static_cast<unsigned long long>(clock.ticks()),unsigned(gp.phase()),unsigned(ep.phase()),
+                static_cast<unsigned long long>(clock.retired(false)),static_cast<unsigned long long>(clock.retired(true)),
+                clock.last(false).pc,clock.last(true).pc,static_cast<unsigned long long>(apu.ep_frame_events()));
+        }else if(op=="STATE") {
             if(in>>extra)return 2;
             std::printf("STATE %u %u %llu %llu %llu %llu\n",unsigned(gp.phase()),unsigned(ep.phase()),
                 static_cast<unsigned long long>(gp.bootstraps()),static_cast<unsigned long long>(ep.bootstraps()),

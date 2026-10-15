@@ -58,8 +58,11 @@ with one exact bootstrap per DSP. Ten focused checks pass, including current
 GP/EP and actual FIFO transfer regressions. All three stopped hardware
 experiments recovered remotely; the console is listening with no manual action
 pending. The extra length2100 trap remains guarded and recorded as AUDIO-D11.
+The enclosing GP/EP setup now also returns through its original10ms wait in
+three lifetimes: the shared clock runs GP to its real yield and EP through its
+real polling instructions, with zero frame events. Thirty focused checks pass.
 The connected title checkpoint still predates these changes.
-Remaining audio work is active VP methods/tables, shared-clock execution, active
+Remaining audio work is active VP methods/tables, shared frame cadence, active
 reset/FE ordering and actual title output. See the
 [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#original-ac97-startup-crossed---2026-10-14).
 

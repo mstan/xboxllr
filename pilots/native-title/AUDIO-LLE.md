@@ -2818,3 +2818,51 @@ FE work, actual codec output and original stop/reuse still need composition.
 The default HLE implementation and performance path are unchanged. Family
 qualification remains6/9. The new AUDIO-D11 entry retains unreached output
 encodings/trap behavior; the queues now contain30 IDs /29 deferred scopes.
+
+## Stopped DSP execution from shared time - 2026-10-14
+
+Tracking `beads-xbox.1.113.9`. `ApuDspClock` now turns elapsed selected guest
+time into budgets for the existing sole GP/EP CPUs. Held, yielded and STOP
+intervals cannot accumulate future credit. The actual core retains negative
+instruction debt; GP's actual yield discards unused positive budget. Repeating
+the same timestamp or polling registers supplies no new budget or event.
+The native MMIO route settles already elapsed time under the previous device
+configuration before applying the next transaction, preserving the reset edge.
+
+The nominal effective rate is133312500 cycles/s:711000 cycles per256/48000s,
+matching the center of retained physical EP polling deltas710998..711002.
+This is calibration of a budget policy, not independent identification of a
+silicon oscillator, exact edge phase or the original708000 processing threshold.
+The active frame/event/threshold composition remains required; AUDIO-D08 is
+still GP-only. One-millisecond dispatch bounds are suitable for this stopped
+bootstrap/poll group; an active caller must split at actual event/MMIO boundaries.
+
+`native_audio_dsp_startup_reference.py --execute-stall` calls the unchanged
+enclosing17BE82 routine, including both setup entrypoints and its original
+KeStallExecutionProcessor(10000). Its explicit kernel-time floor advances11250
+shared PIT ticks. Each of three lifetimes reaches GP Yielded at PC2B after6538
+actual cycles and EP Running at PC32 after1333125 actual cycles. No events,
+extra RAM transfer or PCM output are fabricated: each still has102 device
+transactions and the same eight owned reads /three writes. The bootstrap bytes
+are checked before execution; both DSPs then execute their actual original code.
+Repeating the final timestamp leaves cycles, PCs and RAM accesses unchanged.
+Original allocations are freed only after fixture device-owner disposal, which
+still does not qualify an active original stop/reset.
+
+Thirty focused checks pass in11.36s. The new clock fixture compares one-tick,
+750-tick and whole-wait partitions; it checks held-time exclusion, exact GP
+yield, real EP looping, unchanged RAM and terminal backward-time rejection.
+Native stopped-clock tests execute an actual STOP image, retain its stopped
+state across later time, then hold and release all ownership. The remaining
+native access, codec capture, failure and cleanup regressions also pass after
+the MMIO service ordering change. Evidence is under
+`build/blinx/audio-dsp-clock-20261014/`; all builds/tests used one idle core.
+No title, renderer, playback or hardware operation was launched in this batch.
+
+Next required composition: prime elapsed setup-clock phase without treating
+stopped time as processed frames; schedule real32-sample GP work and256-sample
+EP events alongside codec consumption; preserve shared original GP/EP scratch
+ownership and install the separately verified EP lookup before CPU creation.
+Then cross the original active FE/status/notification and stop/reuse paths.
+Native released-DSP/active-SE sampling retains its guard until that group is
+qualified. Family total stays6/9; the existing30 IDs /29 deferred scopes remain.

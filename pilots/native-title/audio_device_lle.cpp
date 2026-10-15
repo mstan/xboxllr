@@ -1,7 +1,7 @@
 #include "audio_device_apu_contract.hpp"
 #include "audio_device_aci_contract.hpp"
 /* Original DirectSound's shared device owner. This connects qualified storage,
- * transactions, reset/bootstrap and codec consumption. Shared DSP cadence and
+ * transactions, reset/bootstrap, stopped DSP execution and codec consumption. Active DSP cadence and
  * active FE ordering remain separate qualification work. */
 #include "audio_device_lle.h"
 extern "C" {
@@ -10,6 +10,7 @@ extern "C" {
 }
 #include "machine/apu_gp_processor.hpp"
 #include "machine/apu_ep_processor.hpp"
+#include "machine/apu_dsp_clock.hpp"
 #include "machine/aci.hpp"
 #include <memory>
 #include <string>
@@ -29,6 +30,7 @@ struct Owner {
     xlle::McpxAci aci{[](const std::string& why){fail(why.c_str());}};
     std::unique_ptr<xlle::ApuGpProcessor> gp;
     std::unique_ptr<xlle::ApuEpProcessor> ep;
+    std::unique_ptr<xlle::ApuDspClock> dsp_clock;
     PilotAudioDevicePcm pcm=nullptr;
     void *context=nullptr;
     uint64_t ticks=0,reads=0,writes=0;
@@ -125,6 +127,8 @@ extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void 
     owner->gp=std::make_unique<xlle::ApuGpProcessor>(owner->apu,[](const std::string& why){fail(why.c_str());});
     owner->ep=std::make_unique<xlle::ApuEpProcessor>(owner->apu,[](const std::string& why){fail(why.c_str());});
     owner->apu.set_time(ticks,1125000);
+    owner->dsp_clock=std::make_unique<xlle::ApuDspClock>(owner->apu,*owner->gp,*owner->ep,ticks,1125000,
+        [](const std::string& why){fail(why.c_str());});
     if(failure.empty()) {
         error=pilot_io_device_mmio_bind(xlle::McpxApu::kBase,xlle::McpxApu::kSize,pilot_audio_device_lle_access);
         if(error)fail(error);else owner->apu_mapped=true;
@@ -144,6 +148,9 @@ extern "C" const char *pilot_audio_device_lle_access(uint32_t address,unsigned s
     if(!failure.empty())return failure.c_str();
     if(!owner || !value || (write!=0 && write!=1))return fail("invalid original audio device transaction");
     if(owner->busy)return fail("original audio device callback reentry");
+    // Settle elapsed guest time under the preceding device configuration.
+    // A read at unchanged time supplies no instruction budget or completion.
+    if(pilot_audio_device_lle_sample())return failure.c_str();
     const uint32_t supplied=write?*value:0; // A read's output need not be initialized.
     const bool apu=address>=xlle::McpxApu::kBase && address<xlle::McpxApu::kBase+xlle::McpxApu::kSize;
     const bool aci=address>=xlle::McpxAci::kBase && address<xlle::McpxAci::kBase+xlle::McpxAci::kSize;
@@ -179,12 +186,16 @@ extern "C" const char *pilot_audio_device_lle_sample(void) {
     const char *error=pilot_usb_pit_clock(&ticks,&next);
     if(error)return fail(error);
     if(ticks<owner->ticks)return fail("original audio device clock moved backwards");
-    if(owner->gp->phase()!=xlle::ApuGpPhase::Held || owner->ep->phase()!=xlle::ApuGpPhase::Held)
-        return fail("original DSP shared-clock execution remains unqualified");
-    Busy busy;owner->ticks=ticks;owner->apu.set_time(ticks,1125000);
+    const bool released=owner->gp->phase()!=xlle::ApuGpPhase::Held || owner->ep->phase()!=xlle::ApuGpPhase::Held;
+    if(released && (owner->apu.mmio_read(xlle::McpxApu::kBase+0x2000,4)&0x18))
+        return fail("original active DSP frame cadence remains unqualified");
+    Busy busy;
+    if(!owner->dsp_clock->advance(ticks))return failure.c_str();
+    owner->ticks=ticks;
     owner->aci.set_time(ticks,1125000);
     // Only the independently qualified, guest-configured codec consumes here.
-    // Held DSPs and VP sources are never started by periodic observer work.
+    // This stopped-sequencer stage supplies actual bootstrap/poll execution,
+    // without publishing VP/GP frames or EP events. Active composition follows.
     owner->aci.set_frame(ticks/6000);
     return pilot_audio_device_lle_error();
 }
@@ -197,6 +208,10 @@ extern "C" void pilot_audio_device_lle_state(PilotAudioDeviceState *state) {
     state->pcm_words=owner->aci.consumed_pcm_words();state->descriptors=owner->aci.completed_descriptors();
     state->gp_held=owner->gp && owner->gp->phase()==xlle::ApuGpPhase::Held;
     state->ep_held=owner->ep && owner->ep->phase()==xlle::ApuEpPhase::Held;
+    if(owner->dsp_clock) {
+        state->gp_cycles=owner->dsp_clock->retired(false);state->ep_cycles=owner->dsp_clock->retired(true);
+        state->gp_phase=unsigned(owner->gp->phase());state->ep_phase=unsigned(owner->ep->phase());
+    }
 }
 extern "C" int pilot_audio_device_lle_consumer_attached(void *context) {
     return owner && owner->pcm && owner->context==context;

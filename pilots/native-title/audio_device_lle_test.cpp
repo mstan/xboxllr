@@ -237,7 +237,8 @@ int main(int argc,char **argv) {
         }
         puts("PASS three real shared-clock counter lifetimes: stopped, run, pause, resume and reset without DMA");return 0;
     }
-    if(!strcmp(mode,"reset-bootstrap") || !strcmp(mode,"reset-clock")) {
+    if(!strcmp(mode,"reset-bootstrap") || !strcmp(mode,"reset-clock") || !strcmp(mode,"reset-clock-active")) {
+        access(0xfe80200c,4,0);
         uint32_t bytes=12288,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
         word(va)=pa+4096;word(va+8)=pa+8192;
         for(unsigned i=0;i<2048;++i)word(va+4096+i*4)=0xa7000087; // Authored STOP image.
@@ -252,9 +253,18 @@ int main(int argc,char **argv) {
         }
         pilot_audio_device_lle_state(&s);CHECK(s.dma_reads==8 && received.empty());
         if(!strcmp(mode,"reset-clock")) {
+            CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);CHECK(!s.gp_cycles && !s.ep_cycles);
+            ticks+=1;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+            pilot_audio_device_lle_state(&s);CHECK(s.gp_phase==4 && s.ep_phase==4 && s.gp_cycles && s.ep_cycles);
+            const auto gp_cycles=s.gp_cycles,ep_cycles=s.ep_cycles;
+            ticks+=11250;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
+            pilot_audio_device_lle_state(&s);CHECK(s.gp_cycles==gp_cycles && s.ep_cycles==ep_cycles && s.dma_reads==8);
+        }
+        if(!strcmp(mode,"reset-clock-active")) {
+            access(0xfe802000,4,15);
             CHECK(pilot_audio_device_lle_sample());CHECK(pilot_audio_device_lle_close());
             pilot_audio_device_lle_state(&s);CHECK(s.owned && s.work_binding && !s.pcm_words && s.dma_reads==8);
-            puts("PASS unqualified DSP cadence fails explicitly and retains released owners");return 0;
+            puts("PASS active DSP frame cadence remains guarded and retains released owners");return 0;
         }
         access(0xfe83fffc,4,0);access(0xfe85fffc,4,1);
         pilot_audio_device_lle_state(&s);CHECK(s.gp_held && s.ep_held && s.dma_reads==8);
