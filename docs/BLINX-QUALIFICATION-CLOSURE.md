@@ -50,7 +50,45 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
-## FE method quiet-context observation - 2026-10-15
+## FE active-context comparison - 2026-10-15
+
+The fresh physical comparison now reaches original control0/SE15. Setup clocks
+write only the second global16-byte notifier slot; the first remains pending.
+The actual2010C=0 method changes SE15 to7 and FE7900F to7100F, with PIO80 and
+decode10C/0. After20104=2, PIO is80 and raw decodeD0104/2, but the actual first
+status byte remains80 through6729 console polls over10000.296us. The later
+whole-owner capture still shows an unchanged first16 bytes. Complete64KiB
+guards pass with only the observed second slot and capture window excluded.
+
+This resolves the halt's setup transition and distinguishes queue progress
+from completion. It does not qualify status1 publication or its ordering.
+Neither arbitrary delays nor presumed DSP acknowledgements follow from these
+observations. Audit the original NOTIFY-specific initialization and actual
+consumer/owner requirements next; do not repeat this held-DSP experiment or
+expand a raw-register precision matrix. The DPC FEMEM consumer still needs
+actual completion; the family count remains6/9.
+
+The original17C2AD retirement callsite does not test the return of17C1B1;
+it proceeds to IRQ/control/SE stop and GP0/EP1 holds. The already retained
+nine-case execution proves that17C1B1's actual pending path polls/stalls668
+times and returns the same active-branch result as successful notification.
+Therefore test that original timeout path with actual clocked work, ownership,
+reset/reentry and cleanup before treating its earlier status1 exit as mandatory.
+If that supported fallback preserves output and lifetime, retain the faster
+notification path as a deferral with a reopening trigger. This is a candidate,
+not a waiver of safe retirement or the separate DPC memory fence.
+
+Probe commit `12eb899`,11 actual-x86 checks and raw observations are documented in
+`docs/FE-NOTIFICATION.md` in the probe worktree. Private final capture:
+`results/fe-notification-active-v4-20261015/execute.aot-private.json`.
+The two earlier active generations stopped on observer assumptions before the
+final NOTIFY and were separately recovered. None is relabeled as a completion.
+Final dashboard/SMC recovery and a fresh probe PING/INFO are confirmed; no owner
+action is pending. The reviewed private proof pins118 source, payload, capture,
+caller and recovery artifacts, SHA256
+`2ddcf3acb5cfbc54e721f807a1699fc903f9762275f307218a5588c44af7f6f6`.
+
+## Earlier FE method quiet-context observation - 2026-10-15
 
 The original2010C=0 /20104=2 pair now has a physical observation in a fresh
 owned notification allocation, with DSPs held, SE7, codec streams stopped and
@@ -140,7 +178,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Open: quiet hardware submission stays queued/status80; original active control0/SE15 context and ordering next | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer observes completion and returns; representative pending/failure checks prevent false success, without an exhaustive fault matrix |
+| A04 | Open: physical halt stops SE15->7; notifier stays80 beyond10ms. Test original retirement's bounded timeout; DPC memory fence remains required | `.115` | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
 | A05 | Captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; sends/mix/GP/EP and digital-ring content agree; complete output/timing/retirement and analog ring evidence remain | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits

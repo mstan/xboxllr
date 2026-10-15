@@ -25,6 +25,13 @@ notification and complete connected output remain required; this component
 closure does not change the6/9 family count. See the current closing checklist
 for the evidence and remaining gates.
 
+The active FE hardware comparison now establishes original2010C=0 stopping
+SE15->7. Releasing FE control allows the following20104 submission to reclaim
+PIO space, but the real notifier remains pending beyond10ms. Thus queue progress
+cannot stand in for completion. The next A04 action is an original NOTIFY
+initialization/consumer-context audit, using the retained measurements instead
+of repeating this held-DSP comparison. No HLE runtime or accepted visuals changed.
+
 The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 preserves every question/evidence/reopening trigger and identifies promoted work.
 Earlier dated totals do not override these current dispositions.

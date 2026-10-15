@@ -55,6 +55,17 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | AUDIO-D13 | What happens for reset at arbitrary instruction boundaries, unreached pending-DMA cancellation, or additional warm-state combinations? | The normal original retirement caller submits FE control/notification before GP0/EP1. Source-bound caller evidence and the configured reset observer isolate that required contract. Both physical GP/EP no-DMA experiments now complete reset and fresh reexecution. Unsupported pending work retains its guards; actual drain, normal connected retirement and model adoption remain required A03-A05. | The bounded title reaches reset with pending work after its real retirement sequence, a supported lifecycle exposes stale work, or broader reset/cancellation support is added. Establish the reached case before widening admission; do not claim cancellation from a drained reset. |
 | AUDIO-D14 | What additional malformed-command, timeout and failure combinations need independent qualification? | Nine unchanged original FE helper cases already distinguish success, timeout, no notifier, stopped state and release under explicit synthetic replies. Return1 and final status80 do not prove completion. This is a representative caller contract, not hardware queue evidence. Required real notification ordering, actual consumer completion and safe failure/ownership checks stay A04/A05; an exhaustive fault matrix is outside the bounded goal. | A required original caller takes an uncovered failure path, a regression reveals false success or premature release, or wider error recovery becomes supported. Retain existing failure guards and replay the relevant original consumer. |
 
+AUDIO-D14 follow-up,2026-10-15: the fresh active-control hardware comparison
+observes setup halt and PIO reclamation, but its actual NOTIFY byte remains80
+past10ms. Original17C2AD does not branch on17C1B1's result, and the retained
+original caller cases prove its bounded668-poll timeout returns normally.
+Potential deferral: earlier successful NOTIFY completion, only if executing
+that actual fallback with clocked work proves required output, safe ownership,
+reset/reentry and cleanup. This candidate is not yet accepted or counted as a
+new waived requirement. Reopen on an original consumer requiring status1, an
+unsafe timeout/late write, or an affected lifetime/output regression. The
+separate original DPC FEMEM completion remains required.
+
 AUDIO-D13 update,2026-10-15: configured reset is adopted and original drained
 retirement/reentry now passes for three configurations, two processed generations
 each, on retained owners. The original final free precedes an observed interval
