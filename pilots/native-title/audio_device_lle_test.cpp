@@ -101,6 +101,25 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"configuration")) {
+        access(0xfe801100,4,0x88);access(0xfe802000,4,0);
+        const uint32_t registers[][2]={{0x1500,0},{0x1508,0x800040},{0x150c,0},
+            {0x2008,0x800},{0x2010,0x800},{0x2020,0x600},{0x2028,0x100},
+            {0x1104,0xff},{0x1124,0x1fff},{0x1130,0x08000000},{0x1158,0x20}};
+        for(const auto& reg:registers) {
+            access(0xfe800000+reg[0],4,reg[1]);uint32_t value=0xa5a5a5a5;
+            CHECK(!pilot_audio_device_lle_access(0xfe800000+reg[0],4,0,&value) && value==reg[1]);
+        }
+        access(0xfe80200c,4,0);access(0xfe802000,4,7);
+        for(uint32_t control:{8u,0x100fu}) {
+            access(0xfe801100,4,control);uint32_t value=0;
+            CHECK(!pilot_audio_device_lle_access(0xfe801100,4,0,&value) && value==(0x70000|control));
+        }
+        PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+        CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words && received.empty());
+        CHECK(!pilot_audio_device_lle_close());
+        puts("PASS native stopped configuration groups and physical FE control readback without DMA");return 0;
+    }
     if(!strcmp(mode,"counter-unknown")) {
         uint32_t value=0xa5a55a5a;
         CHECK(pilot_audio_device_lle_access(0xfe80200c,4,0,&value) && value==0xa5a55a5a);

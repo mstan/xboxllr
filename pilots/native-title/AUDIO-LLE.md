@@ -20,6 +20,24 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Stopped initialization and VP mapping boundary - 2026-10-14
+
+The actual original stopped initializer now executes against the maintained
+canonical register owner. Its23 configuration fields and three FE control
+values have independent physical readback. The pre-video71F8F capture and
+original kernel/control helpers establish the explicit warm FE handoff.
+Configuration admission is limited to stopped/halted startup and original
+values; active access/effects, unknown encodings and FE completion remain
+guarded. No second register store or fabricated processing owner is introduced.
+
+All36 targeted checks and three live original helper/initializer lifetimes pass.
+The final connected title crosses FETFORCE0 and stops at FE802038=02F80000 with
+zero PCM, after57.453s. The next batch includes the actual VP setup17B79F plus
+the remaining DSP host controls; the retained65-write inventory now includes
+that previously omitted VP routine. See the
+[source, physical and title evidence](../../docs/BLINX-QUALIFICATION-CLOSURE.md#stopped-initialization-batch-and-connected-vp-mapping-boundary---2026-10-14).
+This closes stopped transport, not the whole audio family. HLE remains unchanged.
+
 ## Physical XGSCNT control - 2026-10-14
 
 The original initializer's stopped zero write and sequencer mode1 now control

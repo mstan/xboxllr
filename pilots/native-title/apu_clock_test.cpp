@@ -51,7 +51,7 @@ int main()
             guarded.mmio_write(0xfe80200c,4,0);
             if(invalid==4) {guarded.mmio_write(0xfe802000,4,15);guarded.mmio_write(0xfe80200c,4,0);}
             if(invalid==5)guarded.set_time(1,0);
-            if(invalid==6) {guarded.mmio_write(0xfe802000,4,23);guarded.set_time(1,48000);}
+            if(invalid==6) {guarded.mmio_write(0xfe801100,4,8);guarded.mmio_write(0xfe802000,4,23);guarded.set_time(1,48000);}
         }
         CHECK(!error.empty());
     }

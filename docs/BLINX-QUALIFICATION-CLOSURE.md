@@ -33,14 +33,61 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: sustained original output and bounded reset/bootstrap pass; startup controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: sustained output, reset/bootstrap and stopped initialization pass; VP mappings, host controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and startup control proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Integration complete; initial reset crossed; current title stops at FETFORCE0=0; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Integration complete; stopped initialization crossed; title stops at VP mapping FE802038; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## Stopped initialization batch and connected VP mapping boundary - 2026-10-14
+
+All23 fixed configuration writes match physical readback with SE stopped,
+GP/EP held, FE halted and global APU interrupts masked. Four additional FE
+control writes observe88 ->70088,8 ->70008,100F ->7100F and restoration7138F.
+All other endpoint controls and the stopped sample counter remain unchanged.
+These27 volatile writes perform no storage operation, DSP release,
+playback or automatic retry. They establish stopped transport, not the active
+effects of arbitrary configuration encodings.
+
+The maintained device retains those values in its existing canonical register
+file. A separate admission bitmap requires original-value writes during stopped,
+halted startup; unsupported values/widths/overlaps and later active access reject.
+FE control reads expose observed status bits only in the qualified startup
+scope. Active status/ordering remains A04; configuration storage does not
+acknowledge unimplemented work or replace a DSP clock/event producer.
+
+The first changed title run exposed missing warm FE control state before the new
+block. The already-retained pre-video/network capture supplies FECTL71F8F.
+Original kernel initialization/retirement supplies108F outside the captured
+status/trap fields; the actual original mode0 helper preserves the captured
+value. The explicit initialized-kernel handoff now includes that state without
+granting FE notification completion or claiming a cold-reset default.
+
+Three unchanged original mode-helper/initializer executions return through live
+maintained MMIO. The source checker
+binds physical payloads/readbacks and the pre-video capture to original code.
+All36 targeted component/native tests pass. The corrected handoff required one
+negative clock fixture to explicitly free the FE before testing an unsupported
+active mode; its prior implicit free-running startup premise was wrong.
+
+The final changed title run crosses the old FETFORCE0 stop and reaches
+DWORD WRITE FE802038=02F80000 after57.453s, with zero captured PCM bytes/stamps.
+The two attempts have distinct retained executables/logs; the earlier diagnostic
+is not the final implementation. Current evidence:
+`build/blinx/audio-initialization-batch-20261014/`, final `source-handoff-v2/`
+and `title-handoff/`; matching physical observations remain in probe
+`results/audio-init-controls-20261014/`.
+
+The next source inventory adds original VP setup17B79F, omitted by the earlier
+GP/EP-only fixture. Its write at17B7DF supplies the reached2038 boundary. The
+combined prepared setup records65 writes, including15 mapping writes and13 DSP
+host-control writes, with actual owned allocations and natural cleanup. This
+groups the next work; it does not admit the unknown mappings or methods.
+Families remain6/9;28 question IDs retain27 deferred scopes. HLE processing is
+unchanged, and required active field effects, shared cadence and output remain open.
 
 ## Physical sample counter gate/reset/resume - 2026-10-14
 

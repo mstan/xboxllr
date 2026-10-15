@@ -29,6 +29,10 @@ if(PILOT_USB STREQUAL "LLE")
   target_include_directories(pilot_apu_clock_test PRIVATE ../../src)
   target_compile_features(pilot_apu_clock_test PRIVATE cxx_std_17)
   pilot_add_test(NAME pilot_apu_clock COMMAND pilot_apu_clock_test)
+  add_executable(pilot_apu_startup_test apu_startup_test.cpp)
+  target_include_directories(pilot_apu_startup_test PRIVATE ../../src)
+  target_compile_features(pilot_apu_startup_test PRIVATE cxx_std_17)
+  pilot_add_test(NAME pilot_apu_startup COMMAND pilot_apu_startup_test)
   set_tests_properties(pilot_usb_lle PROPERTIES TIMEOUT 15)
   pilot_add_test(NAME pilot_usb_dma_guards COMMAND "${CMAKE_COMMAND}"
     "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DPILOT_MEMORY=${PILOT_MEMORY}"

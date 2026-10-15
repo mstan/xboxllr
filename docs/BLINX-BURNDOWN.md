@@ -34,10 +34,14 @@ the sole DSP CPUs and fetch their actual SG bootstrap images; six original
 images and retained physical loaded-P observations support that connection.
 Physical XGSCNT observations now support stopped retention, zero initialization,
 mode1 progression and resume; the unconditional uptime counter is corrected.
-The last connected title crosses initial reset and stops at FETFORCE0=0. Remaining
-audio work is original startup controls, shared-clock execution, active reset/FE
-ordering and actual title output. See the
-[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#physical-sample-counter-gateresetresume---2026-10-14).
+The stopped initialization batch now admits23 physically observed configuration
+fields and the original FE control sequence. Captured pre-video FECTL state is
+part of the explicit kernel handoff. Three live original initializer transports
+and all36 targeted checks pass. The latest connected title crosses FETFORCE0 and
+stops at VP mapping FE802038=02F80000, with zero captured PCM. Remaining audio work
+is VP mapping/method setup, DSP host controls, shared-clock execution, active
+reset/FE ordering and actual title output. See the
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#stopped-initialization-batch-and-connected-vp-mapping-boundary---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable

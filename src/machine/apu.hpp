@@ -22,6 +22,7 @@
 
 #include "machine/mmio_device.hpp"
 #include "machine/apu_clock.hpp"
+#include "machine/apu_startup_config.hpp"
 #include "machine/apu_adpcm.h"
 #include "machine/apu_gp_dma.hpp"
 #include "machine/apu_envelope_curve.hpp"
@@ -392,6 +393,10 @@ public:
         // Original idle retirement and retained pre-video/network observations
         // agree. These are initialized-kernel values, not cold-reset defaults.
         set_reg32(kGpReset,0);set_reg32(kEpReset,1);dsp_reset_context_known_=true;
+        // The same pre-video/network entry capture supplies the retained FE
+        // status/trap fields. Original kernel init/retirement supplies108F;
+        // the capture supplies70000/F00. This is not a board-reset default.
+        set_reg32(kFectl,kObservedIdleFectl&~0x70000u);fectl_initialized_=true;
         // The warm kernel handoff does not establish a counter value. The
         // original title writes zero while stopped before enabling mode1.
         sample_counter_known_=false;
@@ -457,6 +462,25 @@ public:
         if (faulted_) return 0;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
+        if(ApuStartupConfiguration::touches(off,size)) {
+            if(size!=4 || !kernel_audio_control_idle() || !startup_configuration_.known(off)) {
+                device_fault("APU startup configuration read context/width remains unqualified");return 0;
+            }
+            return reg32(off); // one canonical register owner, including future active updates
+        }
+        if(off==kFectl && size==4 && dsp_reset_context_known_) {
+            if(!fectl_initialized_ || !kernel_audio_control_idle()) {
+                char diagnostic[192];
+                std::snprintf(diagnostic,sizeof(diagnostic),
+                    "original FE control/status remains unqualified: known=%u startup=%u fectl=%08x sectl=%08x gp=%x ep=%x",
+                    unsigned(fectl_initialized_),unsigned(kernel_audio_startup_),reg32(kFectl),reg32(kSectl),reg32(kGpReset),reg32(kEpReset));
+                device_fault(diagnostic);return 0;
+            }
+            // The original88/8/100F writes physically read70088/70008/7100F
+            // with no active SE/DSP work. Do not export these empty-state bits
+            // as an acknowledgement of unqualified active work.
+            return (reg32(kFectl)&~0x70000u)|0x70000u;
+        }
         if(touches_sample_counter(off,size)) {
             if(off!=kXgscnt || size!=4 || !sample_counter_known_) {
                 device_fault("APU sample counter read context/width remains unqualified");return 0;
@@ -494,6 +518,14 @@ public:
         if (faulted_) return;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
+        if(ApuStartupConfiguration::touches(off,size)) {
+            if(size!=4 || !kernel_audio_control_idle() ||
+               (reg32(kFectl)&kFectlMethodMode)!=0x80 ||
+               !startup_configuration_.write(off,value)) {
+                device_fault("APU configuration requires original value in stopped halted startup");return;
+            }
+            set_reg32(off,value);fe_context_known_=false;return;
+        }
         if(touches_sample_counter(off,size)) {
             if(off!=kXgscnt || size!=4 || value || (reg32(kSectl)&0x18) || fe_fence_pending_) {
                 device_fault("APU sample counter write requires stopped DWORD zero");return;
@@ -632,6 +664,13 @@ public:
         if (releases_method_trap) value &= ~kFectlTrapReason;
 
         log_subregion("wr", off);
+        if(off==kFectl && size==4 && dsp_reset_context_known_) {
+            value&=~0x70000u;
+            const bool idle_mode=(value&kFectlMethodMode)==0 || (value&kFectlMethodMode)==0x80;
+            const bool preserves=fectl_initialized_ && idle_mode &&
+                ((value^reg32(kFectl))&~kFectlMethodMode)==0;
+            fectl_initialized_=value==0x88 || value==8 || value==0x100f || preserves;
+        }
         RegFileMmio::mmio_write(addr, size, value);
         if(size==4 && (off==kVpvaddr || off==kVpsgeaddr)) {
             for(auto& rate:voice_rates_)rate.reset();
@@ -1157,6 +1196,8 @@ private:
     uint64_t idle_voice_traps_ = 0;
     ApuSampleCounter sample_counter_;
     bool sample_counter_known_=true; // fresh device; warm imports revoke this
+    ApuStartupConfiguration startup_configuration_;
+    bool fectl_initialized_=false;
     std::array<bool,kMaxVoices> voice_locked_{};
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
     std::array<std::array<apu_envelope_curve::ReleaseHistory,2>,kMaxVoices> voice_envelopes_{};

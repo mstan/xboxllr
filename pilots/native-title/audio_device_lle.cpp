@@ -46,6 +46,7 @@ bool dma(uint32_t address,void *buffer,size_t bytes,int write) {
  * by the device; active FE and unknown registers retain their guards. */
 bool apu_admitted(uint32_t off,unsigned size,int write,uint32_t value) {
     if(size!=4 || (off&3))return false;
+    if(xlle::ApuStartupConfiguration::touches(off,int(size)))return true; // Device owns value/context admission.
     if(off==0x200c && write)return value==0; // Device also requires mode0.
     if(off==0x3fffc || off==0x5fffc)return !write || value==1 || value==3 || (off==0x3fffc && value==0);
     if(!write) {
