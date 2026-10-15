@@ -104,9 +104,8 @@ and AC-3 for selector2. It does not establish selector2's FIFO0 PCM filtering
 and matrix contract. The failed mode0 comparison is retained as a diagnostic,
 not a proven emulator defect. The original driver program was not substituted.
 
-Next derive that selector2 PCM contract from the saved program/context, then
-compare the retained authored tones and live EP input/output. Another title
-run or Xbox probe is unnecessary for this next step. Actual original FE ordering,
+The subsequent [selector2 PCM proof](#selector2-stereo-pcm-contract---2026-10-15)
+resolves this numerical gap using those saved inputs. Actual original FE ordering,
 active reset, timing, full attract output and the final analog-ring hardware
 question remain required; A03-A05 stay open, families6/9 and deferrals31 IDs /
 30 scopes unchanged. HLE processing is unchanged.
@@ -121,6 +120,52 @@ by505 frames, so the observed/unobserved fixture equality is not a claim of
 whole-title bit identity. All builds and title runs were serial, muted and
 limited to four CPUs with the game absent; offline analysis uses one CPU and
 no playback. No hardware operations occurred.
+
+## Selector2 stereo PCM contract - 2026-10-15
+
+`tools/qualify_native_ep_mode2_pcm.py` independently computes the fixed original
+754-word program's stereo PCM route. It verifies the program hash and entire
+24-word control context against owned original startup RAM, then uses integer
+arithmetic without calling the candidate DSP or fitting gain, rate or phase.
+Bootstrap P:0055..0057 passes X:0BC0 to P:0304 unchanged. P:03D4..03E3 clamps
+context[7] and indexes the original table; the reached31 selects literal
+P:0324 word607000. This counterintuitive source value must not be replaced by
+assumed unity. The exact program/context bound the claim; other settings and
+intended SDK behavior are not inferred.
+
+After source scaling, center joins FL/FR and the two surround channels combine.
+The explicit zero field at X:0608 selects the second coefficient bank: four
+sections per front channel and five for surround. The independently transcribed
+P:05CA..05F1 recurrence retains24-bit histories and the discarded fractional
+residue through each256-sample block. The final matrix adds/subtracts the
+filtered surround, then FIFO0 packs high16-bit stereo samples. The comparison
+uses the original constants, rounding and saturation; it rejects accumulator
+overflow outside the audited domain.
+
+All three retained silence, tone and distinct-channel fixtures match exactly:
+49,152 samples over32 events per fixture. Input and output hashes bind each
+comparison to its own original execution. All281 live blocks match exactly:
+143,872 samples /71,936 stereo frames. Every captured78-word filter-state load
+also agrees with state independently derived from previous input. The first
+observed state is zero; later blocks never reseed from candidate output. The
+five input planes use matching alternating400-byte halves of their800-byte
+rings. This establishes the captured PCM transform and state continuity,
+not physical ownership, codec timing, full attract or original teardown.
+
+An initial exploratory comparison paired the distinct input with the standard
+tone capture and failed; both reports remain. Binding the correct input hash
+resolves it without changing any coefficient or recurrence. The first live
+parser rejected the valid second ring half; its corrected address check admits
+only the two observed aligned halves and requires them to agree across channels.
+No emulator or HLE behavior changed to obtain these passes.
+
+Evidence is `build/blinx/audio-stage-trace-20261015/mode2-pcm-qualified-final.aot-private.json`.
+The next required offline group is original active FE ordering and codec/GP/EP
+stop/reset ownership, followed by remaining connected output, HLE-effect and
+movie-relative timing acceptance. The analog-ring question stays in the final
+hardware batch. A03-A05 remain open, families6/9 and deferrals31 IDs /30 scopes.
+This step used short one-core BelowNormal file analysis, with no build, title,
+hardware or playback operation.
 
 ## Digital prefix diagnosis - 2026-10-15
 

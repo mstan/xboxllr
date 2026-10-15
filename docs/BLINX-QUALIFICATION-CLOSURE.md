@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Captured audible source prefix meets tolerances; sends/mix/GP/EP input and digital-ring transport agree; live selector2 PCM transform needs its own oracle; analog still needs ring-semantics evidence | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; sends/mix/GP/EP and digital-ring content agree; complete output/timing/retirement and analog ring evidence remain | `.113`, `.113.9`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -68,15 +68,19 @@ ownership/timing or output-transform acceptance.
 
 All281 live PCM program loads and47 control contexts identify original EP
 selector2. Its754-word PCM filter program differs from the selector0/1 matrix
-used in the failed diagnostic. Existing selector2 checks cover AC-3, leaving
-its stereo PCM oracle unqualified; the mismatch is not an established emulator
-defect. Next derive that contract from the saved program/context and use the
-retained tone and live captures before another title run. Original active
-FE/reset/timing/attract acceptance remains required. No hardware operation
-occurred; the analog question stays in the final hardware batch.
+used in the failed diagnostic. The new independent integer oracle now matches
+all three retained fixtures (49,152 samples) and all281 live blocks (143,872
+samples) exactly, including all78-word state loads derived continuously from
+prior input. No fitted parameters or emulator behavior changes were needed.
+This resolves the captured waveform discrepancy. Next address original active
+FE ordering and codec/GP/EP stop/reset ownership, then remaining connected
+output/HLE-effect/timing/attract acceptance. No new hardware or title run was
+needed for this numerical proof; the analog question stays in the final
+hardware batch.
 AUDIO-D12 defers only raw nontrapped FE reason values/timing; required active
 IRQ/DPC/queue behavior remains A03-A05. Families6/9; deferred31 IDs /30 scopes.
-See the [audible stage and mode diagnosis](../pilots/native-title/AUDIO-LLE.md#audible-stage-diagnosis-and-ep-mode-identity---2026-10-15),
+See the [selector2 PCM proof](../pilots/native-title/AUDIO-LLE.md#selector2-stereo-pcm-contract---2026-10-15),
+[audible stage and mode diagnosis](../pilots/native-title/AUDIO-LLE.md#audible-stage-diagnosis-and-ep-mode-identity---2026-10-15),
 [passive stage journal](../pilots/native-title/AUDIO-LLE.md#passive-audio-stage-observation---2026-10-15),
 [earlier digital prefix diagnosis](../pilots/native-title/AUDIO-LLE.md#digital-prefix-diagnosis---2026-10-15),
 [bounded output evidence](../pilots/native-title/AUDIO-LLE.md#bounded-output-observation---2026-10-15),
