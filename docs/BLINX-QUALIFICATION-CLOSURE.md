@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Connected startup crosses the DSP wait; current title stops at SPDIF byte status read FEC00176; active stream/output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Candidate SPDIF transport and original start/stop/restart pass; native digital capture/integration and physical active transport remain. Current title checkpoint still stops at FEC00176 | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -145,6 +145,19 @@ to force startup. No speaker output or hardware operation ran. Families remain
 [current input-timeline evidence](../pilots/native-title/AUDIO-LLE.md#original-audio-input-timeline---2026-10-14).
 
 ## Original AC97 startup crossed - 2026-10-14
+
+The subsequent SPDIF group now has candidate digital consumption through the
+existing ACI ring/RAM/clock/IRQ owner. Four focused executable checks pass,
+including unchanged PCM regressions. Three original-driver lifetimes each
+produce8192 PCM bytes and9216 digital bytes through live owned RAM, then run
+their original destructors and free every allocation. The extra1024 digital
+bytes are the deliberately stopped prefix: original start(-1) resets and
+restarts that ring rather than continuing its partial descriptor. A read-only
+physical batch confirms byte/word status agreement for both stopped streams;
+no hardware writes ran. Native title admission remains guarded pending its
+digital consumer/teardown connection and active physical transport evidence.
+No title retry or family closure is claimed. Families6/9 and deferred30 IDs /
+29 scopes are unchanged. See the [candidate SPDIF evidence](../pilots/native-title/AUDIO-LLE.md#candidate-spdif-transport-and-original-stream-lifetimes---2026-10-15).
 
 The physical codec identifies as WM9709, matching the manufacturer's fixed48kHz
 DAC with zero ordinary mixer/rate/power readbacks. The maintained ACI replaces

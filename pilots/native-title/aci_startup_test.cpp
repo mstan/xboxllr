@@ -10,14 +10,41 @@ int main(int argc,char** argv) {
     std::string error;xlle::McpxAci aci([&](const std::string& why){error=why;});
     CHECK(aci.mmio_read(base+0x12c,4)==0 && aci.mmio_read(base+0x130,4)==0);
     CHECK(aci.initialize_kernel_audio_handoff());aci.set_time(0,1125000);
-    if(argc==2 && !std::strcmp(argv[1],"--transport")) {
+    const bool streams=argc==2 && !std::strcmp(argv[1],"--stream-transport");
+    if(argc==2 && (!std::strcmp(argv[1],"--transport") || streams)) {
+        if(streams) {
+            // Candidate device proof only. Native title admission remains
+            // guarded until its digital consumer and ownership are connected.
+            aci.set_mem_access([](uint32_t a,void* out,size_t n){
+                if(!n || n>4096 || uint64_t(a)+n>0x4000000)return false;
+                std::printf("MEMR %08x %zu\n",a,n);std::fflush(stdout);
+                char data[8193]={};if(std::scanf(" DATA %8192s",data)!=1 || std::strlen(data)!=n*2)return false;
+                auto nibble=[](char c){return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;};
+                for(size_t i=0;i<n;++i){int hi=nibble(data[i*2]),lo=nibble(data[i*2+1]);
+                    if(hi<0 || lo<0)return false;
+                    static_cast<uint8_t*>(out)[i]=uint8_t(hi*16+lo);}
+                return true;
+            });
+            auto output=[](char stream,const uint8_t* p,size_t n,uint32_t format){
+                std::printf("OUTPUT %c %08x ",stream,format);
+                for(size_t i=0;i<n;++i)std::printf("%02x",p[i]);
+                std::puts("");std::fflush(stdout);
+                char reply[16]={};return std::scanf(" %15s",reply)==1 && !std::strcmp(reply,"ACCEPTED");
+            };
+            aci.set_pcm_output([output](const uint8_t* p,size_t n){return output('P',p,n,0);});
+            aci.set_spdif_output([output](const uint8_t* p,size_t n,uint32_t format){return output('S',p,n,format);});
+        }
         char operation;unsigned address,width,value;std::puts("READY");std::fflush(stdout);
         while(std::scanf(" %c %x %u %x",&operation,&address,&width,&value)==4) {
-            if(operation=='T') {aci.set_time(address,1125000);value=0;}
+            if(operation=='T') {aci.set_time(address,1125000);if(streams)aci.set_frame(address/6000);value=0;}
             else {
                 CHECK(operation=='R' || operation=='W');
                 CHECK(address>=base && address<base+aci.kSize);
-                if(!pilot_original_aci_admitted(address-base,width,operation=='W',value)) {
+                const unsigned off=address-base;
+                const bool candidate=streams &&
+                    (((off==0x116 || off==0x176) && width==1 && operation=='R') ||
+                     (off==0x17b && width==1 && operation=='W' && value==0x1d));
+                if(!candidate && !pilot_original_aci_admitted(off,width,operation=='W',value)) {
                     std::printf("FAIL admission %08x\n",address);std::fflush(stdout);return 2;
                 }
                 if(operation=='W')aci.mmio_write(address,width,value);

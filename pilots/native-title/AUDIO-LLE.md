@@ -3064,3 +3064,60 @@ writes stream CR=1D after conditional status handling. Shared admission and
 ACI still guard active SPDIF; that reached operation must be implemented and
 qualified. Skipping it would hide original startup work. Family qualification
 remains6/9, with30 retained IDs /29 deferred scopes; no new deferral is added.
+
+## Candidate SPDIF transport and original stream lifetimes - 2026-10-15
+
+Issue `beads-xbox.1.113.30` covers status widths, start, digital consumption,
+IRQ and stop/reset as one group before another title run. A fresh read-only
+physical context observes SR1 through both byte and word accesses for both
+stopped rings, CR0/PICB0, codec ready and SPDIF format02000000. The35 reads
+performed no explicit device or storage writes; raw receipts remain private
+in probe `results/spdif-startup-20261014/`. This is stopped-width evidence,
+not an active digital transport measurement.
+
+The [Linux nForce driver](https://github.com/torvalds/linux/blob/master/sound/pci/intel8x0.c)
+independently identifies the digital busmaster at70, global interrupt bit4,
+byte status/W1C, word-count descriptors, and the48kHz two-channel16-bit stream
+contract. It supports a candidate transport model; it does not establish
+Xbox wire output, exact phase, or every reset side effect. The xemu reference
+has no active SPDIF output callback and is not used as an active-output oracle.
+
+`McpxAci` now services both existing ring owners at the shared256-sample
+boundary. SPDIF reads actual RAM through the same DMA capability and offers
+raw bytes plus the unchanged programmed format to a distinct consumer.
+Digital words/completions have separate counters and share the existing
+level IRQ with PCM. Rejecting bytes or mutating/rebinding during consumption
+preserves the incomplete cursor and never publishes completion. Both reached
+format tags02000000/02000002 are retained; no AC3/IEC61937 decoding or physical
+wire framing is claimed. Descriptor decoding explicitly uses little endian
+bytes instead of relying on host byte order. No second DSP or output clock
+is introduced, and the native title's active-SPDIF admission is unchanged.
+
+Four focused MinGW executables pass: the new digital transport contract,
+existing PCM output and register regressions, and stopped codec startup.
+They cover distinct simultaneous streams, combined IRQ/W1C ownership,
+partial stop/resume, changed unread RAM, exhausted-ring extension, reset/reuse,
+format retention and failures of RAM, descriptors, consumers and reentry.
+These are device/source checks; native MSVC integration has not been rerun.
+
+`native_audio_aci_startup_reference.py --active-streams` runs unchanged owned
+original stream constructors, fill/start/stop/restart helpers and destructors
+against the candidate observer. Every DMA read resolves into one currently
+live original allocation. Three lifetimes each perform2109 device/time
+transactions,20 live RAM reads and17 accepted chunks. Each emits8192 PCM
+bytes and9216 raw digital bytes. Original start(-1) after the1024-byte stopped
+prefix sees DCH, resets the ring and starts its first descriptor again. The
+source proof checks this restart explicitly; it does not incorrectly treat
+it as a bare-CR continuation. Original destructors stop/reset both rings and
+free all allocations. Existing asynchronous CAS and held-semaphore timeout
+checks still pass. Prepared memory/IRQL and explicit guest time remain fixture
+inputs; the actual title ISR/DPC and DSP-produced output are outside this proof.
+
+Evidence: `build/blinx/audio-spdif-startup-20261014/`, including the pinned
+manifest, source/binary snapshots, four executable logs and three original
+lifetimes. Tests ran serially on four Normal-priority cores only after checking
+that neither Gundam Evolution nor Marvel Rivals was running; no speaker output
+or title launch occurred. The native digital capture/teardown connection and
+bounded active physical check remain required before admitting the complete
+stream group and retrying the title. Family count6/9 and30 question IDs /
+29 deferred scopes are unchanged.

@@ -6,6 +6,8 @@ prepared memory/IRQL floor is inherited from the existing GP/EP source fixture;
 KeStallExecutionProcessor advances its explicit guest clock, never a CAS read.
 Interrupt registration and the enclosing initializer are checked by the native
 title, not substituted inside this prepared helper proof.
+Optional active-streams mode connects the candidate digital transport and
+unchanged start/stop/restart helpers to currently owned original RAM.
 """
 import argparse
 import hashlib
@@ -88,7 +90,7 @@ def physical(folder):
             p.suffix in ('.c','.py','.json','.bin')]
 
 
-def check(xbe, observer, evidence, output):
+def check(xbe, observer, evidence, output, active_streams=False):
     assert 'build' in output.resolve().parts and not output.exists()
     output.mkdir(parents=True)
     blob = xbe.read_bytes()
@@ -99,13 +101,40 @@ def check(xbe, observer, evidence, output):
         original = CodecStartup(blob, lifetime)
         original.produce_startup()
         rows = []
+        captured = {'P': bytearray(), 'S': bytearray()}
+        ram_reads, output_chunks = [], []
+        stream_format = 0x02000000
         with (output/f'observer-{lifetime}.aot-private.log').open('w') as log:
-            with subprocess.Popen([str(observer.resolve()),'--transport'], stdin=subprocess.PIPE,
+            with subprocess.Popen([str(observer.resolve()),'--stream-transport' if active_streams else '--transport'], stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1) as process:
                 assert process.stdout.readline().strip() == 'READY'
                 def transport(operation, address, size, value):
                     process.stdin.write(f'{operation} {address:x} {size} {value:x}\n');process.stdin.flush()
-                    reply = process.stdout.readline().strip()
+                    while True:
+                        reply = process.stdout.readline().strip()
+                        parts = reply.split()
+                        if parts and parts[0] == 'MEMR':
+                            assert active_streams and len(parts) == 3
+                            physical, count = int(parts[1],16), int(parts[2])
+                            assert 0 < count <= 4096
+                            owners = [a for a in original.allocations if a['live'] and
+                                a['physical'] <= physical and physical+count <= a['physical']+a['extent']]
+                            assert len(owners) == 1, 'DMA requires exactly one currently live original owner'
+                            virtual = owners[0]['virtual']+physical-owners[0]['physical']
+                            data = bytes(original.cpu.mem_read(virtual,count))
+                            ram_reads.append(dict(physical=physical,virtual=virtual,bytes=count,sha256=hashlib.sha256(data).hexdigest()))
+                            process.stdin.write('DATA '+data.hex()+'\n');process.stdin.flush()
+                        elif parts and parts[0] == 'OUTPUT':
+                            assert active_streams and len(parts) == 4 and parts[1] in captured
+                            kind, format_value, data = parts[1],int(parts[2],16),bytes.fromhex(parts[3])
+                            assert format_value == (stream_format if kind == 'S' else 0)
+                            assert 0 < len(data) <= 1024 and len(data)%4 == 0
+                            assert len(captured[kind])+len(data) <= 16384
+                            captured[kind].extend(data)
+                            output_chunks.append(dict(stream=kind,format=format_value,bytes=len(data),ticks=original.ticks))
+                            process.stdin.write('ACCEPTED\n');process.stdin.flush()
+                        else:
+                            break
                     assert re.fullmatch(r'OK [0-9a-fA-F]{8}', reply), reply
                     result = int(reply[3:],16)
                     rows.append(dict(operation=operation,address=address,size=size,value=value,result=result))
@@ -137,8 +166,42 @@ def check(xbe, observer, evidence, output):
                             assert transport('R',0xfec0017c,4,0) == value
                     rings.append(dict(index=index,virtual=ring,physical=pa,buffer=target,
                                       descriptor=struct.pack('<II',target,0xc0001000).hex()))
+                if active_streams:
+                    streams = [original.get(original.owner+0x14+index*4) for index in range(2)]
+                    stream_format = (0x02000000,0x02000002,0x02000000)[lifetime]
+                    original.call(0x17c514,(stream_format,),ecx=streams[1])
+                    target = rings[0]['buffer']
+                    assert target == rings[1]['buffer']
+                    owners = [a for a in original.allocations if a['live'] and
+                        a['physical'] <= target and target+8192 <= a['physical']+a['extent']]
+                    assert len(owners) == 1
+                    virtual = owners[0]['virtual']+target-owners[0]['physical']
+                    expected = bytes(original.cpu.mem_read(virtual,8192))
+                    # Exact original start helper, SPDIF before PCM as in the title.
+                    for stream in reversed(streams):original.call(0x17c73a,(0xffffffff,),ecx=stream)
+                    original.ticks = 6000;transport('T',original.ticks,0,0)
+                    assert captured['S'] == expected[:1024] and captured['P'] == expected[:1024]
+                    original.call(0x17c455,ecx=streams[1])
+                    original.ticks = 12000;transport('T',original.ticks,0,0)
+                    assert captured['S'] == expected[:1024] and captured['P'] == expected[:2048]
+                    assert transport('R',0xfec00178,2,0) == 3584
+                    # Original start(-1) observes DCH and resets the ring; it
+                    # intentionally restarts at its first descriptor, unlike a
+                    # bare CR resume. The incomplete prefix owns no completion.
+                    original.call(0x17c73a,(0xffffffff,),ecx=streams[1])
+                    for frame in range(3,11):
+                        original.ticks = frame*6000;transport('T',original.ticks,0,0)
+                    assert captured['S'] == expected[:1024]+expected and captured['P'] == expected
+                    for offset in (0x110,0x170):
+                        assert transport('R',0xfec00000+offset+6,1,0) == 15
+                        assert transport('R',0xfec00000+offset+8,2,0) == 0
                 original.call(0x17cae2,ecx=original.owner+0x14)
                 assert not original.get(original.owner+0x14) and not original.get(original.owner+0x18)
+                if active_streams:
+                    for offset in (0x110,0x170):
+                        assert transport('R',0xfec00000+offset+11,1,0) == 0
+                        assert transport('R',0xfec00000+offset+8,2,0) == 0
+                        assert transport('R',0xfec00000+offset+6,1,0) == 1
                 original.ticks += 24
                 transport('T',original.ticks,0,0)
                 # Acquire and retain the semaphore: the actual original wait
@@ -152,18 +215,21 @@ def check(xbe, observer, evidence, output):
                 process.stdin.close();assert process.wait(timeout=10) == 0
         original.destroy_startup()
         lives.append(dict(lifetime=lifetime,rings=rings,transactions=rows,calls=original.calls,
+            active_streams=active_streams,ram_reads=ram_reads,output_chunks=output_chunks,
+            captured={kind:dict(bytes=len(data),sha256=hashlib.sha256(data).hexdigest()) for kind,data in captured.items()},
             source_identity=original.source_identity(),stalls=original.stalls,
             original_codec_helpers_returned=True,original_held_semaphore_timeout=True,
             original_destructors_release_all_allocations=True))
     result = dict(status='original-aci-startup-helpers-observed',lifetimes=lives,
         pins=pins+[pin(xbe),pin(observer),pin(Path(__file__))],
-        limits='Prepared memory/IRQL caller and explicit initialized-kernel codec profile. Original codec/stream helpers are unchanged; stalls service an authored guest clock. No replacement IRQ-registration return, full cold boot, active SPDIF processing, precise AC-link bus phase or connected PCM-output claim.')
+        limits='Prepared memory/IRQL caller and explicit initialized-kernel codec profile. Original codec/stream helpers are unchanged; stalls and optional stream dispatch service an authored guest clock. Active mode proves candidate transport against live original RAM; native admission remains guarded. No replacement IRQ-registration return, full cold boot, physical active-SPDIF equivalence, precise AC-link bus phase, digital wire/decode or connected title-output claim.')
     report = output/'original-aci-startup.aot-private.json'
     report.write_text(json.dumps(result,indent=2)+'\n')
-    print(f'PASS three original codec helper groups, six owned rings, asynchronous waits and three original semaphore timeouts; {report}')
+    print(f'PASS three original codec helper groups, six owned rings, asynchronous waits and three original semaphore timeouts; active_streams={active_streams}; {report}')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','observer','evidence','output'):parser.add_argument('--'+name,type=Path,required=True)
-    args = parser.parse_args();check(args.xbe,args.observer,args.evidence,args.output)
+    parser.add_argument('--active-streams',action='store_true')
+    args = parser.parse_args();check(args.xbe,args.observer,args.evidence,args.output,args.active_streams)

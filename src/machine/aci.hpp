@@ -4,9 +4,10 @@
 // Layout and register semantics are harvested from xemu's MCPX ACI wrapper and QEMU AC97
 // model. The NAM mixer occupies +0x000..0x0ff and the NABM bus master +0x100..0x17f.
 //
-// PCM output is headless but functional: it fetches the guest's 32-entry descriptor ring,
+// Output fetches the guest's 32-entry descriptor rings,
 // advances CIV/PIV/PICB at the 48 kHz stereo cadence, publishes BCIS/LVBCI/GLOB_STA, and
-// drives the routed level IRQ. Samples are consumed without host output. Other streams retain
+// and drives the routed level IRQ. PCM and SPDIF borrow distinct consumers;
+// digital payload is never interpreted as analog PCM. Other streams retain
 // register semantics until a guest-visible path needs them.
 #pragma once
 #include <algorithm>
@@ -32,6 +33,11 @@ public:
     // whole chunk; rejection must leave the consumer unchanged. Without an
     // observer the device still fetches and consumes the actual RAM bytes.
     using PcmOutputFn = std::function<bool(const uint8_t*, size_t)>;
+    // Raw little-endian16-bit transport words plus the programmed format.
+    // The reached02000000/02000002 profiles use a nominal48kHz, two-word
+    // cadence. Preserve the tag without decoding IEC61937 or emitting a
+    // wire signal. Acceptance is atomic under the PCM contract above.
+    using SpdifOutputFn = std::function<bool(const uint8_t*, size_t, uint32_t)>;
 
     explicit McpxAci(FaultFn fault) : fault_(std::move(fault)) { reset(); }
 
@@ -46,6 +52,10 @@ public:
     void set_pcm_output(PcmOutputFn fn) {
         if (pcm_inflight_) { device_fault("PCM consumer changed during consumption"); return; }
         pcm_output_ = std::move(fn);
+    }
+    void set_spdif_output(SpdifOutputFn fn) {
+        if (pcm_inflight_) { device_fault("SPDIF consumer changed during output consumption"); return; }
+        spdif_output_ = std::move(fn);
     }
     void set_irq(IrqFn fn, int irq = 6) {
         irq_fn_ = std::move(fn);
@@ -64,6 +74,8 @@ public:
     }
     uint64_t completed_descriptors() const { return completed_descriptors_; }
     uint64_t consumed_pcm_words() const { return consumed_pcm_words_; }
+    uint64_t consumed_spdif_words() const { return consumed_spdif_words_; }
+    uint64_t completed_spdif_descriptors() const { return completed_spdif_descriptors_; }
     uint64_t current_frame() const { return frame_; }
     bool faulted() const { return faulted_; }
     // Prime once before configuration or consumption, without traversing elapsed
@@ -303,8 +315,8 @@ private:
                 return;
             case 0xb:
                 if ((value & CR_RPBM) && !(value & CR_RR) &&
-                    (!(glob_sta_ & kGsS0cr) || &r == &bm_[7])) {
-                    device_fault("codec not ready or active SPDIF processing unqualified"); return;
+                    (!(glob_sta_ & kGsS0cr) || (&r == &bm_[7] && !spdif_control_known_))) {
+                    device_fault("codec not ready or SPDIF format not established"); return;
                 }
                 if (value & CR_RR) {
                     const uint8_t enables = r.cr & (CR_IOCE | CR_FEIE | CR_LVBIE);
@@ -333,20 +345,25 @@ private:
         }
     }
 
-    bool fetch_bd(BmRegs& r, bool pcm_output) {
-        uint32_t bd[2] = {};
+    bool fetch_bd(BmRegs& r, bool output) {
+        uint8_t raw[8] = {};
         const uint64_t address = uint64_t(r.bdbar) + r.civ * 8;
-        if (address + sizeof(bd) > (uint64_t(1) << 32)) {
+        if (address + sizeof(raw) > (uint64_t(1) << 32)) {
             device_fault("buffer descriptor read failed");
             return false;
         }
         pcm_inflight_ = true;
-        const bool fetched = mem_read_ && mem_read_(uint32_t(address), bd, sizeof(bd));
+        const bool fetched = mem_read_ && mem_read_(uint32_t(address), raw, sizeof(raw));
         pcm_inflight_ = false;
         if (faulted_) return false;
         if (!fetched) { device_fault("buffer descriptor read failed"); return false; }
-        if (pcm_output && ((bd[1] & 0x3fff0000u) || (bd[1] & 1u))) {
-            device_fault("unqualified PCM descriptor format or odd stereo count");
+        const auto le32 = [](const uint8_t* p) {
+            return uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
+                   (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
+        };
+        const uint32_t bd[2] = {le32(raw), le32(raw + 4)};
+        if (output && ((bd[1] & 0x3fff0000u) || (bd[1] & 1u))) {
+            device_fault("unqualified output descriptor format or odd two-word count");
             return false;
         }
         if (uint64_t(bd[0] & ~3u) + uint16_t(bd[1]) * 2 > (uint64_t(1) << 32)) {
@@ -363,12 +380,12 @@ private:
         BmRegs next = r;
         next.civ = r.piv;
         next.piv = (r.piv + 1) % 32;
-        if (!fetch_bd(next, &r == &bm_[1])) return false;
+        if (!fetch_bd(next, &r == &bm_[1] || &r == &bm_[7])) return false;
         r = next;
         return true;
     }
 
-    bool consume_pcm(BmRegs& r, uint32_t words) {
+    bool consume_output(BmRegs& r, uint32_t words, bool digital) {
         if (!words) return true;
         // WM9709 has no programmable rate register; ordinary NAM writes do
         // not alter this fixed48kHz PCM consumer.
@@ -380,15 +397,19 @@ private:
         pcm_inflight_ = true;
         const bool fetched = mem_read_ && mem_read_(r.bd_addr, pcm.data(), bytes);
         bool accepted = false;
-        if (fetched && !faulted_) accepted = !pcm_output_ || pcm_output_(pcm.data(), bytes);
+        if (fetched && !faulted_) {
+            if (digital) accepted = !spdif_output_ || spdif_output_(pcm.data(), bytes, spdif_control_);
+            else accepted = !pcm_output_ || pcm_output_(pcm.data(), bytes);
+        }
         pcm_inflight_ = false;
         if (faulted_) return false;
-        if (!fetched) { device_fault("PCM buffer read failed"); return false; }
-        if (!accepted) { device_fault("PCM consumer rejected bytes"); return false; }
+        if (!fetched) { device_fault("output buffer read failed"); return false; }
+        if (!accepted) { device_fault("output consumer rejected bytes"); return false; }
         // No cursor, count, completion or interrupt precedes accepted bytes.
         r.picb = static_cast<uint16_t>(r.picb - words);
         r.bd_addr += bytes;
-        consumed_pcm_words_ += words;
+        if (digital) consumed_spdif_words_ += words;
+        else consumed_pcm_words_ += words;
         return true;
     }
 
@@ -417,19 +438,25 @@ private:
 
     void frame_step() {
         if (faulted_) return;
-        // PCM out is 48 kHz stereo signed-16. One 5.333 ms frame consumes 512 words.
-        BmRegs& r = bm_[1];
+        output_step(bm_[1], false);
+        if (!faulted_) output_step(bm_[7], true);
+    }
+
+    void output_step(BmRegs& r, bool digital) {
+        // Both reached output modes carry two16-bit words per48kHz frame.
+        // The existing shared clock dispatches256 frames at this boundary.
         if (!(r.cr & CR_RPBM) || (r.sr & SR_DCH)) return;
         uint32_t words = 512;
         while (words && !(r.sr & SR_DCH)) {
             const uint32_t consumed = std::min<uint32_t>(words, r.picb);
-            if (!consume_pcm(r, consumed)) return;
+            if (!consume_output(r, consumed, digital)) return;
             words -= consumed;
             if (r.picb) continue;
 
             uint16_t new_sr = r.sr & ~SR_CELV;
             if (r.bd_ctl_len & kBdIoc) new_sr |= SR_BCIS;
-            ++completed_descriptors_;
+            if (digital) ++completed_spdif_descriptors_;
+            else ++completed_descriptors_;
             const bool last = r.civ == r.lvi;
             if (last) {
                 new_sr |= SR_LVBCI | SR_DCH | SR_CELV;
@@ -461,6 +488,7 @@ private:
     FaultFn fault_;
     MemReadFn mem_read_;
     PcmOutputFn pcm_output_;
+    SpdifOutputFn spdif_output_;
     IrqFn irq_fn_;
     uint8_t mixer_[0x100] = {};
     BmRegs bm_[8];
@@ -475,6 +503,7 @@ private:
     bool frame_clock_primed_ = false;
     uint64_t frame_ = 0, completed_descriptors_ = 0;
     uint64_t consumed_pcm_words_ = 0;
+    uint64_t consumed_spdif_words_ = 0, completed_spdif_descriptors_ = 0;
     int unk_logged_ = 0;
 };
 
