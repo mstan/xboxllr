@@ -10,6 +10,11 @@ endforeach()
 pilot_add_test(NAME pilot_audio_device_ep-lookup COMMAND pilot_audio_device_lle_test
   ep-lookup "${PILOT_IO_DEVICE_SNAPSHOT}" "${PILOT_AUDIO_EP_Y_LOOKUP}")
 set_tests_properties(pilot_audio_device_ep-lookup PROPERTIES TIMEOUT 20)
+foreach(case runtime-clock runtime-clock-input-failure)
+  pilot_add_test(NAME pilot_audio_device_${case} COMMAND pilot_audio_device_lle_test
+    ${case} "${PILOT_IO_DEVICE_SNAPSHOT}")
+  set_tests_properties(pilot_audio_device_${case} PROPERTIES TIMEOUT 90)
+endforeach()
 add_executable(pilot_aci_startup_test aci_startup_test.cpp)
 add_executable(pilot_dsp_host_test ../../tests/test_apu_dsp_host.cpp)
 add_executable(pilot_audio_dsp_startup_transport audio_dsp_startup_transport.cpp)

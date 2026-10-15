@@ -17,6 +17,8 @@
 #ifdef PILOT_AUDIO_DEVICE_LLE
 #include "audio_device_lle.h"
 #include "audio_device_pcm_capture.h"
+#include "audio_device_timeline.h"
+#include "input_host.h"
 static PilotPcmCapture *original_pcm_capture;
 #endif
 
@@ -328,6 +330,11 @@ uint64_t xbox_ReadTimeStampCounter(void)
 {
 #ifdef PILOT_AUDIO_REFERENCE
     return audio_reference_counter();
+#elif defined(PILOT_AUDIO_DEVICE_LLE)
+    uint64_t counter=0;
+    const char *error=pilot_audio_device_timeline_counter(&counter);
+    if(error)stop(error,0);
+    return counter;
 #else
     LARGE_INTEGER now, frequency;
     QueryPerformanceCounter(&now);

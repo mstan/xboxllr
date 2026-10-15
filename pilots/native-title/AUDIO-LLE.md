@@ -20,6 +20,51 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Original audio input timeline - 2026-10-14
+
+The original-device selection now binds the existing `PilotReferenceClock`
+after the unchanged kernel PIT initializer. Original RDTSC, the compiled
+timestamp helper, PIT, USB and controller replay share its fixed input policy;
+GP/EP/ACI continue to consume that PIT time through their existing sole owner.
+Elapsed host work never becomes another device-work interval. This binding is
+automatic for selected original LLE audio; native HLE keeps its existing path.
+
+Configure with `PILOT_REFERENCE_BLOCKS_PER_MS=32000` for the current qualified
+reference-input profile, matching the retained movie/scheduling composition.
+The parameter remains an explicit observed-block opportunity per1ms input,
+not an assertion of hardware CPU cycles. Other cadence values are not newly
+qualified by this checkpoint. The app owns one timeline: opening or closing
+an audio device cannot reset the CPU, input or timestamp epoch.
+
+Thirty-eight affected checks pass: the36 existing device/compiled-MMIO cases
+plus two new original-runtime cases. The actual kernel KeStallExecutionProcessor
+executes its unchanged calibrated loop for a10000us request. Its captured
+calibration is367 iterations/us; under the declared32000-block input policy,
+the observed return occurs after126000 PIT ticks (112ms simulated time). This
+establishes a real return and a bounded minimum delay, not cycle-exact10ms
+timing. No loop, callee or return is replaced to accelerate the check.
+
+The same case services16 actual GP quanta and two EP events during a subsequent
+active interval. Host sleeps and100 repeated observations add no DSP cycles or
+time. Two real original-CPU RDTSC instructions equal the pure counter used by
+the compiled helper. Original thread ownership retires; released DSP ownership
+still remains until the required active reset contract is established.
+
+Invalid cadence, missing PIT initialization and duplicate timeline binding are
+rejected. A failed controller-time observer stops before PIT/device publication
+and supplies no invented TSC output; the registered terminal device is retained.
+Evidence is `build/blinx/audio-runtime-clock-20261014/`. No hardware operation
+or speaker output was used. This resolves the identified host-time dependency;
+whole original startup/output, active FE and reset still require qualification.
+
+The changed muted connected title completes its enclosing GP/EP setup and wait,
+then stops after111.38s at the original SPDIF start helper's byte status read
+FEC00176. The shared admission currently accepts only a16-bit SR read. Source
+also requires the ensuing CR1D start, which remains guarded along with active
+SPDIF processing. Qualify this whole reached stream group together; admitting
+the byte read alone would not establish output. The run has no whole-audio pass
+or speaker playback claim, and the family total remains6/9.
+
 ## Native shared clock and immutable EP image - 2026-10-14
 
 The selected original audio device now adopts the validated shared GP/EP/ACI

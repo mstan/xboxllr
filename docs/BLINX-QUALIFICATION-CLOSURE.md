@@ -33,9 +33,9 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: original active lifetimes, native clock/lookup and reached GP request bit2 pass; connected clock input, runtime consumers and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Native clock/lookup integrated; title reaches original startup wait, but host-time catch-up prevents a completed checkpoint; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Connected startup crosses the DSP wait; current title stops at SPDIF byte status read FEC00176; active stream/output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -130,6 +130,19 @@ qualified stopped reference timeline is currently bound only by the other audio
 profile. Connect original audio to that shared input/TSC policy before another
 long title attempt; do not make LLE speed an acceptance condition. Required
 SPDIF/FE/output/reset remain open. No hardware recovery is pending.
+
+Original audio now binds the existing stopped input/common TSC policy, including
+USB/controller replay, at the retained32000-block cadence. Thirty-eight affected
+checks pass. The real kernel's10000us requested stall returns after112ms of this
+explicit simulation input; hardware CPU-cycle timing is not claimed. Active
+GP/EP events and original RDTSC pass, host pauses add no work, and rejected input
+publishes neither PIT/device time nor a fabricated counter. A changed muted
+111.38s title crosses the previous DSP-startup wait and reaches the original
+SPDIF start helper's byte status read at FEC00176. That reached width, subsequent
+CR1D and active stream behavior form the next required batch; no field is skipped
+to force startup. No speaker output or hardware operation ran. Families remain
+6/9 and the deferred queues remain30 IDs /29 scopes. See the
+[current input-timeline evidence](../pilots/native-title/AUDIO-LLE.md#original-audio-input-timeline---2026-10-14).
 
 ## Original AC97 startup crossed - 2026-10-14
 

@@ -7,6 +7,7 @@
 #include <vector>
 #include "audio_device_lle.h"
 #include "audio_device_pcm_capture.h"
+#include "audio_device_timeline.h"
 #include <string>
 extern "C" {
 #include "io_device_lle.h"
@@ -19,6 +20,12 @@ static unsigned raw_calls,clock_calls;
 static std::vector<uint8_t> received;
 static PilotPcmCapture *capture=nullptr;
 static std::string destination;
+static uint64_t timeline_input_ms,timeline_body_counter;
+static bool timeline_body,timeline_input_reject;
+static uint32_t timeline_input(uint64_t milliseconds) {
+    if(timeline_input_reject && milliseconds)return 1;
+    CHECK(milliseconds>=timeline_input_ms);timeline_input_ms=milliseconds;return 0;
+}
 static void capture_view_check(uint64_t expected_bytes,uint64_t expected_stamps,const uint8_t *expected) {
     const uint8_t *bytes=nullptr;const PilotPcmCaptureStamp *stamps=nullptr;uint64_t count=0,records=0;
     pilot_pcm_capture_view(capture,&bytes,&count,&stamps,&records);
@@ -61,6 +68,7 @@ static const char *body(uint32_t entry,uint32_t regs[8],unsigned arguments,int *
     CHECK(entry==0x12000 && arguments==1);++raw_calls;
     const char *error=pilot_io_device_thread_execute(entry,regs);
     if(error)return error;
+    if(timeline_body)CHECK(!pilot_audio_device_timeline_counter(&timeline_body_counter));
     return pilot_io_device_thread_completion(terminate,status);
 }
 static const char *clock_input(void*,uint64_t *value) {
@@ -101,6 +109,80 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"runtime-clock") || !strcmp(mode,"runtime-clock-input-failure")) {
+        uint64_t counter=UINT64_MAX;
+        CHECK(pilot_audio_device_timeline_counter(&counter) && counter==UINT64_MAX);
+        CHECK(pilot_audio_device_timeline_start(0,timeline_input));
+        CHECK(pilot_audio_device_timeline_start(2000001,timeline_input));
+        CHECK(pilot_audio_device_timeline_start(32000,nullptr));
+        CHECK(pilot_audio_device_timeline_start(32000,timeline_input)); // unprogrammed PIT
+        CHECK(!pilot_io_device_clock_start());
+        CHECK(!pilot_audio_device_timeline_start(32000,timeline_input));
+        CHECK(pilot_audio_device_timeline_start(32000,timeline_input)); // no rebind
+        CHECK(!pilot_audio_device_timeline_counter(&counter));
+        const auto initial_counter=counter;
+        if(!strcmp(mode,"runtime-clock-input-failure")) {
+            timeline_input_reject=true;
+            uint32_t us=10000,result=0;const char *error=pilot_io_device_lle(151,guest,&us,&result);
+            CHECK(error && strstr(error,"reference controller time rejected"));
+            uint64_t pit=0,next=0;CHECK(!pilot_usb_pit_clock(&pit,&next) && pit==60000 && !timeline_input_ms);
+            counter=UINT64_MAX;CHECK(pilot_audio_device_timeline_counter(&counter) && counter==UINT64_MAX);
+            CHECK(pilot_audio_device_lle_close());PilotAudioDeviceState failed;pilot_audio_device_lle_state(&failed);
+            CHECK(failed.owned && failed.work_binding && failed.clock_ticks==60000 && !failed.dma_reads && !failed.pcm_words);
+            puts("PASS original input rejection stops before PIT/device publication or fabricated TSC; registered owner retained");return 0;
+        }
+        Sleep(30);CHECK(!pilot_audio_device_timeline_counter(&counter) && counter==initial_counter);
+        CHECK(!pilot_audio_device_lle_sample());
+        PilotAudioDeviceState initial;pilot_audio_device_lle_state(&initial);CHECK(initial.clock_ticks==60000);
+
+        uint32_t bytes=3*4096,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
+        memset(guest+va,0,bytes);word(va)=pa+4096;word(va+8)=pa+8192;
+        const uint32_t program[]={0x08f485,0xfff,0x08f484,1,0x0a8581,4,0x08f485,2,0x08f484,1,0x0af080,4};
+        memcpy(guest+va+4096,program,sizeof(program));
+        access(0xfe80200c,4,0);access(0xfe801100,4,0x7130f);
+        access(0xfe802040,4,pa);access(0xfe8020d4,4,1);
+        access(0xfe802048,4,pa);access(0xfe8020dc,4,1);
+        access(0xfe83fffc,4,1);access(0xfe83fffc,4,3);access(0xfe85fffc,4,3);
+        pilot_audio_device_lle_state(&initial);
+        uint32_t us=10000;call(151,&us); // unchanged original calibrated loop, no service substitution
+        PilotAudioDeviceState stalled;pilot_audio_device_lle_state(&stalled);
+        CHECK(stalled.clock_ticks>=initial.clock_ticks+11250 && stalled.gp_phase==3 && stalled.ep_phase==2);
+        CHECK(stalled.ep_cycles>=1333125 && !stalled.gp_quanta && !stalled.ep_events && !stalled.pcm_words);
+        CHECK(timeline_input_ms==(stalled.clock_ticks-60000)/1125);
+        CHECK(!pilot_audio_device_timeline_counter(&counter));
+        CHECK(counter==stalled.clock_ticks/1125000*733333333ull+(stalled.clock_ticks%1125000)*733333333ull/1125000);
+        uint32_t usb_before=0;CHECK(!pilot_usb_lle_access(0xfe80200c,0,&usb_before));
+        Sleep(30);
+        for(unsigned i=0;i<100;++i) {
+            uint64_t observed=0;CHECK(!pilot_audio_device_timeline_counter(&observed) && observed==counter);
+            uint32_t usb_after=0;CHECK(!pilot_usb_lle_access(0xfe80200c,0,&usb_after) && usb_after==usb_before);
+            CHECK(!pilot_audio_device_lle_sample());
+        }
+        PilotAudioDeviceState frozen;pilot_audio_device_lle_state(&frozen);
+        CHECK(frozen.clock_ticks==stalled.clock_ticks && frozen.gp_cycles==stalled.gp_cycles && frozen.ep_cycles==stalled.ep_cycles);
+        access(0xfe802000,4,15);us=1000;call(151,&us);
+        PilotAudioDeviceState active;pilot_audio_device_lle_state(&active);
+        CHECK(active.gp_quanta && active.ep_events && !active.pcm_words);
+        access(0xfe802000,4,7);call(151,&us);pilot_audio_device_lle_state(&frozen);
+        CHECK(frozen.gp_quanta==active.gp_quanta && frozen.ep_events==active.ep_events && frozen.gp_phase==3 && frozen.ep_phase==2);
+
+        // Two real RDTSC instructions on the original CPU must equal the
+        // same pure counter used by the maintained compiled runtime helper.
+        const uint8_t code[]={0x0f,0x31,0xa3,0x40,0x90,0x01,0,0x89,0x15,0x44,0x90,0x01,0,
+            0x0f,0x31,0xa3,0x48,0x90,0x01,0,0x89,0x15,0x4c,0x90,0x01,0,0xc2,4,0};
+        memcpy(guest+0x12000,code,sizeof(code));timeline_body=true;pilot_io_device_thread_bind(body);
+        uint32_t create[]={0x19000,0,0x12000,0x19040,0};CHECK(!call(254,create));uint32_t handle=word(0x19000);
+        uint32_t ref[]={handle,0,0x19004};CHECK(!call(246,ref));uint32_t object=word(0x19004);
+        uint32_t priority[]={object,29};call(148,priority);
+        uint32_t join[]={object,0,0,0,0};CHECK(!call(159,join));
+        CHECK(raw_calls==1 && (uint64_t(word(0x19044))<<32|word(0x19040))==timeline_body_counter &&
+            (uint64_t(word(0x1904c))<<32|word(0x19048))==timeline_body_counter);
+        CHECK(!call(187,&handle));call(250,&object);
+        CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&frozen);CHECK(frozen.owned && frozen.work_binding);
+        printf("PASS native runtime clock: real10000us original stall returns after %llu explicit PITticks; active GP=%llu EP=%llu; host pauses/polls inert; original RDTSC agrees; active reset owner retained\n",
+            (unsigned long long)(stalled.clock_ticks-initial.clock_ticks),(unsigned long long)active.gp_quanta,(unsigned long long)active.ep_events);
+        return 0;
+    }
     if(!strcmp(mode,"ep-lookup")) {
         CHECK(argc==4);std::vector<uint8_t> image(8192);
         FILE *file=fopen(argv[3],"rb");CHECK(file && fread(image.data(),1,image.size(),file)==image.size() && fgetc(file)==EOF);CHECK(!fclose(file));

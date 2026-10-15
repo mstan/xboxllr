@@ -44,6 +44,10 @@ static void scheduling_lle_run(void)
     if(clock_error)stop(clock_error,0);
 #ifdef PILOT_AUDIO_REFERENCE
     audio_reference_clock_start();
+#elif defined(PILOT_AUDIO_DEVICE_LLE)
+    clock_error=pilot_audio_device_timeline_start(PILOT_REFERENCE_BLOCKS_PER_MS,pilot_input_host_reference_time);
+    if(clock_error)stop(clock_error,0);
+    fprintf(stderr,"[ORIGINAL AUDIO TIME] stopped reference input: %u observed blocks per 1ms PIT opportunity; shared original/compiled TSC, USB/input and GP/EP/ACI; no hardware CPU-cycle claim\n",PILOT_REFERENCE_BLOCKS_PER_MS);
 #endif
     clock_error=pilot_io_device_sections_start();
     if(clock_error)stop(clock_error,327);
