@@ -23,6 +23,7 @@
 #include "machine/mmio_device.hpp"
 #include "machine/apu_clock.hpp"
 #include "machine/apu_startup_config.hpp"
+#include "machine/apu_dsp_host.hpp"
 #include "machine/apu_adpcm.h"
 #include "machine/apu_gp_dma.hpp"
 #include "machine/apu_envelope_curve.hpp"
@@ -134,8 +135,14 @@ public:
         if(mode==8 && !sample_counter_known_) {
             device_fault("APU sample counter requires its original zero initialization");return;
         }
-        if(!sample_counter_.advance(ticks,frequency,mode==8))
-            device_fault("invalid or nonmonotonic APU clock");
+        const uint64_t previous=sample_counter_.ticks();
+        if(!sample_counter_.advance(ticks,frequency,mode==8)) {
+            device_fault("invalid or nonmonotonic APU clock");return;
+        }
+        // Physical CPU EP status100 can return after an immediate clear,
+        // even with the core held. Its cause/latency is not established.
+        // Do not preserve a fabricated permanent zero across elapsed time.
+        if(ticks>previous)ep_host_status_known_=false;
     }
     // Advance to an absolute 5.333 ms APU-frame number.
     void set_frame(uint64_t frame) {
@@ -369,17 +376,29 @@ private:
         if(!owner || owner!=gp_frame_owner_ || !gp_mix_lease_ || gp_frame_pending_) {
             device_fault("GP frame event has no published MIX owner");return false;
         }
-        gp_frame_pending_=true;return true;
+        gp_frame_pending_=true;gp_host_requested_=false;return true;
     }
     bool gp_yield_frame(void* owner) {
         if(faulted_)return false;
         if(!owner || owner!=gp_frame_owner_) {
             device_fault("GP frame yield has no matching owner");return false;
         }
-        gp_mix_lease_=false;return true;
+        gp_mix_lease_=false;gp_host_requested_=true;return true;
     }
 public:
     bool gp_frame_outstanding()const{return gp_mix_lease_ || gp_frame_pending_;}
+    // Explicit observation input for a fresh held context. Native startup does
+    // not borrow the dashboard's EP status: its original all-ones clear
+    // establishes the immediate CPU result without guessing a warm default.
+    bool capture_ep_host_status(uint32_t value) {
+        if(faulted_)return false;
+        if(!dsp_reset_context_known_ || dsp_host_used_ ||
+           reg32(kGpReset)!=0 || reg32(kEpReset)!=1 ||
+           (value!=0 && value!=0x100) || !dsp_host_idle(true)) {
+            device_fault("EP host status capture requires a fresh held observation");return false;
+        }
+        dsp_host_used_=true;set_reg32(0x5ff14,value);ep_host_status_known_=true;return true;
+    }
     // Explicit pinned-kernel application handoff, separate from board reset
     // and the captured FE notification experiment. Original init/retirement
     // establishes SECTL/IEN; retained physical idle control is exactly1.
@@ -504,6 +523,7 @@ public:
             if(size==4 && (off==kGpReset || off==kEpReset) && dsp_reset_context_known_)return reg32(off);
             device_fault("DSP reset read context/width remains unqualified");return 0;
         }
+        if(ApuDspHostRegisters::touches(off,size))return dsp_host_read(off,size);
         if(touches_fe_fence(off,size)) {
             if(off==kFeFenceControl && size==4 && (kernel_audio_control_idle() || fe_context_idle()))return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
@@ -566,9 +586,14 @@ public:
             // Publish control only after the CPU accepted the transition and
             // a release fetched all actual bootstrap bytes. Holds do no DMA.
             set_reg32(off,value);fe_context_known_=false;
+            if(off==kGpReset && value==0) {
+                gp_host_requested_=false;set_reg32(0x3ff14,0);
+            }
+            if(off==kEpReset)ep_host_status_known_=false;
             if(value==3)kernel_audio_startup_=false;
             return;
         }
+        if(ApuDspHostRegisters::touches(off,size)) {dsp_host_write(off,size,value);return;}
         // Guard the device itself, including partial/overlapping transactions;
         // reference-wrapper whitelists cannot establish unknown fence behavior.
         if(touches_fe_fence(off,size)) {
@@ -770,6 +795,51 @@ private:
         if(offset<0x3000 || (offset>=0x6000 && offset<0x6400) ||
            (offset>=0xa000 && offset<0xe000))return ep_word(offset/4);
         return nullptr;
+    }
+    bool dsp_host_idle(bool ep)const {
+        return dsp_reset_context_known_ && reg32(ep?kEpReset:kGpReset)!=3 &&
+               !(reg32(kSectl)&0x18) && !fe_fence_pending_ && !dsp_work_active() &&
+               !dsp_work_pending(ep?ApuDspKind::Ep:ApuDspKind::Gp) &&
+               !(ep?ep_counter_profile_touched_:gp_counter_profile_touched_) &&
+               !(ep?ep_control_written_:gp_frame_outstanding());
+    }
+    uint32_t dsp_host_read(uint32_t off,int size) {
+        const bool ep=off>=0x50000;
+        if(size!=4 || !ApuDspHostRegisters::contains(off) || !dsp_reset_context_known_) {
+            device_fault("DSP host register read context/width remains unqualified");return 0;
+        }
+        dsp_host_used_=true;
+        // Requests belong to the existing frame/event owner. Polling this
+        // view never executes a DSP or advances an event/acknowledgement.
+        if((off&0xffff)==0xff10)return ep?ep_frame_requested_:gp_host_requested_;
+        if(!dsp_host_idle(ep) || (off==0x5ff14 && !ep_host_status_known_)) {
+            device_fault("DSP host status/zero-field read requires known held state");return 0;
+        }
+        return reg32(off);
+    }
+    void dsp_host_write(uint32_t off,int size,uint32_t value) {
+        const bool ep=off>=0x50000;
+        if(size!=4 || !ApuDspHostRegisters::permits(off,value) || !dsp_host_idle(ep)) {
+            device_fault("DSP host register write requires supported held startup state");return;
+        }
+        // CPU host control is not an alias of every DSP peripheral. In
+        // particular CPU FF14 and DSP C5 have independently observed views.
+        if(off==0x5ff5c) {
+            uint32_t config=0;
+            if(!ep_dma_.read(0xffffd7,config) || config) {
+                device_fault("EP host zero requires unused DMA configuration");return;
+            }
+        }
+        dsp_host_used_=true;fe_context_known_=false;
+        if((off&0xffff)==0xff10) {
+            if(value&1u)(ep?ep_frame_requested_:gp_host_requested_)=true;
+            return; // A zero store does not withdraw an observed request.
+        }
+        if(off==0x5ff14) {
+            set_reg32(off,0);ep_host_status_known_=true;return;
+        }
+        if(off==0x3ff14) {set_reg32(off,reg32(off)&~value);return;}
+        set_reg32(off,0);
     }
     bool gp_sge(uint32_t table,uint32_t maximum,uint32_t linear,void* data,uint32_t bytes,bool output) {
         auto* next=static_cast<uint8_t*>(data);
@@ -1242,6 +1312,9 @@ private:
         // C4 requests the next event; delayed C5 acknowledgement clears the
         // previous flag independently while retaining background bit8.
         if(ep_frame_requested_ && ep_program_owner_ && ep_frame_owner_ && ep_frame_owner_()) {
+            if(!ep_control_written_) {
+                device_fault("CPU-only EP frame request remains unqualified");return;
+            }
             if(dsp_work_active() || dsp_work_pending(ApuDspKind::Ep)) {
                 device_fault("EP frame publication overlaps unqualified DMA work");return;
             }
@@ -1285,6 +1358,7 @@ private:
     // Retained across CPU detach/rebind. No qualified warm-reset profile exists.
     bool gp_counter_profile_touched_=false,ep_counter_profile_touched_=false;
     bool ep_control_written_=false;
+    bool gp_host_requested_=false,dsp_host_used_=false,ep_host_status_known_=false;
     uint32_t ep_control_value_=0;
     bool ep_frame_requested_=false;
     uint32_t ep_frame_status_=0;

@@ -101,6 +101,26 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"host-controls")) {
+        auto read=[](uint32_t address){uint32_t value=0;CHECK(!pilot_audio_device_lle_access(address,4,0,&value));return value;};
+        for(unsigned life=0;life<3;++life) {
+            if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            for(uint32_t address:{0xfe83ff00u,0xfe83ff04u,0xfe85ff00u,0xfe85ff04u,0xfe85ff5cu}) {
+                access(address,4,0);CHECK(read(address)==0);
+            }
+            access(0xfe83fffc,4,1);access(0xfe83ff10,4,0xfffffff1);
+            CHECK(read(0xfe83ff10)==1);access(0xfe83ff10,4,0);CHECK(read(0xfe83ff10)==1);
+            access(0xfe83ff14,4,0xff);CHECK(read(0xfe83ff14)==0);
+            access(0xfe83fffc,4,0);CHECK(read(0xfe83ff10)==0);
+            access(0xfe85ff10,4,1);access(0xfe85ff10,4,0);CHECK(read(0xfe85ff10)==1);
+            access(0xfe85ff14,4,0xffffffff);CHECK(read(0xfe85ff14)==0);
+            ++ticks;CHECK(!pilot_audio_device_lle_sample());CHECK(read(0xfe85ff10)==1);
+            PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+            CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words && received.empty());
+            CHECK(!pilot_audio_device_lle_close());
+        }
+        puts("PASS three native host-control lifetimes with shared clock and no DSP/PCM work");return 0;
+    }
     if(!strcmp(mode,"codec-startup")) {
         auto read=[](unsigned off,unsigned size){uint32_t value=0;CHECK(!pilot_audio_device_lle_access(0xfec00000+off,size,0,&value));return value;};
         for(unsigned life=0;life<3;++life) {

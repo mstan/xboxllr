@@ -9,6 +9,8 @@ namespace xlle {
 ApuDspProcessor::ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuDmaDispatchPolicy policy)
     :apu_(apu),kind_(kind),policy_(policy),fault_(std::move(fault)) {
     if(apu_.faulted()){fail("GP owner requires an available APU");return;}
+    if(kind_==ApuDspKind::Gp?apu_.gp_host_requested_:apu_.ep_frame_requested_)
+        {fail("GP control request requires its retained CPU owner; warm rebind is unqualified");return;}
     if(kind_==ApuDspKind::Ep && apu_.ep_control_written_)
         {fail("EP control requires its retained CPU owner; warm rebind is unqualified");return;}
     if(kind_==ApuDspKind::Gp?apu_.gp_counter_profile_touched_:apu_.ep_counter_profile_touched_)

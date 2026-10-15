@@ -20,6 +20,46 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## CPU DSP host controls connected - 2026-10-14
+
+The maintained APU now admits the original held GP/EP zero fields, aligned
+GP owner-pattern requests, EP requests and the observed CPU status clears.
+Physical GP FFFFFFF1 reads1, a subsequent0 retains1, and reset0 clears both
+request and status. This agrees with the earlier30000001 observation. Shared
+native/source admission uses the same register/value definitions, and the
+device itself checks width, held state and ownership. Unknown control modes,
+active host writes and active reset still fail explicitly.
+
+CPU FF10 reads the existing EP event-request state and the GP frame owner's
+request state; zero writes do not cancel requests. GP frame publication and
+yield update that same state. A new CPU owner cannot adopt an outstanding
+request. The original DSP C4 publication remains required before EP frame
+generation: CPU setup alone cannot fabricate a DSP event. CPU FF14 is kept
+distinct from DSP C5, matching their independent hardware observations.
+
+A later physical read found EP CPU status100 again with no intervening agent
+store. Its cause and latency remain unknown. The implementation therefore
+does not invent a permanent cleared0 or a guessed reassertion timer: an
+explicit original clear establishes the immediate result, and elapsed shared
+time invalidates that status observation. A subsequent unqualified status
+read fails. Captured0/100 inputs are explicit fresh observations, not native
+warm defaults. No precision question was silently converted to a pass.
+
+Nine focused checks pass: three direct device lifetimes, three native shared-
+device lifetimes, existing startup methods/reset/bootstrap/clock guards, and
+fresh GP processor/frame and EP counter regressions. They verify supported
+effects, no work from repeated polls, no DMA/output while held, status expiry
+and rejected modes. Builds used one idle core, with no title or playback run.
+The first multi-target build named three unavailable targets in this device
+configuration; dedicated current-source regression targets replaced those
+names, and all required checks completed. Old executables were not substituted.
+
+Whole original startup still needs its remaining FIFO/method dependencies,
+shared GP/EP scheduling and active FE/output. The last connected title receipt
+still ends at FE83FF00; that run predates this implementation and cannot prove
+the newly admitted path. Overall qualification remains6/9. Current model/test
+evidence is in `build/blinx/audio-dsp-host-controls-20261014/`.
+
 ## DSP host-control source audit - 2026-10-14
 
 Tracked in `.113.9`. The connected title's next stop is the first GP FF00

@@ -25,6 +25,7 @@ public:
     }
     void clear() {value_=0;}
     uint32_t value()const{return value_;}
+    uint64_t ticks()const{return ticks_;}
 private:
     uint64_t ticks_=0,frequency_=0;
     uint32_t previous_sample_=0,value_=0;

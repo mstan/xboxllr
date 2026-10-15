@@ -1,9 +1,11 @@
 // Shared admission for the original native device and source-execution transport.
 #pragma once
 #include "machine/apu_startup_config.hpp"
+#include "machine/apu_dsp_host.hpp"
 
 inline bool pilot_original_apu_admitted(uint32_t off,unsigned size,int write,uint32_t value) {
     if(size!=4 || (off&3))return false;
+    if(xlle::ApuDspHostRegisters::contains(off))return !write || xlle::ApuDspHostRegisters::permits(off,value);
     if(!write && xlle::ApuStartupMethods::register_index(off)>=0)return true;
     if(xlle::ApuStartupMethods::touches(off,int(size)))return write;
     if(xlle::ApuStartupMappings::touches(off,int(size)))return true;
