@@ -58,6 +58,35 @@ This was source review only while the owner was gaming: no builds, tests,
 title launches or hardware operations. No new qualification pass or deferral
 is claimed; the overall count remains6/9.
 
+The subsequent light physical batch supplied32 stable read-only observations
+and the original zero-write readbacks. EP FF10=1 read1, but a following0 still
+read1; the strict batch stopped and remote dashboard/SMC recovery completed.
+A separate original-order prefix with both cores held observed GP
+FF10=30000001 reading1, GP FF14=FF retaining its pre-store0 and EP
+FF14=FFFFFFFF reading0 after an initial100. The last result contradicted the planned retained
+status, stopping that batch before final context reads. Neither stopped batch
+is a whole-prefix qualification pass.
+
+After a second remote recovery, an isolated one-store comparison read EP
+FF14=100 immediately before FFFFFFFF, then0 twice afterward. All nine surrounding
+control words remained exact across21 reads; CPU GP/EP FF10 stayed0, both
+cores held and setup clocks stopped. This establishes the observed CPU status
+bit8 clear without intervening reset/control writes. Other bits and active
+effects remain open. The probe is responsive, with EP FF14 now0 and no pending
+recovery or allocation ownership. Tiny payload checks execute183 cases across
+the four fixed programs; they verify access/return mechanics, not register
+semantics or maintained LLE behavior.
+
+These observations reject generic last-written-value storage and supply the
+next CPU control/status comparisons. Earlier clock-event evidence already
+observed CPU FF10 changing1to0 when a setup event arrived, but a general alias
+with DSP C4/C5 is still unproven. Connect the supported CPU requests/status
+effects to the existing APU/GP/EP event ownership, preserving the distinct
+status views, then qualify the whole original startup/shared-clock group.
+Private evidence and recovery receipts are in the probe worktree under
+`results/dsp-host-controls-20261014/`; sanitized details are in its
+`docs/DSP-HOST-CONTROLS.md`. No production behavior changed and6/9 remains.
+
 ## Original codec initialization connected - 2026-10-14
 
 Tracked in `.113.29`. Physical vendor574D/4C09 and ordinary zero register

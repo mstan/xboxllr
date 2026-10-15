@@ -48,6 +48,14 @@ GP FF10 receives an owner-derived value, not a fixed1; generic emulator
 readback storage does not establish these register effects. This inventory is
 preparation only and leaves A03-A05 open.
 
+The subsequent stopped hardware batches observed original zero writes,
+GP FF10 input30000001 reading1 and EP FF10 retaining1 after a0 write.
+An isolated one-store check also established CPU EP status100 clearing to0
+with unchanged surrounding controls. Both unexpected-write stops were followed
+by confirmed remote recovery; the final isolated check passed and leaves no
+manual recovery pending. These are physical inputs to the remaining shared
+control/clock implementation, not a connected-startup or family pass.
+
 ## Original AC97 startup crossed - 2026-10-14
 
 The physical codec identifies as WM9709, matching the manufacturer's fixed48kHz
