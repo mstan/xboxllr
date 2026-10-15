@@ -1,6 +1,7 @@
 /* An independent maintained device IRQ arrives while the real original
  * scheduler is idle. No authored idle frame or ready queue completes work. */
 static unsigned idle_interrupt_sent,idle_interrupt_calls,idle_interrupt_samples,idle_dpc_calls;
+static unsigned idle_interrupt_service_mode,idle_interrupt_service_active,idle_interrupt_service_guard;
 static uint32_t idle_interrupt_base,idle_interrupt_top;
 static unsigned idle_dpc_page_mode,idle_dpc_page_life,idle_dpc_page_calls;
 static uint32_t idle_dpc_page_base,idle_dpc_page_physical[2];
@@ -84,6 +85,20 @@ static const char *test_idle_interrupt_work(void)
 static void test_idle_interrupt_callback(void)
 {
     CHECK(MEM32(0x8003da64)==MEM32(0x8003da6c) && pilot_io_device_irql()==23);
+    if(idle_interrupt_service_active) {
+        /* A real IRQ interrupts the nested original service, whose bounded
+         * bridge stack is distinct from the suspended idle DPC's stack. */
+        uint32_t base=PILOT_IO_SERVICE_BASE+PILOT_IO_SERVICE_STRIDE;
+        CHECK(g_esp>=base+4096+0x100 && (uint64_t)g_esp+12<=base+PILOT_IO_SERVICE_STRIDE);
+        CHECK(MEM32(g_esp+4)==0x1c200 && MEM32(g_esp+8)==0xabcdef01);
+        uint32_t saved=g_esp;g_esp-=0x100;
+        MEM32(g_esp)=0x11223344;MEM32(g_esp+4)=0xcccccccc;MEM32(g_esp+8)=0x55667788;
+        pilot_usb_pic_raise(3,0);
+        uint32_t args[]={0,6,0,g_esp+4},result=0;
+        CHECK(!pilot_io_device_lle(2,memory,args,&result));
+        CHECK(MEM32(g_esp)==0x11223344 && MEM32(g_esp+4)==0x004e0101 && MEM32(g_esp+8)==0x55667788);
+        ++idle_interrupt_calls;g_eax=1;g_esp=saved+12;return;
+    }
     CHECK(g_esp>=idle_interrupt_base+0x100 && (uint64_t)g_esp+12<=idle_interrupt_top);
     CHECK(MEM32(g_esp+4)==0x1c200 && MEM32(g_esp+8)==0xabcdef01);
     uint32_t saved_sp=g_esp;g_esp-=0x100;
@@ -95,7 +110,10 @@ static void test_idle_interrupt_callback(void)
     CHECK(!pilot_io_device_lle(2,memory,args,&result));
     CHECK(MEM32(g_esp)==0x11223344 && MEM32(g_esp+4)==0x004e0101 && MEM32(g_esp+8)==0x55667788);
     uint32_t queue[]={0x1c300,0x13579bdf,0x2468ace0};
-    CHECK(!pilot_io_device_lle(119,memory,queue,&result) && result==1);
+    const char *queue_error=pilot_io_device_lle(119,memory,queue,&result);
+    /* Original KeInsertQueueDpc ends in SETE AL; upper EAX is unspecified. */
+    if(queue_error || (result&255)!=1)fprintf(stderr,"[IDLE ISR QUEUE] result=%08x error=%s\n",result,queue_error?queue_error:"none");
+    CHECK(!queue_error && (result&255)==1);
     ++idle_interrupt_calls;g_eax=1;g_esp=saved_sp+12;
 }
 static void test_idle_dpc_callback(void)
@@ -115,6 +133,22 @@ static void test_idle_dpc_callback(void)
     CHECK(!pilot_io_device_lle(2,memory,args,&result));
     CHECK(MEM32(g_esp)==0x11223344 && MEM32(g_esp+4)==0x004e0101 && MEM32(g_esp+8)==0x55667788);
     if(idle_dpc_page_mode)test_idle_dpc_pages();
+    if(idle_interrupt_service_mode) {
+        uint32_t set[]={0x1c380,(uint32_t)-10000,0xffffffffu,0};
+        if(idle_interrupt_service_guard)MEM32(MEM32(0x8003da6c)+0x1c)+=4;
+        idle_interrupt_service_active=1;pilot_usb_pic_raise(3,1);
+        if(idle_interrupt_service_guard) {
+            uint32_t result=0xcccccccc;
+            const char *error=pilot_io_device_lle(149,memory,set,&result);
+            CHECK(error && !strcmp(error,"device LLE idle callback stack owner or bounds changed"));
+            CHECK(result==0xcccccccc && idle_interrupt_calls==1);
+            g_esp=saved+20;return;
+        }
+        CHECK((timer_callback_lle_call(149,set,4)&255)==0);
+        idle_interrupt_service_active=0;
+        CHECK(idle_interrupt_calls==2 && pilot_io_device_irql()==2 && dispatch_in_dpc);
+        CHECK(MEM32(g_esp)==0x11223344 && MEM32(g_esp+4)==0x004e0101 && MEM32(g_esp+8)==0x55667788);
+    }
     g_esp=ebp;ebp=MEM32(g_esp);g_esp+=4;
     CHECK(ebp==incoming && g_esp==saved && g_ebp==saved-4);
     ++idle_dpc_calls;g_esp=saved+20;
@@ -127,8 +161,10 @@ static const char *test_idle_dpc_adapter(uint32_t entry,uint32_t regs[8])
     CHECK(regs[4]==before[4]+20);
     return NULL;
 }
-static void test_idle_interrupt_stack_lle(int changed_bounds)
+static void test_idle_interrupt_stack_lle(int mode)
 {
+    int changed_bounds=mode==1;
+    idle_interrupt_service_mode=mode>=2;idle_interrupt_service_guard=mode==3;
     install_fault_handler();CHECK(!pilot_io_device_files(memory));
     g_fs_base=0x19000;MEM8(g_fs_base+0x24)=0;uint32_t revision=0;
     CHECK(!usb_access(0xfed00000,0,&revision));
@@ -136,6 +172,9 @@ static void test_idle_interrupt_stack_lle(int changed_bounds)
     CHECK(!pilot_io_device_lle(109,memory,intr,&result));
     CHECK(!pilot_io_device_lle(98,memory,intr,&result) && (result&255)==1);
     uint32_t dpc[]={0x1c300,0x12560,0x10203040};CHECK(!pilot_io_device_lle(107,memory,dpc,&result));
+    if(idle_interrupt_service_mode) {
+        uint32_t timer[]={0x1c380,1};CHECK(!pilot_io_device_lle(113,memory,timer,&result));
+    }
     pilot_io_device_dpc_bind(test_idle_dpc_adapter);
     uint32_t out=0x19800,event_create[]={out,0,1,0};
     CHECK(!event_lle_call(189,event_create));uint32_t event=MEM32(out);
@@ -163,8 +202,13 @@ static void test_idle_interrupt_stack_lle(int changed_bounds)
         CHECK(VirtualQuery(memory+idle_interrupt_base,&info,sizeof(info)) && info.State==MEM_RESERVE);
         fprintf(stderr,"PASS: changed idle-owner stack metadata stops before publication/callback/result\n");return;
     }
+    if(idle_interrupt_service_guard) {
+        CHECK(error && !strcmp(error,"device LLE idle callback stack owner or bounds changed"));
+        CHECK(result==0xcccccccc && idle_interrupt_calls==1 && !idle_dpc_calls);
+        fprintf(stderr,"PASS: active service stack does not bypass changed idle-owner metadata\n");return;
+    }
     if(error)fprintf(stderr,"[IDLE ISR ERROR] %s\n",error);CHECK(!error && !result);
-    CHECK(idle_interrupt_sent && idle_interrupt_calls==1 && idle_dpc_calls==1 && MEM32(context)==0x102 && MEM32(context+4)==1);
+    CHECK(idle_interrupt_sent && idle_interrupt_calls==1+idle_interrupt_service_mode && idle_dpc_calls==1 && MEM32(context)==0x102 && MEM32(context+4)==1);
     uint64_t after=0;CHECK(!pilot_usb_pit_clock(&after,&next) && after-before>=562500);
     CHECK(VirtualQuery(memory+idle_interrupt_base,&info,sizeof(info)) && info.State==MEM_COMMIT);
     CHECK(MEM32(idle+0x1c)==idle_interrupt_top && MEM32(idle+0x20)==idle_interrupt_base);

@@ -131,6 +131,10 @@ static __declspec(thread) struct CompiledMmioScope *compiled_mmio_scope;
 static volatile LONG current_irql;
 static volatile LONG caller_if=1;
 static unsigned execution_depth;
+/* Each execute() lends one guarded bridge stack to its actual kernel caller.
+ * An IRQ may interrupt that service even when the caller is the idle thread.
+ * The lease ends with that original service, including a failed return. */
+static uint32_t service_stack_owners[PILOT_IO_SERVICE_FRAMES];
 static int service_stack_page(uint32_t page)
 {
     return page>=PILOT_IO_SERVICE_BASE &&
@@ -1045,16 +1049,31 @@ static void retire_owner(uint32_t object)
  * the unaligned ends remain caller bounds, not fabricated guard pages. */
 static void publish_idle_callback_stack(uint32_t sp,unsigned frame_bytes)
 {
-    if(kernel_word(0x8003da64u)!=idle_stack.object) {
-        if(!guest_page(sp&~4095u))failure="device LLE ISR stack has no published owner";
-        return;
-    }
+    uint32_t current=kernel_word(0x8003da64u);
+    int service=sp>=PILOT_IO_SERVICE_BASE &&
+        (uint64_t)sp<PILOT_IO_SERVICE_BASE+PILOT_IO_SERVICE_FRAMES*PILOT_IO_SERVICE_STRIDE;
     uint32_t idle=kernel_word(0x8003da6cu),top=kernel_word(idle_stack.object+0x1c),base=kernel_word(idle_stack.object+0x20);
-    if(idle!=idle_stack.object || top!=idle_stack.top || base!=idle_stack.base ||
-       sp<idle_stack.base || (uint64_t)sp+frame_bytes>idle_stack.top) {
+    if(current==idle_stack.object && (idle!=idle_stack.object || top!=idle_stack.top || base!=idle_stack.base ||
+       (!service && (sp<idle_stack.base || (uint64_t)sp+frame_bytes>idle_stack.top)))) {
         fprintf(stderr,"[ORIGINAL IDLE STACK GUARD] expected_owner=%08x actual_idle=%08x expected=%08x..%08x actual=%08x..%08x frame=%08x bytes=%u\n",
             idle_stack.object,idle,idle_stack.base,idle_stack.top,base,top,sp,frame_bytes);
         failure="device LLE idle callback stack owner or bounds changed";return;
+    }
+    if(service) {
+        unsigned index=(sp-PILOT_IO_SERVICE_BASE)/PILOT_IO_SERVICE_STRIDE;
+        uint32_t bottom=PILOT_IO_SERVICE_BASE+index*PILOT_IO_SERVICE_STRIDE;
+        if(!execution_depth || index!=execution_depth-1 || !service_stack_owners[index] ||
+           service_stack_owners[index]!=current || sp<bottom+4096 ||
+           (uint64_t)sp+frame_bytes>bottom+PILOT_IO_SERVICE_STRIDE) {
+            failure="device LLE callback service stack has no active bounded owner";return;
+        }
+        /* Already shared with Unicorn at initialization. Do not publish a
+         * fabricated guest allocation or relocate the interrupt's frame. */
+        return;
+    }
+    if(current!=idle_stack.object) {
+        if(!guest_page(sp&~4095u))failure="device LLE ISR stack has no published owner";
+        return;
     }
     if(failure || idle_stack.published)return;
     uint32_t end=(idle_stack.top+4095u)&~4095u;
@@ -1397,7 +1416,12 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
      * exceed the small device-call budget. Permit bounded console-sized work
      * without replacing its zeroing or declaring an unfinished call complete. */
     uint32_t dispatcher_object=ordinal==159 && !args[3] && thread_object(args[0])?args[0]:0;
+    unsigned service_index=execution_depth-1;
+    if(service_stack_owners[service_index]){failure="device LLE service stack already lent";return;}
+    service_stack_owners[service_index]=kernel_word(0x8003da64u);
+    if(failure){service_stack_owners[service_index]=0;return;}
     run_original(entry,ordinal==184?64u*1024*1024:ordinal==279?4000000:1000000,dispatcher_object);
+    service_stack_owners[service_index]=0;
     if(failure)return;
     IO_UC(uc_reg_read(cpu,UC_X86_REG_EIP,&observed));
     if(observed!=RETURN_PC){failure="device LLE instruction limit without return";return;}

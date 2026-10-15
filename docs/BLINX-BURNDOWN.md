@@ -26,9 +26,18 @@ checks take seconds, and live API observations plus cooperative early capture
 finalization replace blind fixed-duration title runs. An early125s check caught
 and retained an incorrect compiled-wrapper observer; recording now targets the
 actual original CPU. See the current closing checklist for scope and evidence.
-The corrected capture then stops at controller connection after402.797s with
-an original idle-callback stack owner/bounds guard. That is the next focused
-integration investigation; no unchanged long rerun or A05 closure is warranted.
+The corrected capture exposed an idle-callback stack guard after402.797s.
+A short fixture reproduces the same ordinal149 failure: the actual IRQ uses
+the nested original service's guarded stack while idle metadata remains valid.
+The fix validates the active service depth/caller/bounds and preserves idle
+metadata rejection. Seven affected checks pass in2.00s; the new regression takes
+0.57s. One changed title check then crosses hotplug/Start/release and stops on
+its planned11.5-guest-second observation after646.203 host seconds, without a
+guard. Its607 completed original calls, movie observations and matching
+1,169,408-byte audio streams are retained. `.113.36` closes. Actual Stop/restart,
+final release and movie-relative timing still require A05 review; input delivery
+alone does not prove those transitions. Reuse this saved prefix before deciding
+whether a further capture is needed. The title is terminal; families remain6/9.
 
 Prior audio milestone: `.115` closes for supported serialized FE work. The
 original kernel now executes its queued DPC, actual device token publication

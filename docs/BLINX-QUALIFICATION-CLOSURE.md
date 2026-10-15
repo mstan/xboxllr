@@ -50,6 +50,50 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## Idle interrupt feedback and service-stack ownership - 2026-10-15
+
+The hotplug guard has a short reproducer: an actual IRQ interrupts original
+KeSetTimer while an idle DPC lends the CPU a guarded service stack. Before the
+fix, the owner and idle bounds still match, but the frame is `e8007ea8`, outside
+the idle stack. The original guard rejects it at ordinal149. The first isolated
+reproduction took11.58s under load; the corrected case takes0.58s. Future changes
+to this boundary use that case before another connected title capture.
+
+Each original service now records its actual caller for the lifetime of its
+existing bridge stack. An interrupt on that stack requires the current service
+depth, the same caller and an entirely in-bounds frame above its guard page.
+Idle metadata checks still apply. No frame moves, fabricated guest allocation,
+clock shortcut or changed HLE processing is involved. The positive case also
+executes a nested original query into native stack spills; a separate negative
+case changes idle metadata and still stops before the nested callback/result.
+
+Seven affected callback/idle-stack/page-sharing checks pass in2.00s. Review also
+found an overstrict fixture assertion: original KeInsertQueueDpc returns its
+Boolean through SETE AL, leaving upper EAX unspecified. The fixture now compares
+the defined byte. The first broad check failure, diagnostic rerun and five
+bounded repeats remain retained; the first failure lacked its result diagnostic,
+so it is not claimed as a proven instance of that assertion defect. Both the
+original-scheduling and mixed-scheduling fixture executables build. A single
+muted title check uses the same hotplug/Start/release inputs, followed by an
+unchanged neutral sample one guest second later to request cooperative stop.
+It finishes after646.203 host seconds with no runtime guard. All five input
+samples are delivered through11.5 guest seconds; movie-buffer processing is
+reached. Both outputs retain1,169,408 bytes in1142 identically timed blocks,
+including316,236 nonzero bytes, with zero common-payload differences. The
+finalized journal records607 completed original calls and no pending call.
+It includes232 Lock/Unlock pairs and110 position queries; no successful Stop,
+restart, final release or device fence appears. Input delivery is not claimed
+as successful movie interruption or normal audio teardown.
+
+`build/blinx/audio-dpc-fence-20261015/idle-service-qualified-component.aot-private.json`
+binds the sources, native artifacts, before/after checks and actual title prefix,
+SHA256 `8525ea34c80168a827c2d695e873092a152a8bea2e8aa5aa173df3cdf7f46d8c`.
+The title is terminal, with both partial outputs finalized and device owners
+retained as designed. `.113.36` closes this stack-boundary defect. Reuse the
+saved movie/audio/API observations for the next A05 timing/lifecycle review;
+another unchanged capture is not justified. This does not close A05 or change
+the6/9 family count. No hardware operation or new deferral.
+
 ## Audio feedback loop and connected hotplug prefix - 2026-10-15
 
 The unchanged-binary delayed-hotplug capture finished after1806.453 host seconds
