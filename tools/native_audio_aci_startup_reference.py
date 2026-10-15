@@ -6,7 +6,7 @@ prepared memory/IRQL floor is inherited from the existing GP/EP source fixture;
 KeStallExecutionProcessor advances its explicit guest clock, never a CAS read.
 Interrupt registration and the enclosing initializer are checked by the native
 title, not substituted inside this prepared helper proof.
-Optional active-streams mode connects the candidate digital transport and
+Optional active-streams mode connects the corrected digital transport and
 unchanged start/stop/restart helpers to currently owned original RAM.
 """
 import argparse
@@ -90,12 +90,33 @@ def physical(folder):
             p.suffix in ('.c','.py','.json','.bin')]
 
 
-def check(xbe, observer, evidence, output, active_streams=False):
+def physical_stream(folder):
+    assert folder is not None, 'active stream proof requires the retained two-node physical evidence'
+    manifest_path = folder/'qualified-observation.aot-private.json'
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest['result'] == 'two-node-silent-ring-observed-and-retired'
+    assert manifest['mmio_stores'] == 6 and manifest['storage_operations'] == 0
+    assert manifest['both_streams_stopped'] and manifest['original_stopped_base_restored'] and not manifest['recovery_pending']
+    for item in manifest['pins']:
+        path = (folder/item['path']).resolve()
+        assert path.is_relative_to(folder.resolve())
+        assert path.stat().st_size == item['bytes'] and pin(path)['sha256'] == item['sha256']
+    samples = list(struct.iter_unpack('<8I',(folder/'capture.aot-private.bin').read_bytes()))
+    assert len(samples) == 64 and all(sr == 12 and civ == piv == after and civ in (0,1) and
+        0 <= remaining <= (1024 if civ == 0 else 2048) and cr == 1
+        for low,high,sr,civ,piv,remaining,after,cr in samples)
+    transitions = [(a[3],b[3]) for a,b in zip(samples,samples[1:]) if a[3] != b[3]]
+    assert transitions == [(1,0),(0,1),(1,0),(0,1)]
+    return [pin(manifest_path),pin(folder/'capture.aot-private.bin')]
+
+
+def check(xbe, observer, evidence, output, active_streams=False, stream_evidence=None):
     assert 'build' in output.resolve().parts and not output.exists()
     output.mkdir(parents=True)
     blob = xbe.read_bytes()
     assert hashlib.sha256(blob).hexdigest() == IMAGE_SHA256
     pins = physical(evidence)
+    if active_streams:pins += physical_stream(stream_evidence)
     lives = []
     for lifetime in range(3):
         original = CodecStartup(blob, lifetime)
@@ -129,7 +150,9 @@ def check(xbe, observer, evidence, output, active_streams=False):
                             kind, format_value, data = parts[1],int(parts[2],16),bytes.fromhex(parts[3])
                             assert format_value == (stream_format if kind == 'S' else 0)
                             assert 0 < len(data) <= 1024 and len(data)%4 == 0
-                            assert len(captured[kind])+len(data) <= 16384
+                            # Two full digital traversals plus the stopped
+                            # prefix; analog retains its independent bound.
+                            assert len(captured[kind])+len(data) <= (17408 if kind == 'S' else 8192)
                             captured[kind].extend(data)
                             output_chunks.append(dict(stream=kind,format=format_value,bytes=len(data),ticks=original.ticks))
                             process.stdin.write('ACCEPTED\n');process.stdin.flush()
@@ -189,12 +212,14 @@ def check(xbe, observer, evidence, output, active_streams=False):
                     # intentionally restarts at its first descriptor, unlike a
                     # bare CR resume. The incomplete prefix owns no completion.
                     original.call(0x17c73a,(0xffffffff,),ecx=streams[1])
-                    for frame in range(3,11):
+                    for frame in range(3,19):
                         original.ticks = frame*6000;transport('T',original.ticks,0,0)
-                    assert captured['S'] == expected[:1024]+expected and captured['P'] == expected
-                    for offset in (0x110,0x170):
-                        assert transport('R',0xfec00000+offset+6,1,0) == 15
-                        assert transport('R',0xfec00000+offset+8,2,0) == 0
+                    assert captured['S'] == expected[:1024]+expected*2 and captured['P'] == expected
+                    assert transport('R',0xfec00116,1,0) == 15
+                    assert transport('R',0xfec00118,2,0) == 0
+                    assert transport('R',0xfec00176,1,0) == 12
+                    assert transport('R',0xfec00178,2,0) == 4096
+                    assert transport('R',0xfec00174,1,0) == transport('R',0xfec0017a,1,0) == 0
                 original.call(0x17cae2,ecx=original.owner+0x14)
                 assert not original.get(original.owner+0x14) and not original.get(original.owner+0x18)
                 if active_streams:
@@ -222,7 +247,7 @@ def check(xbe, observer, evidence, output, active_streams=False):
             original_destructors_release_all_allocations=True))
     result = dict(status='original-aci-startup-helpers-observed',lifetimes=lives,
         pins=pins+[pin(xbe),pin(observer),pin(Path(__file__))],
-        limits='Prepared memory/IRQL caller and explicit initialized-kernel codec profile. Original codec/stream helpers are unchanged; stalls and optional stream dispatch service an authored guest clock. Active mode proves candidate transport against live original RAM; native admission remains guarded. No replacement IRQ-registration return, full cold boot, physical active-SPDIF equivalence, precise AC-link bus phase, digital wire/decode or connected title-output claim.')
+        limits='Prepared memory/IRQL caller and explicit initialized-kernel codec profile. Original codec/stream helpers are unchanged; stalls and optional stream dispatch service an authored guest clock. Silent physical one/two-node observations support digital continuation; this helper proof covers live original RAM, restart and destructor ownership. No replacement IRQ-registration return, full cold boot, physical nonzero output/enabled IRQ/format02000002 equivalence, precise AC-link phase, digital wire/decode or connected title-output claim.')
     report = output/'original-aci-startup.aot-private.json'
     report.write_text(json.dumps(result,indent=2)+'\n')
     print(f'PASS three original codec helper groups, six owned rings, asynchronous waits and three original semaphore timeouts; active_streams={active_streams}; {report}')
@@ -232,4 +257,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','observer','evidence','output'):parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--active-streams',action='store_true')
-    args = parser.parse_args();check(args.xbe,args.observer,args.evidence,args.output,args.active_streams)
+    parser.add_argument('--stream-evidence',type=Path)
+    args = parser.parse_args();check(args.xbe,args.observer,args.evidence,args.output,args.active_streams,args.stream_evidence)

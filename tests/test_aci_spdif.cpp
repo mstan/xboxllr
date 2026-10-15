@@ -1,6 +1,7 @@
 // Reached nForce digital transport, separate from analog PCM presentation.
 // Register/word contracts: Linux intel8x0 nforce_regs and the owned original
-// codec helpers. Physical active-stream equivalence is a separate checkpoint.
+// codec helpers. Silent one/two-node Xbox traces establish repeating digital
+// traversal and stable PIV=CIV. Nonzero wire output remains a separate claim.
 #include "machine/aci.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -62,12 +63,16 @@ static void independent_streams() {
         f.aci.set_frame(1);CHECK(f.error.empty() && f.pcm==analog && f.digital==digital);
         CHECK(f.formats==std::vector<uint32_t>{format});
         CHECK(f.aci.completed_descriptors()==1 && f.aci.completed_spdif_descriptors()==1);
-        CHECK(f.rd(0x176)==15 && f.rd(0x176,2)==15 && !f.rd(0x178,2));
+        CHECK(f.rd(0x176)==12 && f.rd(0x176,2)==12 && f.rd(0x178,2)==512);
+        CHECK(!f.rd(0x174) && !f.rd(0x17a));
         CHECK((f.rd(0x130,4)&0x50)==0x50 && f.irq==std::vector<bool>{true});
-        f.wr(0x176,1,0xc);CHECK(f.rd(0x176)==3 && (f.rd(0x130,4)&0x50)==0x40);
+        f.wr(0x176,1,0xc);CHECK(!f.rd(0x176) && (f.rd(0x130,4)&0x50)==0x40);
         CHECK(f.irq==std::vector<bool>{true}); // PCM still owns the shared level.
         f.wr(0x116,2,0xc);CHECK((f.irq==std::vector<bool>{true,false}));
-        f.aci.set_frame(100);CHECK(f.digital==digital && f.pcm==analog);
+        f.aci.set_frame(2);const auto first_pass=digital;digital.insert(digital.end(),first_pass.begin(),first_pass.end());
+        CHECK(f.digital==digital && f.pcm==analog && f.rd(0x176)==12);
+        f.wr(0x17b,1,0);CHECK(f.rd(0x176)==13);f.aci.set_frame(100);
+        CHECK(f.digital==digital && f.pcm==analog);
     }
 }
 static void stop_resume_reset_and_reuse() {
@@ -78,14 +83,16 @@ static void stop_resume_reset_and_reuse() {
     auto changed=f.bytes(0x4400,1024,71);f.wr(0x17b,1,0x1d);f.aci.set_frame(10);
     CHECK(f.error.empty() && std::vector<uint8_t>(f.digital.begin()+1024,f.digital.end())==changed);
     CHECK(f.aci.completed_spdif_descriptors()==1 && !f.aci.completed_descriptors());
-    // Extend an exhausted ring without fabricating completion from the write.
+    // A live LVI extension changes the next traversal, not the current cursor.
     auto next=f.bytes(0x6000,1024,4);f.bd(0x2000,1,0x6000,512);f.wr(0x175,1,1);
-    CHECK(f.digital.size()==2048 && f.rd(0x174)==1);f.aci.set_frame(11);
+    CHECK(f.digital.size()==2048 && !f.rd(0x174) && !f.rd(0x17a) && f.rd(0x178,2)==1024);
+    f.aci.set_frame(12);CHECK(f.rd(0x174)==1 && f.rd(0x17a)==1 && f.rd(0x178,2)==512);
+    f.aci.set_frame(13);
     CHECK(std::vector<uint8_t>(f.digital.end()-1024,f.digital.end())==next);
     f.wr(0x17b,1,0);f.wr(0x17b,1,2);
     CHECK(!f.rd(0x170,4) && !f.rd(0x174) && !f.rd(0x175) && !f.rd(0x178,2) && !f.rd(0x17a) && f.rd(0x176)==1);
-    f.wr(0x17c,4,0x02000000);f.bd(0x2000,0,0x6000,512);f.start(0x170,0x2000);f.aci.set_frame(12);
-    CHECK(f.error.empty() && f.formats.back()==0x02000000 && f.aci.completed_spdif_descriptors()==3);
+    f.wr(0x17c,4,0x02000000);f.bd(0x2000,0,0x6000,512);f.start(0x170,0x2000);f.aci.set_frame(14);
+    CHECK(f.error.empty() && f.formats.back()==0x02000000 && f.aci.completed_spdif_descriptors()==4);
     CHECK(f.pcm.empty() && !f.aci.consumed_pcm_words());
 }
 static void failure_keeps_ownership() {
@@ -94,7 +101,7 @@ static void failure_keeps_ownership() {
         if(kind==0)f.failed=0x6000;else f.violation=kind;
         f.aci.set_frame(1);CHECK(!f.error.empty() && f.digital.empty());
         CHECK(!f.aci.completed_spdif_descriptors() && !f.aci.consumed_spdif_words());
-        CHECK(f.rd(0x178,2)==512 && !f.rd(0x174) && f.rd(0x17a)==1 && !(f.rd(0x130,4)&0x10));
+        CHECK(f.rd(0x178,2)==512 && !f.rd(0x174) && !f.rd(0x17a) && !(f.rd(0x130,4)&0x10));
         const auto reads=f.reads;f.wr(0x17b,1,2);f.aci.set_frame(9);CHECK(f.reads==reads && f.rd(0x178,2)==512);
     }
     for(unsigned kind=0;kind<5;++kind) {
@@ -108,7 +115,35 @@ static void failure_keeps_ownership() {
     f.wr(0x17b,1,0);f.wr(0x17c,4,0x02000002);
     CHECK(!f.error.empty() && f.rd(0x17c,4)==0x02000000 && f.rd(0x178,2)==1024);
 }
+static void repeated_two_node_ring() {
+    Fixture f;f.wr(0x17c,4,0x02000000);
+    auto first=f.bytes(0x4000,2048,7),second=f.bytes(0x6000,4096,31);
+    f.bd(0x2000,0,0x4000,1024);f.bd(0x2000,1,0x6000,2048);
+    f.start(0x170,0x2000,1);
+    f.aci.set_frame(2);CHECK(f.digital==first && f.rd(0x174)==1 && f.rd(0x17a)==1 && f.rd(0x178,2)==2048);
+    f.aci.set_frame(6);std::vector<uint8_t> expected=first;expected.insert(expected.end(),second.begin(),second.end());
+    CHECK(f.digital==expected && !f.rd(0x174) && !f.rd(0x17a) && f.rd(0x178,2)==1024 && f.rd(0x176)==12);
+    // A wrap reads current RAM, not a cached first traversal or silence fill.
+    first=f.bytes(0x4000,2048,91);second=f.bytes(0x6000,4096,103);
+    expected.insert(expected.end(),first.begin(),first.end());expected.insert(expected.end(),second.begin(),second.end());
+    f.aci.set_frame(12);CHECK(f.digital==expected && f.aci.completed_spdif_descriptors()==4 && f.aci.consumed_spdif_words()==6144);
+    CHECK(!f.rd(0x174) && !f.rd(0x17a) && f.rd(0x178,2)==1024 && f.rd(0x176)==12);
+    // A completed old descriptor owns its accepted bytes/IRQ even if the
+    // successor fetch fails; no successor cursor or output is fabricated.
+    f.failed=0x2008;f.aci.set_frame(14);
+    CHECK(!f.error.empty() && f.aci.completed_spdif_descriptors()==5 && f.aci.consumed_spdif_words()==7168);
+    CHECK(!f.rd(0x174) && !f.rd(0x17a) && !f.rd(0x178,2) && f.rd(0x176)==12);
+    const auto reads=f.reads;f.aci.set_frame(100);CHECK(f.reads==reads);
+    for(unsigned bad_node:{0u,1u}) {
+        Fixture zero;zero.wr(0x17c,4,0x02000000);
+        zero.bd(0x2000,0,0x4000,bad_node?512:0);zero.bd(0x2000,1,0x6000,0);
+        zero.start(0x170,0x2000,1);zero.aci.set_frame(1);
+        CHECK(zero.error.find("zero-length cyclic")!=std::string::npos);
+        CHECK(zero.aci.completed_spdif_descriptors()==bad_node && zero.digital.size()==bad_node*1024);
+        CHECK(!zero.rd(0x174) && !zero.rd(0x17a) && !zero.rd(0x178,2));
+    }
+}
 int main() {
-    independent_streams();stop_resume_reset_and_reuse();failure_keeps_ownership();
-    std::puts("PASS separate digital bytes/formats, shared IRQ, live RAM, stop/resume/reset and terminal ownership");
+    independent_streams();stop_resume_reset_and_reuse();failure_keeps_ownership();repeated_two_node_ring();
+    std::puts("PASS cyclic digital bytes/formats, observed cursors, shared IRQ, live RAM, stop/resume/reset and bounded terminal ownership");
 }

@@ -13,8 +13,8 @@ int main(int argc,char** argv) {
     const bool streams=argc==2 && !std::strcmp(argv[1],"--stream-transport");
     if(argc==2 && (!std::strcmp(argv[1],"--transport") || streams)) {
         if(streams) {
-            // Candidate device proof only. Native title admission remains
-            // guarded until its digital consumer and ownership are connected.
+            // Same register boundary as the native owner; this fixture adds
+            // live RAM and separate consumers without running a title.
             aci.set_mem_access([](uint32_t a,void* out,size_t n){
                 if(!n || n>4096 || uint64_t(a)+n>0x4000000)return false;
                 std::printf("MEMR %08x %zu\n",a,n);std::fflush(stdout);
@@ -41,10 +41,7 @@ int main(int argc,char** argv) {
                 CHECK(operation=='R' || operation=='W');
                 CHECK(address>=base && address<base+aci.kSize);
                 const unsigned off=address-base;
-                const bool candidate=streams &&
-                    (((off==0x116 || off==0x176) && width==1 && operation=='R') ||
-                     (off==0x17b && width==1 && operation=='W' && value==0x1d));
-                if(!candidate && !pilot_original_aci_admitted(off,width,operation=='W',value)) {
+                if(!pilot_original_aci_admitted(off,width,operation=='W',value)) {
                     std::printf("FAIL admission %08x\n",address);std::fflush(stdout);return 2;
                 }
                 if(operation=='W')aci.mmio_write(address,width,value);
@@ -100,7 +97,11 @@ int main(int argc,char** argv) {
     }
     CHECK(!pilot_original_aci_admitted(0x12c,4,true,2));
     CHECK(!pilot_original_aci_admitted(0x134,4,false,0));
-    CHECK(!pilot_original_aci_admitted(0x17b,1,true,0x1d));
+    CHECK(pilot_original_aci_admitted(0x17b,1,true,0x1d));
+    CHECK(pilot_original_aci_admitted(0x176,1,false,0));
+    CHECK(pilot_original_aci_admitted(0x176,1,true,0xc));
+    CHECK(!pilot_original_aci_admitted(0x178,1,false,0));
+    CHECK(!pilot_original_aci_admitted(0x176,1,true,0x20));
     CHECK(!pilot_original_aci_admitted(0x18,2,true,0));
     std::puts("PASS WM9709 startup, clock-owned CAS, two stopped rings and explicit unsupported-context guards");
 }

@@ -9,10 +9,14 @@ extern "C" {
  * synchronous DMA capability; they must never reenter CPU/services or hold
  * the USB lock. A consumer accepts an entire actual little-endian PCM chunk. */
 typedef int (*PilotAudioDevicePcm)(void*,const uint8_t*,size_t);
+/* Raw digital transport words, with the unchanged programmed format tag. */
+typedef int (*PilotAudioDeviceSpdif)(void*,const uint8_t*,size_t,uint32_t);
 /* Begins at the pinned kernel4983 initialized idle handoff. SECTL/IEN derive from
  * original init/retirement; FE control uses the retained physical idle value.
  * This is not a board cold-reset constructor or a fence-completion grant. */
 const char *pilot_audio_device_lle_open(PilotAudioDevicePcm consumer,void *context);
+const char *pilot_audio_device_lle_open_outputs(PilotAudioDevicePcm pcm,void *pcm_context,
+    PilotAudioDeviceSpdif spdif,void *spdif_context);
 /* Close requires a stopped/drained codec and an idle shared engine. Active or
  * paused descriptors, or an engine fault forbidding exact unbind, retain the
  * registered terminal owner until process disposal. No cancellation claimed. */
@@ -28,10 +32,12 @@ typedef struct PilotAudioDeviceState {
     uint64_t gp_cycles,ep_cycles;
     unsigned gp_phase,ep_phase;
     uint64_t gp_quanta,ep_events;
+    uint64_t spdif_words,spdif_descriptors;
 } PilotAudioDeviceState;
 void pilot_audio_device_lle_state(PilotAudioDeviceState *state);
 /* Passive lifetime check; no locking, services, clock input or device work. */
 int pilot_audio_device_lle_consumer_attached(void *context);
+int pilot_audio_device_lle_spdif_consumer_attached(void *context);
 #ifdef __cplusplus
 }
 #endif

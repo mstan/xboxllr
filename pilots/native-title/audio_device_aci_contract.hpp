@@ -3,7 +3,8 @@
 
 // One admission boundary for the native title and original-source observer.
 // Startup evidence: native_audio_aci_startup_reference.py and probe
-// docs/AC97-STARTUP.md. Active SPDIF and link reset remain separate work.
+// docs/AC97-STARTUP.md and docs/SPDIF-STREAM.md. Digital RUN additionally
+// requires the native owner's distinct consumer. Link reset stays guarded.
 inline bool pilot_original_aci_admitted(uint32_t off, unsigned size, bool write, uint32_t value) {
     if (off < 0x100) {
         if (size != 2) return false;
@@ -20,13 +21,12 @@ inline bool pilot_original_aci_admitted(uint32_t off, unsigned size, bool write,
     if (!write) {
         if (reg == 0) return size == 4;
         if (reg == 4 || reg == 5 || reg == 10 || reg == 11) return size == 1;
-        return (reg == 6 || reg == 8) && size == 2;
+        return (reg == 6 && (size == 1 || size == 2)) || (reg == 8 && size == 2);
     }
     if (reg == 0) return size == 4 && !(value & 3);
     if (reg == 4) return size == 1 && value == 0;
     if (reg == 5) return size == 1 && value < 32;
-    if (reg == 6) return size == 2 && !(value & ~0x1cu);
-    if (reg == 11) return size == 1 && !(value & ~0x1fu) &&
-        (off < 0x170 || value == 0 || value == 2);
+    if (reg == 6) return (size == 1 || size == 2) && !(value & ~0x1cu);
+    if (reg == 11) return size == 1 && !(value & ~0x1fu);
     return false;
 }

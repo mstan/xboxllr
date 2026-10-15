@@ -2,7 +2,7 @@
 #include "audio_device_aci_contract.hpp"
 /* Original DirectSound's shared device owner. This connects qualified storage,
  * transactions, reset/bootstrap, shared GP/EP cadence and codec consumption.
- * Active FE, SPDIF and complete original reset remain separate work. */
+ * Active FE and complete original DSP reset remain separate work. */
 #include "audio_device_lle.h"
 extern "C" {
 #include "io_device_lle.h"
@@ -34,6 +34,8 @@ struct Owner {
     std::unique_ptr<xlle::ApuDeviceClock> clock;
     PilotAudioDevicePcm pcm=nullptr;
     void *context=nullptr;
+    PilotAudioDeviceSpdif spdif=nullptr;
+    void *spdif_context=nullptr;
     uint64_t reads=0,writes=0;
     uint64_t lifetime=0,epoch=0;
     bool apu_mapped=false,aci_mapped=false,work=false,busy=false;
@@ -69,6 +71,9 @@ extern "C" const char *pilot_audio_device_lle_close(void) {
     if((owner->aci.mmio_read(xlle::McpxAci::kBase+0x11b,1)&1) ||
        owner->aci.mmio_read(xlle::McpxAci::kBase+0x118,2))
         return fail("original audio device teardown with active or paused PCM descriptor");
+    if((owner->aci.mmio_read(xlle::McpxAci::kBase+0x17b,1)&1) ||
+       owner->aci.mmio_read(xlle::McpxAci::kBase+0x178,2))
+        return fail("original audio device teardown with active or paused SPDIF descriptor");
     const char *error=nullptr;
     if(owner->work) {
         error=pilot_io_device_work_unbind(pilot_audio_device_lle_sample);
@@ -89,6 +94,10 @@ extern "C" const char *pilot_audio_device_lle_close(void) {
     owner.reset();return nullptr;
 }
 extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void *context) {
+    return pilot_audio_device_lle_open_outputs(pcm,context,nullptr,nullptr);
+}
+extern "C" const char *pilot_audio_device_lle_open_outputs(PilotAudioDevicePcm pcm,void *context,
+    PilotAudioDeviceSpdif spdif,void *spdif_context) {
     if(!failure.empty())return failure.c_str();
     if(owner)return fail("original audio device already owned");
     if(next_lifetime==UINT64_MAX)return fail("original audio device lifetime exhausted");
@@ -98,6 +107,7 @@ extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void 
     owner.reset(new(std::nothrow) Owner);
     if(!owner)return fail("original audio device allocation failed");
     owner->pcm=pcm;owner->context=context;
+    owner->spdif=spdif;owner->spdif_context=spdif_context;
     owner->lifetime=++next_lifetime;owner->epoch=ticks;
     // This owner begins after the pinned4983 kernel's initialized idle handoff,
     // not at board cold reset. Original654DC clears SECTL then enables bits0..2;
@@ -123,6 +133,12 @@ extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void 
         if(!owner->pcm){fail("original audio device requires a real PCM consumer");return false;}
         const bool accepted=owner->pcm(owner->context,bytes,n)!=0;
         if(!accepted)fail("original audio PCM consumer rejected actual bytes");
+        return accepted && failure.empty();
+    });
+    owner->aci.set_spdif_output([](const uint8_t *bytes,size_t n,uint32_t format){
+        if(!owner->spdif){fail("original audio device requires a real SPDIF consumer");return false;}
+        const bool accepted=owner->spdif(owner->spdif_context,bytes,n,format)!=0;
+        if(!accepted)fail("original audio SPDIF consumer rejected actual bytes");
         return accepted && failure.empty();
     });
     owner->gp=std::make_unique<xlle::ApuGpProcessor>(owner->apu,[](const std::string& why){fail(why.c_str());});
@@ -168,6 +184,8 @@ extern "C" const char *pilot_audio_device_lle_access(uint32_t address,unsigned s
     }
     if(aci && write && address==xlle::McpxAci::kBase+0x11b && (*value&1) && !(*value&2) && !owner->pcm)
         return fail("original audio device requires a real PCM consumer");
+    if(aci && write && address==xlle::McpxAci::kBase+0x17b && (*value&1) && !(*value&2) && !owner->spdif)
+        return fail("original audio device requires a real SPDIF consumer");
     Busy busy;
     if(apu) {
         if(write)owner->apu.mmio_write(address,int(size),*value);
@@ -198,6 +216,7 @@ extern "C" void pilot_audio_device_lle_state(PilotAudioDeviceState *state) {
     state->dma_reads=owner->reads;state->dma_writes=owner->writes;
     state->lifetime_id=owner->lifetime;state->epoch_ticks=owner->epoch;state->codec_frame=owner->aci.current_frame();
     state->pcm_words=owner->aci.consumed_pcm_words();state->descriptors=owner->aci.completed_descriptors();
+    state->spdif_words=owner->aci.consumed_spdif_words();state->spdif_descriptors=owner->aci.completed_spdif_descriptors();
     state->gp_held=owner->gp && owner->gp->phase()==xlle::ApuGpPhase::Held;
     state->ep_held=owner->ep && owner->ep->phase()==xlle::ApuEpPhase::Held;
     if(owner->clock) {
@@ -208,4 +227,7 @@ extern "C" void pilot_audio_device_lle_state(PilotAudioDeviceState *state) {
 }
 extern "C" int pilot_audio_device_lle_consumer_attached(void *context) {
     return owner && owner->pcm && owner->context==context;
+}
+extern "C" int pilot_audio_device_lle_spdif_consumer_attached(void *context) {
+    return owner && owner->spdif && owner->spdif_context==context;
 }

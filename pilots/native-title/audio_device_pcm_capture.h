@@ -17,7 +17,7 @@ typedef struct PilotPcmCaptureHeader {
 } PilotPcmCaptureHeader;
 typedef struct PilotPcmCaptureStamp {
     uint64_t lifetime_id,epoch_ticks,observed_pit_ticks,codec_frame,byte_offset;
-    uint32_t bytes,reserved;
+    uint32_t bytes,reserved; /* zero for PCM; programmed format for XLLESPD1 */
 } PilotPcmCaptureStamp;
 typedef struct PilotPcmCaptureFooter {
     char magic[8];uint64_t pcm_bytes,stamp_count;uint32_t status,reserved;
@@ -26,8 +26,13 @@ typedef struct PilotPcmCaptureFooter {
  * Exclusive <destination>.partial is retained on failure; final destination
  * is non-replacing and published only after successful flush AND close. */
 const char *pilot_pcm_capture_create(PilotPcmCapture **out,const char *destination,uint64_t bytes,uint64_t stamps);
+/* Uses the same bounded ownership/persistence machinery, but a distinct
+ * XLLESPD1 header and per-stamp raw format. No PCM decoding or playback.
+ * The common bind/finish/destroy/view APIs below handle either stream kind. */
+const char *pilot_spdif_capture_create(PilotPcmCapture **out,const char *destination,uint64_t bytes,uint64_t stamps);
 const char *pilot_pcm_capture_bind(PilotPcmCapture *capture);
 int pilot_pcm_capture_consume(void *context,const uint8_t *bytes,size_t count);
+int pilot_spdif_capture_consume(void *context,const uint8_t *bytes,size_t count,uint32_t format);
 const char *pilot_pcm_capture_finish(PilotPcmCapture *capture,int complete);
 const char *pilot_pcm_capture_destroy(PilotPcmCapture *capture);
 const char *pilot_pcm_capture_error(const PilotPcmCapture *capture);

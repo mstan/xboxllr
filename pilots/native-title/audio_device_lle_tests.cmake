@@ -7,6 +7,11 @@ foreach(case positive startup startup-width startup-active startup-mappings star
     "${case}" "${PILOT_IO_DEVICE_SNAPSHOT}" "${CMAKE_CURRENT_BINARY_DIR}/audio-capture-private")
   set_tests_properties(pilot_audio_device_${case} PROPERTIES TIMEOUT 20)
 endforeach()
+foreach(case positive absent paused capacity kind format rollback misbound)
+  pilot_add_test(NAME pilot_audio_device_spdif-${case} COMMAND pilot_audio_device_lle_test
+    "spdif-${case}" "${PILOT_IO_DEVICE_SNAPSHOT}" "${CMAKE_CURRENT_BINARY_DIR}/audio-capture-private")
+  set_tests_properties(pilot_audio_device_spdif-${case} PROPERTIES TIMEOUT 20)
+endforeach()
 pilot_add_test(NAME pilot_audio_device_ep-lookup COMMAND pilot_audio_device_lle_test
   ep-lookup "${PILOT_IO_DEVICE_SNAPSHOT}" "${PILOT_AUDIO_EP_Y_LOOKUP}")
 set_tests_properties(pilot_audio_device_ep-lookup PROPERTIES TIMEOUT 20)

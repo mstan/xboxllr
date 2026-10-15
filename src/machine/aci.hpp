@@ -6,7 +6,7 @@
 //
 // Output fetches the guest's 32-entry descriptor rings,
 // advances CIV/PIV/PICB at the 48 kHz stereo cadence, publishes BCIS/LVBCI/GLOB_STA, and
-// and drives the routed level IRQ. PCM and SPDIF borrow distinct consumers;
+// drives the routed level IRQ. PCM and SPDIF borrow distinct consumers;
 // digital payload is never interpreted as analog PCM. Other streams retain
 // register semantics until a guest-visible path needs them.
 #pragma once
@@ -378,9 +378,24 @@ private:
 
     bool advance_bd(BmRegs& r) {
         BmRegs next = r;
-        next.civ = r.piv;
-        next.piv = (r.piv + 1) % 32;
+        const bool digital = &r == &bm_[7];
+        if (digital) {
+            // Owned Xbox one/two-node observations: the valid ring repeats,
+            // SR stays0C after completion, and stable PIV equals CIV. This
+            // replaces the generic ICH last-buffer halt for SPDIF only.
+            next.civ = r.bd_valid ? (r.civ == r.lvi ? 0 : (r.civ + 1) % 32) : 0;
+            next.piv = next.civ;
+        } else {
+            next.civ = r.piv;
+            next.piv = (r.piv + 1) % 32;
+        }
         if (!fetch_bd(next, &r == &bm_[1] || &r == &bm_[7])) return false;
+        // Reached original buffers are nonempty. An unqualified zero-length
+        // cyclic descriptor must not create an unbounded completion loop.
+        if (digital && !next.picb) {
+            device_fault("zero-length cyclic SPDIF descriptor remains unqualified");
+            return false;
+        }
         r = next;
         return true;
     }
@@ -459,10 +474,11 @@ private:
             else ++completed_descriptors_;
             const bool last = r.civ == r.lvi;
             if (last) {
-                new_sr |= SR_LVBCI | SR_DCH | SR_CELV;
+                new_sr |= SR_LVBCI;
+                if (!digital) new_sr |= SR_DCH | SR_CELV;
             }
             r.sr = new_sr;
-            if (!last && !advance_bd(r)) {
+            if ((digital || !last) && !advance_bd(r)) {
                 // A successfully consumed old descriptor still owns its
                 // completion, even if fetching the successor fails.
                 update_irq(); return;

@@ -20,6 +20,7 @@
 #include "audio_device_timeline.h"
 #include "input_host.h"
 static PilotPcmCapture *original_pcm_capture;
+static PilotPcmCapture *original_spdif_capture;
 #endif
 
 ptrdiff_t g_xbox_mem_offset;
@@ -109,6 +110,10 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
         const char *capture_error=pilot_pcm_capture_finish(original_pcm_capture,0);
         if(capture_error)fprintf(stderr,"[ORIGINAL PCM PARTIAL FAILURE] %s\n",capture_error);
         /* Keep callback storage alive with any retained terminal owner. */
+    }
+    if(original_spdif_capture) {
+        const char *capture_error=pilot_pcm_capture_finish(original_spdif_capture,0);
+        if(capture_error)fprintf(stderr,"[ORIGINAL SPDIF PARTIAL FAILURE] %s\n",capture_error);
     }
 #endif
 #ifdef PILOT_AUDIO_REFERENCE
@@ -1225,18 +1230,31 @@ int main(int argc,char **argv)
 #endif
 #ifdef PILOT_SCHEDULING_LLE
 #ifdef PILOT_AUDIO_DEVICE_LLE
-    /* Diagnostic destination selects a real bounded AC97 memory consumer;
-     * absent selection retains the existing before-DMA RUN guard. */
+    /* Separate bounded PCM and raw digital consumers share the device lifetime.
+     * Both captures are silent; absent selection retains before-DMA RUN guards. */
     const char *capture_destination=getenv("XLLE_PILOT_ORIGINAL_PCM_CAPTURE");
     const char *audio_error=NULL;
     if(capture_destination && *capture_destination) {
         audio_error=pilot_pcm_capture_create(&original_pcm_capture,capture_destination,0,0);
         if(audio_error)stop(audio_error,0xfe800000u);
+        size_t path_length=strlen(capture_destination);
+        if(path_length>SIZE_MAX-7)stop("original digital capture path too long",0xfe800000u);
+        char *digital_destination=malloc(path_length+7);
+        if(!digital_destination)stop("original digital capture path allocation failed",0xfe800000u);
+        memcpy(digital_destination,capture_destination,path_length);
+        memcpy(digital_destination+path_length,".spdif",7);
+        audio_error=pilot_spdif_capture_create(&original_spdif_capture,digital_destination,0,0);
+        free(digital_destination);if(audio_error)stop(audio_error,0xfe800000u);
     }
-    audio_error=pilot_audio_device_lle_open(original_pcm_capture?pilot_pcm_capture_consume:NULL,original_pcm_capture);
+    audio_error=pilot_audio_device_lle_open_outputs(original_pcm_capture?pilot_pcm_capture_consume:NULL,original_pcm_capture,
+        original_spdif_capture?pilot_spdif_capture_consume:NULL,original_spdif_capture);
     if(audio_error)stop(audio_error,0xfe800000u);
     if(original_pcm_capture) {
         audio_error=pilot_pcm_capture_bind(original_pcm_capture);
+        if(audio_error)stop(audio_error,0xfe800000u);
+    }
+    if(original_spdif_capture) {
+        audio_error=pilot_pcm_capture_bind(original_spdif_capture);
         if(audio_error)stop(audio_error,0xfe800000u);
     }
 #endif
@@ -1247,6 +1265,11 @@ int main(int argc,char **argv)
         audio_error=pilot_pcm_capture_finish(original_pcm_capture,1);if(audio_error)stop(audio_error,0xfe800000u);
         audio_error=pilot_pcm_capture_destroy(original_pcm_capture);if(audio_error)stop(audio_error,0xfe800000u);
         original_pcm_capture=NULL;
+    }
+    if(original_spdif_capture) {
+        audio_error=pilot_pcm_capture_finish(original_spdif_capture,1);if(audio_error)stop(audio_error,0xfe800000u);
+        audio_error=pilot_pcm_capture_destroy(original_spdif_capture);if(audio_error)stop(audio_error,0xfe800000u);
+        original_spdif_capture=NULL;
     }
 #endif
     return 0;

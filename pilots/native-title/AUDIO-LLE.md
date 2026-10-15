@@ -3181,3 +3181,54 @@ follow that correction. Eleven compiled-payload test methods pass; they test
 the observer, not physical equivalence of the candidate. Evidence is in probe
 `results/spdif-ring-20261015/` and `docs/SPDIF-STREAM.md`. Families6/9 and
 deferred30 IDs /29 scopes are unchanged; no new deferral or HLE change.
+
+## Cyclic SPDIF integrated; title reaches next FE method - 2026-10-15
+
+The maintained ACI now repeats the digital valid ring instead of halting at
+its last descriptor, with stable PIV=CIV as observed on the Xbox. Completion
+and counters still follow accepted actual RAM bytes. Wrap fetches current
+RAM; a failed successor fetch retains the completed predecessor's evidence
+without publishing a successor. Zero-length cyclic descriptors fail rather
+than spinning. PCM traversal remains unchanged because the physical
+experiment observed SPDIF only.
+
+`pilot_audio_device_lle_open_outputs` binds separate PCM and raw digital
+consumers under the existing RAM/clock/IRQ owner; the existing PCM-only entry
+point remains available. Missing digital output rejects RUN before descriptor
+DMA. Close checks both streams for active or paused descriptors. Diagnostic
+state adds digital word/completion counters without creating another clock
+or processor. The shared admission now includes reached byte status/W1C and
+digital CR accesses; there is no observer-only register exception.
+
+The runtime's existing capture destination also creates a separate `.spdif`
+file. Its `XLLESPD1` header identifies raw two-word transport, and each stamp
+retains the programmed format in the field reserved as zero for PCM. The
+bounded memory/persistence implementation is shared, but the streams never
+mix. Callbacks allocate nothing, perform no file I/O and do not reenter the
+engine. Finish/destroy protect every registered context, including rejected
+cross-kind binding; publication still requires retirement, flush and close.
+There is no speaker output, digital decoding or physical wire claim.
+
+Validation covers45 distinct native checks: the initial44-check batch plus
+the added cross-kind lifetime case, with all16 affected capture cases rerun
+after that review fix. Four focused MinGW checks pass, and the native
+register regression was rebuilt/rechecked against the current header.
+Three original helper lifetimes each perform2119 transactions,30 live RAM
+reads and25 accepted chunks, producing8192 PCM bytes and17408 digital bytes.
+Original start(-1) resets the stopped prefix, digital output completes two
+full traversals, and the original destructors retire/free both rings. The
+first expanded helper run hit its old16384-byte fixture bound; that failed
+evidence is retained, and the corrected explicit per-stream bounds passed.
+The active helper proof pins the retained physical two-node observation.
+
+One changed muted/headless title attempt ran for62.766s, crossed the former
+byte-status startup guard and stopped at an unsupported DWORD write0 to
+`FE820280`. Both title capture files are valid partials with zero accepted
+bytes. Required next work is the reached FE method group and its original
+consumers, not another isolated status-read change. Active FE ordering,
+original runtime DSP/reset/output and audio-family acceptance remain open.
+The bounded `.113.30` acceptance conditions are satisfied; stream startup
+alone does not close the family. Evidence, binaries and source snapshots:
+`build/blinx/audio-spdif-cyclic-20261015/`. Families6/9 and deferred30 IDs /
+29 scopes remain unchanged. No new hardware operation, precision deferral
+or HLE processing change occurred.

@@ -84,6 +84,7 @@ static void access(uint32_t address,unsigned size,uint32_t value) {
     if(error)fprintf(stderr,"access %08x: %s\n",address,error);CHECK(!error);
 }
 static const char *dummy(uint32_t,unsigned,int,uint32_t*){return nullptr;}
+#include "audio_device_spdif_test.inc"
 int main(int argc,char **argv) {
     CHECK(argc==3 || argc==4);const char *mode=argv[1];
     const bool sink_mode=!strcmp(mode,"positive") || !strncmp(mode,"capture-",8);
@@ -98,6 +99,7 @@ int main(int argc,char **argv) {
     CHECK(!pilot_io_device_resident(0x10000,0x10000));
     uint32_t prep[]={captured_thread(argv[2]),31};call(148,prep);call(36,prep);
     CHECK(!pilot_usb_pit_time(ticks));
+    if(!strncmp(mode,"spdif-",6))return spdif_contract(mode,argc==4?argv[3]:nullptr);
     if(!strcmp(mode,"rollback") || !strcmp(mode,"capture-rollback")) {
         CHECK(!pilot_io_device_mmio_bind(0xfec00000,0x1000,dummy));
         CHECK(pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:consume,capture));PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);

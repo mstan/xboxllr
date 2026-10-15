@@ -1,4 +1,4 @@
-/* Actual AC97 PCM memory acceptance; persistence is a separate operation.
+/* Separate AC97 PCM/digital memory acceptance; persistence is separate.
  * No callback file I/O, allocation, CPU reentry or second clock/audio owner. */
 #include <windows.h>
 #include "audio_device_pcm_capture.h"
@@ -16,18 +16,25 @@ struct PilotPcmCapture {
     PilotPcmCaptureStamp *stamps=nullptr;
     uint64_t capacity=0,stamp_capacity=0,bytes=0,count=0,lifetime=0,epoch=0;
     const char *failure=nullptr;
-    bool bound=false,finished=false;
+    bool bound=false,finished=false,digital=false;
 #ifdef PILOT_PCM_CAPTURE_TEST
     unsigned injected=0;
 #endif
     const char *fail(const char *why){if(!failure)failure=why;return failure;}
+    bool attached() const {return digital ? pilot_audio_device_lle_spdif_consumer_attached((void*)this)!=0 :
+        pilot_audio_device_lle_consumer_attached((void*)this)!=0;}
+    // Even a rejected cross-kind binding still owns a registered pointer.
+    // Lifetime protection must check both routes before publication or free.
+    bool registered() const {return pilot_audio_device_lle_spdif_consumer_attached((void*)this) ||
+        pilot_audio_device_lle_consumer_attached((void*)this);}
     ~PilotPcmCapture(){if(file!=INVALID_HANDLE_VALUE)CloseHandle(file);if(pcm)VirtualFree(pcm,0,MEM_RELEASE);if(stamps)VirtualFree(stamps,0,MEM_RELEASE);}
 };
-extern "C" const char *pilot_pcm_capture_create(PilotPcmCapture **out,const char *destination,uint64_t bytes,uint64_t stamps) {
+static const char *create(PilotPcmCapture **out,const char *destination,uint64_t bytes,uint64_t stamps,bool digital) {
     if(!out || *out || !destination || !*destination)return "invalid original PCM capture destination";
     if(!bytes)bytes=PILOT_PCM_CAPTURE_BYTES;if(!stamps)stamps=PILOT_PCM_CAPTURE_STAMPS;
     if(bytes>PILOT_PCM_CAPTURE_BYTES || stamps>PILOT_PCM_CAPTURE_STAMPS)return "original PCM capture exceeds bounded limits";
     PilotPcmCapture *c=new(std::nothrow) PilotPcmCapture;if(!c)return "original PCM capture allocation failed";
+    c->digital=digital;
     try {c->destination=destination;c->partial=c->destination+".partial";}
     catch(...) {delete c;return "original PCM capture path allocation failed";}
     DWORD attributes=GetFileAttributesA(destination);
@@ -39,29 +46,42 @@ extern "C" const char *pilot_pcm_capture_create(PilotPcmCapture **out,const char
     if(!c->pcm || !c->stamps){delete c;return "original PCM bounded storage allocation failed (partial retained)";}
     c->capacity=bytes;c->stamp_capacity=stamps;*out=c;return nullptr;
 }
+extern "C" const char *pilot_pcm_capture_create(PilotPcmCapture **out,const char *destination,uint64_t bytes,uint64_t stamps) {
+    return create(out,destination,bytes,stamps,false);
+}
+extern "C" const char *pilot_spdif_capture_create(PilotPcmCapture **out,const char *destination,uint64_t bytes,uint64_t stamps) {
+    return create(out,destination,bytes,stamps,true);
+}
 extern "C" const char *pilot_pcm_capture_bind(PilotPcmCapture *c) {
     if(!c)return "missing original PCM capture";
     if(c->failure)return c->failure;
     PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
-    if(c->bound || c->finished || !state.owned || !state.lifetime_id || state.pcm_words ||
-       !pilot_audio_device_lle_consumer_attached(c))return c->fail("original PCM capture lifetime binding rejected");
+    if(c->bound || c->finished || !state.owned || !state.lifetime_id ||
+       (c->digital?state.spdif_words:state.pcm_words) || !c->attached())return c->fail("original output capture lifetime binding rejected");
     c->lifetime=state.lifetime_id;c->epoch=state.epoch_ticks;c->bound=true;return nullptr;
 }
-extern "C" int pilot_pcm_capture_consume(void *context,const uint8_t *bytes,size_t count) {
+static int consume(void *context,const uint8_t *bytes,size_t count,uint32_t format,bool digital) {
     auto *c=static_cast<PilotPcmCapture*>(context);if(!c)return 0;
     if(c->failure)return 0;
     PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);
-    if(!c->bound || c->finished || !state.owned || state.lifetime_id!=c->lifetime ||
-       state.epoch_ticks!=c->epoch || !pilot_audio_device_lle_consumer_attached(c) ||
+    if(c->digital!=digital || (digital && format!=0x02000000 && format!=0x02000002) ||
+       !c->bound || c->finished || !state.owned || state.lifetime_id!=c->lifetime ||
+       state.epoch_ticks!=c->epoch || !c->attached() ||
        !bytes || !count || (count&3) || count>1024 || state.clock_ticks<c->epoch)
-        {c->fail("original PCM capture invalid state/chunk/lifetime");return 0;}
+        {c->fail("original output capture invalid state/chunk/format/lifetime");return 0;}
     if(count>c->capacity-c->bytes || c->count==c->stamp_capacity)
-        {c->fail("original PCM capture capacity exhausted; no truncation");return 0;}
+        {c->fail("original output capture capacity exhausted; no truncation");return 0;}
     // All admission precedes copy/publication. Rejection may mark terminal
     // state but cannot change accepted bytes, counts or stamps.
-    PilotPcmCaptureStamp stamp{c->lifetime,c->epoch,state.clock_ticks,state.codec_frame,c->bytes,uint32_t(count),0};
+    PilotPcmCaptureStamp stamp{c->lifetime,c->epoch,state.clock_ticks,state.codec_frame,c->bytes,uint32_t(count),format};
     std::memcpy(c->pcm+c->bytes,bytes,count);c->stamps[c->count]=stamp;
     c->bytes+=count;++c->count;return 1;
+}
+extern "C" int pilot_pcm_capture_consume(void *context,const uint8_t *bytes,size_t count) {
+    return consume(context,bytes,count,0,false);
+}
+extern "C" int pilot_spdif_capture_consume(void *context,const uint8_t *bytes,size_t count,uint32_t format) {
+    return consume(context,bytes,count,format,true);
 }
 static bool write_bytes(PilotPcmCapture *c,const void *bytes,uint64_t count) {
     auto *p=static_cast<const uint8_t*>(bytes);
@@ -74,12 +94,13 @@ extern "C" const char *pilot_pcm_capture_finish(PilotPcmCapture *c,int complete)
     if(!c)return "missing original PCM capture";
     if(c->finished)return c->failure;
     c->finished=true;
-    if(!c->bound)c->fail("original PCM capture finalized without device lifetime");
-    if(complete && pilot_audio_device_lle_consumer_attached(c))
-        c->fail("original PCM complete capture requires retired device consumer");
+    if(!c->bound)c->fail("original output capture finalized without device lifetime");
+    if(complete && c->registered())
+        c->fail("original complete output capture requires retired device consumer");
     const bool success=complete && !c->failure;
     PilotPcmCaptureHeader h{{'X','L','L','E','A','C','9','7'},1,sizeof(h),48000,2,16,success?0u:1u,
         c->lifetime,c->epoch,c->bytes,c->count,c->capacity,c->stamp_capacity};
+    if(c->digital)std::memcpy(h.magic,"XLLESPD1",8);
     PilotPcmCaptureFooter f{{'X','L','L','E','E','N','D','1'},c->bytes,c->count,success?0u:1u,0};
     bool written=write_bytes(c,&h,sizeof(h)) && write_bytes(c,c->stamps,c->count*sizeof(*c->stamps)) &&
         write_bytes(c,c->pcm,c->bytes) && write_bytes(c,&f,sizeof(f));
@@ -105,7 +126,7 @@ extern "C" const char *pilot_pcm_capture_finish(PilotPcmCapture *c,int complete)
 }
 extern "C" const char *pilot_pcm_capture_destroy(PilotPcmCapture *c) {
     if(!c)return nullptr;
-    if(pilot_audio_device_lle_consumer_attached(c))return c->fail("original PCM capture retained with registered device owner");
+    if(c->registered())return c->fail("original output capture retained with registered device owner");
     delete c;return nullptr;
 }
 extern "C" const char *pilot_pcm_capture_error(const PilotPcmCapture *c){return c?c->failure:"missing original PCM capture";}

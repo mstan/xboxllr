@@ -35,7 +35,7 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Open: connected title crosses GP/EP setup/wait using stopped shared input; reached runtime consumers and original active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and physical method hold/release observed; runtime queue and active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Physical SPDIF now establishes repeated two-node wrap, SR0C/CR1 and stable PIV=CIV; stop/reset/restore succeeds. Correct candidate traversal and native digital capture/integration before admission. Current title checkpoint still stops at FEC00176 | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Corrected cyclic SPDIF and separate native digital capture/retirement integrated; bounded stream group `.113.30` validated. Muted title crossed FEC00176 and now stops at FE820280 DWORD write0 before output | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28`, `.113.29`, `.113.30` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
@@ -184,6 +184,23 @@ last-buffer halt and always-next PIV behavior; native capture/teardown and
 one changed connected title remain next. Families6/9 and deferred30 IDs /
 29 scopes are unchanged. Probe evidence: `results/spdif-ring-20261015/` and
 `docs/SPDIF-STREAM.md`; no full build, title launch or speaker output ran.
+
+The bounded SPDIF group is now implemented and validated. Digital traversal
+repeats the ring and reports stable PIV=CIV; zero-length cyclic descriptors
+fail before unbounded work. Native output has separate format-tagged digital
+capture and both-stream stop/reset/close ownership, including rejected
+cross-kind bindings. Forty-five distinct native checks, four focused MinGW
+checks and three unchanged original-driver lifetimes pass. Each original
+lifetime emits8192 PCM bytes and17408 raw digital bytes, including the stopped
+prefix and two complete digital traversals, then releases its allocations.
+
+One changed muted/headless title checkpoint crossed the old FEC00176 boundary
+and stopped at `FE820280`, DWORD write0, after62.766s. Both actual title
+captures remain partial with zero accepted bytes: the downstream method
+blocks startup before output, so this does not close audio. Evidence and
+the next method-group handoff are in
+`build/blinx/audio-spdif-cyclic-20261015/`. Families6/9 and deferred30 IDs /
+29 scopes are unchanged; no new hardware operations or HLE changes occurred.
 
 The physical codec identifies as WM9709, matching the manufacturer's fixed48kHz
 DAC with zero ordinary mixer/rate/power readbacks. The maintained ACI replaces
