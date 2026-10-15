@@ -77,6 +77,22 @@ int pilot_io_device_diagnostic_context(PilotIoDiagnosticEvent *event);
  * physical!=0 selects actual retail RAM addresses. Valid only in receiver or
  * raw-MMIO callback on the sole engine owner. Validate entire extent first. */
 int pilot_io_device_diagnostic_read(uint32_t address,void *out,uint32_t bytes,int physical);
+/* Repeated stdcall observations on the actual CPU. Source bytes are verified
+ * before execution. Entry/return pairing uses the original thread, caller and
+ * exact cleaned stack. Receivers have the same read-only diagnostic borrow;
+ * they must not execute services, change time or release simulation owners. */
+typedef struct PilotIoDiagnosticCall {
+    uint32_t entry,bytes,stack_bytes;
+    const char *sha256;
+} PilotIoDiagnosticCall;
+typedef struct PilotIoCallDiagnosticEvent {
+    uint64_t id;
+    unsigned index,kind;
+    uint32_t thread,regs[8],args[8],caller,entry_sp;
+} PilotIoCallDiagnosticEvent;
+typedef const char *(*PilotIoCallDiagnostic)(const PilotIoCallDiagnosticEvent *event);
+const char *pilot_io_device_diagnostic_calls_bind(const PilotIoDiagnosticCall *calls,
+    unsigned count,PilotIoCallDiagnostic receiver);
 /* Build-selected complete zero-argument helper: EAX result and RET0 only.
  * Bind only reviewed original bytes by SHA256. The retained native worker
  * runs the selected implementation while the same original CPU is stopped.

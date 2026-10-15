@@ -10,6 +10,14 @@ extern "C" {
  * This neither closes devices nor certifies original stop/reset/retirement. */
 const char *pilot_audio_device_observation_start(const char *milliseconds,
     PilotPcmCapture *pcm,PilotPcmCapture *spdif);
+/* Optional diagnostic persistence only; install before start. The callback
+ * runs at the serialized observation cutoff and must not enter guest/device
+ * services, advance time or release simulation owners. */
+const char *pilot_audio_device_observation_on_finish(const char *(*finish)(void));
+/* Optional external early cutoff. Configure a nonexistent file before start;
+ * creating it requests the same partial persistence as the duration cutoff.
+ * Checked at most every250 host ms; never supplies simulated time or success. */
+const char *pilot_audio_device_observation_stop_file(const char *path);
 #ifdef __cplusplus
 }
 #endif

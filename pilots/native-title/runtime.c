@@ -605,6 +605,9 @@ static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
 #ifdef PILOT_AUDIO_NATIVE
 #include "audio.inc"
 #endif
+#ifdef PILOT_AUDIO_DEVICE_LLE
+#include "audio_original_call_capture.inc"
+#endif
 #ifdef PILOT_INPUT_NATIVE
 #include "input.inc"
 #endif
@@ -1260,12 +1263,19 @@ int main(int argc,char **argv)
     }
     audio_error=pilot_audio_device_lle_trace_start(getenv("XLLE_PILOT_AUDIO_STAGE_TRACE"));
     if(audio_error)stop(audio_error,0xfe800000u);
+    audio_error=original_audio_call_capture_start(getenv("XLLE_PILOT_AUDIO_CALL_CAPTURE"));
+    if(audio_error)stop(audio_error,0xfe800000u);
+    audio_error=pilot_audio_device_observation_on_finish(original_audio_call_capture_finish);
+    if(audio_error)stop(audio_error,0xfe800000u);
+    audio_error=pilot_audio_device_observation_stop_file(getenv("XLLE_PILOT_ORIGINAL_CAPTURE_STOP_FILE"));
+    if(audio_error)stop(audio_error,0xfe800000u);
     audio_error=pilot_audio_device_observation_start(getenv("XLLE_PILOT_ORIGINAL_CAPTURE_MS"),
         original_pcm_capture,original_spdif_capture);
     if(audio_error)stop(audio_error,0xfe800000u);
 #endif
     scheduling_lle_run();
 #ifdef PILOT_AUDIO_DEVICE_LLE
+    audio_error=original_audio_call_capture_finish();if(audio_error)stop(audio_error,0xfe800000u);
     audio_error=pilot_audio_device_lle_close();if(audio_error)stop(audio_error,0xfe800000u);
     if(original_pcm_capture) {
         audio_error=pilot_pcm_capture_finish(original_pcm_capture,1);if(audio_error)stop(audio_error,0xfe800000u);

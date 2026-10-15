@@ -50,6 +50,73 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## Audio feedback loop and connected hotplug prefix - 2026-10-15
+
+The unchanged-binary delayed-hotplug capture finished after1806.453 host seconds
+without a runtime guard. Actual input records show connection at9 guest seconds,
+Start at10 and release at10.5. Analog and digital each contain3,562,496 bytes in
+3479 identically timed blocks, with2,520,025 nonzero bytes and zero differences
+between their common payloads. This is18.555 seconds of captured stereo PCM,
+not30 minutes of guest playback. Prior independent DSP arithmetic/source-prefix
+evidence is reused; matching the two transports does not replace that evidence.
+`build/blinx/audio-dpc-fence-20261015/title-hotplug/analysis.aot-private.json`
+retains the result. Its partial host cutoff does not establish guest teardown.
+
+The owner requested faster feedback. Existing first410s timing observations
+attribute254s inclusively to device-clock work and111s to original CPU execution;
+these categories overlap and are not an exclusive performance breakdown.
+Device work includes the actual GP/EP instruction execution. No guest-clock
+speedup, skipped DSP polling or substituted completion is admitted to shorten
+the run. The55 prior focused checks took26.54s; they remain the implementation
+feedback loop, with only affected checks rerun after a change.
+
+Captures now support an external early-stop request that persists both partial
+audio outputs and the optional API journal at the existing serialized work
+boundary. Device owners remain live; a request is never guest shutdown or a
+qualification result. The initial six affected checks passed in3.997s total,
+including persistence failure and pending ownership. A real title request
+ended after125.016s and preserved both176,128-byte streams. Early inspection
+found that a compiled-wrapper logger observed no calls: this profile executes
+audio on the original CPU. That failed measurement is retained under
+`build/blinx/audio-connected-acceptance-20261015/`; it is not acceptance.
+
+The corrected recorder uses the existing original-CPU block hook, source-bound
+entry points and thread/caller/cleaned-stack return pairing. It introduces no
+instruction hook, extra block splitting or clock opportunity. A short original
+CPU fixture executes repeated stdcall bodies with observations disabled/enabled;
+return values, original stack cleanup and guest time agree, while service reentry
+and MMIO reads remain denied. The fixture initially lacked its established
+original child-priority setup; restoring that setup resolves the unrelated
+captured storage-thread dispatch failure. Compiled audio wrapper changes were
+removed. A5s title preflight then rejected the recorder's initial20-byte argument
+limit because the actual Lock API consumes32 bytes. The bounded transport now
+supports eight argument words, and the short fixture exercises that full ABI.
+The final affected set passes9/9 checks in24.00s. An earlier positive-case20s
+wall-time limit expired during concurrent work; the same case passes in1.93s
+in the final set, with no behavioral workaround or relaxed timeout.
+The actual title recorder, PCM/SPDIF and movie-luma timing are collected
+together; verbose diagnostic tracing is disabled outside diagnosis. Inspect
+the live journal before allowing a long observation and stop once the needed
+evidence is present or a measurement blocker is found. The duration limit is
+a safety ceiling, not a required testing interval. No further full-title rerun
+is justified without a specific changed behavior or missing acceptance event.
+
+The corrected live title prefix already records31 completed original calls,
+including Play, CreateSoundBuffer, Lock/Unlock and DownloadEffectsImage, with
+both output counters advancing. Successful stop/restart/final release and a
+published fence have not yet appeared in this retained prefix. The report
+explicitly leaves those milestones false. A mutated return from another thread
+is rejected. `.113.35` closes the diagnostic feedback controls, not A05.
+`build/blinx/audio-dpc-fence-20261015/feedback-qualified-controls.aot-private.json`
+binds the retained sources, native artifacts, nine checks and actual journal
+prefix, SHA256
+`7692358eaa658490af38f3a19e9fc9afc53c71183099bfc6fce0bd1f9cf42147`.
+The continuing capture is `build/blinx/audio-connected-live32-20261015/`.
+
+Families remain6/9. A05 still needs actual connected output/timing and normal
+stop/reuse/reentry acceptance; initial-connected USB calibration remains open.
+GPU/graphics G02-G05 are unchanged. No new hardware operation or deferral.
+
 ## Original queued audio DPC and serialized FE fence - 2026-10-15
 
 The original kernel now dispatches its actual queued17838E DPC through

@@ -257,6 +257,9 @@ extern "C" void pilot_audio_device_lle_state(PilotAudioDeviceState *state) {
     }
     state->gp_quanta=owner->apu.voice_mix_quanta();state->ep_events=owner->apu.ep_frame_events();
 }
+extern "C" uint64_t pilot_audio_device_lle_fences_published(void) {
+    return owner?owner->apu.fe_fences_published():0;
+}
 extern "C" int pilot_audio_device_lle_consumer_attached(void *context) {
     return owner && owner->pcm && owner->context==context;
 }

@@ -1,6 +1,7 @@
 /* One offline shared-engine integration fixture. No files/storage initializer,
  * host input, title, renderer, playback or hardware transport is called. */
 #include <windows.h>
+#include <bcrypt.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -85,6 +86,26 @@ static void access(uint32_t address,unsigned size,uint32_t value) {
     if(error)fprintf(stderr,"access %08x: %s\n",address,error);CHECK(!error);
 }
 static const char *dummy(uint32_t,unsigned,int,uint32_t*){return nullptr;}
+static unsigned observed_entries,observed_returns;
+static uint64_t observed_id;
+static uint32_t observed_thread,observed_sp;
+static const char *observe_original_call(const PilotIoCallDiagnosticEvent *event) {
+    CHECK(event->index==0 && event->thread && event->args[0]==(event->id==1?17u:34u));
+    for(unsigned i=1;i<8;++i)CHECK(event->args[i]==42);
+    uint32_t result=0xdeadbeef,args[]={1};CHECK(pilot_io_device_lle(1,guest,args,&result));
+    CHECK(result==0xdeadbeef && pilot_io_device_diagnostic_calls_bind(nullptr,0,nullptr));
+    uint32_t canary=0xa5a5a5a5;CHECK(!pilot_io_device_diagnostic_read(0xfe800000,&canary,4,0));
+    CHECK(canary==0xa5a5a5a5);
+    if(event->kind==PILOT_IO_DIAGNOSTIC_ENTRY) {
+        CHECK(++observed_entries==event->id);observed_id=event->id;
+        observed_thread=event->thread;observed_sp=event->regs[4];
+    } else {
+        CHECK(event->kind==PILOT_IO_DIAGNOSTIC_RETURN && ++observed_returns==event->id);
+        CHECK(event->id==observed_id && event->thread==observed_thread && event->regs[4]==observed_sp+36);
+        CHECK(event->regs[0]==event->args[0]+1);
+    }
+    return nullptr;
+}
 #include "audio_device_spdif_test.inc"
 int main(int argc,char **argv) {
     CHECK(argc==3 || argc==4);const char *mode=argv[1];
@@ -112,9 +133,46 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"call-observation")) {
+        // Two real stdcall executions on an original Ps-created CPU thread.
+        // Disabled/enabled observations must leave results and time identical.
+        const uint8_t helper[]={0x8b,0x44,0x24,4,0x83,0xc0,1,0xc2,32,0};
+        std::vector<uint8_t> code={0x53};
+        auto emit_call=[&](uint8_t value) {
+            for(unsigned i=0;i<7;++i)code.insert(code.end(),{0x6a,42});
+            code.insert(code.end(),{0x6a,value});uint32_t displacement=0x12100-(0x12000+uint32_t(code.size())+5);
+            code.push_back(0xe8);for(unsigned i=0;i<4;++i)code.push_back(uint8_t(displacement>>(i*8)));
+        };
+        emit_call(17);code.insert(code.end(),{0x8b,0xd8});emit_call(34);
+        const uint8_t tail[]={0x03,0xc3,0xa3,0x24,0x90,1,0,0x5b,0xc2,4,0};code.insert(code.end(),tail,tail+sizeof(tail));
+        memcpy(guest+0x12000,code.data(),code.size());memcpy(guest+0x12100,helper,sizeof(helper));
+        pilot_io_device_thread_bind(body);CHECK(!pilot_io_device_clock_bind(clock_input,nullptr));
+        uint8_t digest[32];char hash[65];
+        CHECK(BCryptHash(BCRYPT_SHA256_ALG_HANDLE,nullptr,0,const_cast<PUCHAR>(helper),sizeof(helper),digest,32)>=0);
+        for(unsigned i=0;i<32;++i)sprintf(hash+i*2,"%02x",digest[i]);
+        PilotIoDiagnosticCall watch={0x12100,sizeof(helper),32,hash};
+        for(unsigned enabled=0;enabled<2;++enabled) {
+            if(enabled) {
+                watch.sha256="0000000000000000000000000000000000000000000000000000000000000000";
+                CHECK(pilot_io_device_diagnostic_calls_bind(&watch,1,observe_original_call));watch.sha256=hash;
+                CHECK(!pilot_io_device_diagnostic_calls_bind(&watch,1,observe_original_call));
+            }
+            word(0x19024)=0;
+            uint32_t create[]={0x19000,0,0x12000,0x19040,0};CHECK(!call(254,create));uint32_t handle=word(0x19000);
+            uint32_t ref[]={handle,0,0x19004};CHECK(!call(246,ref));uint32_t object=word(0x19004);
+            uint32_t priority[]={object,29};call(148,priority);
+            uint32_t wait[]={object,0,0,0,0};CHECK(!call(159,wait));CHECK(!call(187,&handle));call(250,&object);
+            CHECK(word(0x19024)==53 && observed_entries==enabled*2 && observed_returns==enabled*2);
+            PilotAudioDeviceState state;pilot_audio_device_lle_state(&state);CHECK(state.clock_ticks==60000);
+        }
+        CHECK(!pilot_io_device_diagnostic_calls_bind(nullptr,0,nullptr));
+        CHECK(!pilot_io_device_clock_bind(nullptr,nullptr));CHECK(!pilot_audio_device_lle_close());
+        puts("PASS repeated original CPU stdcall observations preserve return values, thread/stack cleanup, time and denied reentry");return 0;
+    }
     if(!strcmp(mode,"fence") || !strcmp(mode,"fence-pending-owner")) {
         for(unsigned life=0;life<3;++life) {
             if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            CHECK(!pilot_audio_device_lle_fences_published());
             uint32_t bytes=4096,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
             memset(guest+va,0xa5,bytes);
             const uint32_t token=0x11223344+life;
@@ -122,6 +180,7 @@ int main(int argc,char **argv) {
             for(unsigned n=0;n<8;++n) {
                 uint32_t control=0;CHECK(!pilot_audio_device_lle_access(0xfe801510,4,0,&control) && control==1);
                 CHECK(!pilot_audio_device_lle_sample() && word(va)==0xa5a5a5a5);
+                CHECK(!pilot_audio_device_lle_fences_published());
             }
             if(!strcmp(mode,"fence-pending-owner")) {
                 const char *error=pilot_audio_device_lle_close();CHECK(error && strstr(error,"FE fence publication"));
@@ -132,7 +191,9 @@ int main(int argc,char **argv) {
             }
             CHECK(!pilot_usb_pit_time(++ticks));CHECK(!pilot_audio_device_lle_sample());
             CHECK(word(va)==token && word(va+4)==0xa5a5a5a5);
+            CHECK(pilot_audio_device_lle_fences_published()==1);
             access(0xfe801510,4,0);CHECK(!pilot_audio_device_lle_close());call(171,&va);
+            CHECK(!pilot_audio_device_lle_fences_published());
         }
         puts("PASS three native FE token lifetimes: real clock publication, passive polls and original free after close");return 0;
     }

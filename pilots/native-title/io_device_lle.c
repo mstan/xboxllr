@@ -593,10 +593,13 @@ static void interrupt(uc_engine *engine,uint32_t number,void *data)
 }
 #include "io_thread_lle.inc"
 #include "io_diagnostic_lle.inc"
+#include "io_call_diagnostic_lle.inc"
 static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *data)
 {
     (void)size;(void)data;
     if(original_diagnostic.receiver)diagnostic_block(engine,(uint32_t)address);
+    if(original_call_diagnostic.receiver)diagnostic_calls_block(engine,(uint32_t)address);
+    if(failure)return;
     if(cpu_running && mapped_count>=ALIAS_TRIM_AT) {
         alias_trim_pending=1;uc_emu_stop(engine);return;
     }

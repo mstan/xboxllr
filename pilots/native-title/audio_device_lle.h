@@ -40,6 +40,7 @@ typedef struct PilotAudioDeviceState {
     uint64_t spdif_words,spdif_descriptors;
 } PilotAudioDeviceState;
 void pilot_audio_device_lle_state(PilotAudioDeviceState *state);
+uint64_t pilot_audio_device_lle_fences_published(void);
 /* Passive lifetime check; no locking, services, clock input or device work. */
 int pilot_audio_device_lle_consumer_attached(void *context);
 int pilot_audio_device_lle_spdif_consumer_attached(void *context);

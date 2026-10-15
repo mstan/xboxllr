@@ -1,5 +1,29 @@
 # Bounded original audio contract
 
+Feedback policy,2026-10-15: use focused original-driver/device checks for changes,
+then a connected capture with live inspection of the exact remaining events.
+The last1806s title capture produced18.555s of actual audio; LLE speed is not an
+acceptance requirement, but blind long observation intervals are unnecessary.
+Unchanged HLE and independent component evidence remain reusable.
+
+`XLLE_PILOT_AUDIO_CALL_CAPTURE` optionally records source-bound original CPU API
+entry/return, caller arguments, successful output parameters and passive device
+counters as JSONL. It uses the existing block hook; no original API is replaced.
+`tools/native_audio_call_report.py JOURNAL --live` checks entry/return pairing
+and reports observed lifecycle milestones. Its candidate flag requests review,
+not acceptance; output/timing/ownership still need their corresponding evidence.
+The earlier compiled-wrapper observer missed this raw-CPU scheduling selection
+and was removed after a125s diagnostic check, before a long rerun.
+
+`XLLE_PILOT_ORIGINAL_CAPTURE_STOP_FILE` names a file that must not exist at
+startup. Creating it requests the same partial persistence as the host duration
+limit, at a serialized work boundary. The observer checks at most every250 host
+ms, keeps device owners and guest time intact, finalizes both audio streams and
+the call journal, and exits. Neither a request nor a duration cutoff proves
+guest teardown. Keep `XLLE_PILOT_ORIGINAL_CAPTURE_MS` as a safety ceiling; inspect
+the live evidence early and stop at the required outcome or first blocker.
+Record movie luma/present timing in the same acceptance run when needed.
+
 Latest A04 closure,2026-10-15: the original kernel dispatches its actual queued
 audio DPC through the FE fence and voice completion consumer. Four cases pass:
 mono/stereo completion, explicit stop and withheld service retaining the page

@@ -18,7 +18,16 @@ also closes; the audio family still requires original device startup/output.
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies | Audio connected A05; A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 34 retained IDs; 33 contain deferred scope, including additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
-Latest audio milestone: `.115` closes for supported serialized FE work. The
+Latest feedback milestone: the real hotplug/Start capture finishes without a
+guard;3479 analog/digital blocks contain3,562,496 identical payload bytes per
+stream. The1806s host run represents18.555s of audio. It does not close connected
+lifecycle/timing. The owner requested shorter feedback loops: affected fixture
+checks take seconds, and live API observations plus cooperative early capture
+finalization replace blind fixed-duration title runs. An early125s check caught
+and retained an incorrect compiled-wrapper observer; recording now targets the
+actual original CPU. See the current closing checklist for scope and evidence.
+
+Prior audio milestone: `.115` closes for supported serialized FE work. The
 original kernel now executes its queued DPC, actual device token publication
 and completion consumer; four original cases pass, including retained ownership
 after the original timeout. All55 affected native/device checks pass. A04's
