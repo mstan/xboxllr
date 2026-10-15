@@ -16,7 +16,18 @@ also closes; the audio family still requires original device startup/output.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A04/A05, with A03 drained reset/reentry component complete; GPU/graphics G02-G05 | 34 retained IDs; 33 contain deferred scope, including additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio connected A05; A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 34 retained IDs; 33 contain deferred scope, including additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+
+Latest audio milestone: `.115` closes for supported serialized FE work. The
+original kernel now executes its queued DPC, actual device token publication
+and completion consumer; four original cases pass, including retained ownership
+after the original timeout. All55 affected native/device checks pass. A04's
+isolated ordering/retirement components are complete. A05's actual connected
+output/timing and normal stop/reuse/reentry remain; a changed muted title check
+is prepared, with no result claimed yet. This reuses prior physical token and
+HLE output/ownership evidence; arbitrary queued work and exact latency remain
+guarded or deferred. See the latest section of the closing checklist. The
+following dated checkpoints retain their earlier remaining-work descriptions.
 
 The configured-reset model now admits original drained GP/EP retirement and
 reentry on the same CPU/RAM owners. Three original driver configurations each

@@ -112,6 +112,30 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"fence") || !strcmp(mode,"fence-pending-owner")) {
+        for(unsigned life=0;life<3;++life) {
+            if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            uint32_t bytes=4096,va=call(165,&bytes),pa=call(173,&va);CHECK(va && pa);
+            memset(guest+va,0xa5,bytes);
+            const uint32_t token=0x11223344+life;
+            access(0xfe801510,4,1);access(0xfe801324,4,pa);access(0xfe801334,4,token);
+            for(unsigned n=0;n<8;++n) {
+                uint32_t control=0;CHECK(!pilot_audio_device_lle_access(0xfe801510,4,0,&control) && control==1);
+                CHECK(!pilot_audio_device_lle_sample() && word(va)==0xa5a5a5a5);
+            }
+            if(!strcmp(mode,"fence-pending-owner")) {
+                const char *error=pilot_audio_device_lle_close();CHECK(error && strstr(error,"FE fence publication"));
+                PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+                CHECK(s.owned && s.work_binding && s.apu_mapping && s.aci_mapping && !s.dma_writes);
+                CHECK(word(va)==0xa5a5a5a5); // The original page remains owned; no free follows.
+                puts("PASS pending FE token retains native device and original allocation");return 0;
+            }
+            CHECK(!pilot_usb_pit_time(++ticks));CHECK(!pilot_audio_device_lle_sample());
+            CHECK(word(va)==token && word(va+4)==0xa5a5a5a5);
+            access(0xfe801510,4,0);CHECK(!pilot_audio_device_lle_close());call(171,&va);
+        }
+        puts("PASS three native FE token lifetimes: real clock publication, passive polls and original free after close");return 0;
+    }
     if(!strcmp(mode,"headroom") || !strcmp(mode,"headroom-read")) {
         access(0xfe820280,4,0);
         for(unsigned slot=0;slot<32;++slot)access(0xfe820200+slot*4,4,slot&7);
@@ -456,7 +480,7 @@ int main(int argc,char **argv) {
         puts("PASS accepted held retirement permits device close and original allocation free");return 0;
     }
     if(!strcmp(mode,"startup-active")) {
-        access(0xfe802000,4,15);
+        access(0xfe802000,4,23); // Mode2 is outside the ordinary mode1 fence profile.
         uint32_t value=0xa5a55a5a;
         const char *error=pilot_audio_device_lle_access(0xfe801510,4,0,&value);CHECK(error);CHECK(value==0xa5a55a5a);
         const std::string first=error;
@@ -466,7 +490,7 @@ int main(int argc,char **argv) {
         PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
         CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words);
         CHECK(!pilot_audio_device_lle_close());
-        puts("PASS active admission rejects FE control read; failed read preserves caller value");return 0;
+        puts("PASS unqualified setup mode rejects FE control read; failed read preserves caller value");return 0;
     }
     if(!strcmp(mode,"startup") || !strcmp(mode,"startup-width")) {
         uint32_t value=0xa5a5a5a5;

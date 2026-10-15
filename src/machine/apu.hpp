@@ -428,7 +428,7 @@ public:
     // Explicit pinned-kernel application handoff, separate from board reset
     // and the captured FE notification experiment. Original init/retirement
     // establishes SECTL/IEN; retained physical idle control is exactly1.
-    // The control bit may be read/toggled only with stopped, drained work.
+    // Later control/fence admission checks the current serialized work state.
     bool initialize_kernel_audio_handoff() {
         if(faulted_)return false;
         if(fe_state_used_ || frame_clock_primed_ || frame_ || voice_mix_quanta_ || !fe_work_idle()) {
@@ -486,7 +486,7 @@ public:
         if(faulted_)return false;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return false;}
         if(!fe_fence_pending_)return true;
-        if(!fe_context_idle()) {device_fault("FE fence outstanding work remains unqualified");return false;}
+        if(!fe_fence_context()) {device_fault("FE fence overlaps unresolved front-end work");return false;}
         fe_fence_working_=true;
         const uint32_t token=reg32(kFememdata);
         const uint8_t raw[4]={uint8_t(token),uint8_t(token>>8),uint8_t(token>>16),uint8_t(token>>24)};
@@ -588,7 +588,7 @@ public:
         if(ApuDspHostRegisters::touches(off,size))return dsp_host_read(off,size);
         if(touches_fe_fence(off,size)) {
             if(off==kFeFenceControl && size==4 &&
-               (audio_control_drained() || retirement_control_accessible() || fe_context_idle()))return reg32(off);
+               (audio_control_drained() || retirement_control_accessible() || fe_fence_context()))return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
         }
         if(off>=0x30000 && off<0x40000) {
@@ -708,7 +708,7 @@ public:
                 set_reg32(off,value);return;
             }
             if(size==4 && (off==kFeFenceControl || off==kFememaddr || off==kFememdata) &&
-               fe_context_idle()) {
+               fe_fence_context()) {
                 if(off==kFeFenceControl && value<=1) {set_reg32(off,value);return;}
                 if(off==kFememaddr && !fe_fence_pending_ && !(value&3) && value<=0x03fffffc) {
                     set_reg32(off,value);fe_address_known_=true;return;
@@ -824,7 +824,8 @@ public:
             value&=~0x78000u;
             const bool idle_mode=(value&kFectlMethodMode)==0 || (value&kFectlMethodMode)==0x80;
             const bool preserves=fectl_initialized_ && idle_mode &&
-                ((value^reg32(kFectl))&~kFectlMethodMode)==0;
+                ((value^reg32(kFectl))&~(kFectlMethodMode|
+                    (releases_method_trap?kFectlTrapReason:0)))==0;
             fectl_initialized_=value==0x88 || value==8 || value==0x100f || preserves;
         }
         RegFileMmio::mmio_write(addr, size, value);
@@ -842,7 +843,7 @@ public:
 private:
     bool process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,bool& completed,bool retire);
     uint64_t voice_mix_quanta_=0;
-    bool processing_quantum_=false;
+    bool processing_quantum_=false,processing_voice_=false;
     bool configure_ssl(uint32_t method,uint32_t value) {
         if(method==0x190) {
             if(!ssl_.select(value))device_fault("SSL staging window remains unqualified");
@@ -1162,7 +1163,7 @@ private:
     bool audio_transfers_drained()const {
         return dsp_reset_context_known_ && fectl_initialized_ &&
                !(reg32(kSectl)&0x18) && !(reg32(kIsts)&kIstsFet) &&
-               !processing_quantum_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
+               !processing_quantum_ && !processing_voice_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
                !gp_frame_outstanding() && !dsp_work_active() && !dsp_work_pending(ApuDspKind::Gp) &&
                !(ep_frame_status_&2u) &&
                !dsp_work_pending(ApuDspKind::Ep) && !fe_fence_pending_ && !fe_fence_working_;
@@ -1186,9 +1187,11 @@ private:
     }
     bool fe_status_observable()const {
         const uint32_t setup=reg32(kSectl);
+        // The original ISR must read the trap produced by our own setup
+        // engine before it can unlink the voice and release that trap. This
+        // status read does not admit a fence or retire the pending interrupt.
         return dsp_reset_context_known_ && fectl_initialized_ && (setup==7 || setup==15) &&
-               !(reg32(kIsts)&kIstsFet) &&
-               !processing_quantum_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
+               !processing_quantum_ && !processing_voice_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
                !fe_fence_pending_ && !fe_fence_working_;
     }
     static bool touches_retirement_method(uint32_t off,int size) {
@@ -1198,7 +1201,7 @@ private:
     }
     void retirement_method(uint32_t off,int size,uint32_t value) {
         if(size!=4 || (off!=0x20104 && off!=0x2010c) ||
-           !fe_status_observable() || (reg32(kFectl)&kFectlMethodMode) ||
+           !fe_status_observable() || (reg32(kIsts)&kIstsFet) || (reg32(kFectl)&kFectlMethodMode) ||
            reg32(kFeFenceControl)!=0 || retirement_notify_pending_) {
             device_fault("FE retirement method context/width remains unqualified");return;
         }
@@ -1228,7 +1231,7 @@ private:
         fe_context_known_=false;kernel_audio_startup_=false;fe_state_used_=true;
     }
     bool fe_work_idle()const {
-        return !processing_quantum_ && !gp_mix_admitting_ && !gp_frame_outstanding() &&
+        return !processing_quantum_ && !processing_voice_ && !gp_mix_admitting_ && !gp_frame_outstanding() &&
                !dsp_work_active() && !gp_dma_.work_pending() && !dsp_work_pending(ApuDspKind::Ep) &&
                !gp_program_owner_ && !gp_frame_owner_ && !ep_program_owner_ &&
                !gp_program_revision_ && !ep_program_revision_ &&
@@ -1237,6 +1240,21 @@ private:
     bool fe_context_idle()const {
         return fe_context_known_ && reg32(kFectl)==kObservedIdleFectl &&
                reg32(kSectl)==kObservedIdleSectl && fe_work_idle();
+    }
+    bool fe_fence_context()const {
+        if(fe_context_idle())return true;
+        // Original177E53 fences before dispatching completed voices. Supported
+        // FE methods and VP source/notification writes finish on this serialized
+        // owner before CPU MMIO can submit a token. A historical frame or a bound
+        // DSP CPU is not outstanding FE work. GP/EP consume their separate MIX/
+        // scratch owners; this fence neither completes nor retires those CPUs.
+        // Held/queued methods and retirement NOTIFY are separate, guarded work.
+        const uint32_t setup=reg32(kSectl),mode=reg32(kFectl)&kFectlMethodMode;
+        return dsp_reset_context_known_ && fectl_initialized_ &&
+               (setup==7 || setup==15) && (mode==0 || mode==0x80) &&
+               !(reg32(kIsts)&kIstsFet) && !retirement_notify_pending_ &&
+               !processing_quantum_ && !processing_voice_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
+               !dsp_work_active() && !fe_fence_working_;
     }
     static bool touches_fe_fence(uint32_t off,int size) {
         if(size<=0 || off>=kFeFenceControl+4)return false;

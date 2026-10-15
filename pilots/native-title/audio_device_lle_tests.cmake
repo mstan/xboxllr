@@ -6,7 +6,7 @@ target_include_directories(pilot_audio_stage_trace_test PRIVATE ../../src)
 target_compile_features(pilot_audio_stage_trace_test PRIVATE cxx_std_17)
 target_compile_definitions(pilot_audio_stage_trace_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX PILOT_AUDIO_TRACE_TEST)
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/audio-capture-private")
-foreach(case positive startup startup-width startup-active retirement-owner retirement-held startup-mappings startup-methods host-controls codec-startup counter counter-unknown configuration reset-bootstrap reset-clock reset-clock-active clock-active unknown unknown-read gap absent reject paused rollback invalid engine-fault capture-full capture-stamps capture-failed capture-closed capture-engine capture-rollback capture-catchup)
+foreach(case positive startup startup-width startup-active fence fence-pending-owner retirement-owner retirement-held startup-mappings startup-methods host-controls codec-startup counter counter-unknown configuration reset-bootstrap reset-clock reset-clock-active clock-active unknown unknown-read gap absent reject paused rollback invalid engine-fault capture-full capture-stamps capture-failed capture-closed capture-engine capture-rollback capture-catchup)
   pilot_add_test(NAME pilot_audio_device_${case} COMMAND pilot_audio_device_lle_test
     "${case}" "${PILOT_IO_DEVICE_SNAPSHOT}" "${CMAKE_CURRENT_BINARY_DIR}/audio-capture-private")
   set_tests_properties(pilot_audio_device_${case} PROPERTIES TIMEOUT 20)

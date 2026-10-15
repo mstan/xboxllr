@@ -50,6 +50,45 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## Original queued audio DPC and serialized FE fence - 2026-10-15
+
+The original kernel now dispatches its actual queued17838E DPC through
+177E53/177DF0 and the voice completion consumer. Mono/stereo natural completion,
+explicit stop and a withheld-service timeout case pass. The CPU writes only its
+complement sentinel; real device service writes the token to the original owned
+page. The timeout case returns without publication and retains that page until
+later service. All four cases restore original allocation statistics.
+
+Admission composes the retained independent physical token observation with the
+original consumer/control instructions and supported FE/VP methods that finish
+synchronously on the sole device owner. Their source, MIX and notification writes
+precede submission. A subsequent advancing device tick publishes the token;
+repeated reads or an unchanged tick do not. Independent GP/EP computation on
+separate MIX/scratch owners is neither completed nor retired by this fence.
+This is a functional composition, not a new hardware measurement of arbitrary
+active queues or silicon latency. Held/queued unknown methods, pending retirement
+NOTIFY, unresolved traps and work reentry remain guarded. The original ISR can
+read and release its own trap without losing the established device profile.
+
+All55 affected native/device checks pass, including real preceding SGE writes,
+source/publication failures, device-clock service, three native owner lifetimes
+and pending-page retention on rejected close. The final original fixture passes
+4/4 after correcting an assertion placed in its pre-DPC branch; the failed script
+result is retained. Default HLE processing and its accepted finite-output,
+completion and ownership comparisons are unchanged and reused.
+
+This closes the bounded FE fence/control component `.115` and completes isolated
+A04 acceptance alongside the prior original timeout retirement/reentry evidence.
+A05 still requires connected title output/timing and normal stop/reuse/reentry;
+the family count remains6/9. One changed muted title check uses real controller
+Start/release at10/10.5 guest seconds since first poll. Its host observation
+cutoff cannot substitute for guest teardown; no result is claimed here.
+
+Private proof `build/blinx/audio-dpc-fence-20261015/qualified-component.aot-private.json`
+binds28 source/binary/report/prior-evidence identities, SHA256
+`d51c2cc5d5173de851c31708402506fb43daeb09b4035982938a59abcbb0c644`.
+No Xbox operation or additional precision matrix was needed.
+
 ## Analog cyclic output and original codec retirement - 2026-10-15
 
 Independent physical one-node4096-word and two-node1024/2048-word analog
@@ -293,7 +332,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Original timeout retirement/reentry component complete for all3 configurations; DPC memory fence and connected composition remain | `.115` | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
+| A04 | Component complete: all3 original timeout retirement/reentry configurations and actual queued DPC/FEMEM completion pass; connected acceptance remains A05 | `.115` complete | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
 | A05 | Analog cyclic hardware/model and original codec lifecycle pass; captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; complete connected output/timing/retirement remain | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits

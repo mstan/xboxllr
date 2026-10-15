@@ -1,5 +1,19 @@
 # Bounded original audio contract
 
+Latest A04 closure,2026-10-15: the original kernel dispatches its actual queued
+audio DPC through the FE fence and voice completion consumer. Four cases pass:
+mono/stereo completion, explicit stop and withheld service retaining the page
+until later real publication. All55 affected native/device checks pass. The
+device orders supported prior synchronous FE/VP writes before the token and
+publishes it only through advancing device service; it does not complete
+independent GP/EP computation. Pending ownership and failure guards remain.
+This composes retained physical token evidence with original instructions and
+serialized method behavior; it is not new arbitrary-active-queue hardware proof.
+Issue `.115` closes. Connected output/timing/normal lifecycle A05 remains open;
+overall6/9. Default HLE evidence is unchanged and reused. See
+[the current milestone](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-queued-audio-dpc-and-serialized-fe-fence---2026-10-15).
+Earlier checkpoints below retain their historical remaining-work descriptions.
+
 Latest A05 component,2026-10-15: physical one/two-node analog rings repeat past
 LVI; pause preserves the descriptor and reset retires it. The maintained model
 now follows that behavior. All51 affected native/device checks and three

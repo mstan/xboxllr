@@ -3,8 +3,9 @@
 
 Uses owned hash-bound XBE and initialized kernel RAM. Preallocated buffer/driver
 state bounds this to control/completion, not complete APU initialization or title
-audio. The DPC's uncertain FE fence remains guarded; --barrier-audit reproduces
-that boundary. No original callee, notifier or interrupt result is replaced.
+audio. --complete-dpc executes the queued callback using explicit device service
+and initialized-kernel FE state. --barrier-audit retains the unknown cold-profile
+guard. No original callee, notifier or interrupt result is replaced.
 """
 import argparse
 import ctypes as c
@@ -159,7 +160,13 @@ class AudioReference(DisplayReference):
             self.stop('notifier payload outside qualified status contract');return
         self.notifier_accesses.append((access,address-self.notifier,size))
 
-    def setup(self,channels):
+    def setup(self,channels,complete_dpc=False):
+        if complete_dpc:
+            for name in ('kernel_handoff','service_fe_fence'):
+                function=getattr(self.hardware.dll,'xlle_apu_reference_'+name)
+                function.restype,function.argtypes=c.c_int,[c.c_void_p]
+                self.hardware.functions[name]=function
+            assert self.hardware.call('kernel_handoff')==1
         self.baseline_statistics=self.statistics()
         self.voice_table,voice_pa=self.allocate(0x8000)
         notify_table,notify_pa=self.allocate(0x5000)
@@ -190,7 +197,10 @@ class AudioReference(DisplayReference):
         self.vector=vector;irql=self.cpu.mem_read(0x10000400,1)[0]
         assert vector==0x35
         self.call(109,INTERRUPT,ENTRIES['isr'],DEVICE,vector,irql,0,1);self.connect()
-        self.write(0x1504,1<<15);self.write(0x2000,8);self.write(0x1004,0x71)
+        if complete_dpc:
+            self.original('fe_control',0,context=DEVICE+8)
+            self.write(0x1100,0x100f)
+        self.write(0x1504,1<<15);self.write(0x2000,15 if complete_dpc else 8);self.write(0x1004,0x71)
         self.original('start')
 
     def statistics(self):
@@ -218,8 +228,8 @@ class AudioReference(DisplayReference):
         assert self.cpu.reg_read(UC_X86_REG_ESP)==STACK and self.cpu.reg_read(UC_X86_REG_EFLAGS)==0x202
         assert self.word(0x8003da60)&255==2
 
-    def qualify(self,channels,scenario,barrier_audit=False):
-        self.setup(channels)
+    def qualify(self,channels,scenario,barrier_audit=False,complete_dpc=False,service_period=64):
+        self.setup(channels,complete_dpc)
         if scenario=='disconnected':self.disconnect()
         if scenario=='masked':self.write(0x1004,0)
         self.irql(2)
@@ -261,10 +271,53 @@ class AudioReference(DisplayReference):
         pending=dict(flags=int.from_bytes(self.cpu.mem_read(OBJECT+0x12,2),'little'),
                      software_status=self.cpu.mem_read(self.notifier+63,1)[0],
                      source_cursor=self.get(self.voice_table+VOICE*128+0x58)&0xffffff)
-        if barrier_audit:self.irql(0) # Deliberately reaches the strict unresolved guard.
-        # Explicit fixture teardown cancels real queued work before freeing its
-        # inputs. Cancellation does not claim that deferred completion ran.
-        assert self.call(self.ordinals[0x189ffc],DEVICE+0x768)&255
+        fence_result=None
+        if complete_dpc:
+            instructions=0;publications=[];cpu_writes=[];servicing=False
+            token=(self.get(0x17ddbc)+1)&0xffffffff
+            def record_write(cpu,access,address,size,value,data):
+                if servicing:cpu_writes.append([address-self.fence,size,value])
+            def service(cpu,address,size,data):
+                nonlocal instructions
+                if not servicing:return
+                instructions+=1
+                if not service_period or instructions%service_period:return
+                try:
+                    before=self.get(self.fence)
+                    assert self.hardware.call('service_fe_fence')==1
+                    after=self.get(self.fence)
+                    if before!=after:publications.append(dict(instruction=instructions,before=before,after=after))
+                except Exception as error:self.stop(str(error))
+            self.cpu.hook_add(UC_HOOK_MEM_WRITE,record_write,None,self.fence,self.fence+4095)
+            self.cpu.hook_add(UC_HOOK_CODE,service)
+            servicing=True
+            self.irql(0) # Actual kernel dispatches its queued original DPC.
+            servicing=False
+            assert self.executed['dpc']==1 and self.executed['fence']==1
+            assert self.executed['completion']==int(scenario!='command-stop')
+            assert cpu_writes==[[0,4,(~token)&0xffffffff]],cpu_writes
+            if service_period:
+                assert self.get(self.fence)==token and len(publications)==1
+            else:
+                # The original timeout can return without the token. Keep its
+                # page owned until actual later service, never call that pass.
+                assert not publications and self.get(self.fence)==((~token)&0xffffffff)
+                assert self.hardware.call('service_fe_fence')==1 and self.get(self.fence)==token
+            assert self.get(DEVICE+0x740)==DEVICE+0x740
+            completion_flags=int.from_bytes(self.cpu.mem_read(OBJECT+0x12,2),'little')
+            completion_status=self.cpu.mem_read(self.notifier+63,1)[0]
+            assert completion_flags==1
+            if scenario!='command-stop':assert completion_status==0x80
+            assert self.cpu.mem_read(self.fence+4,4092)==bytes(4092)
+            fence_result=dict(service_period=service_period,instructions=instructions,token=token,
+                cpu_writes=cpu_writes,publications=publications,
+                completion_flags=completion_flags,completion_status=completion_status,
+                original_dpc_executed=True,token_observed_before_return=bool(service_period),
+                late_publication_before_free=not bool(service_period))
+        else:
+            if barrier_audit:self.irql(0) # Reproduce the unknown cold-profile guard.
+            # Old IRQ-only fixture explicitly cancels work; it claims no DPC.
+            assert self.call(self.ordinals[0x189ffc],DEVICE+0x768)&255
         assert not self.call(self.ordinals[0x189ffc],DEVICE+0x768)&255
         self.irql(0)
         self.hardware.call('frame',2)
@@ -274,7 +327,8 @@ class AudioReference(DisplayReference):
         for allocation in reversed(self.allocations):self.call(171,allocation)
         assert self.statistics()==self.baseline_statistics
         return dict(channels=channels,scenario=scenario,output_frames_before_irq=total,deliveries=deliveries,
-                    executed=self.executed,pending=pending,original_dpc_cancelled_for_teardown=True,
+                    executed=self.executed,pending=pending,original_dpc_cancelled_for_teardown=not complete_dpc,
+                    fence=fence_result,
                     allocation_statistics_restored=True,notifier_accesses=self.notifier_accesses)
 
 
@@ -282,6 +336,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('xbe','snapshot','library','output'):parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--barrier-audit',action='store_true')
+    parser.add_argument('--complete-dpc',action='store_true')
     args=parser.parse_args()
     result=dict(xbe_sha256=IMAGE,snapshot_sha256=SNAPSHOT_SHA,
         library_sha256=hashlib.sha256(args.library.read_bytes()).hexdigest(),cases=[],error=None,
@@ -289,10 +344,15 @@ def main():
     scenarios=('combined','notification-before-frame','masked','disconnected','command-stop')
     configurations=[(channels,scenario) for channels in (1,2) for scenario in scenarios for _ in range(3)]
     if args.barrier_audit:configurations=configurations[:1]
-    for channels,scenario in configurations:
+    if args.complete_dpc:
+        assert not args.barrier_audit
+        configurations=[(1,'combined'),(2,'combined'),(2,'command-stop'),(1,'combined')]
+        result['scope']='Original IRQ/PIC/kernel queue/DPC/completion with owned source and actual FE token service; explicit initialized-kernel device profile and instruction service boundaries. No full title or hardware timing claim.'
+    for case,(channels,scenario) in enumerate(configurations):
         ref=None
         try:
-            ref=AudioReference(args);result['cases'].append(ref.qualify(channels,scenario,args.barrier_audit))
+            ref=AudioReference(args);result['cases'].append(ref.qualify(channels,scenario,args.barrier_audit,
+                args.complete_dpc,0 if args.complete_dpc and case==3 else 64))
         except Exception as error:
             result.update(error=f'{type(error).__name__}: {error}',traceback=traceback.format_exc())
             if ref is not None:result['stopped_pc']=hex(ref.cpu.reg_read(UC_X86_REG_EIP))

@@ -38,6 +38,10 @@ public:
         // interleave, not an assertion of silicon instruction/bus simultaneity.
         while(ticks()<target) {
             if(!dsp_.advance(ticks()+1))return fail("audio device DSP execution failed");
+            // Prior synchronous FE/VP publications precede this queued RAM
+            // token. Service comes from advancing the sole device clock, not
+            // from CPU/MMIO polls or a fabricated DSP/voice completion.
+            if(!apu_.service_fe_fence())return fail("audio device FE fence publication failed");
             aci_.set_time(ticks(),frequency_);
             if(!check_devices())return false;
             const uint64_t next=quantum_at(ticks());

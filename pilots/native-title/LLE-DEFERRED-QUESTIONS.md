@@ -109,6 +109,18 @@ unnecessary for this isolated stopped-codec component, but full-profile deferral
 still awaits A05 output acceptance. No new hardware measurement or deferred
 scope is claimed; the separate DPC FEMEM consumer remains required.
 
+AUDIO-D14 follow-up,2026-10-15: the separate original queued DPC/FEMEM consumer
+now passes four representative cases against actual device publication. Supported
+prior FE/VP work finishes synchronously before token submission; advancing sole
+device service publishes it. The withheld-service case retains ownership until
+later publication, and source/DMA/reentry/native-close failures remain guarded.
+This closes `.115`'s bounded functional component using retained physical token
+evidence and original consumer instructions. Arbitrary held/queued work and exact
+silicon latency are not newly qualified. Reopen only for a reached consumer that
+needs such ordering, exposes a stale token or premature release, or supports wider
+recovery. Connected A05 output/timing/lifecycle remains mandatory; the34 retained
+IDs/33 deferred scopes and overall6/9 family count are unchanged.
+
 Initial FP values no longer need a console query. Original/native callback state
 transport and the scheduling idle/compute clock path were required integration
 work, not deferrals. They are now covered by completed Q01-Q03 in the closing

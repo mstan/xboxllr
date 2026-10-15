@@ -80,6 +80,24 @@ struct Fixture {
     }
 };
 
+static void clocked_fence() {
+    Fixture f;f.configure();f.reg(0x1100,0x100f);f.reg(0x1510,0);f.reg(0x2000,15);
+    // Admit a real GP/EP frame. The fence orders completed FE/VP accesses,
+    // not the unrelated DSP computations on their own scratch/MIX owners.
+    CHECK(f.clock->advance(66000) && f.apu.gp_frame_outstanding());
+    const auto ep_events=f.apu.ep_frame_events(),mix=f.apu.voice_mix_quanta();
+    f.word(0x9000,0xa5a5a5a5);f.reg(0x1510,1);f.reg(0x1324,0x9000);f.reg(0x1334,0x12345678);
+    const auto writes=f.writes;
+    CHECK(f.error.empty() && f.apu.fe_fence_pending());
+    for(unsigned n=0;n<16;++n)CHECK(f.apu.mmio_read(f.apu.kBase+0x1510,4)==1);
+    CHECK(f.clock->advance(66000) && f.writes==writes);
+    CHECK(f.clock->advance(66001) && f.writes==writes+1 && f.apu.fe_fences_published()==1);
+    uint32_t token=0;std::memcpy(&token,f.ram.data()+0x9000,4);CHECK(token==0x12345678);
+    CHECK(!f.apu.fe_fence_pending() && f.apu.ep_frame_events()==ep_events && f.apu.voice_mix_quanta()==mix);
+    CHECK(f.clock->advance(66001) && f.writes==writes+1);
+    f.reg(0x1510,0);CHECK(f.error.empty());
+}
+
 static void stopped_epoch() {
     Fixture f;
     for(unsigned offset=0x2054;offset<=0x2074;offset+=4)
@@ -250,6 +268,6 @@ static void retirement_timeout() {
     }
 }
 int main() {
-    stopped_epoch();partitioned_active_output();admission_and_failure();runtime_input_sge();drained_control();retirement_timeout();
+    stopped_epoch();clocked_fence();partitioned_active_output();admission_and_failure();runtime_input_sge();drained_control();retirement_timeout();
     puts("PASS authored shared audio timeline: epoch, actual GP/EP events, partition-independent PCM bytes/stamps and failure retention");
 }

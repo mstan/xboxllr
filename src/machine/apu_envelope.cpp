@@ -122,6 +122,9 @@ bool McpxApu::process_2d_voice(uint16_t voice,float* bins,uint32_t& count,bool& 
 bool McpxApu::process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,bool& completed,bool retire) {
     count=0;completed=false;
     if(faulted_)return false;
+    if(processing_voice_) {device_fault("recursive voice processing");return false;}
+    processing_voice_=true;
+    struct Scope {bool& active;~Scope(){active=false;}} scope{processing_voice_};
     if(voice<64 || voice>=kMaxVoices || !bins) {
         device_fault("invalid 2D processing voice/output");return false;
     }

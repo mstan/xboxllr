@@ -11,6 +11,7 @@ struct Fixture {
     std::string error;
     std::vector<uint8_t> ram=std::vector<uint8_t>(65536,0xa5);
     unsigned writes=0,irq_edges=0;
+    std::vector<uint32_t> written_addresses;
     bool reject=false,reenter=false;
     std::unique_ptr<xlle::McpxApu> device=std::make_unique<xlle::McpxApu>(
         [this](const std::string& why){error=why;});
@@ -24,6 +25,7 @@ struct Fixture {
             if(reenter){CHECK(!apu.service_fe_fence());return false;}
             if(reject || uint64_t(a)+n>ram.size())return false;
             CHECK(n==4 && !(a&3));
+            written_addresses.push_back(a);
             std::memcpy(ram.data()+a,p,n);return true;
         });
         apu.set_irq([this](int line,bool){CHECK(line==5);++irq_edges;});
@@ -35,7 +37,7 @@ struct Fixture {
 };
 }
 int main() {
-    // Initialized-kernel controls remain distinct from notification admission.
+    // Control access does not itself submit or complete a memory token.
     // Merely binding two unused CPU owners does not fabricate active work.
     for(unsigned life=0;life<3;++life) {
         Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
@@ -53,11 +55,11 @@ int main() {
     for(uint32_t field:{0x1324u,0x1334u})for(bool output:{false,true}) {
         Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());const auto before=f.ram;
         if(output)f.write(field,4096);else CHECK(f.read(field)==0);
-        CHECK(!f.error.empty() && f.ram==before && !f.writes && !f.irq_edges);
+        CHECK((f.error.empty()==(output && field==0x1324)) && f.ram==before && !f.writes && !f.irq_edges);
         CHECK(!f.apu.fe_fence_pending() && !f.apu.fe_fences_published());
     }
-    // Drained control access can follow real processing history. Restoring
-    // registers still cannot grant the independently required RAM fence.
+    // Prior use alone is not pending work. Explicit service must still publish
+    // the token; register writes and repeated reads cannot complete it.
     for(unsigned kind=0;kind<8;++kind) {
         Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
         switch(kind) {
@@ -71,8 +73,34 @@ int main() {
         case 7:f.write(0x1100,0xe0);f.write(0x1100,0x88);break;
         }
         CHECK(f.error.empty());const auto before=f.ram;
-        f.write(0x1324,4096);
-        CHECK(!f.error.empty() && !f.writes && f.ram==before && !f.apu.fe_fence_pending());
+        f.write(0x1324,4096);f.write(0x1334,0x12345678);
+        if(kind==7) {
+            // Restoring the mode does not acknowledge a trapped interrupt.
+            CHECK(!f.error.empty() && !f.writes && f.ram==before && !f.apu.fe_fence_pending());
+            continue;
+        }
+        if(!f.error.empty())std::fprintf(stderr,"history case %u: %s\n",kind,f.error.c_str());
+        CHECK(f.error.empty() && !f.writes && f.ram==before && f.apu.fe_fence_pending());
+        for(unsigned n=0;n<8;++n)CHECK(f.read(0x1510)==1 && !f.writes);
+        CHECK(f.apu.service_fe_fence() && f.word(4096)==0x12345678 && f.writes==1);
+    }
+    // A real method's RAM publication precedes the queued token, with SE
+    // running and the original table owner retained. Device failures must not
+    // publish a token over incomplete work or retry the failed transfer.
+    for(bool reject:{false,true}) {
+        Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());
+        f.write(0x1138,0x7ff);f.write(0x2030,0x4000);
+        f.write(0x1100,0x100f);f.write(0x1510,0);f.write(0x2000,15);
+        f.write(0x20804,0x7ff);f.reject=reject;f.write(0x20808,0xc000);
+        f.write(0x1510,1);f.write(0x1324,4096);f.write(0x1334,0x11223344);
+        if(reject) {
+            CHECK(!f.apu.service_fe_fence() && f.word(4096)==0xa5a5a5a5);
+            CHECK(!f.apu.fe_fences_published() && f.written_addresses.empty() && f.writes==1);
+        } else {
+            CHECK(f.word(0x7ff8)==0xc000 && f.word(4096)==0xa5a5a5a5);
+            CHECK(f.apu.service_fe_fence() && f.word(4096)==0x11223344 && f.error.empty());
+            CHECK(f.written_addresses==std::vector<uint32_t>({0x7ff8,4096}));
+        }
     }
     {Fixture f;CHECK(f.apu.initialize_kernel_audio_handoff());f.write(0x1510,0);
      CHECK(!f.apu.initialize_kernel_audio_handoff());
@@ -150,8 +178,8 @@ int main() {
         f.write(changed,8);CHECK(!f.error.empty() && !f.apu.service_fe_fence());
         CHECK(f.ram==before && !f.writes && !f.irq_edges && !f.apu.fe_fences_published());
     }
-    // A real DSP owner is not equivalent to completed work just because FE/SE
-    // register values happen to match the idle observation.
+    // Binding a DSP does not turn an imported idle-only snapshot into the
+    // distinct initialized-kernel profile used by actual original startup.
     for(bool ep:{false,true}) {
         Fixture f;f.capture();int owner;
         if(ep)CHECK(f.apu.bind_ep_program_owner(&owner,[]{return true;}));
@@ -166,6 +194,15 @@ int main() {
     }
     {Fixture f;CHECK(f.apu.gp_write(0xffffd4,0));CHECK(!f.apu.capture_fe_idle_context(0x71f8f,7,1,0));}
     {Fixture f;CHECK(f.apu.ep_write(0xffffd4,0));CHECK(!f.apu.capture_fe_idle_context(0x71f8f,7,1,0));}
+    // A caller cannot insert a fence from within an unfinished voice fetch,
+    // including the older standalone processing interface.
+    for(bool captured:{false,true}) {
+        Fixture f;if(captured)f.capture();else CHECK(f.apu.initialize_kernel_audio_handoff());
+        f.apu.set_mem_access([&](uint32_t,void*,size_t){f.write(0x1324,4096);return false;},{});
+        float bins[1024]{};uint32_t count=0;bool completed=false;
+        CHECK(!f.apu.process_2d_voice(71,bins,count,completed));
+        CHECK(!f.error.empty() && !f.apu.fe_fence_pending() && !f.apu.fe_fences_published() && !f.writes);
+    }
     for(bool reenter:{false,true}) {
         Fixture f;f.capture();f.write(0x1324,4096);f.write(0x1334,7);
         f.reject=!reenter;f.reenter=reenter;const auto before=f.ram;
@@ -173,5 +210,5 @@ int main() {
         CHECK(f.ram==before && !f.irq_edges && !f.apu.fe_fences_published());
         CHECK(!f.apu.service_fe_fence() && f.writes==1); // sticky: no hidden retry
     }
-    std::puts("PASS: startup control/notification separation and history guards; 96 idle FE publications, 120 overlap guards, cold/busy/ownership/DMA/reentry negatives");
+    std::puts("PASS: serialized FE method/token order and failure retention; idle publications, overlap guards, unknown-context/DMA/reentry negatives");
 }
