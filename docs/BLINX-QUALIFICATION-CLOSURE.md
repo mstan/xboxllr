@@ -42,6 +42,30 @@ can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
 
+## Deferral reconciliation and idle counter finding - 2026-10-14
+
+The append-only queues retain27 question IDs, but that is not27 currently
+deferred closing requirements. GFX-D06 has reopened as G01-G03/G05 (G01 is
+complete). GFX-D04 splits required enabled-noise behavior G04 from additional
+sampling/rounding precision. There are26 entries with deferred scope, including
+that split entry. See the [current dispositions](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14).
+The cross-family queue also now marks callback/scheduling integration completed
+under Q01-Q03 and distinguishes reached A02 stages from guarded extensions.
+This is a status correction, not new runtime qualification; families remain6/9.
+
+A fixed physical read-only startup-control observation completed50 DWORD reads,
+followed by12 reads over three temporal rounds. The latter spans2.328 host
+seconds: SECTL remains7 and offsets2008/200C/2020 remain6C9A0/6C186/6C300.
+The first snapshot's GP/EP reset and FE/SE state match before and after.
+There were zero MMIO writes, zero storage operations and no retries.
+This establishes an idle observation, not active counter rate, writable-counter
+semantics, or causation by SECTL alone. The current unconditional XGSCNT update
+in `McpxApu::set_time` does not represent this frozen state. Investigating the
+required counter start/stop/reset contract belongs to A03-A05; it is not silently
+added to the precision queue. No runtime behavior or HLE processing changed.
+Private observations and exact payload scripts:
+probe `results/audio-init-controls-20261014/`.
+
 ## Reset controls connected to sole DSP bootstrap owners - 2026-10-14
 
 Original driver execution records GP/EP reset1 then3 over three allocation and

@@ -14,9 +14,13 @@ natural openings, actual later movie interruption, title return and fresh demo
 gameplay are accepted after root scene/ownership review. Final audio census A01
 also closes; the audio family still requires original device startup/output.
 
-| Qualified | Remaining required | Deferred precision |
+| Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 27 questions; GP profiling precision added as AUDIO-D08 |
+| Input, display, memory, files, scheduling, movies | Audio A03-A05; GPU/graphics G02-G05 | 27 retained IDs; 26 contain deferred scope. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+
+The [deferral reconciliation](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
+preserves every question/evidence/reopening trigger and identifies promoted work.
+Earlier dated totals do not override these current dispositions.
 
 Required GP bit9 input/output now passes independent physical observations,
 and the unchanged preserved original graph passes all1,501 blocks and73,549

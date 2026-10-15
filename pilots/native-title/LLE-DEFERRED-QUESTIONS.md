@@ -10,6 +10,21 @@ The existing 14 graphics questions and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
+Current reconciliation, 2026-10-14: the thirteen entries here retain their
+deferred precision/extension scopes. The graphics queue now distinguishes
+GFX-D06's promotion to required work and GFX-D04's required enabled-noise
+behavior from its remaining precision question. Across both queues, 27 IDs
+are retained; 26 still contain deferred scope. See the
+[current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
+and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+
+The final reached-mode census A01 and ordinary stages A02 are complete.
+References below to missing filter/spatial/headroom stages are extension
+requirements when an original supported consumer reaches them, not a new
+requirement to implement every unreached mode. Existing guards and reopening
+triggers stay in place. Required original audio startup, shared DSP cadence,
+active FE ordering and actual title output remain A03-A05, outside this queue.
+
 | ID | Question | Evidence and reason it can wait | Reopen when |
 | --- | --- | --- | --- |
 | LLE-D01 | What additional x87 precision, empty-tag, exception and lazy-NPX semantics must the native generated FP model preserve? | The owned original thread creator establishes saved CW `0x027f`, SW/tag zero and MXCSR `0x1f80` through twelve actual lifecycles. Native startup control/status can be corrected independently. The current generated stack remains double-backed and does not represent empty tags; those explicit limits are preserved. This defers broader arithmetic fidelity, not the original callback's required state transport. | A supported title observes these omitted semantics, a representative arithmetic mismatch appears, or a replacement generated FP model is admitted; replay the retained original context fixture and transport cases. |
@@ -29,8 +44,9 @@ questions that also affect other service families.
 | AUDIO-D08 | What exact GP B3 clock identity, rate, epoch, halt/yield and wrap behavior does the original composite profile use? | A fresh physical observer executes exactly B2=FFFFFF, B0=1, B1=1 and samples 0/0/0/0/0/20/280. The serialized GP CPU now owns a passive elapsed producer with a post-B1-retirement epoch; the frozen observer matches all seven samples. Original GP branches only change profiling telemetry and reconverge after the same required DMA/output calls at the same yield. The nominal policy is isolated in `apu_gp_counter.hpp`, and warm reset/rebind remains guarded. This defers GP profiling precision, not a missing producer, wake, DMA, output or lifetime owner. EP is explicitly excluded: its elapsed threshold can enter a permanent error spin. | A reached GP consumer uses profiling state to alter required output/scheduling, independent samples distinguish the nominal policy, or reset/rebind is admitted. Replace the isolated source/epoch policy and replay the frozen observer and original consumer cases. Establish EP behavior separately before admitting its configuration. |
 
 Initial FP values no longer need a console query. Original/native callback state
-transport and the scheduling idle/compute clock path remain active integration
-gaps in [SCHEDULING-LLE.md](SCHEDULING-LLE.md), rather than deferred questions.
+transport and the scheduling idle/compute clock path were required integration
+work, not deferrals. They are now covered by completed Q01-Q03 in the closing
+checklist; LLE-D01 retains only the broader FP semantics it explicitly names.
 
 Audio source evidence and active stage/owner dependencies are recorded in
 [AUDIO-LLE.md](AUDIO-LLE.md). The private source handoff retains the pinned

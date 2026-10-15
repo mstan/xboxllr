@@ -17,6 +17,27 @@ are the default validation unit. Repeat human appearance review when a change
 affects visible behavior. Reuse the accepted baseline for qualification-only
 or documentation changes.
 
+## Current disposition - 2026-10-14
+
+The [bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md)
+supersedes the original deferral status where a reopening trigger has fired:
+
+- **GFX-D06 is required work**, not a current deferral. Original resource
+  lifetime G01 is complete; startup/instance integration and connected title
+  execution remain G02/G03/G05.
+- **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
+  required G04 work. Further sampling/rounding precision can remain deferred
+  after that behavior exists; disabling noise does not satisfy G04.
+- The other twelve graphics entries retain their deferred scopes and reopening
+  triggers. Preserve the original entries and evidence below.
+
+Together with the thirteen entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
+there are **27 retained question IDs: 26 with deferred scope, and one fully
+promoted to required work**. Of those 26, GFX-D04 also has the required portion
+above. Earlier reports calling all 27 "precision deferrals" were imprecise;
+they are historical counts, not 27 currently waived closing requirements.
+The current family count is **6/9**; this reconciliation qualifies no new work.
+
 ## Foundation work before broader correctness claims
 
 The initial read-only audit found reusable boundaries: owned draw state and
@@ -33,8 +54,8 @@ full graphics correctness are not established by that finding.
 | GFX-F01 | Does completion ownership survive sampling and retirement of aliases? `graphics_backend.c` currently aggregates shared-image usage for texture queries, but surface queries use only their own serial. `graphics_completion_backend.inc` records sampled aliases; destroying the alias clears its serial. | Preserve the latest use on the surviving allocation owner. Cover source-surface lookup before and after alias retirement, with unrelated allocation work excluded. Verify selected serials deterministically; GPU timing is not the oracle. Keep this off the per-pixel path. |
 | GFX-F02 | Does generic surface validity follow DMA binding/descriptor/range semantics? `src/machine/nv2a.cpp` rejects physical address zero using witnessed-profile history and can silently disable non-stencil depth when resolution fails. The existing guard prevents a reproduced boot-memory corruption. | Retain that protection while replacing the capture-derived assumption with an explicit bounded contract. Distinguish absent depth from an invalid enabled depth target. Test authored valid/invalid descriptors and observable depth behavior; do not simply remove the zero-address guard. |
 
-These are the next foundation batch. They are not treated as qualified or
-hidden among safely deferred precision questions.
+These were the initial foundation batch, with their bounded resolutions recorded
+below. They were not hidden among safely deferred precision questions.
 
 GFX-F01 resolution, 2026-10-10: image allocations now own a shared completion
 record retained by presentation surfaces and texture aliases. Sampling updates
@@ -66,7 +87,9 @@ silicon/source-role semantics remain deferred in GFX-D11 through GFX-D14.
 
 ## Safely deferred questions
 
-All entries below are **open and deferred**, not qualified.
+These are the original recorded questions, not claims of qualification. Apply
+the current dispositions above: GFX-D06 has reopened, and GFX-D04 has both
+required and deferred portions.
 
 | ID | Question | Evidence retained / why it can wait | Reopen when |
 | --- | --- | --- | --- |
@@ -92,7 +115,8 @@ captured frame)**, with 361,948 independently expected writing fragments and
 2,822,707,200 owned-pixel comparisons. It retains 117 actual-artifact fault
 controls. The last 20 draws passed in one batch with 72 source-only batch
 controls and zero new writes. This percentage is not an overall graphics
-completion estimate. The service-family burndown remains **4/9**.
+completion estimate. The service-family burndown was **4/9 at this 2026-10-10
+checkpoint**; use the current closing checklist for present status.
 
 Private artifacts under `build/blinx/frame-inputs-firstworld-20261010` include
 `producer-prefix2162-final-qualified.aot-private.json`, the original
