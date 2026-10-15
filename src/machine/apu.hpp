@@ -462,6 +462,12 @@ public:
         if (faulted_) return 0;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
+        if(ApuStartupMappings::touches(off,size)) {
+            if(size!=4 || !kernel_audio_control_idle() || !startup_mappings_.known(off)) {
+                device_fault("APU startup mapping read context/width remains unqualified");return 0;
+            }
+            return reg32(off);
+        }
         if(ApuStartupConfiguration::touches(off,size)) {
             if(size!=4 || !kernel_audio_control_idle() || !startup_configuration_.known(off)) {
                 device_fault("APU startup configuration read context/width remains unqualified");return 0;
@@ -518,6 +524,12 @@ public:
         if (faulted_) return;
         fe_state_used_=true;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
+        if(ApuStartupMappings::touches(off,size)) {
+            if(size!=4 || !kernel_audio_control_idle() || !startup_mappings_.write(off,value)) {
+                device_fault("APU startup mapping requires stopped aligned physical allocation");return;
+            }
+            set_reg32(off,value);fe_context_known_=false;return;
+        }
         if(ApuStartupConfiguration::touches(off,size)) {
             if(size!=4 || !kernel_audio_control_idle() ||
                (reg32(kFectl)&kFectlMethodMode)!=0x80 ||
@@ -1197,6 +1209,7 @@ private:
     ApuSampleCounter sample_counter_;
     bool sample_counter_known_=true; // fresh device; warm imports revoke this
     ApuStartupConfiguration startup_configuration_;
+    ApuStartupMappings startup_mappings_;
     bool fectl_initialized_=false;
     std::array<bool,kMaxVoices> voice_locked_{};
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};

@@ -37,11 +37,15 @@ mode1 progression and resume; the unconditional uptime counter is corrected.
 The stopped initialization batch now admits23 physically observed configuration
 fields and the original FE control sequence. Captured pre-video FECTL state is
 part of the explicit kernel handoff. Three live original initializer transports
-and all36 targeted checks pass. The latest connected title crosses FETFORCE0 and
-stops at VP mapping FE802038=02F80000, with zero captured PCM. Remaining audio work
-is VP mapping/method setup, DSP host controls, shared-clock execution, active
+and all36 targeted checks pass at that checkpoint. The subsequent VP mapping
+batch passes37 checks and18 original mapping writes across three lifetimes.
+The latest connected title crosses FE802038 and stops at method FE8202A4=FFF,
+with zero captured PCM. A physical input-SGE method pair returned unexpected
+immediate zero; it was stopped, then the console was recovered through dashboard
+SMC restart and remote probe launch. No manual recovery remains pending.
+Remaining audio work is VP methods/active tables, DSP host controls, shared-clock execution, active
 reset/FE ordering and actual title output. See the
-[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#stopped-initialization-batch-and-connected-vp-mapping-boundary---2026-10-14).
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md#vp-mapping-transport-and-unresolved-method-ordering---2026-10-14).
 
 One full changed capture supplied movie, scheduling and census evidence; no
 unchanged title/component reruns were added. Host load did not pause it. Durable

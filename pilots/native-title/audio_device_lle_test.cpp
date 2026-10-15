@@ -101,6 +101,27 @@ int main(int argc,char **argv) {
         puts("PASS exact rollback preserves preexisting ACI owner");return 0;
     }
     CHECK(!pilot_audio_device_lle_open(capture?pilot_pcm_capture_consume:!strcmp(mode,"absent")?nullptr:!strcmp(mode,"reject")?reject:consume,capture));
+    if(!strcmp(mode,"startup-mappings")) {
+        for(unsigned life=0;life<3;++life) {
+            if(life)CHECK(!pilot_audio_device_lle_open(consume,nullptr));
+            uint32_t args[]={0xc000,0,0x03ffffff,0x4000,PAGE_READWRITE};
+            uint32_t va=call(166,args),pa=call(173,&va);CHECK(va && pa && !(pa&0x3fff));
+            access(0xfe802038,4,pa);access(0xfe80203c,4,pa+0x4000);
+            access(0xfe802034,4,pa+0x8000);
+            for(uint32_t off:{0x2038u,0x203cu}) {
+                uint32_t value=0;CHECK(!pilot_audio_device_lle_access(0xfe800000+off,4,0,&value));
+                CHECK(value==pa+(off==0x2038?0:0x4000));
+            }
+            PilotAudioDeviceState s;pilot_audio_device_lle_state(&s);
+            CHECK(s.gp_held && s.ep_held && !s.dma_reads && !s.dma_writes && !s.pcm_words && received.empty());
+            if(life==2) {
+                uint32_t value=0xfff;
+                CHECK(pilot_audio_device_lle_access(0xfe8202a4,4,1,&value)); // rejection permanently faults this engine
+            }
+            CHECK(!pilot_audio_device_lle_close());call(171,&va);
+        }
+        puts("PASS three native original-aligned mapping lifetimes, readback, no DMA and unchanged next-method guard");return 0;
+    }
     if(!strcmp(mode,"configuration")) {
         access(0xfe801100,4,0x88);access(0xfe802000,4,0);
         const uint32_t registers[][2]={{0x1500,0},{0x1508,0x800040},{0x150c,0},

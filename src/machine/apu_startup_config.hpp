@@ -36,4 +36,24 @@ public:
 private:
     uint32_t known_=0;
 };
+
+// The original caller gives each of these two slots a distinct, aligned 8 KiB
+// allocation. Held-device write/readback establishes address transport only;
+// the tables' active consumers and their unnamed fields remain unqualified.
+class ApuStartupMappings {
+public:
+    static bool touches(uint32_t offset,int bytes) {
+        return bytes>0 && offset<0x2040 && uint64_t(offset)+unsigned(bytes)>0x2038;
+    }
+    bool write(uint32_t offset,uint32_t value) {
+        if((offset!=0x2038 && offset!=0x203c) || !value || (value&0x3fff) ||
+           value>0x03ffe000)return false;
+        known_|=1u<<((offset-0x2038)/4);return true;
+    }
+    bool known(uint32_t offset)const {
+        return (offset==0x2038 || offset==0x203c) && (known_&(1u<<((offset-0x2038)/4)));
+    }
+private:
+    uint32_t known_=0;
+};
 }

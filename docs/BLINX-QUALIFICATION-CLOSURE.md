@@ -33,14 +33,65 @@ New Game, dashboard, other titles and LLE performance work are outside this phas
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Open: sustained output, reset/bootstrap and stopped initialization pass; VP mappings, host controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A03 | Open: stopped VP mapping prefix crosses; methods, active table consumers, host controls, shared cadence and active reset remain | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Open: idle fence and startup control proven; active ordering pending | `.115` | FE fence/control ordering | Required work precedes real RAM notification; actual original DPC/consumer returns, including pending/failure cases, with no substituted completion |
-| A05 | Integration complete; stopped initialization crossed; title stops at VP mapping FE802038; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Integration complete; original VP mappings crossed; title stops at method FE8202A4; output open | `.113`, `.113.23`, `.113.24`, `.113.25`, `.113.27`, `.113.28` | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
 A03/A04 -> A05 closes audio. Only unresolved *required* hardware semantics move
 to the final hardware batch; precision questions remain deferred.
+
+## VP mapping transport and unresolved method ordering - 2026-10-14
+
+A fresh owned64KiB allocation passed physical/page/protection/extent checks and
+zero-initialization. Four mapping writes (VPSGE, GPF and unnamed2038/203C)
+returned their exact owned addresses while SE was stopped and DSPs held.
+The two unnamed slots each receive an original-owned8KiB,16KiB-aligned region.
+The maintained APU now retains those addresses in its existing register owner,
+with stopped-context, width, alignment/range and known-read guards. Active table
+consumers are still unqualified. The original prefix has FE free before its
+first method; the physical mapping writes were made with FE halted. This is
+address-transport evidence, not an active-table or timing proof.
+
+Native and original-source transport now share one admission function. The
+already-implemented SSL table mapping is connected through that same contract.
+Three original VP setup prefixes cross all six mappings, initialize768 actual
+voice self-links and stop at the first unknown method2A4=FFF. All allocations
+are released by original destructors. The first source checker incorrectly
+expectedFFFF links; unchanged original instructions establish self-links0..255,
+and the corrected checker retains that evidence. The new native lifetime test
+also moved its deliberate terminal rejection to the last lifetime, respecting
+the shared engine's existing permanent-fault contract.
+
+All37 targeted checks, including three native allocation lifetimes, pass.
+Three full original stopped initializer executions also pass. One changed
+connected title run crosses FE802038 and reaches FE8202A4=00000FFF after45.828s,
+with zero PCM bytes/stamps. Current private evidence is
+`build/blinx/audio-vp-mapping-20261014/`, final source `source-final/`,
+initializer `initializer/` and connected run `title/`.
+
+The physical input-SGE method pair804/808 returned immediate zero instead of
+the expected owned pointer. Exactly eight device stores had been sent: four
+maps, one output-handle limit, one FE control, and two method writes. No later
+hardware operation, output-table test, restoration or cleanup write followed.
+This does not distinguish latency from different method semantics; synchronous
+method completion remains unproved and required A03/A04 work. The initial RB
+request had separately been rejected by the protocol before RAM access; a
+bounded read-only EXEC check established the allocation's zero table contents.
+Neither stopped observation is a passing method result.
+
+On the owner's recovery instruction, probe DASH, dashboard SMC restart and
+remote probe launch restored service without controller input. Fresh read-only
+checks observed GP0/EP1,SE7,FECTL7138F,ISTS0,IEND8 and replacement mappings;
+the old allocation is retired and must never be reused. No restart or launch
+command was retried; transient startup liveness failures were observed again
+read-only. Receipts are probe `results/vp-startup-mapping-20261014/`.
+
+Next work is the original VP method/control batch, including its execution and
+publication ordering, then remaining DSP host controls/shared cadence. Families
+stay6/9;28 retained question IDs contain27 deferred scopes. No new deferral or
+HLE processing change is introduced.
 
 ## Stopped initialization batch and connected VP mapping boundary - 2026-10-14
 

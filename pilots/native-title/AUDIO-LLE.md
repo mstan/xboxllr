@@ -20,6 +20,24 @@ integration before it is a qualified selectable title backend. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
+## Original VP mappings and method boundary - 2026-10-14
+
+The original VP prefix now routes six mappings through the same admission
+function used by the native device. Unnamed2038/203C retain stopped, aligned
+physical addresses; their active consumers remain guarded. Original allocation
+and instruction evidence spans three lifetimes,18 mapping writes and768 voice
+self-links. The existing SSL table mapping is connected. All37 targeted checks
+pass, and a changed45.828s title run reaches the first unknown method2A4=FFF
+with zero PCM. HLE processing is unchanged.
+
+Physical mapping readbacks match, but the input-SGE method pair returned
+immediate zero instead of the expected pointer. No later probe operation or
+restoration write followed. That result cannot establish synchronous completion
+or settle method timing/semantics. The owner-authorized dashboard SMC restart
+and remote probe return restored the stopped controls and replaced mappings;
+no manual console action remains pending. See the
+[evidence and remaining required work](../../docs/BLINX-QUALIFICATION-CLOSURE.md#vp-mapping-transport-and-unresolved-method-ordering---2026-10-14).
+
 ## Stopped initialization and VP mapping boundary - 2026-10-14
 
 The actual original stopped initializer now executes against the maintained
