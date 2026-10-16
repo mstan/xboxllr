@@ -111,6 +111,16 @@ synchronous AV3 call returns; the exact branch/continuation is being traced.
 This does not establish an asynchronous early FIELD consumer or justify a timing
 fallback. No FIELD value, clock phase or readiness is substituted.
 
+The next single private diagnostic stops after161.094s with the same guard.
+Its opt-in read-only observer pairs AV invocations with actual caller returns.
+At failure AV3 is still waiting for retrace; it has not reached its final reset
+branch or returned, and no AV2 FIELD15 call entered. The original vblank ISR's
+FIELD port read is the reached consumer. This supersedes attribution to the
+title's later synchronous post-AV3 query. The fixed-size early FIELD sampling
+window was exhausted, so exact final sync counters are not claimed. The
+counter's live-update contract remains under source review. Terminal receipt:
+`build/blinx/gpu-lle-diagnostic-boundary-20261016/run.aot-private.json`.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued
@@ -140,11 +150,32 @@ owner reserves an unused512-byte tail inside its verified existing allocation,
 with independent compiled drift/readback/publication checks. Probe e9a820f passes
 14 groups/132 lifetimes in31.268s; root verifies206 artifact identities and exact
 bootstrap/SDK code, data and resolved relocations in the original-profile build.
-This is an offline ownership result, not physical completion. A fresh hardware
-owner and physical continuation are pending; no capture or family acceptance is
-claimed. Private receipts: probe `results/noise-physical-original-20261016/`,
+The fresh physical continuation crosses runout relocation and full instance
+initialization, then stops at PGRAPH CFG0: the SDK writes PFB's03070003 and
+the immediate mirror readback is00000003. No following GPU operation or capture
+runs. This is a configuration mirror, not the adjacent ZCOMP_OFFSET. The prior
+model used PFB=3 and a generic latch, so it did not exercise this physical pair.
+A bounded adapter correction preserves the full SDK write, rechecks the exact
+source word and requires the exact measured full-word result; other input or
+readback values remain unsupported. Fresh recovery/continuation is required;
+no general register mask, physical SDK success or family acceptance is claimed.
+Probe abee32b passes15groups/138lifetimes in33.370s; the retained prior executable
+reproduces the failure under the corrected measured fixture. Its next fresh
+physical run passes CFG0 and reaches12,388 stores, stopping on first USER PUT
+readback. The specific primary NV10:G80 XML marks that aperture write-only;
+the revised probe uses readable CACHE1 DMA_PUT after verifying exclusive DMA
+channel0 selection.16bootstrap groups/141lifetimes pass34.650s; five capture
+groups/26cases and three original-profile transport groups pass, including the
+actual248-command input. Root verifies249 artifact identities and equivalent
+bootstrap/SDK object code in the original-profile image. These do not establish
+physical publication, GET progress or pixels. Remote DASH was acknowledged,
+but subsequent FTP/probe checks time out; owner power-cycle was requested.
+Private receipts: probe `results/noise-physical-runout-20261016/`,
+`results/noise-physical-original-20261016/`,
 `results/noise-physical-vblank-20261016/` and
-`results/noise-runout-owner-20261016-final/`.
+`results/noise-runout-owner-20261016-final/`, with latest corrections/results in
+`results/noise-cfg0-profile-20261016/`, `results/noise-physical-cfg0-20261016/`
+and `results/noise-put-owner-20261016/`.
 
 ## Original sampling capture integrated; physical startup still open - 2026-10-16
 

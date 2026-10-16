@@ -26,13 +26,20 @@ The changed diagnostic reaches a FIELD continuity guard. A short original-code
 reproduction identifies a real luma-filter write incorrectly invalidating timing;
 the narrow correction passes both original startup phases and preserves genuine
 timing-change guards. The changed private diagnostic still stops at FIELD;
-original synchronous return/branch behavior is being traced before more changes.
+an opt-in invocation trace now identifies the original vblank ISR reading FIELD
+while AV3 is still in its first retrace wait. AV3 has not returned or reached
+its final reset. The encoder counter contract during this interval is being
+checked; no guessed FIELD value or readiness is supplied.
 Separate probe startup now completes offline (273 queued methods); source and
-artifact review passed. The physical continuation now passes preflight, claims
-IRQ and completes13 checked stores. It stops before instance writes because the
-inherited runout buffer overlaps the new context. The bounded owner now reserves
-an unused512-byte tail inside its existing allocation; physical continuation is
-pending after fresh remote recovery.
+artifact review passed. Physical startup now crosses runout relocation, complete
+instance initialization and the exact observed CFG0 mirror pair. It reaches
+12,388 stores, then stops on the first USER PUT readback. The specific primary
+definition marks that older aperture write-only. The probe now checks the
+readable active-channel CACHE1 cursor after verifying channel0 ownership;
+16 bootstrap groups/141 lifetimes and focused authored/original capture checks
+pass. The original write and real GET progress remain required. The next fresh
+physical attempt is pending owner power-cycle: DASH was acknowledged but both
+FTP and probe status time out, preventing the remote restart command.
 Physical enabled-noise behavior, connected
 original rendering and normal lifecycle remain required. See the latest
 [closing checkpoint](BLINX-QUALIFICATION-CLOSURE.md#original-dac-upload-and-digital-gamma-consumer---2026-10-16).
