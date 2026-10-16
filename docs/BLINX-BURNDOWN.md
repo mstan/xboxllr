@@ -12,9 +12,25 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: original startup/context transfer, reached enabled-noise draw, connected rendering and lifecycle | 43 retained IDs / 42 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
+| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: connected original startup/rendering, reached enabled-noise draw and lifecycle | 44 retained IDs / 43 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Latest checkpoint: audio A01-A05 closes after actual same-object Stop/status/Play
+Current implementation checkpoint: the maintained route now connects loaded contexts
+to bounded programmable CPU draws and the 32 reached startup initializer methods.
+Authored queued tests cover immediate, indexed and inline vertex input, retained
+attributes, constant aliases, required-state rejection and texture Q initialization
+through both shader execution paths. Review corrected an unrelated visibility-count
+gate and the eighth draw's actual read-only LESS depth test. The affected NV2A and
+shader tests pass in0.32s; five original-driver checks pass in2.48s. Dispatch and
+repository hygiene checks pass. One changed original run passes actual context
+LOAD, then stops after169.063s at texture setter1B68, before drawing. The handler's
+range entry had hidden missing bump-state setters from the earlier preflight;
+this is required implementation, not a qualified no-op. The pre-LOAD64MiB RAM
+snapshot matches all1733 independently captured packet words and now supplies
+actual vertex/texture storage for offline diagnosis. Next finish those18 reached
+setters and replay the captured queue, then connected original rendering,
+enabled-noise output and lifecycle. GPU/graphics remain open.
+
+Latest completed family: audio A01-A05 closes after actual same-object Stop/status/Play
 and96000 continued frames on both output routes. The single changed muted capture
 exits0 with no guards. Independent concurrent mixing, original GP publications
 and continuous EP processing match; source-established circular-buffer replay
@@ -42,9 +58,9 @@ drawing/visibility and lifecycle. The common-state audit now binds153 setter
 entries and the actual pre-LOAD reset: first-eight live fields are queue-produced,
 and current secondary color must persist across draws. An overstrict nonindexed
 palette guard is corrected; full CPU-renderer fixture passes0.79s with exact
-target invariance and retained indexed/unsupported-alpha guards. Next is the
-owned context implementation with preserved unknown-state provenance, not an
-exhaustive mapping of unused initial defaults.
+target invariance and retained indexed/unsupported-alpha guards. The owned context
+implementation and authored draw connection are now present as described above;
+connected original-title acceptance is still required.
 No GPU/graphics family closure is inferred from captured submissions.
 
 Earlier capture checkpoint: the retained-buffer title ended cleanly at its

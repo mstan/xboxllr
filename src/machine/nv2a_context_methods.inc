@@ -25,6 +25,9 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
     };
     if(m==0 || m==0x50)return true;
     if(!(context_objects_known_&(1u<<sub)))return reject("object binding is unknown");
+    const auto initializer=context_initializer_method(push,false);
+    if(initializer!=ContextInitializerResult::Unhandled)
+        return initializer==ContextInitializerResult::Ready;
     if(cls==0x62) {
         switch(m) {
         case 0x184:case 0x188:case 0x300:return true;
@@ -41,6 +44,24 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
         switch(m) {
         case 0x19c:case 0x2fc:case 0x300:case 0x304:return true;
         case 0x308:
+            {
+                // The copy path implements disabled chroma/clip/pattern/ROP/
+                // beta selectors. A LOAD or another object's receipts cannot
+                // establish those selections for the current blit owner.
+                bool selectors=false;
+                for(const auto& owner:context_initializers_.objects) {
+                    if(!owner.used || owner.channel!=push.channel || owner.object_class!=cls ||
+                       owner.instance!=object_instance_[sub])continue;
+                    uint32_t identity=0;
+                    if(!pramin_range_initialized(owner.instance,4))continue;
+                    std::memcpy(&identity,pramin_.data()+owner.instance,4);
+                    if(identity!=owner.identity_word)continue;
+                    selectors=std::all_of(owner.null_selectors.begin(),owner.null_selectors.end(),
+                        [](const auto& binding){return binding.known && (binding.words[0]&0xfff)==0x30;});
+                    if(selectors)break;
+                }
+                if(!selectors)return reject("2D copy context selectors are unknown");
+            }
             if(!known(kContext2dObject|kContext2dFormat|kContextBlitObject|
                       kContextBlitOperation|kContextBlitIn|kContextBlitOut) ||
                !image_blit_.context_surfaces_bound || !context_surfaces_2d_.dma_source_bound ||
@@ -70,6 +91,7 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
         // Check BOTH selected planes before the first write; unused clear
         // values, bindings and ordinary raster features are not dependencies.
         if(!p)break;
+        if(!context_initializer_clear_ready(p))return false;
         if(!known(kContextClearH|kContextClearV) || !raster(kRasterSurfaceFormat,0xff00))
             return reject("clear rectangle/format is unknown");
         if((p&0xf0) && (!known(kContextClearColor) || !color_dma_bound_ ||
@@ -125,15 +147,20 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
             return reject("semaphore DMA extent is invalid");
         break;
     }
+    case kNv097M17CC:
+        if(p>1)return reject("visibility enable must be boolean");
+        break;
     case kNv097M17D0:
         if(!known(kContextZpassCount) || !report_dma_bound_[sub])return reject("report input is unknown");
         break;
-    // These consume vertex/current-value history and transformed/raster state.
-    // The scalar transfer milestone does not yet authorize connected drawing.
-    case kNv097M17FC:case kNv097M1800:case kNv097M1808:case kNv097M1810:case kNv097M1818:
-    case kNv097R1518_1528:case kNv097R1880_1900:case kNv097R1900_1940:
-    case kNv097R1940_1980:case kNv097R1980_1A00:case kNv097R1A00_1B00:
-        return reject("vertex consumers require state provenance");
+    case kNv097M17FC:
+        if(p && (p<5 || p>8 || primitive_mode_))
+            return reject("BEGIN primitive/nesting is unqualified");
+        // END checks the actual latched producers in submit_vertex_batch.
+        break;
+    case kNv097M1800:case kNv097M1808:case kNv097M1810:case kNv097M1818:
+        if(!primitive_mode_)return reject("vertex data outside BEGIN/END");
+        break;
     default:break;
     }
     return true;

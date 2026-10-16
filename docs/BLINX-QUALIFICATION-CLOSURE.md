@@ -48,7 +48,59 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: seven of nine families;43 retained deferral IDs,42 scopes.
+Current disposition: seven of nine families;44 retained deferral IDs,43 scopes.
+
+## Loaded draw implementation checkpoint; title acceptance pending - 2026-10-16
+
+The maintained batch connects actual queued LOAD/state production to
+bounded programmable CPU drawing. It admits the 32 audited startup initializer
+methods, tracks current-attribute knowledge across immediate/indexed/inline input,
+and checks consumed shader inputs and persistent constants. Authored tests check
+actual destination pixels, completion, retained vertex attributes and refusal of
+missing required state. PRAMIN readback changed by unmodeled object updates remains
+guarded until explicitly replaced; invalid read widths cannot overflow the host
+read buffer. Two-sided lighting remains explicitly guarded in this bounded route.
+
+Per-invocation temporary/result initialization uses the existing functional shader
+contract; its physical mechanism is recorded in GFX-D22. The texture test retains
+the PROJECT2D Q dependency and distinguishes explicit Q=2 from a subsequent
+partial-XY result initialized with Q=1, on both interpreter and compiled paths.
+An initial test selected the legacy bilinear filter while expecting nearest texels;
+explicit nearest filtering and coordinates away from texel boundaries correct the
+fixture without a renderer change. The failed log is retained.
+
+Independent original-state review found two overly broad guards: no17CC visibility
+enable is written in the captured prefix, and draw8 enables depth LESS with writes
+disabled. Unknown counter enable now invalidates count history without blocking
+pixels; a later enable setter cannot repair it, while explicit count clear can.
+Reports still require known count/history and descriptor. Depth/stencil admission
+requires its actual comparison and zeta inputs. Authored LESS pass/fail cases preserve
+the read-only depth buffer. Compressed ZROP writes remain guarded before mutation;
+ordinary memory expansion is not silently accepted as their compression contract.
+
+`build/blinx/context-draw-build6.aot-private.log` records a successful four-job
+build. `context-draw-tests6.aot-private.log` records both affected checks passing
+in0.32s; the five selected original-driver checks in `context-draw-pilot-tests6`
+pass in2.48s. Dispatch structural checks pass; staged repository hygiene scans994
+blobs with zero findings. Optional OpenGL coverage remains unavailable. No new
+HLE performance claim or physical Xbox operation is made.
+
+The changed original run in `gpu-lle-loaded-draw-20261016` passes actual context
+LOAD and stops at class97 method1B68 after169.063s, before drawing. The earlier
+handler-range audit missed18 reached stage1..3 bump setters whose existing range
+handler has no implementation; the loaded guard correctly refuses them. They
+remain required work. One elective pre-LOAD canonical RAM snapshot is passive,
+default off and owned by the same execution borrow. Root verifies all1733 captured
+packet words against its64MiB bytes, retaining actual vertex/texture inputs for
+offline replay rather than substituting authored RAM into an original-title claim.
+
+Root verifies36 merged review/input pins (one exact reconstructed predecessor for
+a comment-only correction), current binary/source identity and the RAM/packet
+agreement. Evidence: `build/blinx/loaded-draw-review-20261016/root-review.aot-private.json`,
+SHA256 `781d8c8f0cb3886f2dc46b81dbb875fc710874dcaf769f775dac27c0afc87f68`.
+This closes the implementation checkpoint, not a family. Connected original
+rendering, reached enabled-noise output and normal lifecycle remain required;
+the family count remains7/9.
 
 ## Loaded scalar consumers connected; geometry remains open - 2026-10-16
 

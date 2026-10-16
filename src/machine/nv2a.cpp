@@ -3,6 +3,7 @@
 #include "machine/nv2a_tile_layout.hpp"
 #include "machine/nv2a_zeta_compression.hpp"
 #include "machine/nv2a_surface_dma.hpp"
+#include "machine/nv2a_vsh_dependencies.hpp"
 
 #include <algorithm>
 #include <climits>
@@ -1118,6 +1119,10 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         // stubs this to 0; the 2BL discards it, but the kernel may consume it — use the truth.
         if (bo == 0x000) return 0x861D4401;
     } else if (blk->off == 0x700000) {  // PRAMIN: object/RAMHT/RAMFC backing store
+        if((size!=1 && size!=2 && size!=4) || uint64_t(bo)+uint32_t(size)>pramin_.size()) {
+            fault_("NV2A invalid PRAMIN read width/extent");return 0;
+        }
+        if(pgraph_loaded_context_ && !context_initializer_pramin_read_ready(bo,size))return 0;
         if (bo + static_cast<uint32_t>(size) <= pramin_.size()) {
             uint32_t value = 0;
             std::memcpy(&value, pramin_.data() + bo, size);
@@ -1475,6 +1480,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             return;
         }
         std::memcpy(pramin_.data() + bo, &value, size);
+        if(pgraph_loaded_context_)context_initializer_pramin_written(bo,size);
         for(int i=0;i<size;++i) {
             const uint32_t byte=bo+uint32_t(i);
             pramin_initialized_[byte/64]|=uint64_t(1)<<(byte%64);
@@ -2025,6 +2031,9 @@ bool Nv2a::set_vertex_array_format(uint32_t slot, uint32_t parameter) {
 bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
     auto& attr = vertex_attributes_[slot];
     if (!attr.count) return true;
+    if(pgraph_loaded_context_ && !(context_vertex_offset_known_&(1u<<slot))) {
+        fault_("NV2A loaded vertex array offset is unknown");return false;
+    }
 
     const uint32_t dma_instance = attr.dma_b ? vertex_dma_b_ : vertex_dma_a_;
     const bool dma_bound = attr.dma_b ? vertex_dma_b_bound_ : vertex_dma_a_bound_;
@@ -2140,6 +2149,7 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
     // an instrumented run did three extra counter increments the noperf run did not.
     // Detailed telemetry is now the only switch; use --nv2a-detailed-telemetry to get
     // these counters back alongside --perf-accounting.
+    if(pgraph_loaded_context_)context_vertex_current_known_[slot]=15;
     if (detailed_telemetry_) {
         ++vertex_attribute_fetches_;
         ++vertex_format_fetches_[attr.format];
@@ -2161,12 +2171,17 @@ bool Nv2a::commit_immediate_vertex() {
     for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot)
         inputs[slot] = vertex_attributes_[slot].value;
     immediate_vertices_.push_back(inputs);
+    if(pgraph_loaded_context_)context_immediate_known_.push_back(context_vertex_current_known_);
     return true;
 }
 
 bool Nv2a::decode_inline_array() {
     inline_vertices_.clear();
+    context_inline_known_.clear();
     if (inline_array_words_.empty()) return true;
+    if(pgraph_loaded_context_ && context_vertex_format_known_!=0xffff) {
+        fault_("NV2A loaded inline array formats are unknown");return false;
+    }
 
     std::array<size_t, 16> offsets{};
     size_t vertex_size = 0;
@@ -2277,7 +2292,12 @@ bool Nv2a::decode_inline_array() {
                 return false;
             }
             ++inline_attribute_decodes_;
+            if(pgraph_loaded_context_) {
+                attr.value=value;
+                context_vertex_current_known_[slot]=15;
+            }
         }
+        if(pgraph_loaded_context_)context_inline_known_.push_back(context_vertex_current_known_);
     }
     ++inline_array_batches_;
     inline_array_words_total_ += inline_array_words_.size();
@@ -3663,6 +3683,28 @@ bool Nv2a::submit_vertex_batch() {
     const size_t vertex_count = indexed ? vertex_indices_.size()
                               : inline_array ? inline_vertices_.size()
                                              : immediate_vertices_.size();
+    std::array<uint8_t,13> context_observable{};
+    VshDependencies context_dependencies;
+    if(pgraph_loaded_context_) {
+        if(!context_draw_ready(context_observable))return false;
+        if(indexed && context_vertex_format_known_!=0xffff) {
+            fault_("NV2A loaded indexed array formats are unknown");return false;
+        }
+        if((immediate && context_immediate_known_.size()!=vertex_count) ||
+           (inline_array && context_inline_known_.size()!=vertex_count)) {
+            fault_("NV2A loaded vertex snapshot provenance is missing");return false;
+        }
+        bool final=false;
+        for(size_t slot=transform_program_start_;slot<transform_program_.size();++slot) {
+            if(context_program_known_[slot]!=15) {
+                fault_("NV2A loaded shader executed program words are unknown");return false;
+            }
+            // Vendored decoder parse_final: token3 bit0. Do not inspect a
+            // constructor-initialized trailing slot to find a convenient FINAL.
+            if(transform_program_[slot][3]&1u){final=true;break;}
+        }
+        if(!final){fault_("NV2A loaded shader has no known FINAL");return false;}
+    }
 
     // beads-xbox.1.14.3 item 4 completed: perf::g_enabled removed from the disjunction.
     // The raster-state sample search below is a linear scan per batch; running it only
@@ -3860,6 +3902,34 @@ bool Nv2a::submit_vertex_batch() {
         fault_("NV2A vertex batch uses unsupported transform execution mode");
         return false;
     }
+    if(pgraph_loaded_context_) {
+        const char* error=nullptr;
+        const bool valid=program_parsed && vsh_dependencies(program.steps,
+            transform_program_.size()-transform_program_start_,context_observable,
+            context_dependencies,error);
+        if(!valid) {
+            if(program_owned)nv2a_vsh_program_destroy(&program);
+            fault_(error?error:"NV2A loaded shader dependency analysis failed");return false;
+        }
+        for(size_t i=0;i<context_dependencies.constants.size();++i) {
+            if((context_constants_known_[i]&context_dependencies.constants[i])==
+               context_dependencies.constants[i])continue;
+            if(program_owned)nv2a_vsh_program_destroy(&program);
+            char why[128];
+            std::snprintf(why,sizeof(why),"NV2A loaded shader constant c%zu needs components %x",i,
+                          context_dependencies.constants[i]);
+            fault_(why);return false;
+        }
+        // initial_temps/initial_outputs have a different owner from persistent
+        // context/attribute state: the shader invocation initializes them.
+        // NVIDIA NV_vertex_program 2.14.1.4/.5 specifies temp0000/result0001;
+        // the existing interpreter and compiled zero plan implement that
+        // functional contract. In particular PROJECT2D still consumes Q even
+        // when the program writes only XY. GFX-D22 retains the exact silicon
+        // initialization mechanism, not a fabricated guest/context producer.
+        // Unknown carriers may feed dead outputs, but never a selected output
+        // or context write. This proof does not mark those carriers as known.
+    }
     bool program_writes_context = false;
     VshProgramCensusRow* census_row = nullptr;
 #if XLLE_VSH_DRAW_OVERLAP_CENSUS
@@ -4047,7 +4117,8 @@ bool Nv2a::submit_vertex_batch() {
 #endif
     };
     std::optional<BatchTransformCache> batch_transform_cache;
-    if (indexed && program_parsed && !program_writes_context && vertex_count >= 64) {
+    if (indexed && program_parsed && !program_writes_context && vertex_count >= 64 &&
+        !pgraph_loaded_context_) {
         batch_transform_cache.emplace();
     }
 #if XLLE_VSH_CAPTURE
@@ -4187,6 +4258,8 @@ bool Nv2a::submit_vertex_batch() {
                                                   : immediate_vertices_[vertex_index];
                 for (uint32_t slot = 0; slot < vertex_attributes_.size(); ++slot)
                     vertex_attributes_[slot].value = inputs[slot];
+                if(pgraph_loaded_context_)context_vertex_current_known_=inline_array
+                    ? context_inline_known_[vertex_index] : context_immediate_known_[vertex_index];
             } else {
                 const uint32_t index = vertex_indices_[vertex_index];
                 largest_vertex_index_ = std::max(largest_vertex_index_, index);
@@ -4242,6 +4315,10 @@ bool Nv2a::submit_vertex_batch() {
                         d, vertex_census_.discarded_deltas);
                     ++vertex_census_.fetch_n;
                 }
+            }
+            if(pgraph_loaded_context_ && !context_vertex_inputs_ready(context_dependencies.inputs)) {
+                if(program_owned)nv2a_vsh_program_destroy(&program);
+                return false;
             }
             TransformedVertex vertex;
             if (program_parsed) {
@@ -6459,16 +6536,25 @@ bool Nv2a::rasterize_witnessed_batch(DrawJob& job, bool& executed) {
     // fallback opens NV2A_RASTER_GENERIC_SW and is carved out of this bucket.
     perf_excl::Scope region(perf_excl::kNv2aRasterWitnessed);
     executed = false;
-    if (zpass_enabled_ || ram_tiles_active()) {
+    if (pgraph_loaded_context_ || zpass_enabled_ || ram_tiles_active()) {
         // Keep the reference small: use the existing software fragment tests,
         // after draining older jobs. Count actual samples, never draw bounds.
         draw_order_fence();
+        // Visibility counting does not change fragment output. An inherited
+        // unknown enable may have accumulated samples; never publish a count
+        // based on the host carrier's stale bool, including after a later
+        // enable setter. Only an explicit clear can repair that history.
+        if(pgraph_loaded_context_ && !(context_known_&kContextZpassEnable)) {
+            context_known_&=~kContextZpassCount;
+            zpass_valid_=false;
+        }
         bool ok = rasterize_generic_combiner_batch(job, executed);
         if (!ok || !executed) {
             if(zpass_enabled_)zpass_valid_ = false;
             // Preserve an explicit DMA/format failure from the generic path.
             // Only a declined draw needs a new unsupported-work diagnostic.
-            if(ok)fault_(ram_tiles_active() ? "NV2A tiled 3D encountered an unsupported draw"
+            if(ok)fault_(pgraph_loaded_context_ ? "NV2A loaded context encountered an unsupported draw" :
+                         ram_tiles_active() ? "NV2A tiled 3D encountered an unsupported draw"
                                            : "NV2A visibility reference encountered an unsupported draw");
             return false;
         }
@@ -11154,6 +11240,23 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             fault_("NV2A generic-combiner color and zeta surfaces overlap");
             return false;
         }
+        const bool stencil_may_write=stencil_test_enabled && stencil_write_mask &&
+            (raster_state[kRasterStencilOpFail]!=0x1e00 ||
+             raster_state[kRasterStencilOpZFail]!=0x1e00 ||
+             raster_state[kRasterStencilOpZPass]!=0x1e00);
+        if(pgraph_loaded_context_ && (depth_write_enabled || stencil_may_write)) {
+            for(unsigned tile_index=0;tile_index<pgraph_tiles_.tiles.size();++tile_index) {
+                const auto& tile=pgraph_tiles_.tiles[tile_index];
+                if((tile[0]&1) && (pgraph_tiles_.zcomp[tile_index]&0x80000000u) &&
+                   depth_address<=tile[1] && (tile[0]&0x03ffc000u)<depth_end) {
+                    // Ordinary memory writes expand compressed blocks. A ZROP
+                    // writer must own1D80 and encoding before using that path.
+                    // Reject before color/texture/target effects, not at flush.
+                    fault_("NV2A loaded compressed depth/stencil writes require a qualified ZROP writer");
+                    return false;
+                }
+            }
+        }
     }
     uint32_t effective_xmin = clip_x;
     uint32_t effective_xmax = clip_x + clip_width - 1;
@@ -15068,10 +15171,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         triangle_vertices[vertex]->texture[stage][component];
                     texture_values[stage][vertex][component] =
                         std::isnan(value) ? 0.0f : value;
-                    // Preserve the old generic fault behavior for infinities in
+                    // For pre-existing non-context paths preserve their fault
+                    // behavior for infinities in
                     // otherwise-unused texture coordinates: NaN sanitized to zero
                     // before, but +/-Inf made the interpolation non-finite.
-                    if ((component_mask & (1u << component)) == 0 &&
+                    // Loaded-context dependency selection excludes these unused
+                    // lanes; they cannot become an accidental fault consumer.
+                    if (!pgraph_loaded_context_ && (component_mask & (1u << component)) == 0 &&
                         !std::isfinite(value) && !std::isnan(value)) {
                         component_mask |= static_cast<uint8_t>(1u << component);
                     }
@@ -16838,6 +16944,8 @@ constexpr Nv097Table kNv097Table = build_nv097_table();
 
 }  // namespace
 
+#include "nv2a_context_initializers.inc"
+#include "nv2a_context_draw.inc"
 #include "nv2a_context_methods.inc"
 
 void Nv2a::dispatch_method(PushMethod push) {
@@ -16946,6 +17054,8 @@ void Nv2a::dispatch_method(PushMethod push) {
             stats.last_parameters[method_index] = parameter;
         }
     }
+    if (pgraph_loaded_context_ &&
+        context_initializer_method(push,true)!=ContextInitializerResult::Unhandled) return;
     if (object_class_[subchannel] == 0x62) {
         switch (method) {
         case 0x0184: {
@@ -17735,6 +17845,7 @@ void Nv2a::dispatch_method(PushMethod push) {
     case kNv097R1518_1528: {
         const uint32_t component = (method - 0x1518) / 4;
         std::memcpy(&vertex_attributes_[0].value[component], &parameter, sizeof(parameter));
+        if(pgraph_loaded_context_)context_vertex_current_known_[0]|=uint8_t(1u<<component);
         ++immediate_methods_;
         if (component == 3 && !commit_immediate_vertex()) return;
         break;
@@ -17747,6 +17858,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         std::memcpy(&value[component], &parameter, sizeof(parameter));
         value[2] = 0.0f;
         value[3] = 1.0f;
+        if(pgraph_loaded_context_)context_vertex_current_known_[slot]|=uint8_t(12u|(1u<<component));
         ++immediate_methods_;
         if (slot == 0 && component == 1 && !commit_immediate_vertex()) return;
         break;
@@ -17760,6 +17872,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[1] = static_cast<float>(y);
         value[2] = 0.0f;
         value[3] = 1.0f;
+        if(pgraph_loaded_context_)context_vertex_current_known_[slot]=15;
         ++immediate_methods_;
         if (slot == 0 && !commit_immediate_vertex()) return;
         break;
@@ -17771,6 +17884,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[1] = static_cast<float>((parameter >> 8) & 0xFFu) / 255.0f;
         value[2] = static_cast<float>((parameter >> 16) & 0xFFu) / 255.0f;
         value[3] = static_cast<float>((parameter >> 24) & 0xFFu) / 255.0f;
+        if(pgraph_loaded_context_)context_vertex_current_known_[slot]=15;
         ++immediate_methods_;
         if (slot == 0 && !commit_immediate_vertex()) return;
         break;
@@ -17784,6 +17898,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         const int16_t hi = static_cast<int16_t>((parameter >> 16) & 0xFFFFu);
         value[part * 2] = static_cast<float>(lo);
         value[part * 2 + 1] = static_cast<float>(hi);
+        if(pgraph_loaded_context_)context_vertex_current_known_[slot]|=uint8_t(3u<<(part*2));
         ++immediate_methods_;
         if (slot == 0 && part == 1 && !commit_immediate_vertex()) return;
         break;
@@ -17793,6 +17908,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         const uint32_t slot = word / 4;
         const uint32_t component = word & 3u;
         std::memcpy(&vertex_attributes_[slot].value[component], &parameter, sizeof(parameter));
+        if(pgraph_loaded_context_)context_vertex_current_known_[slot]|=uint8_t(1u<<component);
         ++immediate_methods_;
         if (slot == 0 && component == 3 && !commit_immediate_vertex()) return;
         break;
@@ -17826,12 +17942,14 @@ void Nv2a::dispatch_method(PushMethod push) {
             inline_array_words_.clear();
             inline_vertices_.clear();
             immediate_vertices_.clear();
+            context_immediate_known_.clear();context_inline_known_.clear();
         } else if (parameter <= 10 && primitive_mode_ == 0) {
             primitive_mode_ = static_cast<uint8_t>(parameter);
             vertex_indices_.clear();
             inline_array_words_.clear();
             inline_vertices_.clear();
             immediate_vertices_.clear();
+            context_immediate_known_.clear();context_inline_known_.clear();
         }
         break;
     }

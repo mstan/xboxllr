@@ -8,7 +8,7 @@
 static struct {
     char directory[4096],library_sha[65],observed_source_sha[65];
     unsigned enabled,failed,records,returned,selector_observed,selector_accepted,load_observed;
-    unsigned source_copied,source_bound;
+    unsigned source_copied,source_bound,capture_ram;
     PilotIoDiagnosticEvent entry;
 } gpu_context_observer;
 static uint32_t gpu_context_word(const unsigned char *p)
@@ -98,6 +98,19 @@ static void gpu_context_capture(const PilotIoDiagnosticEvent *event)
     if(driver_ok)saved=gpu_context_file(record,"driver.bin",driver,sizeof(driver)) && saved;
     if(snapshot_ok)saved=gpu_context_file(record,"gfc1.bin",wire,required) && saved;
     if(packets && packet_count)saved=gpu_context_file(record,"packets.bin",packets,packet_count*20u) && saved;
+    // One elective physical RAM snapshot at the actual pre-LOAD boundary.
+    // Retained packet/context bytes alone cannot replay vertex/texture fetches.
+    // The diagnostic copy uses canonical RAM backing, without device accesses,
+    // CPU reentry or clocks, while the same execution owner is borrowed.
+    const int ram_requested=gpu_context_observer.capture_ram && event->address==0xfd400788u;
+    int ram_copied=0;
+    if(ram_requested) {
+        const uint32_t ram_bytes=64u*1024*1024;
+        unsigned char *ram=malloc(ram_bytes);
+        ram_copied=ram && pilot_io_device_diagnostic_read(0,ram,ram_bytes,1) &&
+            gpu_context_file(record,"ram.bin",ram,ram_bytes);
+        free(ram);saved=ram_copied && saved;
+    }
     char json[2048];
     int length=sprintf_s(json,sizeof(json),
         "{\"kind\":%u,\"raw_pc\":%u,\"raw_thread\":%u,\"raw_in_kernel\":%u,"
@@ -108,6 +121,7 @@ static void gpu_context_capture(const PilotIoDiagnosticEvent *event)
         "\"parser_bytes_complete\":%s,\"derived_image_table_ramfc_valid\":%s,\"packet_rows\":%u,"
         "\"actual_producer_return_observed\":%s,\"selector_request_observed\":%s,"
         "\"selector_accepted_before_this_record\":%s,\"load_request_observed\":%s,"
+        "\"preload_ram_requested\":%s,\"preload_ram_copied\":%s,"
         "\"g03_qualified\":false,\"diagnostic_device_reads_writes_clocks_drains\":0}\n",
         event->kind,event->pc,event->thread,event->in_kernel,
         event->kind==PILOT_IO_DIAGNOSTIC_COMPILED_MMIO?"true":"false",
@@ -119,7 +133,8 @@ static void gpu_context_capture(const PilotIoDiagnosticEvent *event)
         driver_ok?"true":"false",snapshot_ok?"true":"false",packets_ok?"true":"false",
         ranges_ok?"true":"false",packet_count,gpu_context_observer.returned?"true":"false",
         gpu_context_observer.selector_observed?"true":"false",gpu_context_observer.selector_accepted?"true":"false",
-        gpu_context_observer.load_observed?"true":"false");
+        gpu_context_observer.load_observed?"true":"false",
+        ram_requested?"true":"false",ram_copied?"true":"false");
     if(length<0 || !gpu_context_file(record,"json",json,(uint32_t)length) || !saved) {
         gpu_context_observer.failed=1;fprintf(stderr,"[G03 OBSERVER] incomplete file capture; original execution unchanged\n");
     }
@@ -206,6 +221,8 @@ static void gpu_context_observer_open(const char *library_sha)
     *(FARPROC*)&gpu_lle.first_context_snapshot=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_first_context_snapshot");
     if(!gpu_lle.first_context_snapshot)stop("G03 passive snapshot ABI missing",0);
     memset(&gpu_context_observer,0,sizeof(gpu_context_observer));
+    const char *capture_ram=getenv("XLLE_PILOT_G03_CAPTURE_RAM");
+    gpu_context_observer.capture_ram=capture_ram && !strcmp(capture_ram,"1");
     strcpy_s(gpu_context_observer.directory,sizeof(gpu_context_observer.directory),directory);
     strcpy_s(gpu_context_observer.library_sha,sizeof(gpu_context_observer.library_sha),library_sha);
     const char *error=pilot_io_device_diagnostic_bind(GPU_CONTEXT_PRODUCER,GPU_CONTEXT_PRODUCER_BYTES,

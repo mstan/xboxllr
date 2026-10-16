@@ -28,11 +28,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other nineteen graphics entries retain their deferred scopes and reopening
+- The other twenty graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **43 retained question IDs:42 with deferred scope, and one fully
+there are **44 retained question IDs:43 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -41,7 +41,7 @@ GFX-D18/D19 retain PRAMDAC interpretation and analog WSS questions. Earlier
 entries and their evidence remain unchanged. Earlier reports
 calling all 27 then-recorded questions "precision deferrals" were imprecise;
 they are historical counts, not 27 currently waived closing requirements.
-The current family count is **6/9**; this reconciliation qualifies no new work.
+The current family count is **7/9**; this reconciliation qualifies no new work.
 
 GFX-D15, added 2026-10-15, isolates AV request service-edge precision from the
 still-required FP_DEBUG, active timing and original initialization behavior.
@@ -165,3 +165,21 @@ the new source has the representative CPU contract qualification above.
 | ID | Question | Evidence and reason it can wait | Reopen when |
 | --- | --- | --- | --- |
 | GFX-D21 | What exact inherited bits and arithmetic edge behavior belong to vertex constant c137 in the captured first draw batch? | The actual pending queue uploads the complete first program. Its sole c137 use is final MAD o5.x = v0.z*c137.x+c137.y; no relative reads, later instruction or paired output consumes that result. All eight captured draw states disable fog, and none of their active alpha/color/final combiner inputs selects FOG. Other read constants are explicitly uploaded; the final draw uses uploaded c0/c1. Independent review agrees that this output has no demonstrated consumer in this prefix. Retain transform-inputs-review.aot-private.json and draw-0/7-program-corrected.aot-private.txt under gpu-lle-first-transfer-20261016. | A supported draw consumes fog/c137, changes the program or combiner dependency, or an observable context save/reload requires these bits. This defers only this unconsumed value's exact semantics. It does not initialize c137, remove unknown-state guards, supply a context map, waive load/save, or qualify the still-pending draws. |
+
+## Per-invocation shader initialization mechanism - 2026-10-16
+
+| ID | Question | Evidence and reason it can wait | Reopen when |
+| --- | --- | --- | --- |
+| GFX-D22 | How does physical NV2A establish the initial temporary/result lanes for each vertex invocation? | NVIDIA's [NV_vertex_program specification](https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program.txt), sections 2.14.1.4/.5, defines temporary zero and result XYZ zero/W one per invocation. This grounds the existing interpreter/compiled functional contract. The original first-seven programs write only T0.XY, while the reached PROJECT2D sampler consumes XYW. Dependency analysis keeps W visible and assigns its producer to invocation initialization; no guest constant, current attribute or serialized context byte is inferred. Applying this programming-model contract to the bounded Xbox path is an inference supported by the original program and the independent xemu implementation, not a silicon measurement. Exact TBUF clearing/slot/driver mechanism can wait; representative original LLE output and lifecycle still must pass. | A supported shader/output differs from the declared initialization contract, or raw output-buffer readback/save/reuse is introduced. Compare explicit-Q=1/2 controls with partial XY writes after varied prior Q values on actual hardware if needed. Do not use input VAB readback as proof of shader results or waive persistent-input provenance. |
+
+## GFX-D01 addendum: early depth-culling mechanism - 2026-10-16
+
+Exact opaque1D84 early-culling/cache behavior stays within the existing culling
+question. The first seven retained draws disable depth; the eighth enables LESS
+with depth writes disabled. It must execute the existing mathematical comparison
+against owned zeta storage; opaque culling bits alone do not establish a different
+pixel equation. Reopen this mechanism when a supported comparison/output differs,
+or an observable cache/readback consumer requires it. This does not defer required
+depth values, ordering or compression tags. Loaded compressed depth/stencil writes
+remain guarded until a ZROP writer owns their selector/encoding; if reached by the
+supported attract route, that writer is required implementation before closure.

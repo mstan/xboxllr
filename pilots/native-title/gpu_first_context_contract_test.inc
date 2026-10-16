@@ -124,7 +124,9 @@ static unsigned char *observer_guard_before;
 static uint32_t observer_guard_before_bytes;
 static void observer_guard_verify(const char *error)
 {
-    CHECK(error && strstr(error,"NV2A PGRAPH context load is not implemented"));
+    // This authored request deliberately omits the original mode/reset setup.
+    // LOAD is implemented; the incomplete caller must still fail atomically.
+    CHECK(error && strstr(error,"NV2A context load configuration is unsupported"));
     CHECK(gpu_lle.error(gpu_lle.device) && gpu_context_observer.selector_accepted &&
           gpu_context_observer.selector_observed && gpu_context_observer.load_observed &&
           !gpu_context_observer.returned && !gpu_context_observer.source_bound &&

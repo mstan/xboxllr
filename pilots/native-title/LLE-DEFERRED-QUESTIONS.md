@@ -13,8 +13,8 @@ questions that also affect other service families.
 Current reconciliation, 2026-10-16: the twenty-two entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues,43 IDs
-are retained;42 still contain deferred scope. AUDIO-D09 records the sample
+behavior from its remaining precision question. Across both queues,44 IDs
+are retained;43 still contain deferred scope. AUDIO-D09 records the sample
 counter's remaining sub-sample phase question; AUDIO-D10 records AC-link
 control-transaction phase and bus latency. AUDIO-D11 retains unreached output
 configuration encodings and trap behavior. AUDIO-D12 retains the nontrapped
@@ -33,7 +33,9 @@ ownership/format extensions; normal same-buffer restart/output remains A05.
 GFX-D20 records unreached active patch processing/reset contents. GFX-D21 retains
 exact inherited c137 behavior only where its sole fog output has no consumer in
 the captured draw batch; required context transfer and ordinary draws remain
-open. See the
+open. GFX-D22 retains the silicon mechanism behind the named per-invocation
+shader initialization contract; persistent guest inputs remain separately guarded.
+See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
 

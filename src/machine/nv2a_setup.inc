@@ -285,6 +285,7 @@ bool Nv2a::pgraph_load_context() {
     pgraph_loaded_context_=std::move(staged);
     pgraph_method_faulted_=false;
     context_known_=0;
+    context_initializers_={};
     context_objects_known_=context_semaphore_dma_known_=context_semaphore_offset_known_=0;
     context_raster_known_.fill(0);
     context_raster_known_[kRasterSurfaceColorOffset]=0xffffffffu;
@@ -292,6 +293,8 @@ bool Nv2a::pgraph_load_context() {
     context_raster_known_[kRasterSurfacePitch]=0xffffffffu;
     context_program_known_.fill(0);context_constants_known_.fill(0);
     context_vertex_format_known_=context_vertex_offset_known_=0;
+    context_vertex_current_known_.fill(0);
+    context_immediate_known_.clear();context_inline_known_.clear();
     context_viewport_scale_known_=context_viewport_offset_known_=0;
     // Bound flags represent provenance, not loaded register values. Resolved
     // raw BASE/LIMIT cannot establish a descriptor identity or its ownership.

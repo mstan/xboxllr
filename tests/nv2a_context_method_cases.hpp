@@ -24,6 +24,7 @@ struct LoadedContextFixture {
             {0x700010,2},{0x700014,0x80010030},{0x700300,0x3d},{0x700304,16383},{0x700308,0},
             {0x700018,3},{0x70001c,0x80010040},{0x700400,0x62},
             {0x700028,5},{0x70002c,0x80010060},{0x700600,0x9f},
+            {0x700048,9},{0x70004c,0x80010090},{0x700900,0x30},
             {0x700180,0x3d},{0x700184,16383},{0x700188,0},{0x002504,1},{0x003204,0x100},
             {0x00322c,0x18},{0x003244,0},{0x003220,1},{0x003250,1},{0x003200,1},
             {0x400720,0},{0x400144,0x10000000},{0x400148,0},{0x400764,0x18000000},
@@ -44,6 +45,7 @@ struct LoadedContextFixture {
         emit(0,1);
         if(omit!=0)emit(0x194,2);
         if(omit!=1)emit(0x208,0x128);
+        emit(0x1d7c,0xffff0000);
         if(omit!=2)emit(0x1d90,0x12345678);
         if(omit!=3)emit(0x1d98,1u<<16);
         if(omit!=4)emit(0x1d9c,1u<<16);
@@ -51,21 +53,23 @@ struct LoadedContextFixture {
 };
 
 static void test_loaded_context_methods() {
-    for(bool operation_known:{false,true}) {
+    for(unsigned copy_case=0;copy_case<3;++copy_case) {
+        const bool operation_known=copy_case!=0, selectors_known=copy_case!=2;
         LoadedContextFixture f;
         for(unsigned y=0;y<2;++y)for(unsigned x=0;x<2;++x)
             put32(f.ram,0x1200+y*64+x*4,0x11220000+y*2+x);
         f.emit(0,3);f.emit(0x184,2);f.emit(0x188,2);f.emit(0x300,0xa);
         f.emit(0,5);f.emit(0x19c,3);
+        if(selectors_known)for(uint32_t m=0x184;m<=0x198;m+=4)f.emit(m,9);
         if(operation_known)f.emit(0x2fc,3);
         f.emit(0x300,0);f.emit(0x304,0);f.emit(0x308,0x00020002);
         f.emit(0x50,0x9876);f.kick();
-        if(operation_known) {
+        if(operation_known && selectors_known) {
             CHECK(f.failure.empty() && f.gpu.image_blit_copies()==1 && f.read(0x800048)==0x9876);
             for(unsigned y=0;y<2;++y)for(unsigned x=0;x<2;++x)
                 CHECK(get32(f.ram,0x1300+y*64+x*4)==0x11220000+y*2+x);
         } else {
-            CHECK(f.failure.find("2D copy input is unknown")!=std::string::npos);
+            CHECK(f.failure.find(selectors_known?"2D copy input is unknown":"context selectors are unknown")!=std::string::npos);
             CHECK(!f.gpu.image_blit_copies() && get32(f.ram,0x1300)==0xa5a5a5a5 && !f.read(0x800048));
         }
     }
@@ -161,7 +165,7 @@ static void test_loaded_context_methods() {
         CHECK(f.failure.find("cursor is unknown")!=std::string::npos && !f.read(0x800048));
     }
     {
-        LoadedContextFixture f;f.emit(0,1);f.emit(0x17fc,6);f.emit(0x50,1);f.kick();
-        CHECK(f.failure.find("vertex consumers")!=std::string::npos && !f.read(0x800048));
+        LoadedContextFixture f;f.emit(0,1);f.emit(0x1808,0);f.emit(0x50,1);f.kick();
+        CHECK(f.failure.find("outside BEGIN/END")!=std::string::npos && !f.read(0x800048));
     }
 }

@@ -170,6 +170,10 @@ inline void vsh_store_operand(const VshCompiledOp& op, unsigned o,
 // output, and `--nv2a-vsh-verify` checks that against the interpreter, which
 // initializes every register, on the real programs. NVIDIA result-register
 // defaults are (0,0,0,1); temporaries and the address register remain zero.
+// Functional contract: NVIDIA NV_vertex_program sections2.14.1.3-.5,
+// https://registry.khronos.org/OpenGL/extensions/NV/NV_vertex_program.txt .
+// This is per-invocation initialization, not a zeroed persistent context image.
+// Exact NV2A silicon initialization mechanism remains GFX-D22.
 struct VshZeroPlan {
     uint16_t temp_mask = 0xFFF;    // r0-r11
     uint16_t output_mask = 0x1FFF;  // o0-o12

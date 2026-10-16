@@ -40,6 +40,7 @@
 #include "machine/nv2a_display_setup_commands.hpp"
 #include "machine/nv2a_av_handshake.hpp"
 #include "machine/nv2a_context_image.hpp"
+#include "machine/nv2a_context_initializers.hpp"
 #include "machine/nv2a_generic_vertex_scratch.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
@@ -2716,7 +2717,17 @@ private:
     std::array<uint8_t,136> context_program_known_{};
     std::array<uint8_t,192> context_constants_known_{};
     uint16_t context_vertex_format_known_=0, context_vertex_offset_known_=0;
+    std::array<uint8_t,16> context_vertex_current_known_{};
+    std::vector<std::array<uint8_t,16>> context_immediate_known_,context_inline_known_;
     uint8_t context_viewport_scale_known_=0, context_viewport_offset_known_=0;
+    ContextInitializerState context_initializers_;
+    ContextInitializerResult context_initializer_method(const PushMethod& push, bool apply);
+    bool context_initializer_draw_ready();
+    bool context_initializer_clear_ready(uint32_t mask);
+    bool context_initializer_pramin_read_ready(uint32_t offset,size_t bytes);
+    void context_initializer_pramin_written(uint32_t offset,size_t bytes);
+    bool context_draw_ready(std::array<uint8_t,13>& observable);
+    bool context_vertex_inputs_ready(const std::array<uint8_t,16>& required);
     bool pramin_range_initialized(uint32_t offset,size_t size) const;
     bool context_method_ready(const PushMethod& push);
     void context_method_completed(const PushMethod& push);
