@@ -145,8 +145,8 @@ public:
             return reject("CX25871 sleep/oscillator power commands remain unqualified");
         if (reg == 0x32 && (value & 0x80))
             return reject("CX25871 automatic monitor-check command remains unqualified");
-        if (reg == 0x60 && (value & 0xf0))
-            return reject("CX25871 WSS enable/reserved controls remain unqualified");
+        if (reg == 0x60 && (value & 0x30))
+            return reject("CX25871 reserved WSS control bits");
         if (reg == 0x6a && (value & 0xf0))
             return reject("CX25871 reserved WSS increment bits");
         if (reg == 0x70 && (value & 0x3f) < 2)
@@ -195,11 +195,19 @@ public:
             value=0x46; // strobe self-clears only after real counter/phase reset
         } else if(timing_.known() && reg!=0xc4 && reg!=0xc6 && reg!=0x6c &&
                   reg!=0x34 && reg!=0x36 && reg!=0xc8 &&
+                  !(reg>=0x60 && reg<=0x6a) &&
+                  !(reg==0xba && !((registers_[reg]^value)&0x20)) &&
                   registers_[reg]!=value) {
             // Timing changes need the documented reset before this bounded
             // route can expose output again; no old phase is silently reused.
             timing_.invalidate();
         }
+        // 100381B1.3.35/table2-5: WSS60..6A changes VBI data/insertion and
+        // its waveform increment, not CLKO or the digital sync/FIELD epoch.
+        // Analog WSS generation is outside the current guarded output path.
+        // BA DACDIS/DACOFF retain digital operation (100381B power-management
+        // section/table2-5). A change of SLAVER still invalidates timing;
+        // SRESET and CHECK_STAT were handled above, not treated as DAC latches.
         registers_[reg] = value; known_[reg] = 0xff; programmed_ = true;
         // Conexant table 2-5: DIV2 is one latch exposed through two registers.
         if (reg == 0x38) mirror_div2(value & 0x10);
@@ -265,7 +273,7 @@ private:
     static bool supported(uint8_t reg) {
         // Conexant 100381B table 2-1 and programming detail table 2-5:
         // disabled HDTV/power (2E/30), drive/input (32), color compensation
-        // (3C/3E/40), luma/hue (5A/5C), disabled WSS/data/increment (60..6A),
+        // (3C/3E/40), luma/hue (5A/5C), WSS/data/increment (60..6A),
         // master sync/data delay (6E/70/74), subcarrier phase offset (B6), coring/attenuation
         // (CA/CC), DAC mux (CE), output/blanking (D6) and chroma/bypass (D8).
         // Reserved72 has only its specified zero-write policy above; readback

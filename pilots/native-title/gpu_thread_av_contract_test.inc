@@ -1,5 +1,5 @@
-/* Actual original CALL/RET frames connect the existing AV/HAL device owner.
- * Explicit fixture inputs do not admit the guarded cold display mode. */
+/* Actual original CALL/RET frames connect the shared AV/HAL device owner.
+ * The initialized startup profile does not qualify a silicon cold reset. */
 #ifdef PILOT_GPU_FILES_WORKER
 static void test_gpu_thread_av_lle(int mode_guard)
 {
@@ -11,6 +11,7 @@ static void test_gpu_thread_av_lle(int mode_guard)
     for(unsigned life=0;life<(mode_guard?1u:3u);++life) {
         gpu_lle_open_profile(mode_guard==2?1:0);
         if(mode_guard) {
+            CHECK(!pilot_io_device_clock_start());
             const uint32_t context=0x1b000,args[]={0xfd000000,0,0,0x12,2560,0};
             memset(memory+context,0,96);MEM32(context)=0xcccccccc;
             MEM32(context+16)=6;MEM32(context+20)=0xfe000000+3*4;
@@ -20,14 +21,21 @@ static void test_gpu_thread_av_lle(int mode_guard)
             uint32_t ref[]={handle,0,out+4};CHECK(!event_lle_call(246,ref));
             uint32_t join[]={MEM32(out+4),0,0,0,0},result=0xcccccccc;
             const char *error=pilot_io_device_lle(159,memory,join,&result);
-            fprintf(stderr,"Original thread AV startup boundary: %s\n",error?error:"returned without guard");
-            // Shared device work now uses the same published PIT timestamp.
-            // Both genuine routes reach the same remaining PRAMDAC table.
-            CHECK(error && strstr(error,"unmodelled NV2A write at fd680898"));
-            CHECK(result==0xcccccccc && MEM32(context)==0xcccccccc && !MEM32(context+4));
-            uint32_t known=0,high=0;CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-2);
-            CHECK(known==((1u<<19)|(1u<<22)|(1u<<24)) && high==(1u<<19));
-            fprintf(stderr,"PASS: original-thread AV mode crosses encoder tables, routing and VGA enable/misc; PRAMDAC guard preserves its caller\n");return;
+            fprintf(stderr,"Original thread AV startup: %s join=%08x call=%08x completed=%u\n",
+                error?error:"returned",result,MEM32(context),MEM32(context+4));
+            CHECK(!error && result==0 && MEM32(context)==0 && MEM32(context+4)==1);
+            gpu_test_completed_av_mode(mode_guard==2?1:0);
+            uint32_t object=MEM32(out+4);CHECK(!event_lle_call(187,&handle));event_lle_call(250,&object);
+            CHECK(event_lle_call(187,&handle)==0xc0000008u);
+            CHECK(!event_lle_call(256,&stats));
+            fprintf(stderr,"AV thread retirement: threads=%u/%u handles=%u/%u\n",
+                MEM32(stats+4),baseline_threads,MEM32(stats+8),baseline_handles);
+            CHECK(MEM32(stats+4)==baseline_threads);
+            // Clocked retrace waits may let the pre-existing captured file
+            // worker close handle10. Reuse the qualified scheduler rule;
+            // this fixture's thread handle is independently invalid above.
+            CHECK(MEM32(stats+8)==baseline_handles || MEM32(stats+8)+1==baseline_handles);
+            fprintf(stderr,"PASS: original-thread AV3 returns, wrapper terminates and handles retire after clocked startup; pixels remain guarded\n");return;
         }
         /* Expectations independently established by the retained original AV
          * reference and shared-device checks; output DWORD canaries are owned. */

@@ -656,10 +656,10 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"gpu-first-context-observer")) {test_gpu_first_context_observer();return 0;}
         if (!strcmp(argv[1],"gpu-first-context-capture-guard") && argc==3) {test_gpu_first_context_capture_guard(argv[2]);return 0;}
         if (!strcmp(argv[1],"gpu-thread-av-lle")) {test_gpu_thread_av_lle(0);return 0;}
-        if (!strcmp(argv[1],"gpu-thread-av-mode-guard")) {test_gpu_thread_av_lle(1);return 0;}
-        if (!strcmp(argv[1],"gpu-thread-av-mode-phase1-guard")) {test_gpu_thread_av_lle(2);return 0;}
-        if (!strcmp(argv[1],"gpu-lle-av-mode-guard")) { test_gpu_lle_av_mode_guard(0); return 0; }
-        if (!strcmp(argv[1],"gpu-lle-av-mode-phase1-guard")) { test_gpu_lle_av_mode_guard(1); return 0; }
+        if (!strcmp(argv[1],"gpu-thread-av-mode-startup")) {test_gpu_thread_av_lle(1);return 0;}
+        if (!strcmp(argv[1],"gpu-thread-av-mode-phase1-startup")) {test_gpu_thread_av_lle(2);return 0;}
+        if (!strcmp(argv[1],"gpu-lle-av-mode-startup")) { test_gpu_lle_av_mode_startup(0); return 0; }
+        if (!strcmp(argv[1],"gpu-lle-av-mode-phase1-startup")) { test_gpu_lle_av_mode_startup(1); return 0; }
 #ifdef PILOT_GPU_FILES_WORKER
         if (!strcmp(argv[1],"gpu-lle-encoder-timing")) { test_gpu_lle_encoder_timing(); return 0; }
         if (!strcmp(argv[1],"gpu-lle-encoder-phase-guard")) { test_gpu_lle_encoder_phase_guard(); return 0; }

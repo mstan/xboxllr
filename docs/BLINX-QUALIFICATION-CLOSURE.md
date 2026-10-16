@@ -48,7 +48,39 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;38 retained deferral IDs,37 scopes.
+Current disposition: six of nine families;40 retained deferral IDs,39 scopes.
+
+## Original AV3 startup returns - 2026-10-15
+
+Direct and genuine-thread original AV3 now return success in both initial AV
+phases. The calls execute all reached encoder/VGA/PRAMDAC setup, three actual
+clock-driven retrace waits, encoder timing reset and final WSS programming.
+Post-return checks establish the programmed clock rate, retained FIELD owner,
+AV acknowledgment and GPIO levels. Both original threads terminate and their
+handles are independently invalid after close. Clocked waits can also retire
+the captured file worker's existing handle10; its previously qualified one-handle
+baseline change is accounted for without accepting leaked authored handles.
+
+The short checks caught a real model defect: original BA3F->2F clears DACOFF
+after timing reset, but blanket invalidation discarded digital timing. The
+manufacturer's power-management description and table2-5 preserve digital
+operation through DAC power changes. DAC writes with unchanged SLAVER now retain
+the timing epoch; an interface change still invalidates it. WSS60..6A likewise
+preserves digital timing, with reserved bits guarded. Independent board checks
+retain the expected later FIELD edges after these writes. Two affected device
+suites pass in0.61s; all four original startup cases pass in1.52s. Evidence is
+build/blinx/display-clock-20261016/dac-clock-tests.aot-private.log and
+startup-final-original.aot-private.log.
+
+The11 additional PRAMDAC commands are retained as received commands, not invented
+hardware readbacks or established pixel-processing effects. Their receipt cannot
+create AV acknowledgment or activate FP timing. Both scanout routes still stop
+before framebuffer reads/resolution when this processing is unresolved. GFX-D18
+records the remaining interpretation; required supported output remains G05.
+GFX-D19 defers analog WSS/VBI waveform and downstream TV aspect response. This
+milestone establishes the initialized AV3 call, not a cold boot or connected
+title graphics acceptance. Next: run the changed original title selection and
+capture its actual first context request. G02-G05 remain open; still6/9.
 
 ## Original VGA setup batch - 2026-10-15
 
@@ -1030,7 +1062,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: shared clocks and VGA transport pass focused checks; direct/thread original AV3 reaches remaining PRAMDAC table; connected acceptance required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: direct/thread original AV3 returns in both phases, with shared-clock retraces and post-return FIELD; connected title startup still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |

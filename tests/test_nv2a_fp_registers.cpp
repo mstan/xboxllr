@@ -9,6 +9,29 @@ using Registers=xlle::Nv2aFpRegisters;
 static uint32_t offset(unsigned i){return i<7?0x800+i*4:0x820+(i-7)*4;}
 int main() {
     {
+        std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
+        CHECK(gpu.establish_av_idle_phase(0));gpu.mmio_write(0xfd6806a0,4,1);
+        const uint32_t setup[][2]={{0x898,0x10000000},{0x89c,0x10000000},
+            {0x8c0,0},{0x8c4,0x40801080},{0x84c,0x00801080},{0x630,2},
+            {0x680,0xc6ed0},{0x684,525},{0x688,155},{0x68c,620},{0x690,0}};
+        for(const auto& command:setup)gpu.mmio_write(0xfd680000+command[0],4,command[1]);
+        CHECK(fault.empty() && gpu.display_setup_commands().known==0x7ff);
+        CHECK(gpu.mmio_read(0xfd6806a0,4)==1); // receipt cannot generate ACK
+        CHECK(!gpu.display_programming().known); // or an active timing bank
+        const auto before=gpu.display_setup_commands();
+        gpu.mmio_write(0xfd680898,4,0);CHECK(!fault.empty());fault.clear();
+        gpu.mmio_write(0xfd680630,1,0);CHECK(!fault.empty());fault.clear();
+        CHECK(gpu.display_setup_commands().received==before.received);
+        // Both full-output routes must stop before fetching/claiming pixels,
+        // even though all the known setup commands have been received.
+        unsigned reads=0;gpu.set_mem_access([&](uint32_t,void*,size_t){++reads;return true;},{});
+        std::vector<uint8_t> pixels{1,2,3,4};xlle::Nv2a::ScanoutInfo info;std::string error;
+        CHECK(!gpu.capture_scanout(pixels,info,error) && error=="NV2A programmed display processing remains unqualified");
+        size_t size=99;CHECK(!gpu.scanout_direct_bytes(info,size,error) && size==0);
+        CHECK(reads==0 && pixels==std::vector<uint8_t>({1,2,3,4}));
+        gpu.mmio_read(0xfd680898,4);CHECK(fault=="NV2A display setup command readback remains unqualified");
+    }
+    {
         // Independently retained original VGA tables, exercised through the
         // NV mirrors. Later PRAMDAC/TV processing is not supplied by this test.
         std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});

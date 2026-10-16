@@ -992,6 +992,9 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         if (bo == 0x3D5) return crtc_regs_[crtc_index_];
     } else if (blk->off == 0x680000) {  // PRAMDAC
         const uint32_t reg = bo & ~3u;
+        if(Nv2aDisplaySetupCommands::handles(reg)) {
+            fault_("NV2A display setup command readback remains unqualified");return 0;
+        }
         if(reg==0x6a0 && av_handshake_.known()) {
             if(size!=4 || (bo&3)){fault_("NV2A AV read size/alignment");return 0;}
             return av_handshake_.read();
@@ -1356,6 +1359,11 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         }
     }
     if (blk->off == 0x680000) {
+        if(Nv2aDisplaySetupCommands::handles(bo&~3u)) {
+            if(size!=4 || (bo&3) || !display_setup_commands_.write(bo,value))
+                fault_("NV2A display setup command outside retained original profile");
+            return;
+        }
         if((bo&~3u)==0x50c && clocked_display_) {
             // Reached original RMW preserves the measured complete word.
             // Other routing selections need their own clock source contract.
@@ -18506,6 +18514,9 @@ Nv2a::ScanoutInfo Nv2a::scanout_info() const {
 // drain, the geometry validation and the resident-surface
 // resolve. Extracted verbatim from capture_scanout, which keeps calling it first.
 bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error) {
+    if(display_setup_commands_.any()) {
+        error="NV2A programmed display processing remains unqualified";return false;
+    }
     info=scanout_info();
     if (!info.width || !info.height || info.width > 1920 || info.height > 1080) {
         error = "NV2A scanout dimensions are unset or outside Xbox limits";

@@ -268,29 +268,39 @@ static void test_gpu_lle_transport(void)
     fprintf(stderr,"PASS: original GPU reservation and physical-zero translation; real shared bootstrap jump/cache publication; compiled MMIO, owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");
 }
 
-static void test_gpu_lle_av_mode_guard(uint32_t phase)
+static void gpu_test_completed_av_mode(uint32_t phase)
+{
+    CHECK(gpu_lle.read(gpu_lle.device,0xfd680880,4)==0x21101100);
+    CHECK(gpu_lle.read(gpu_lle.device,0xfd6806a0,4)==((phase^1u)*0x11u));
+    uint64_t rates[6];uint32_t driven=0;
+    CHECK(gpu_lle.encoder_clocks(gpu_lle.device,rates,&driven) && driven==1);
+    CHECK(rates[0]==12502828125ull && rates[1]==512 && rates[2]==rates[0] && rates[3]==rates[1]);
+    // WSS control writes after the timing reset must preserve the FIELD owner.
+    uint32_t field=0;const char* field_error=gpu_lle_port(0x80c0,1,0,&field);
+    if(field_error)fprintf(stderr,"Post-startup FIELD: %s\n",field_error);
+    CHECK(!field_error);
+    CHECK(!gpu_lle.error(gpu_lle.device));
+    uint32_t known=0,high=0;
+    CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-2);
+    CHECK(known==((1u<<19)|(1u<<22)|(1u<<24)) && high==(1u<<19));
+}
+static void test_gpu_lle_av_mode_startup(uint32_t phase)
 {
     install_fault_handler();
 #ifdef PILOT_GPU_FILES_WORKER
     CHECK(!pilot_io_device_files(memory));
 #endif
     gpu_lle_open_profile(phase);
-    // Original AvSetDisplayMode observes the selected quiescent protocol and
-    // starts its full mode sequence. DEBUG, serial tables and clock routing
-    // and VGA enable/misc execute; the remaining PRAMDAC table stops the call.
+    // Startup now reaches actual retrace waits. Use the existing original
+    // PIT initialization/shared runtime clock, as the title selection does.
+    CHECK(!pilot_io_device_clock_start());
+    // Actual original mode setup executes all tables, waits for three real
+    // retraces, resets encoder timing, programs WSS and returns through RET24.
     uint32_t args[]={0xfd000000,0,0,0x12,2560,0},result=0xcccccccc;
     const char *error=pilot_io_device_lle(3,memory,args,&result);
-    fprintf(stderr,"Original AV startup boundary: %s\n",error?error:"returned without guard");
-    CHECK(error && strstr(error,"unmodelled NV2A write at fd680898"));
-    // A later nominal FIELD callback cannot replace the original failure.
-    gpu_lle.field(gpu_lle.device,0);
-    CHECK(strstr(gpu_lle.error(gpu_lle.device),"unmodelled NV2A write at fd680898"));
-    uint32_t known=0,high=0;
-    // Original 80034EF7..80034F02 now also drives GPIO22/24 low.
-    CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-2);
-    CHECK(known==((1u<<19)|(1u<<22)|(1u<<24)) && high==(1u<<19));
-    CHECK(result==0xcccccccc); // failed initialization cannot publish success
-    fprintf(stderr,"PASS: original mode setup crosses encoder tables, clock routing and VGA enable/misc; remaining PRAMDAC guard preserves the caller\n");
+    fprintf(stderr,"Original AV startup: %s result=%08x\n",error?error:"returned",result);
+    CHECK(!error && result==0);gpu_test_completed_av_mode(phase);
+    fprintf(stderr,"PASS: original AV3 returns after actual setup, clock-driven retraces, encoder reset and WSS; connected pixels remain guarded\n");
 }
 
 #ifdef PILOT_GPU_FILES_WORKER

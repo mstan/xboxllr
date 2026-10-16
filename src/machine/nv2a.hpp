@@ -37,6 +37,7 @@
 #include "machine/nv2a_renderer.hpp"
 #include "machine/nv2a_fp_registers.hpp"
 #include "machine/nv2a_vga_registers.hpp"
+#include "machine/nv2a_display_setup_commands.hpp"
 #include "machine/nv2a_av_handshake.hpp"
 #include "machine/nv2a_generic_vertex_scratch.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
@@ -182,6 +183,7 @@ public:
         fault_(vga_registers_.error());return false;
     }
     Nv2aFpRegisters::Observation display_programming() const {return fp_registers_.observe();}
+    Nv2aDisplaySetupCommands::Observation display_setup_commands() const {return display_setup_commands_.observe();}
     bool display_slaved() const {return crtc28_programmed_ && (crtc_regs_[0x28]&0x80);}
     uint32_t display_clock_routing() const {return pramdac_pll_control_;}
     void display_clock_signals(bool known,bool retrace,bool blank,bool vertical_blank_edge) {
@@ -3916,6 +3918,7 @@ private:
     std::array<uint8_t, 256> crtc_regs_{};
     uint8_t crtc_index_ = 0;
     Nv2aVgaRegisters vga_registers_;
+    Nv2aDisplaySetupCommands display_setup_commands_;
     uint32_t pcrtc_start_ = 0;
     uint32_t pramdac_general_control_ = 0;
     Nv2aFpRegisters fp_registers_;

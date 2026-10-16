@@ -44,10 +44,24 @@ int main() {
         };
         advance(13);
         xlle::Nv2aFpTiming::State fp;CHECK(board.state(fp) && fp.x==13 && !board.encoder_live());
+        // Original startup keeps analog DACs disabled until after timing reset.
+        CHECK(encoder.write_byte(0xba,0x3f));
         CHECK(encoder.write_byte(0x6c,0xc6));
         CHECK(board.refresh(registers.observe(),true,0x100a0000));
         CHECK(board.encoder_live());CHECK(board.state(fp) && fp.x==13 && fp.clocks==13);
         xlle::Cx25871Timing::State state;CHECK(encoder.timing_state(state) && !state.clocks);
+        const uint64_t epoch=encoder.timing_epoch();
+        CHECK(encoder.write_byte(0xba,0x2f)); // DACOFF clears; SLAVER is unchanged.
+        CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(board.encoder_live() && encoder.timing_epoch()==epoch);
+        CHECK(encoder.timing_state(state) && !state.clocks);
+        const uint8_t wss[][2]={{0x60,0xc5},{0x62,0xa9},{0x64,0x37},{0x66,0x15},{0x68,0x4b},{0x6a,0}};
+        for(const auto& command:wss) {
+            CHECK(encoder.write_byte(command[0],command[1]));
+            CHECK(board.refresh(registers.observe(),true,0x100a0000));
+            CHECK(board.encoder_live() && encoder.timing_epoch()==epoch);
+            CHECK(encoder.timing_state(state) && !state.clocks);
+        }
         // Positive VSYNC begins at line491, before that line's HSYNC at654.
         // The FIELD transition is two CLKI cycles AFTER that HSYNC.
         const uint64_t first=491*line+654;
@@ -72,6 +86,10 @@ int main() {
         CHECK(board.state(fp) && fp.clocks==first+frame+2);
         advance(first+2*frame+2);CHECK(encoder.field_signal()==1 && vblanks==3);
         CHECK(fault.empty());
+        // The exception is limited to DAC power controls, not interface changes.
+        CHECK(encoder.write_byte(0xba,0x0f));
+        CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(!encoder.timing_known() && !board.encoder_live());
         auto before=fp;CHECK(board.state(before));
         CHECK(!board.advance({8,(first+2*frame+2)*512,frequency}));
         CHECK(fault=="display clock time owner/frequency/order changed");

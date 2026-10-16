@@ -359,7 +359,7 @@ static void documented_encoder_controls() {
         CHECK(fault.empty());
         // Rejected commands preserve both the prior latch and destinations.
         const uint8_t rejected[][2] = {
-            {0x2e,0x80},{0x30,1},{0x32,0x80},{0x60,0x40},{0x60,0x10},
+            {0x2e,0x80},{0x30,1},{0x32,0x80},{0x60,0x20},{0x60,0x10},
             {0x6a,0x10},{0x70,0},{0x70,1},{0x74,8},{0x74,0},{0xca,0x38},{0xcc,0x38},
             {0xd6,4},{0xd6,0x40}
         };
@@ -371,6 +371,12 @@ static void documented_encoder_controls() {
             CHECK(encoder.read_byte(entry[0],after) && after==prior);
         }
         CHECK(encoder.write_byte(0x72,0));
+        // Manufacturer table2-5: bits6/7 enable WSS fields1/2. Data nibble
+        // remains readable; bits4/5 are reserved, checked above.
+        for(uint8_t control:{0x4f,0x80,0xc5,0x00}) {
+            uint8_t observed=0xa5;CHECK(encoder.write_byte(0x60,control));
+            CHECK(encoder.read_byte(0x60,observed) && observed==control);
+        }
         uint8_t reserved=0xa5;
         CHECK(!encoder.read_byte(0x72,reserved) && reserved==0xa5);fault.clear();
         CHECK(!encoder.write_byte(0x72,1) && !fault.empty());fault.clear();
