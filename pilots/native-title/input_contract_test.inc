@@ -34,6 +34,97 @@ static DWORD WINAPI input_test_set_state(DWORD port,XINPUT_VIBRATION *vibration)
 #undef XInputSetState
 
 static uint32_t input_test_last_error;
+static void input_test_trigger_file(const char *path,const char *data,DWORD bytes)
+{
+    HANDLE file=CreateFileA(path,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(file!=INVALID_HANDLE_VALUE);
+    if(file==INVALID_HANDLE_VALUE)return;
+    DWORD written=0;CHECK(WriteFile(file,data,bytes,&written,NULL) && written==bytes);
+    CHECK(CloseHandle(file));
+}
+static uint32_t input_test_trigger_poll(uint64_t now,uint8_t pad[18])
+{
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+    CHECK(!pilot_input_host_reference_time(now));
+    return pilot_input_host_state(0,pad);
+#else
+    /* Same source poll with an explicitly authored clock value. The separate
+     * reference-clock selection below exercises publication + actual host API. */
+    return input_replay_poll(now,pad);
+#endif
+}
+static void input_test_trigger_failure(uint64_t now,uint32_t expected)
+{
+    uint8_t pad[18];memset(pad,0xcc,sizeof(pad));
+    const ULONGLONG start=input_replay_start;const int clock=input_replay_clock_started,reported=input_replay_reported;
+    const struct InputReplayTrigger before=input_replay_trigger;
+    CHECK(input_test_trigger_poll(now,pad)==expected);
+    for(unsigned i=0;i<18;++i)CHECK(pad[i]==0xcc);
+    CHECK(input_replay_start==start && input_replay_clock_started==clock && input_replay_reported==reported);
+    CHECK(input_replay_trigger.enabled==before.enabled && input_replay_trigger.consumed==before.consumed &&
+          !strcmp(input_replay_trigger.path,before.path));
+}
+static void test_input_replay_trigger(void)
+{
+    input_host_is_keyboard();input_host_keyboard=0;
+    FILE *file=tmpfile();CHECK(file);
+    CHECK(fputs("0 000000000000000000000000000000000000\n20 100000000000000000000000000000000000\n220 000000000000000000000000000000000000\n",file)>=0);
+    rewind(file);CHECK(input_replay_load(file) && !fclose(file));
+    char directory[MAX_PATH],path[MAX_PATH];
+    DWORD length=GetTempPathA(sizeof(directory),directory);CHECK(length && length<sizeof(directory));
+    if(!length || length>=sizeof(directory))return;
+    UINT temporary=GetTempFileNameA(directory,"irp",0,path);CHECK(temporary);
+    if(!temporary)return;
+    CHECK(DeleteFileA(path));
+    CHECK(input_replay_trigger_configure("relative-trigger")==ERROR_INVALID_PARAMETER);
+    CHECK(!input_replay_trigger.enabled && !input_replay_clock_started && input_replay_reported==-1);
+    CHECK(!input_replay_trigger_configure(path));
+    uint64_t base=1000;
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+    base+=input_host_reference_ms;
+#endif
+    uint8_t pad[18];
+    for(unsigned n=0;n<3;++n) {
+        memset(pad,0xcc,sizeof(pad));CHECK(!input_test_trigger_poll(base+n*3000,pad));
+        for(unsigned i=0;i<18;++i)CHECK(!pad[i]);
+        CHECK(!input_replay_clock_started && !input_replay_trigger.consumed && input_replay_reported==-1);
+    }
+    input_test_trigger_file(path,"start-v1\r\n",10);
+    input_test_trigger_failure(base+7000,ERROR_INVALID_DATA);CHECK(DeleteFileA(path));
+    input_test_trigger_file(path,"start-v2\n",9);
+    input_test_trigger_failure(base+7100,ERROR_INVALID_DATA);CHECK(DeleteFileA(path));
+    HANDLE locked=CreateFileA(path,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(locked!=INVALID_HANDLE_VALUE);
+    input_test_trigger_failure(base+7200,ERROR_SHARING_VIOLATION);
+    CHECK(CloseHandle(locked));CHECK(DeleteFileA(path));
+    CHECK(CreateDirectoryA(path,NULL));input_test_trigger_failure(base+7300,ERROR_ACCESS_DENIED);
+    CHECK(RemoveDirectoryA(path));
+    input_test_trigger_file(path,"start-v1\n",9);
+    const ULONGLONG old_start=input_replay_start;
+    CHECK(input_replay_trigger_configure(path)==ERROR_ALREADY_EXISTS);
+    CHECK(input_replay_trigger.enabled && !input_replay_trigger.consumed &&
+          !input_replay_clock_started && input_replay_start==old_start && input_replay_reported==-1);
+    CHECK(!input_test_trigger_poll(base+8000,pad) && !pad[0]);
+    CHECK(input_replay_trigger.consumed && input_replay_clock_started && input_replay_start==base+8000 && input_replay_reported==0);
+    CHECK(DeleteFileA(path)); // consumption is sticky, not the file's lifetime
+    CHECK(!input_test_trigger_poll(base+8019,pad) && !pad[0]);
+    CHECK(!input_test_trigger_poll(base+8020,pad) && pad[0]==0x10 && input_replay_reported==1);
+    input_test_trigger_file(path,"invalid",7); // never probe a consumed trigger again
+    CHECK(!input_test_trigger_poll(base+8219,pad) && pad[0]==0x10);
+    CHECK(!input_test_trigger_poll(base+8220,pad) && !pad[0] && input_replay_reported==2);
+    CHECK(DeleteFileA(path));
+    /* Configuration rejects both a disconnected row0 and any nonneutral axis
+     * or button before arming, leaving the old trigger/epoch untouched. */
+    for(unsigned kind=0;kind<2;++kind) {
+        file=tmpfile();CHECK(file);
+        CHECK(fputs(kind?"0 000000000000000000000100000000000000\n":"0 disconnected\n",file)>=0);
+        rewind(file);CHECK(input_replay_load(file) && !fclose(file));
+        CHECK(input_replay_trigger_configure(path)==(kind?ERROR_INVALID_DATA:ERROR_INVALID_PARAMETER));
+        CHECK(!input_replay_trigger.enabled && !input_replay_clock_started && input_replay_reported==-1);
+    }
+    input_replay_count=0;
+    puts("input replay trigger: neutral wait, selected-clock epoch, ordered press/release, sticky consumption and nonmutating invalid/stale/inaccessible failures passed");
+}
 #ifdef PILOT_INPUT_REFERENCE_CLOCK
 static void test_input_reference_clock(void)
 {
@@ -60,6 +151,7 @@ static void test_input_reference_clock(void)
     CHECK(!pilot_input_host_reference_time(400));
     CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
     CHECK(pilot_input_host_state(1,pad)==ERROR_DEVICE_NOT_CONNECTED);
+    test_input_replay_trigger();
     fprintf(stderr,"PASS reference input: Start20ms/release220ms/hotplug300/400ms on external time; 80ms host stalls and100 observer polls preserve state; backwards publication rejects before mutation\n");
 }
 #endif
@@ -130,6 +222,7 @@ static void input_test_setup(void)
 }
 static void test_input(void)
 {
+    test_input_replay_trigger();
     input_test_setup();
     uint32_t type=PILOT_INPUT_g_DeviceType_Gamepad,out=0x1a020;
     CHECK(input_test_call(PILOT_INPUT_XGetDevices,type,0,0,0)==1);

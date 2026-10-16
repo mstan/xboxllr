@@ -43,6 +43,9 @@ static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID
         const char *path=getenv("XLLE_PILOT_INPUT_REPLAY");FILE *file=path?fopen(path,"r"):NULL;
         int ok=file && input_replay_load(file);if(file && fclose(file))ok=0;
         if(!ok){fprintf(stderr,"[PILOT INPUT STOP] invalid/missing input replay\n");ExitProcess(2);}
+        uint32_t error=input_replay_trigger_configure(getenv("XLLE_PILOT_INPUT_REPLAY_TRIGGER"));
+        if(error){fprintf(stderr,"[PILOT INPUT STOP] invalid replay trigger configuration error=%u\n",error);ExitProcess(2);}
+        if(input_replay_trigger.enabled)fprintf(stderr,"[INPUT REPLAY TRIGGER] neutral connected until marker: %s\n",input_replay_trigger.path);
         fprintf(stderr,"[INPUT REPLAY] %u real controller-state transitions; port 0\n",input_replay_count);
     }
     return TRUE;
@@ -87,9 +90,7 @@ uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
     input_host_is_keyboard();
     if(input_replay_count) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
-        uint64_t now=input_host_replay_time();
-        if(!input_replay_clock_started){input_replay_start=now;input_replay_clock_started=1;}
-        return input_replay_sample(now-input_replay_start,gamepad);
+        return input_replay_poll(input_host_replay_time(),gamepad);
     }
     if(input_host_keyboard) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;

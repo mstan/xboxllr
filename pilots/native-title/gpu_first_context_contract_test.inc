@@ -68,6 +68,30 @@ static void test_gpu_first_context_observer(void)
     CHECK(!pilot_io_device_files(memory));g_fs_base=0x19000;MEM8(g_fs_base+0x24)=0;
     uint32_t revision=0;CHECK(!usb_access(0xfed00000,0,&revision));observer_worker_code();
     gpu_lle_open();CHECK(!gpu_context_observer.enabled && !gpu_lle.first_context_snapshot);
+    // Elective phase selection is a bounded read-only host request. It does
+    // not imply that any particular original title phase has been reached.
+    {
+        char temporary[MAX_PATH],directory[MAX_PATH],path[MAX_PATH];
+        CHECK(GetTempPathA(sizeof(temporary),temporary)>0);
+        CHECK(GetTempFileNameA(temporary,"gfr",0,directory));CHECK(DeleteFileA(directory));
+        CHECK(CreateDirectoryA(directory,NULL));
+        CHECK(gpu_framebuffer_request(directory,1)==0);
+        CHECK(gpu_framebuffer_request(directory,0)==-1 && gpu_framebuffer_request(directory,17)==-1);
+        CHECK(sprintf_s(path,sizeof(path),"%s/framebuffer-01.request",directory)>0);
+        HANDLE request=CreateFileA(path,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+        CHECK(request!=INVALID_HANDLE_VALUE);DWORD bytes=0;
+        // Incomplete or concurrently written files cannot arm capture.
+        CHECK(gpu_framebuffer_request(directory,1)==-1);
+        CHECK(WriteFile(request,"capture-v1\n",11,&bytes,NULL) && bytes==11);CHECK(CloseHandle(request));
+        CHECK(gpu_framebuffer_request(directory,1)==1 && gpu_framebuffer_request(directory,2)==0);
+        request=CreateFileA(path,GENERIC_WRITE,0,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+        CHECK(request!=INVALID_HANDLE_VALUE && SetFilePointer(request,0,NULL,FILE_END)!=INVALID_SET_FILE_POINTER);
+        CHECK(WriteFile(request,"x",1,&bytes,NULL) && bytes==1);CHECK(CloseHandle(request));
+        CHECK(gpu_framebuffer_request(directory,1)==-1);CHECK(DeleteFileA(path));
+        CHECK(CreateDirectoryA(path,NULL));CHECK(gpu_framebuffer_request(directory,1)==-1);
+        CHECK(RemoveDirectoryA(path));CHECK(RemoveDirectoryA(directory));
+        CHECK(gpu_framebuffer_request(directory,1)==-1);
+    }
     gpu_test_write(0x1804,4); // Independently authored PCI command, not reset guess.
     CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));
     CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,observer_checked_mmio));

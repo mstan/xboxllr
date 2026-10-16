@@ -344,6 +344,21 @@ actual producer, with no authored unblank/table inputs in this title run.
 The private enabled-noise omission remains explicit, and supervisor termination
 is not title retirement. No analog, attract or lifecycle acceptance is inferred.
 
+Final-run preparation now avoids the early-capture and fixed-HLE-time traps.
+Elective request-controlled observation reserves up to16 distinct completed
+captures for the supervising phase checks; missing markers wait, malformed or
+inaccessible markers fail observation. A one-shot input marker keeps a connected
+controller neutral until an actual poll arms the preloaded replay on the selected
+clock. It neither patches guest state nor changes input time ownership. Six
+affected original-input/clock/USB/observer/launch checks pass in1.969s; no extra
+title run is needed for these host controls. Evidence:
+`build/blinx/graphics-acceptance-controls-20261016/review.aot-private.json`.
+The [one-run acceptance sequence](BLINX-GRAPHICS-ACCEPTANCE.md) requires actual
+title, moving attract, delivered Start/release, title/content retirement and
+neutral reentry. Requests and supervisor termination prove none of those by
+themselves. This prepares G05; enabled-noise behavior and final execution remain
+open, and the existing physical recovery hold is unchanged.
+
 ## Actual original GPU framebuffer captured - 2026-10-16
 
 The whole-GPU route now has an elective passive storage observer at hash-bound
@@ -2191,9 +2206,9 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: pre-title startup and actual title04010101 AV3/FIELD return pass; post-mode takeover acceptance remains with the connected enabled-noise route | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: owned LOAD/projections and physical transfer pass; actual original loading-screen framebuffer captured in noise-omitting diagnostic; enabled-noise connected acceptance remains | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G03 | Open: owned LOAD/projections and physical transfer pass; three completed loading-picture flips and processed digital input captured in noise-omitting diagnostic; enabled-noise connected acceptance remains | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
-| G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
+| G05 | Open: digital input and phase-selected capture/input controls ready; needs enabled-noise connected attract/lifecycle run after G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Complete: configured reset and three original drained retirement/reentry lifetimes compose with accepted A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
