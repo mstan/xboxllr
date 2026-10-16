@@ -176,6 +176,20 @@ guards remain intact. Evidence:
 `build/blinx/gpu-lle-diagnostic-counter-20261016/retrace-slice-review/`.
 Actual connected title passage, enabled noise and lifecycle remain open.
 
+The changed connected diagnostic reaches300.235s without a guard, but AV3 id5
+still does not return from its first retrace loop. The new clock is selected;
+PIT/USB/scheduler continue and nine complete retained FIELD samples remain
+valid around lines482/483 (one later log record is torn and excluded). Thus
+the interleaving correction is necessary for coherent composition but is not
+sufficient to resolve the live wait. No per-poll values/timestamps were retained,
+so the remaining cause is not assigned to interrupt starvation or the status
+read path. Source review identifies13B210 as the actual GPU ISR and13BBC0 as
+its DPC; the FIELD read in13B400/13B47D belongs to the latter. Slow host callback
+time alone cannot explain missed guest pulses under the stopped clock.
+The next short fixture will include the actual GPU ISR/DPC registrations omitted
+from the passing AV-only fixtures. No unchanged full-title rerun is planned.
+Receipt: `build/blinx/gpu-lle-diagnostic-clock-20261016/final-review.aot-private.json`.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued
