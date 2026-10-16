@@ -118,6 +118,14 @@ checks pass under strict GCC and MSVC C++17 builds; root reviewed its arithmetic
 and state-preservation contracts. It does not yet select a display source or
 connect FP counters/encoder sync. That integration remains the next G02 work.
 
+The encoder also exposes a non-mutating clock observation for that scheduler:
+unknown, unsupported, configured-but-undriven or driven. Incomplete original
+programming can be observed without faulting before a consumer needs the clock.
+The existing consuming query still rejects unavailable clocks; neither query
+creates elapsed time or output edges. The focused encoder suite passes in0.06s,
+including unchanged output on unknown/unsupported observations and preserved
+consumer faults. Evidence: build/blinx/encoder-clock-observation-20261015/.
+
 ## Measured DEBUG storage and original encoder continuation - 2026-10-15
 
 The maintained FP owner now admits the two independently observed whole DEBUG

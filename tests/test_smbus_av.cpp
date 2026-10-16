@@ -179,10 +179,14 @@ static void encoder_clocks() {
         Encoder encoder([&](const std::string& why){fault=why;},pal);
         Encoder::Clocks clocks;
         clocks.encoder={123,7};
+        const char* reason=nullptr;
+        CHECK(encoder.observe_clocks(clocks,reason)==Encoder::ClockState::Unknown && reason);
+        CHECK(fault.empty() && equals(clocks.encoder,123,7));
         CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
         CHECK(equals(clocks.encoder,123,7)); // unknown warm state is not zero Hz
         const auto write=[&](uint8_t reg,uint8_t value){CHECK(encoder.write_byte(reg,value));};
         write(0xba,0x80);
+        CHECK(encoder.observe_clocks(clocks,reason)==Encoder::ClockState::Undriven && !reason && fault.empty());
         CHECK(encoder.clocks(clocks) && !clocks.clko_driven);
         // Independent rational evaluation of table C-1's PLL equation, not
         // rates obtained from this model. PAL ~29.500 MHz; NTSC ~28.196 MHz.
@@ -190,6 +194,7 @@ static void encoder_clocks() {
         CHECK(equals(clocks.encoder,numerator,2048));
         CHECK(equals(clocks.input,numerator,2048) && equals(clocks.clko,numerator,2048));
         write(0xc4,1);CHECK(encoder.clocks(clocks) && clocks.clko_driven);
+        CHECK(encoder.observe_clocks(clocks,reason)==Encoder::ClockState::Driven && !reason && fault.empty());
         write(0x3a,8);CHECK(encoder.clocks(clocks)); // HALF_CLKO is pin-only
         CHECK(equals(clocks.clko,numerator,4096) && equals(clocks.input,numerator,2048));
         write(0x3a,4);CHECK(encoder.clocks(clocks)); // PLL divisor 6 -> 10
@@ -211,7 +216,11 @@ static void encoder_clocks() {
         CHECK(equals(clocks.encoder,13500000) && equals(clocks.input,27000000));
         write(0xd4,0x60);CHECK(encoder.clocks(clocks));
         CHECK(equals(clocks.input,13500000)); // DIV2 aliases D4 bit 6
-        write(0xd4,0x80);CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
+        write(0xd4,0x80);
+        const auto prior=clocks.encoder;
+        CHECK(encoder.observe_clocks(clocks,reason)==Encoder::ClockState::Unsupported && reason && fault.empty());
+        CHECK(clocks.encoder.numerator==prior.numerator && clocks.encoder.denominator==prior.denominator);
+        CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
         write(0xd4,0);write(0xa0,0xc0);
         CHECK(!encoder.clocks(clocks) && !fault.empty());fault.clear();
         write(0xa0,0);write(0x9c,0);write(0x9e,0);

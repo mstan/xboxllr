@@ -25,6 +25,7 @@ public:
         Rate encoder, input, clko;
         bool clko_driven=false;
     };
+    enum class ClockState { Unknown, Undriven, Driven, Unsupported };
     // Received command bytes, NOT hardware register readback. The public
     // register map does not specify DA..FC effects. Keep their provenance
     // separate from the documented controls; it does not qualify their unknown
@@ -41,31 +42,40 @@ public:
     // Explicit board input. Zero means no known CLKI source, not a stopped
     // oscillator. No title rate is inferred from the game's intended cadence.
     void set_clki_hz(uint32_t hz) { clki_hz_=hz; }
-    bool clocks(Clocks& output) {
+    // Board scheduling may observe incomplete original programming without
+    // faulting the guest. Only a consumer that needs an unavailable clock
+    // calls clocks(). Neither query advances time or changes device state.
+    ClockState observe_clocks(Clocks& output,const char*& reason) const {
+        reason=nullptr;
+        const auto unsupported=[&](const char* why) {
+            reason=why;return ClockState::Unsupported;
+        };
         // Software reset establishes the power/oscillator control defaults.
         // A RAM-only warm capture does not establish those pins/registers.
         if(!clock_defaults_known_ || known_[0x3a]!=0xff ||
            known_[0xa0]!=0xff || known_[0x9c]!=0xff || known_[0x9e]!=0xff ||
-           known_[0x38]!=0xff || (known_[0xd4]&0xe0)!=0xe0 || !(known_[0xc4]&1))
-            return reject("CX25871 clock tree has unknown control state");
+           known_[0x38]!=0xff || (known_[0xd4]&0xe0)!=0xe0 || !(known_[0xc4]&1)) {
+            reason="CX25871 clock tree has unknown control state";
+            return ClockState::Unknown;
+        }
         // Conexant 100381B sections 1.3.6/1.3.6.1 and table 2-5. This
         // bounded profile uses the same 13.5-MHz crystal as autoconfig 0/1.
         // PLL lock time, sleep, external PLL reference and MODE2X remain open.
         if(registers_[0xd4]&0x80)
-            return reject("CX25871 MODE2X input clock remains unqualified");
+            return unsupported("CX25871 MODE2X input clock remains unqualified");
         const bool bypass=registers_[0xa0]&0x40;
         const bool external=!bypass && (registers_[0xa0]&0x80);
         const bool async=registers_[0xd4]&0x20;
         if(bypass && (registers_[0xa0]&0x80))
-            return reject("CX25871 combined PLL bypass/external pin gating remains unqualified");
+            return unsupported("CX25871 combined PLL bypass/external pin gating remains unqualified");
         if((external || async) && !clki_hz_)
-            return reject("CX25871 clock tree requires a real CLKI source");
+            return unsupported("CX25871 clock tree requires a real CLKI source");
         Rate source{13500000,1};
         if(external) source={clki_hz_,1};
         else if(!bypass) {
             const uint32_t multiplier=((registers_[0xa0]&0x3fu)<<16) |
                 (uint32_t(registers_[0x9e])<<8) | registers_[0x9c];
-            if(!multiplier)return reject("CX25871 zero PLL multiplier is unqualified");
+            if(!multiplier)return unsupported("CX25871 zero PLL multiplier is unqualified");
             source=source.scaled(multiplier,65536u*((registers_[0x3a]&4)?10u:6u));
         }
         Clocks result;
@@ -73,7 +83,7 @@ public:
         result.input=async ? Rate{clki_hz_,1} : source;
         if(registers_[0x38]&0x20) {
             if(bypass || external)
-                return reject("CX25871 3:2 clocking requires the qualified internal PLL");
+                return unsupported("CX25871 3:2 clocking requires the qualified internal PLL");
             result.encoder=source.scaled(2,3);
         }
         if(registers_[0x38]&0x10)result.input=result.input.scaled(1,2);
@@ -81,7 +91,13 @@ public:
         // EN_XCLK three-states CLKO even with EN_OUT set. Combined bypass
         // and external-clock pin gating is deliberately not inferred here.
         result.clko_driven=(registers_[0xc4]&1) && !(registers_[0xa0]&0x80);
-        output=result;return true;
+        output=result;return result.clko_driven?ClockState::Driven:ClockState::Undriven;
+    }
+    bool clocks(Clocks& output) {
+        const char* reason=nullptr;
+        const auto state=observe_clocks(output,reason);
+        if(state==ClockState::Unknown || state==ClockState::Unsupported)return reject(reason);
+        return true;
     }
     const char* name() const override { return "cx25871-control"; }
     uint8_t address() const override { return 0x45; }
