@@ -224,6 +224,23 @@ does not prove its behavior during the later AV3 wait. The next bounded title
 diagnostic records actual polling values, times and event-list observations.
 Families remain7/9; no new precision or hardware requirement is introduced.
 
+That changed diagnostic stops on its observation condition after163.234s,
+rather than using the300s ceiling. During the actual04010101 AV3 call,5,551,476
+status reads spanning90,032 PIT ticks (about80ms) return no high retrace bit.
+The same observations show frame373 advancing to377, actual IRQL0, callback
+A04F0 and event waiterD0012D44. No guard fires and AV3 has not returned.
+This establishes missed polling opportunities while vblank work progresses;
+it does not yet prove that the higher-priority worker consumes each pulse.
+Its saved original entryF9E80 and callback chain contain at least13 original
+service calls per normal loop under the captured configuration, including
+priority changes and dependent-thread resume/suspend. An empty worker would
+omit those consumers. Next is a bounded short-service scheduling counterexample,
+not an unchanged full-title retry or a substituted original worker.
+Receipt: `build/blinx/gpu-lle-diagnostic-poll-20261016/result.aot-private.json`;
+source review: `retrace-slice-review/vblank-worker-review-v2.aot-private.json`
+under the earlier counter diagnostic. The private image still omits enabled
+noise and remains ineligible for graphics acceptance.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued
