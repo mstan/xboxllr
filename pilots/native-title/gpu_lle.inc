@@ -15,6 +15,8 @@ static struct {
     void (*write)(void*,uint32_t,int,uint32_t);
     void (*frame)(void*,uint64_t);
     void (*clock)(void*,uint64_t,uint32_t);
+    int (*board_start)(void*,uint64_t,uint64_t,uint64_t);
+    int (*board_advance)(void*,uint64_t,uint64_t,uint64_t);
     uint32_t (*port)(void*,uint16_t,int,int,uint32_t);
     void (*field)(void*,int);
     int (*av_outputs)(void*,uint32_t*,uint32_t*);
@@ -23,7 +25,8 @@ static struct {
     int (*encoder_timing)(void*,uint64_t*,int*);
     int (*scanout)(void*,uint8_t*,uint32_t,uint32_t*,uint32_t*);
     int (*first_context_snapshot)(void*,uint8_t*,uint32_t,uint32_t*);
-    uint64_t origin,field_count;
+    uint64_t origin;
+    int external_clock_fixture;
 } gpu_lle;
 static const char *gpu_lle_sample(void);
 #include "gpu_first_context_observer.inc"
@@ -71,8 +74,9 @@ static const char *gpu_lle_access(uint32_t address,unsigned size,int write,uint3
 static const char *gpu_lle_port(uint16_t port,int size,int write,uint32_t *value)
 {
     if(!gpu_lle.device)return "GPU platform port before initialization";
-    /* Called from original kernel PCI instructions with its lock held.
-     * No tick/DMA/kernel reentry belongs inside configuration transport. */
+    /* Observe the already published shared PIT time before changing clocks.
+     * This never samples QPC or pumps CPU/PIT work inside a port callback. */
+    const char *error=gpu_lle_sample();if(error)return error;
     uint32_t result=gpu_lle.port(gpu_lle.device,port,size,write,*value);
     if(!write)*value=result;
     return gpu_lle.error(gpu_lle.device);
@@ -94,19 +98,19 @@ static const char *gpu_lle_kernel_mmio(uint32_t address,unsigned size,int write,
 static const char *gpu_lle_sample(void)
 {
     if(!gpu_lle.device)return "GPU device work without owned instance";
-    uint64_t elapsed=dispatch_monotonic()-gpu_lle.origin;
-    /* Same bounded nominal 60-Hz field clock as the qualified display floor.
-     * Reading a register never advances time. Slow rendering is permitted. */
-    uint64_t field=(elapsed/10000000)*60+(elapsed%10000000)*60/10000000;
+    uint64_t ticks=0,next=0;
+    const char *error=pilot_usb_pit_clock(&ticks,&next);if(error)return error;
+    if(ticks<gpu_lle.origin)return "GPU shared device time moved backwards";
+    uint64_t elapsed=ticks-gpu_lle.origin;
     /* Pinned xemu reset oscillator; PLL reprogramming remains an explicit
      * unsupported MMIO access. Counter epoch/subcycle phase are bounded. */
     const uint64_t hz=233333324;
-    gpu_lle.clock(gpu_lle.device,(elapsed/10000000)*hz+(elapsed%10000000)*hz/10000000,
-                  (uint32_t)(((elapsed%10000000)*60%10000000)*1000/10000000));
-    if(field>gpu_lle.field_count) {
-        gpu_lle.field_count=field;gpu_lle.field(gpu_lle.device,(int)(field&1));
-        gpu_lle.frame(gpu_lle.device,field);
-    }
+    gpu_lle.clock(gpu_lle.device,(elapsed/1125000)*hz+(elapsed%1125000)*hz/1125000,0);
+    // Same published PIT-time snapshot as the original CPU/device owner.
+    // Reads and time spent in host code cannot independently advance it.
+    // CLKO/FP counters supply retrace, vblank IRQs and encoder sync/FIELD.
+    if(!gpu_lle.external_clock_fixture)
+        gpu_lle.board_advance(gpu_lle.device,1,elapsed,1125000);
     return gpu_lle.error(gpu_lle.device);
 }
 static void gpu_lle_tick(void)
@@ -114,7 +118,7 @@ static void gpu_lle_tick(void)
     if(!gpu_lle.device)return;
     const char *error=gpu_lle_sample();if(error)stop(error,0xfd000000u);
 }
-static void gpu_lle_open_profile(uint32_t idle_phase)
+static void gpu_lle_open_profile_clock(uint32_t idle_phase,int external_clock_fixture)
 {
     if(gpu_lle.device)stop("GPU device already owned",0);
     if(!InitOnceExecuteOnce(&usb_once,usb_start,NULL,NULL))stop("shared GPU machine bus initialization failed",0);
@@ -143,7 +147,7 @@ static void gpu_lle_open_profile(uint32_t idle_phase)
     RemoveDllDirectory(dependency);
     if(!gpu_lle.library)stop("maintained NV2A reference DLL unavailable",GetLastError());
 #define GPU_LOAD(member) do {*(FARPROC*)&gpu_lle.member=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_" #member);if(!gpu_lle.member)stop("GPU DLL ABI missing: " #member,0);} while(0)
-    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(av_idle);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(port);GPU_LOAD(field);GPU_LOAD(av_outputs);GPU_LOAD(encoder_clocks);GPU_LOAD(encoder_advance);GPU_LOAD(encoder_timing);GPU_LOAD(scanout);
+    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(av_idle);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(board_start);GPU_LOAD(board_advance);GPU_LOAD(port);GPU_LOAD(field);GPU_LOAD(av_outputs);GPU_LOAD(encoder_clocks);GPU_LOAD(encoder_advance);GPU_LOAD(encoder_timing);GPU_LOAD(scanout);
 #undef GPU_LOAD
     gpu_lle.device=gpu_lle.create();
     if(!gpu_lle.device)stop("NV2A reference allocation failed",0);
@@ -156,8 +160,11 @@ static void gpu_lle_open_profile(uint32_t idle_phase)
     const char *error=gpu_lle.error(gpu_lle.device);
     if(error)stop(error,0xfd000000u);
     gpu_context_observer_open(hex);
-    gpu_lle.origin=dispatch_monotonic();
-    gpu_lle.field_count=0;
+    uint64_t next=0;
+    error=pilot_usb_pit_clock(&gpu_lle.origin,&next);if(error)stop(error,0xfd000000u);
+    gpu_lle.external_clock_fixture=external_clock_fixture;
+    if(!external_clock_fixture && !gpu_lle.board_start(gpu_lle.device,1,0,1125000))
+        stop(gpu_lle.error(gpu_lle.device),0xfd000000u);
     pilot_io_device_port_bind(0xcf8,0xcff,gpu_lle_port);
     pilot_io_device_port_bind(0x80c0,0x80c0,gpu_lle_port);
     pilot_io_device_port_bind(0x80d3,0x80d3,gpu_lle_port);
@@ -169,4 +176,5 @@ static void gpu_lle_open_profile(uint32_t idle_phase)
     error=pilot_io_device_work_bind(gpu_lle_sample);if(error)stop(error,0xfd000000u);
     fprintf(stderr,"[GPU LLE] original XDK renderer; maintained NV2A; shared original RAM/PIC/ISR\n");
 }
+static void gpu_lle_open_profile(uint32_t phase){gpu_lle_open_profile_clock(phase,0);}
 static void gpu_lle_open(void){gpu_lle_open_profile(0);}

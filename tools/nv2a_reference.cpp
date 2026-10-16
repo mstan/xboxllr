@@ -6,6 +6,7 @@
 #include "machine/mcpx_field.hpp"
 #include "machine/mcpx_av_outputs.hpp"
 #include "machine/cx25871_control.hpp"
+#include "machine/nv2a_encoder_clock.hpp"
 #include <cstdio>
 #include <cstring>
 #include <array>
@@ -28,6 +29,12 @@ struct Reference {
     xlle::Nv2a gpu;
     xlle::Amd756Smbus smbus;
     xlle::Cx25871Control* encoder = nullptr;
+    std::unique_ptr<xlle::Nv2aEncoderClock> board_clock;
+    void refresh_board_clock() {
+        if(!board_clock || !failure.empty())return;
+        board_clock->refresh(gpu.display_programming(),gpu.display_slaved(),gpu.display_clock_routing());
+        if(!board_clock->active())gpu.display_clock_signals(false,false,false,false);
+    }
     void (*external_irq)(int, int) = nullptr;
     // Qualification observes the last decoded parameter, not merely a recent
     // recorder window. A target bind can remain active across thousands of
@@ -109,6 +116,25 @@ EXPORT int xlle_nv2a_reference_av_idle(void* instance, uint32_t phase) {
     auto& ref = *static_cast<Reference*>(instance);
     return ref.failure.empty() && ref.gpu.establish_av_idle_phase(phase);
 }
+EXPORT int xlle_nv2a_reference_board_start(void* instance,uint64_t owner,uint64_t ticks,uint64_t frequency) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(ref.board_clock) {ref.failure="display board clock already owned";return 0;}
+    if(!ref.gpu.establish_display_clock_routing(0x100a0000u))return 0;
+    ref.board_clock=std::make_unique<xlle::Nv2aEncoderClock>(*ref.encoder,
+        [&ref](const std::string& why){if(ref.failure.empty())ref.failure=why;},
+        [&ref](const xlle::Nv2aFpTiming::State& state,bool vblank) {
+            ref.gpu.display_clock_signals(true,state.vsync_active,!state.display_active,vblank);
+            if(ref.board_clock->encoder_live())ref.sample_encoder_field();
+        });
+    return ref.board_clock->bind({owner,ticks,frequency});
+}
+EXPORT int xlle_nv2a_reference_board_advance(void* instance,uint64_t owner,uint64_t ticks,uint64_t frequency) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(!ref.board_clock) {ref.failure="display board clock has no owner";return 0;}
+    return ref.board_clock->advance({owner,ticks,frequency});
+}
 EXPORT void xlle_nv2a_reference_memory(void* instance, uint8_t* ram, uint32_t bytes) {
     auto& ref = *static_cast<Reference*>(instance);
     ref.gpu.set_mem_access(
@@ -147,10 +173,12 @@ EXPORT void xlle_nv2a_reference_write(void* instance, uint32_t address, int size
     auto& ref = *static_cast<Reference*>(instance);
     if (ref.failure.empty()) {
         ref.gpu.mmio_write(address, size, value); ref.observe_methods();
+        ref.refresh_board_clock();
     }
 }
 EXPORT void xlle_nv2a_reference_frame(void* instance, uint64_t frame) {
     auto& ref = *static_cast<Reference*>(instance);
+    if(ref.failure.empty() && ref.board_clock) {ref.failure="NV2A manual frame injection conflicts with board clock owner";return;}
     if (ref.failure.empty()) ref.gpu.set_frame(frame);
 }
 // Qualification-only observation of the maintained transform output. No
@@ -263,6 +291,9 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
     } else if (port == 0x80c0 && size == 1) {
         if (write) ref.field.write(value);
         else {
+            if(ref.board_clock && ref.encoder->timing_selected() && !ref.board_clock->encoder_live()) {
+                ref.failure="CX25871 FIELD requires a continuously clocked encoder epoch";return 0;
+            }
             if(ref.encoder->timing_selected()) {
                 if(ref.encoder->field_signal()<0) {
                     ref.failure="CX25871 FIELD input has unknown/high-impedance board level";return 0;
@@ -283,7 +314,9 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
                 (size == 2 && (port == 0xc000 || port == 0xc006)))) {
         if (write) {
             ref.smbus.io_write(port, size, value);
-            if(ref.encoder->timing_selected())ref.sample_encoder_field();
+            ref.refresh_board_clock();
+            if(ref.encoder->timing_selected() && (!ref.board_clock || ref.board_clock->encoder_live()))
+                ref.sample_encoder_field();
         }
         else return ref.smbus.io_read(port, size);
     } else ref.failure = "unmodelled display reference port";
@@ -292,6 +325,7 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
 EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
     auto& ref=*static_cast<Reference*>(instance);
     if(!ref.failure.empty())return;
+    if(ref.board_clock) {ref.failure="CX25871 manual FIELD injection conflicts with board clock owner";return;}
     if(ref.encoder->timing_selected()) {
         ref.failure="CX25871 programmed timing requires board clocks/sync, not nominal field injection";return;
     }
@@ -303,6 +337,7 @@ EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
 EXPORT int xlle_nv2a_reference_encoder_advance(void* instance,uint64_t clocks,unsigned sync) {
     auto& ref=*static_cast<Reference*>(instance);
     if(!ref.failure.empty())return 0;
+    if(ref.board_clock) {ref.failure="CX25871 manual clocks/sync conflict with board clock owner";return 0;}
     if(sync>3) { ref.failure="invalid encoder sync event";return 0; }
     xlle::Cx25871Timing::State before;
     const bool known=ref.encoder->timing_state(before);

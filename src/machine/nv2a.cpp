@@ -973,6 +973,12 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         // Driven from the instruction-derived frame phase (last ~5% of each frame is the
         // vertical blank), so the kernel's poll-for-retrace loops see a real cadence.
         if (bo == 0x3DA) {
+            if(clocked_display_) {
+                if(size!=1 || !display_signals_known_) {
+                    fault_("NV2A input status requires established display clock/signals");return 0;
+                }
+                return (display_retrace_?8u:0u)|(display_blank_?1u:0u);
+            }
             bool vblank = frame_phase_ >= 950;
             return vblank ? 0x09u : 0x00u;
         }
@@ -983,6 +989,10 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         if(reg==0x6a0 && av_handshake_.known()) {
             if(size!=4 || (bo&3)){fault_("NV2A AV read size/alignment");return 0;}
             return av_handshake_.read();
+        }
+        if(reg==0x50c && clocked_display_) {
+            if(size!=4 || (bo&3)){fault_("NV2A display routing read size/alignment");return 0;}
+            return pramdac_pll_control_;
         }
         if (reg == 0x500 || reg == 0x504 || reg == 0x508) {
             if ((size != 1 && size != 2 && size != 4) || (bo & (size - 1))) {
@@ -1337,11 +1347,20 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             return;
         }
         if (bo == 0x3D5) {
+            if(clocked_display_ && size!=1) {fault_("NV2A clocked CRTC write width");return;}
             crtc_regs_[crtc_index_] = static_cast<uint8_t>(value);
+            if(crtc_index_==0x28)crtc28_programmed_=true;
             return;
         }
     }
     if (blk->off == 0x680000) {
+        if((bo&~3u)==0x50c && clocked_display_) {
+            // Reached original RMW preserves the measured complete word.
+            // Other routing selections need their own clock source contract.
+            if(size!=4 || (bo&3) || value!=pramdac_pll_control_)
+                fault_("NV2A display routing change outside initialized profile");
+            return;
+        }
         if((bo&~3u)==0x6a0 && av_handshake_.known()) {
             if(size!=4 || (bo&3)){fault_("NV2A AV write size/alignment");return;}
             if(!av_handshake_.write(value))fault_(av_handshake_.error());

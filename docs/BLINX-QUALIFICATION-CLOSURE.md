@@ -50,6 +50,34 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;38 retained deferral IDs,37 scopes.
 
+## Shared display-clock integration - 2026-10-15
+
+Original direct and genuine-thread AV3 calls in both idle phases now cross
+PLL_CONTROL and reach the same next unimplemented VGA write: FD0C03C3=01 at
+80034F15. The selected initialized profile supplies the measured routing word
+100A0000; it supplies no encoder contents or ready/retrace result. The new board
+owner couples programmed CLKO to FP counters and encoder sync, retaining separate
+GPU phase and real encoder timing-reset epochs. The functional counter origin
+is declared nominal; exact activation/phase stays in GFX-D16. Connected original
+startup and output are still required, so this does not close G02.
+
+GPU work now observes the original device owner's cached published PIT time.
+GPU MMIO and platform ports advance old configuration before mutation, without
+sampling wall time or pumping original execution inside callbacks. Manual frame,
+FIELD or encoder-clock injection is rejected when this board owner exists.
+Explicit component fixtures retain their separate external-clock selection.
+
+Independent review caught and corrected a vblank edge that depended on time-step
+partitioning. Sparse FP traversal now visits vertical blank even when horizontal
+blank already suppresses DISPEN. Split and unsplit expectations check the exact
+edge, separate encoder reset, sync ordering and delayed FIELD transitions. Four
+affected device suites pass in0.37s; eight original transport/AV suites pass
+in1.22s; three C-ABI ownership rejection checks pass. Delta review has no remaining
+findings. Evidence: build/blinx/display-clock-20261016/. No hardware work or live
+audio HDD access was needed. Remaining VGA and PRAMDAC setup has been extracted
+as one batch; unknown pixel-processing controls are not qualified by this clock
+integration.
+
 ## Original synchronous audio callback transport - 2026-10-15
 
 The reached KeSynchronizeExecution route now executes original kernel153,
@@ -974,7 +1002,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: original encoder table transport executes; direct route reaches PLL_CONTROL, thread route rejects nominal FIELD; clocks/activation remain | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: shared clock integration passes focused checks; direct/thread original AV3 reaches VGA setup; remaining setup and connected acceptance required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |

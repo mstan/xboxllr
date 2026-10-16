@@ -176,7 +176,9 @@ static void test_gpu_lle_transport(void)
     CHECK(!pilot_io_device_lle(179,memory,&keep,&protect) && protect==0x204);
     call_kernel(168,query,2);CHECK(g_eax==top && MEM32(0x15000)==0x10000);
     for(unsigned lifetime=0;lifetime<3;++lifetime) {
-        gpu_lle_open();
+        // This transport fixture supplies explicit FIELD levels. The actual
+        // title profile instead owns its board clock and rejects injection.
+        gpu_lle_open_profile_clock(0,1);
         gpu_test_av();
         uint32_t bootstrap_va=0x80000000u,bootstrap_pa=UINT32_MAX;
         CHECK(!pilot_io_device_lle(173,memory,&bootstrap_va,&bootstrap_pa) && bootstrap_pa==0);
@@ -274,21 +276,21 @@ static void test_gpu_lle_av_mode_guard(uint32_t phase)
 #endif
     gpu_lle_open_profile(phase);
     // Original AvSetDisplayMode observes the selected quiescent protocol and
-    // starts its full mode sequence. DEBUG and serial table writes execute;
-    // the independently unestablished GPU clock routing still stops the call.
+    // starts its full mode sequence. DEBUG, serial tables and clock routing
+    // execute; the next unimplemented VGA control still stops the call.
     uint32_t args[]={0xfd000000,0,0,0x12,2560,0},result=0xcccccccc;
     const char *error=pilot_io_device_lle(3,memory,args,&result);
     fprintf(stderr,"Original AV startup boundary: %s\n",error?error:"returned without guard");
-    CHECK(error && strstr(error,"unmodelled NV2A read at fd68050c"));
+    CHECK(error && strstr(error,"unmodelled NV2A write at fd0c03c3"));
     // A later nominal FIELD callback cannot replace the original failure.
     gpu_lle.field(gpu_lle.device,0);
-    CHECK(strstr(gpu_lle.error(gpu_lle.device),"unmodelled NV2A read at fd68050c"));
+    CHECK(strstr(gpu_lle.error(gpu_lle.device),"unmodelled NV2A write at fd0c03c3"));
     uint32_t known=0,high=0;
     // Original 80034EF7..80034F02 now also drives GPIO22/24 low.
     CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-2);
     CHECK(known==((1u<<19)|(1u<<22)|(1u<<24)) && high==(1u<<19));
     CHECK(result==0xcccccccc); // failed initialization cannot publish success
-    fprintf(stderr,"PASS: original mode setup crosses AV, DEBUG and encoder table transport, drives GPIO19 and stops at clock routing without success\n");
+    fprintf(stderr,"PASS: original mode setup crosses AV, DEBUG, encoder tables and clock routing; VGA guard preserves the caller\n");
 }
 
 #ifdef PILOT_GPU_FILES_WORKER
@@ -310,7 +312,7 @@ static void gpu_test_timing_field(uint32_t expected)
 static void test_gpu_lle_encoder_phase_guard(void)
 {
     install_fault_handler();CHECK(!pilot_io_device_files(memory));
-    gpu_lle_open();
+    gpu_lle_open_profile_clock(0,1); // explicitly supplied clock/sync fixture
     gpu_test_timing_hal_write(0xba,0x80);
     gpu_test_timing_hal_write(0xba,0x20);
     gpu_test_timing_hal_write(0xc6,0x9c);
@@ -334,7 +336,7 @@ static void test_gpu_lle_encoder_timing(void)
 {
     install_fault_handler();CHECK(!pilot_io_device_files(memory));
     for(unsigned slave=0;slave<2;++slave) for(unsigned lifetime=0;lifetime<3;++lifetime) {
-        gpu_lle_open();
+        gpu_lle_open_profile_clock(0,1); // explicitly supplied clock/sync fixture
         gpu_test_timing_hal_write(0xba,0x80);
         gpu_test_timing_hal_write(0xba,slave?0x20:0);
         gpu_test_timing_hal_write(0xc6,0x9c);

@@ -8,6 +8,27 @@ static int failures;
 using Registers=xlle::Nv2aFpRegisters;
 static uint32_t offset(unsigned i){return i<7?0x800+i*4:0x820+(i-7)*4;}
 int main() {
+    {
+        std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
+        CHECK(!gpu.establish_display_clock_routing(0));fault.clear();
+        CHECK(gpu.establish_display_clock_routing(0x100a0000));
+        CHECK(gpu.mmio_read(0xfd68050c,4)==0x100a0000);
+        gpu.mmio_write(0xfd68050c,4,0x100a0000);CHECK(fault.empty());
+        gpu.mmio_read(0xfd6013da,1);
+        CHECK(fault=="NV2A input status requires established display clock/signals");fault.clear();
+        gpu.set_frame_phase(999); // nominal injection cannot supply this owner
+        gpu.display_clock_signals(true,false,true,false);
+        CHECK(gpu.mmio_read(0xfd6013da,1)==1);
+        gpu.display_clock_signals(true,true,true,true);
+        CHECK(gpu.mmio_read(0xfd6013da,1)==9 && gpu.mmio_read(0xfd600100,4)==1);
+        gpu.mmio_write(0xfd600100,4,1);CHECK(gpu.mmio_read(0xfd600100,4)==0);
+        CHECK(gpu.mmio_read(0xfd6013da,1)==9 && gpu.mmio_read(0xfd600100,4)==0);
+        gpu.display_clock_signals(true,false,false,false);CHECK(gpu.mmio_read(0xfd6013da,1)==0);
+        gpu.mmio_write(0xfd6013d4,1,0x28);gpu.mmio_write(0xfd6013d5,1,0x83);
+        CHECK(gpu.display_slaved());
+        gpu.mmio_write(0xfd68050c,4,0);CHECK(!fault.empty());
+        CHECK(gpu.mmio_read(0xfd68050c,4)==0x100a0000);
+    }
     // Actual whole-word readbacks from the physical differential sequence.
     // DEBUG can precede FP_CONTROL in original AV3. It is configuration storage,
     // not an invented ready/commit trigger or an assertion of reset defaults.

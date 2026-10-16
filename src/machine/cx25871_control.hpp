@@ -216,6 +216,9 @@ public:
     bool programmed() const { return programmed_; }
     bool timing_known() const { return timing_.known(); }
     bool timing_selected() const { return timing_selected_; }
+    uint64_t timing_epoch() const { return timing_epoch_; }
+    // The admitted C6 values both select positive HSYNC/VSYNC (bits3/4).
+    bool positive_sync_input() const { return known_[0xc6]==0xff && (registers_[0xc6]&0x18)==0x18; }
     bool advance_timing(uint64_t clocks) { return timing_.advance(clocks); }
     bool input_sync(bool vertical) { return timing_.sync(vertical); }
     bool input_vsync() { return timing_.vertical_sync(); }
@@ -257,7 +260,7 @@ private:
                             (known_[0x70]==0xff && (registers_[0x70]&0xc0))))
             return reject("CX25871 nonzero master HSYNC offset phase remains unqualified");
         if(!timing_.reset(config))return false;
-        timing_selected_=true;return true;
+        timing_selected_=true;++timing_epoch_;return true;
     }
     static bool supported(uint8_t reg) {
         // Conexant 100381B table 2-1 and programming detail table 2-5:
@@ -328,6 +331,7 @@ private:
     bool programmed_ = false;
     bool clock_defaults_known_=false;
     bool timing_selected_=false;
+    uint64_t timing_epoch_=0;
     uint32_t clki_hz_=0;
 };
 } // namespace xlle

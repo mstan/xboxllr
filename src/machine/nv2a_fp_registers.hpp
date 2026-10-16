@@ -9,6 +9,15 @@ namespace xlle {
 class Nv2aFpRegisters {
 public:
     using Words=std::array<uint32_t,14>;
+    struct Observation {
+        Words words{};
+        uint16_t known=0;
+        uint32_t control=0,debug=0;
+        bool control_known=false,debug_known=false;
+    };
+    Observation observe() const {
+        return {programmed_,programmed_known_,control_,debug_,control_known_,debug_known_};
+    }
     static constexpr uint32_t read_programmed=1u<<20;
     static int index(uint32_t offset) {
         if(offset&3)return -1;

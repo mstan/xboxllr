@@ -23,6 +23,7 @@ public:
         uint32_t x=0,y=0;
         bool hsync=false,vsync=false,display_enable=false; // electrical levels
         bool hsync_active=false,vsync_active=false,display_active=false;
+        bool vertical_blank=false;
     };
     using Event=std::function<void(const State&)>;
     explicit Nv2aFpTiming(FaultFn fault) : fault_(std::move(fault)) {}
@@ -71,7 +72,8 @@ public:
             }
             signals();
             if(before.hsync!=state_.hsync || before.vsync!=state_.vsync ||
-               before.display_enable!=state_.display_enable)event(state_);
+               before.display_enable!=state_.display_enable ||
+               before.vertical_blank!=state_.vertical_blank)event(state_);
         }
         return true;
     }
@@ -94,6 +96,9 @@ private:
         state_.vsync_active=state_.y>v.sync_start && state_.y<=v.sync_end;
         state_.display_active=state_.x>=h.valid_start && state_.x<=h.valid_end &&
                               state_.y>=v.valid_start && state_.y<=v.valid_end;
+        // This boundary can occur while horizontal blanking already keeps
+        // DISPEN inactive. It must still be visited for the frame IRQ owner.
+        state_.vertical_blank=state_.y>v.display_end;
         state_.hsync=level(state_.hsync_active,(mode_.control>>4)&3);
         state_.vsync=level(state_.vsync_active,mode_.control&3);
         state_.display_enable=level(state_.display_active,(mode_.control>>28)&3);

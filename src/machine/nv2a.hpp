@@ -168,6 +168,21 @@ public:
         if(av_handshake_.establish_idle(phase))return true;
         fault_(av_handshake_.error());return false;
     }
+    // Independently observed initialized GPU routing. This does not initialize
+    // the encoder or create display clocks, retrace, ready or active-bank data.
+    bool establish_display_clock_routing(uint32_t value) {
+        if(clocked_display_ || value!=0x100a0000u) {
+            fault_("NV2A display routing input outside initialized profile");return false;
+        }
+        pramdac_pll_control_=value;clocked_display_=true;return true;
+    }
+    Nv2aFpRegisters::Observation display_programming() const {return fp_registers_.observe();}
+    bool display_slaved() const {return crtc28_programmed_ && (crtc_regs_[0x28]&0x80);}
+    uint32_t display_clock_routing() const {return pramdac_pll_control_;}
+    void display_clock_signals(bool known,bool retrace,bool blank,bool vertical_blank_edge) {
+        display_signals_known_=known;display_retrace_=retrace;display_blank_=blank;
+        if(known && vertical_blank_edge)set_frame(frame_no_+1);
+    }
     void on_unmodeled(std::function<void(bool write, uint32_t addr, uint32_t rel,
                                          const char* block, uint32_t value)> cb) {
         unmodeled_cb_ = std::move(cb);
@@ -2542,6 +2557,9 @@ private:
     uint32_t pramdac_nvpll_ = 0x00011c01u;
     uint32_t pramdac_mpll_ = 0;
     uint32_t pramdac_vpll_ = 0x0003c20du;
+    uint32_t pramdac_pll_control_=0;
+    bool clocked_display_=false,display_signals_known_=false;
+    bool display_retrace_=false,display_blank_=false,crtc28_programmed_=false;
     // Inactive overlay configuration. Enabling an overlay requires the real
     // overlay pixel/scanout path, which this bounded route explicitly rejects.
     std::array<uint32_t, 0x1000 / 4> pvideo_regs_{};

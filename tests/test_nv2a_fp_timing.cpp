@@ -18,7 +18,8 @@ static Timing::Mode program(const Modeline& m,unsigned polarity) {
     return mode;
 }
 static unsigned pins(const Timing::State& s) {
-    return unsigned(s.hsync) | (unsigned(s.vsync)<<1) | (unsigned(s.display_enable)<<2);
+    return unsigned(s.hsync) | (unsigned(s.vsync)<<1) | (unsigned(s.display_enable)<<2) |
+        (unsigned(s.vertical_blank)<<3);
 }
 struct Edge { uint64_t clock; uint32_t x,y; unsigned levels; };
 int main() {
@@ -51,7 +52,7 @@ int main() {
             unsigned active=unsigned(x>=m.hs && x<m.he) |
                 (unsigned(y>=m.vs && y<m.ve)<<1) |
                 (unsigned(x>=m.left && x<m.w && y>=m.top && y<m.h)<<2);
-            return active ^ (polarity^7u);
+            return (active ^ (polarity^7u)) | (unsigned(y>=m.h)<<3);
         };
         unsigned previous=levels();
         for(uint64_t clock=1;clock<=total;++clock) {
