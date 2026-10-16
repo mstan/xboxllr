@@ -19,7 +19,20 @@ continued output through that transition.
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies | Audio A05 normal Stop/reuse and continued output; representative connected output passes, A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 36 retained IDs; 35 contain deferred scope, including AV service-edge precision, nominal interpolation precision, additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
-Latest graphics checkpoint: the maintained quiescent AV protocol now services
+Latest capture checkpoint: the retained-buffer title ended cleanly at its
+one-hour host ceiling:8647 calls, five Plays, no Stop and no guards. The actual
+1440-update title transition had not occurred. Its framing/cadence and identical
+accepted initial trace are preserved. The host ceiling correction passes four
+observer cases; one fresh muted capture now runs with a two-hour maximum and
+the same automatic lifecycle stop, four-core/Normal limit and game detector.
+Guest timing/audio remain unchanged. A source-bound round1
+post-restart oracle is ready, but has no transition to score yet. In parallel,
+the differential FP DEBUG/one-pixel HSYNC probe passes nine offline tests and
+remains unexecuted. Its omitted CRTC/encoder steps are explicit limitations,
+not grounds to close G02. See the
+[current checkpoint](BLINX-QUALIFICATION-CLOSURE.md#lifecycle-capture-limit-and-next-graphics-experiment---2026-10-15).
+
+Prior graphics checkpoint: the maintained quiescent AV protocol now services
 pending requests from actual GPU clock work; reads cannot complete them and
 acknowledgment cannot activate an FP bank. Both original direct and guest-thread
 AV calls pass their initial handshake in both idle phases and preserve caller

@@ -89,12 +89,12 @@ const char *pilot_audio_device_observation_start(const char *milliseconds,
     if(observation.bound)return "original audio observation already bound";
     uint64_t duration=0;
     for(const char *p=milliseconds;*p;++p) {
-        if(*p<'0' || *p>'9' || duration>360000)
-            return "original audio observation duration requires 1..3600000 decimal milliseconds";
+        if(*p<'0' || *p>'9' || duration>720000)
+            return "original audio observation duration requires 1..7200000 decimal milliseconds";
         duration=duration*10+(unsigned)(*p-'0');
     }
-    if(!duration || duration>3600000)
-        return "original audio observation duration requires 1..3600000 decimal milliseconds";
+    if(!duration || duration>7200000)
+        return "original audio observation duration requires 1..7200000 decimal milliseconds";
     if(!pcm || !spdif || pcm==spdif || !pilot_audio_device_lle_consumer_attached(pcm) ||
        !pilot_audio_device_lle_spdif_consumer_attached(spdif))
         return "original audio observation requires both bound capture consumers";

@@ -50,6 +50,53 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;36 retained deferral IDs,35 scopes.
 
+## Lifecycle capture limit and next graphics experiment - 2026-10-15
+
+The retained-buffer audio capture finalized cleanly at its3600000ms host ceiling
+(3608.312s supervisor duration), with no guards and8647 completed calls. Its
+finalized journal has five Plays and no Stop:34.249 guest seconds did not reach
+the normal title timeout. Both output streams retain5536768 PCM bytes and5407
+stamps. This is preserved evidence, not A05 acceptance. Do not restart the same
+one-hour configuration. The source timer counts1440 title updates, not a fixed
+guest duration. The observer now accepts a finite ceiling up to7200000ms, with
+four existing duration/cooperative-stop/error cases passing. Root reviewed the
+worker's parser/test change and runner difference: only the host ceiling and
+matching supervisor fallback change. Guest CPU, input, clocks and audio stages
+are unchanged; the other five audio-library members and retained AOT inputs
+match. The fresh muted `audio-retained-lifecycle-2h-20261015/capture` run is now
+active, four logical CPUs at Normal priority, with the existing automatic
+lifecycle/output stop and owner-game detector. Two hours is a maximum, not a
+required capture length. It owns the same isolated persistent HDD exclusively.
+
+The terminal capture's complete framing/cadence check passes: analog/digital
+payloads and epochs match, and its initial DSP trace is bit-identical to the
+already accepted trace. Reuse that evidence. Private terminal report SHA256 is
+034a53871dd70049cd7c82bd16e72b45d446680472de745ccf064be1a26d2f29;
+new executable SHA256 is3fe661aac1aef4ec5b5375086ce0f292ff576cb1318b9227d493741f489633a4.
+
+One bounded read-only observation of the owned Windows title process confirmed
+the normal selector50A590=0 and timeout counter9E7F9C=1090 near the ceiling.
+It used only process query/read access, with pinned PID/start/executable and
+guest allocation/XBE/code identity; no writes, debugger, suspension or guest
+time change. Sequential samples are diagnostic, not lifecycle acceptance.
+The worker traced normal phase4 through r01s01demo.dat stage0 to round1.adx and
+prepared its independent decoded source. An earlier replay.adx attribution was
+corrected before comparison: that load belongs to phase10. No post-restart
+waveform comparison is possible without the actual transition.
+
+G02's next offline preparation is a differential current-mode DEBUG sequence
+with a measured HSYNC755->756->755 marker. The companion probe's
+`docs/FP-DEBUG-SEQUENCE.md` specifies exact stores, bounded AV/retrace waits,
+planned restoration and immediate stop after unexpected readback. Nine actual
+compiled-payload/host tests and five unchanged bank regressions pass; companion
+commit `e8d7711` retains the preparation. No console operation has occurred.
+Independent review confirms the original additionally toggles CRTC28 from0 to83
+for format12 and later resets the encoder. The differential experiment omits
+those operations: an unchanged alternate field cannot disprove original startup
+activation. The DEBUG words change scaling plus unresolved bit17 together;
+neither sets clock-power-down bit28. Families remain6/9; no precision deferral
+or functional guard is removed by this preparation.
+
 ## Quiescent AV protocol and original initializer - 2026-10-15
 
 G02 now has a clock-owned FD6806A0 protocol in the maintained NV2A, selected by

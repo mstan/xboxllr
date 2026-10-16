@@ -96,11 +96,11 @@ static int spdif_contract(const char *mode,const char *directory) {
         CHECK(pilot_audio_device_observation_on_finish(observation_finished));
         CHECK(!pilot_audio_device_observation_start(nullptr,nullptr,nullptr));
         CHECK(!pilot_audio_device_observation_start("",nullptr,nullptr));
-        for(const char *bad:{"0","-1","+1"," 1","1x","3600001","18446744073709551616"})
+        for(const char *bad:{"0","-1","+1"," 1","1x","7200001","18446744073709551616"})
             CHECK(pilot_audio_device_observation_start(bad,analog,digital));
         CHECK(pilot_audio_device_observation_start("1",nullptr,digital));
         CHECK(pilot_audio_device_observation_start("1",digital,analog));
-        CHECK(!pilot_audio_device_observation_start(request?"3600000":"1",analog,digital));
+        CHECK(!pilot_audio_device_observation_start(request?"7200000":"1",analog,digital));
         CHECK(pilot_audio_device_observation_start("1",analog,digital));
         if(request) {
             FILE *stop=fopen(request_path.c_str(),"wbx");CHECK(stop && !fclose(stop));
