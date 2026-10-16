@@ -75,7 +75,11 @@ saved-image offsets. No context command, RDI_DATA access, PRAMIN store or storag
 operation occurs. The probe remains available with PGRAPH enabled. Ten offline
 payload/host tests pass; independent review's post-EXEC receipt-error finding
 is corrected and covered. Probe evidence: results/pgraph-enable-20261016/.
-The audio worker continues its separate changed acceptance run. Still6/9;
+The changed audio run subsequently terminates successfully after4022.640s,
+with no guard or supervisor error. Its actual retained-buffer Stop/status/restart
+and96000 continued frames on each output route trigger cooperative finalization.
+The worker's finalized lifecycle provenance review passes; independent waveform
+review remains pending, so this checkpoint does not yet qualify audio. Still6/9;
 43 retained deferral IDs/42 deferred scopes.
 
 ## Actual first selector and bounded pending draw batch - 2026-10-15

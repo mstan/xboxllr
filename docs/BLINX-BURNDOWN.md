@@ -20,9 +20,11 @@ continued output through that transition.
 | Input, display, memory, files, scheduling, movies | Audio A05 normal Stop/reuse and continued output; representative connected output passes, A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 43 retained IDs; 42 contain deferred scope, including unconsumed inherited fog state, inactive patch processing, AV service-edge precision, nominal interpolation precision, additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
 Latest checkpoint: the stopped, locked PCM16 restart cursor fix38f6836 passes
-its original-code reproduction and independent source-output comparison. One
-changed muted title acceptance run remains active under the audio worker; its
-same-buffer Stop/restart plus continued output is not yet accepted. GPU commits
+its original-code reproduction and independent source-output comparison. The
+changed muted title acceptance run now completes its actual same-buffer
+Stop/restart plus96000 continued frames on both output routes after4022.640s,
+with no guard. Finalized lifecycle provenance passes; independent waveform
+review is pending, so audio remains open. GPU commits
 7765ecf/60bb8d7/897ab10 add the owned CPU UMA aperture, inactive FD clears,
 compiled callback bus ownership and explicit context-selector behavior. Actual
 original execution produced its complete context image and requested its first
