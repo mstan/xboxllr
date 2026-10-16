@@ -50,6 +50,45 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: seven of nine families;43 retained deferral IDs,42 scopes.
 
+## Surface context map measured; transform dependencies bounded - 2026-10-16
+
+Probe37ec5df completes one23-field surface batch after autonomous remote recovery.
+Distinct legal markers in six offsets, six bases, five pitches and six limits
+map uniquely to saved bytesE0..138. After SAVE, every live field is explicitly
+cleared and checked; actual LOAD restores all23 markers. Borrowed RAM/pointer/
+FIFO restoration passes. Critical time76683/3375000 seconds is22.720889ms.
+The3496-word prefix replaces every sentinel;84 original tail words are preserved
+and checked before inverse LOAD, so no poison or reconstructed hole is loaded.
+The23 measured mappings replace the prior six-limit pattern hypothesis.
+
+The batch retains27 differences from original input, including raw328=0C plus
+previous header/3024/369C differences. Extra observations do not become new gates
+without an actual supported consumer. Independent root byte review verifies
+mapping, raw output, canaries, input/code identity and previous-observation delta;
+the successful pinned checked path establishes inverse/restoration. Eight focused
+methods pass22.659s and the strengthened first-observation failure control7.436s.
+No default HLE behavior changes. GPU/graphics remain open;7/9 qualified with
+43 retained deferral IDs/42 scopes. No hardware recovery hold remains, although
+retained VM/pins cannot be reused as fresh ownership.
+
+Independent transform review establishes exact live RDI program selector10 and
+constant selector17, including raw constant lane orderW,Z,Y,X. Original producer
+regions are program[1A9C,231C), constants[231C,2F1C). The first seven pending draws
+upload their complete11-step program and consumed c98/c132/c136; the eighth
+uploads its complete12-step program and c0/c1. Only inherited c137 feeds unused
+fog, covered by existing GFX-D21. Therefore arbitrary initial transform-bank
+precision is not a new blocker for these eight outputs. Exact arbitrary saved
+slot/live-bank identity remains unproven; this does not authorize omitted bank
+transfer, zero substitution or ignoring a later observable inherited/save consumer.
+The next step is mapping genuinely consumed common state and implementing the
+guarded original context route, followed by connected rendering/lifecycle.
+
+Evidence: probe results/context-surfaces-observed-20261016/ (saved image SHA256
+511216e436dcea8d4286cf57ef14cbba84de8a08becc37607cd49e46c69ba6c4), and title
+build/blinx/transform-bank-audit-20261016/review.aot-private.json (SHA256
+d0765b96657936500cb5b18230b713cd6ae84e23cc68a2532006bd9791f1e102).
+Root verified all16 transform-review input identities; no title recapture was needed.
+
 ## Audio family qualified; GPU transfer investigation continues - 2026-10-16
 
 Audio A01-A05 closes for the bounded attract profile. Root reviewed54 unique

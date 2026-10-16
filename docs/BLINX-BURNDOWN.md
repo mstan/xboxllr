@@ -31,8 +31,14 @@ After the original-consumer witness correction and separate recovery, probe759d3
 completes actual LOAD/poison/SAVE and verified borrowed-RAM/pointer/FIFO restoration.
 3496 words replace their sentinels; USER loads/saves11. Nine written differences
 and84 sentinel-equal tail words remain explicit observations. No recovery hold
-remains. The consumed field-to-maintained-state map is still required, followed
-by connected drawing/visibility and lifecycle.
+remains. Follow-up37ec5df maps23 passive surface words to saved bytesE0..138;
+checked clears and actual inverse LOAD restore every marker in one22.721ms batch.
+The original tail is preserved, and no poisoned hole is loaded. Root independently
+reviews the bytes and all checks pass. First-eight-draw analysis proves complete
+explicit uploads of consumed transform programs/constants; inherited c137 remains
+unused fog under existing GFX-D21. Remaining consumed common-state mapping and
+the maintained context route are still required, followed by connected
+drawing/visibility and lifecycle.
 No GPU/graphics family closure is inferred from captured submissions.
 
 Earlier capture checkpoint: the retained-buffer title ended cleanly at its
