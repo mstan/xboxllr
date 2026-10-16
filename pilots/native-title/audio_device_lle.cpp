@@ -42,6 +42,7 @@ struct Owner {
     std::unique_ptr<xlle::ApuEpProcessor> ep;
     std::unique_ptr<xlle::ApuDeviceClock> clock;
     std::unique_ptr<PilotAudioStageTrace> trace;
+    std::unique_ptr<PilotAudioStageTrace> retained_trace;
     PilotAudioDevicePcm pcm=nullptr;
     void *context=nullptr;
     PilotAudioDeviceSpdif spdif=nullptr;
@@ -116,13 +117,35 @@ extern "C" const char *pilot_audio_device_lle_trace_start(const char *path) {
     const char *error=PilotAudioStageTrace::create(owner->trace,path,owner->lifetime,owner->epoch);
     if(error)return error;
     owner->apu.set_observer([](const xlle::ApuObservation& event){
-        owner->trace->record(owner->clock->ticks(),event);
+        const uint64_t ticks=owner->clock->ticks();
+        if(owner->trace)owner->trace->record(ticks,event);
+        if(owner->retained_trace)owner->retained_trace->record(ticks,event);
     });
     return nullptr;
 }
+extern "C" const char *pilot_audio_device_lle_retained_trace_start(const char *path) {
+    if(!path || !*path)return nullptr;
+    if(!owner || owner->busy || !owner->trace || owner->retained_trace ||
+       owner->clock->ticks()!=owner->epoch || owner->reads || owner->writes || owner->apu.voice_mix_quanta())
+        return "original retained stage trace requires fresh owner and initial trace";
+    return PilotAudioStageTrace::create(owner->retained_trace,path,owner->lifetime,owner->epoch,true);
+}
+extern "C" const char *pilot_audio_device_lle_retained_trace_trigger(uint64_t lifetime,
+    uint32_t object,uint64_t prior_play,uint64_t stop) {
+    if(!owner || owner->busy || !owner->retained_trace || lifetime!=owner->lifetime ||
+       !object || !prior_play || stop<=prior_play)
+        return "original retained stage trace trigger lacks journal/device owner";
+    const char* error=owner->retained_trace->trigger(owner->clock->ticks());
+    if(!error)std::fprintf(stderr,"[AUDIO RETAINED TRACE] lifetime=%llu object=%u prior_play=%llu stop=%llu ticks=%llu\n",
+        (unsigned long long)lifetime,object,(unsigned long long)prior_play,(unsigned long long)stop,
+        (unsigned long long)owner->clock->ticks());
+    return error;
+}
 extern "C" const char *pilot_audio_device_lle_trace_finish(void) {
     if(owner && owner->busy)return "original audio stage trace persistence during device work";
-    return owner && owner->trace?owner->trace->finish():nullptr;
+    const char* first=owner && owner->trace?owner->trace->finish():nullptr;
+    const char* retained=owner && owner->retained_trace?owner->retained_trace->finish():nullptr;
+    return first?first:retained;
 }
 extern "C" const char *pilot_audio_device_lle_open(PilotAudioDevicePcm pcm,void *context) {
     return pilot_audio_device_lle_open_outputs(pcm,context,nullptr,nullptr);

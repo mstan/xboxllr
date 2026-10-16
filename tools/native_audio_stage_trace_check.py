@@ -53,10 +53,24 @@ def check(program, output):
             assert row['kind'] == (3 if mode in ('normal', 'window') and index == 1 else 1)
             assert row['ticks'] == (600 if index == 0 else 700 if mode != 'capacity' else 600+index)
         results.append(dict(mode=mode, flags=flags, records=count, path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
+    for mode, flags, count in (('retained', 1, 2), ('retained-window', 9, 2),
+                               ('retained-capacity', 3, 12), ('retained-untriggered', 0, 0)):
+        result = subprocess.run([str(program.resolve()), mode, str(output.resolve())], capture_output=True, timeout=15)
+        log = (result.stdout+result.stderr).decode(errors='replace')
+        (output/(mode+'.log')).write_text(log, encoding='utf-8')
+        assert result.returncode == 0, log
+        path = output/(mode+'.bin.partial'); trace = read_trace(path)
+        assert (trace['flags'], trace['lifetime'], trace['epoch'], trace['first']) == (flags, 123, 456, 600 if count else 0)
+        assert len(trace['records']) == count
+        for index, row in enumerate(trace['records']):
+            assert row['voice'] == 96 and row['metadata'] == (11, 22, 33, 44, 55, 66, 77)
+            assert row['data'] == struct.pack('<6f', .25, -.5, 0, 1, -1, .125)
+            assert row['kind'] == (6 if index == 0 else 1)
+        results.append(dict(mode=mode, flags=flags, records=count, path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
     report = dict(status='bounded-stage-journal-persistence-validated', cases=results,
-                  limits='Storage uses a 1024-byte test capacity; production uses64MiB. No title, hardware, audio accuracy or guest teardown qualification.')
+                  limits='Storage uses a 1024-byte test capacity; production uses64MiB initial/256MiB retained, each at most4guest seconds. No title, hardware, audio accuracy or guest teardown qualification.')
     (output/'stage-trace-check.aot-private.json').write_text(json.dumps(report, indent=2)+'\n', encoding='utf-8')
-    print('PASS: trigger, exact borrowed bytes, fixed window, capacity truncation, invalid timestamp and immutable partial persistence')
+    print('PASS: eight prefix/retained cases; same-object lifetime trigger, exact bytes, time/capacity/untriggered distinctions and immutable persistence')
 
 
 if __name__ == '__main__':

@@ -28,6 +28,12 @@ const char *pilot_audio_device_lle_error(void);
  * It borrows existing samples/settings, never guest reads or another clock.
  * finish preserves a diagnostic .partial file and leaves device owners live. */
 const char *pilot_audio_device_lle_trace_start(const char *path);
+/* Separate256MiB/4guest-second window, configured on the fresh owner. Starts
+ * only on the journal's completed Stop of a previously played retained object.
+ * Copies all concurrent existing stage events, including silent samples. */
+const char *pilot_audio_device_lle_retained_trace_start(const char *path);
+const char *pilot_audio_device_lle_retained_trace_trigger(uint64_t lifetime,
+    uint32_t object,uint64_t prior_play,uint64_t stop);
 const char *pilot_audio_device_lle_trace_finish(void);
 /* Passive diagnostics remain available after a terminal guard. */
 typedef struct PilotAudioDeviceState {

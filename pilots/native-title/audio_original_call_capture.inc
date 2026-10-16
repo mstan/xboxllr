@@ -4,6 +4,7 @@
  * The existing sole original CPU owner serializes these calls. The journal
  * remains a diagnostic prefix, including at a host observation cutoff. */
 #include "pilot_audio_bindings.h"
+#include "audio_retained_trace_trigger.h"
 /* Same reviewed XDK4831 body as native_input_binding.py. This bounded title
  * observer verifies its full original bytes before registering the existing
  * block hook. A successful state read establishes what the game received;
@@ -14,6 +15,8 @@ static struct {
     FILE *file;
     uint64_t sequence,records,active;
     int finished;
+    int retained_trace;
+    PilotRetainedTraceTrigger trigger;
 } original_audio_calls;
 static const char *original_audio_call_record(const PilotIoCallDiagnosticEvent *event);
 
@@ -24,6 +27,8 @@ static const char *original_audio_call_capture_start(const char *path)
         return "original audio call capture already started";
     original_audio_calls.file=fopen(path,"wbx");
     if(!original_audio_calls.file)return "original audio call capture exclusive create failed";
+    const char* retained=getenv("XLLE_PILOT_AUDIO_RETAINED_STAGE_TRACE");
+    original_audio_calls.retained_trace=retained && *retained;
     if(fprintf(original_audio_calls.file,"{\"schema\":\"xboxlle.original-audio-calls.v1\",\"partial\":true,\"scope\":\"original CPU audio/input entry/return; passive device counters\"}\n")<0 ||
        fflush(original_audio_calls.file))return "original audio call capture header failed";
     PilotIoDiagnosticCall calls[PILOT_AUDIO_COUNT+1];
@@ -80,6 +85,25 @@ static const char *original_audio_call_record(const PilotIoCallDiagnosticEvent *
     }
     if(result<0 || fprintf(file,"]}\n")<0 || fflush(file) || ferror(file))
         return "original audio call capture write failed";
+    if(returning && original_audio_calls.retained_trace) {
+        enum PilotRetainedTraceCall call=PILOT_RETAINED_PLAY;int track=0;
+        if(!event->regs[0]) {
+            if(entry==PILOT_AUDIO_IDirectSoundBuffer_Play)track=1;
+            else if(entry==PILOT_AUDIO_IDirectSoundBuffer_Stop){track=1;call=PILOT_RETAINED_STOP;}
+            else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetBufferData){track=1;call=PILOT_RETAINED_REBIND;}
+            else if(entry==PILOT_AUDIO_IDirectSoundBuffer_Release){track=1;call=PILOT_RETAINED_FINAL_RELEASE;}
+        }
+        if(track) {
+            int requested=pilot_retained_trace_call(&original_audio_calls.trigger,state.lifetime_id,
+                event->id,event->args[0],call);
+            if(requested<0)return "original retained stage trace call domain exhausted/changed";
+            if(requested) {
+                const PilotRetainedTraceTrigger* t=&original_audio_calls.trigger;
+                const char* error=pilot_audio_device_lle_retained_trace_trigger(t->lifetime,t->object,t->prior_play,t->stop);
+                if(error)return error;
+            }
+        }
+    }
     ++original_audio_calls.records;
     if(returning)--original_audio_calls.active;
     else {++original_audio_calls.active;++original_audio_calls.sequence;}

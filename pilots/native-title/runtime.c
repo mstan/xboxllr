@@ -1263,6 +1263,12 @@ int main(int argc,char **argv)
     }
     audio_error=pilot_audio_device_lle_trace_start(getenv("XLLE_PILOT_AUDIO_STAGE_TRACE"));
     if(audio_error)stop(audio_error,0xfe800000u);
+    const char* retained_trace=getenv("XLLE_PILOT_AUDIO_RETAINED_STAGE_TRACE");
+    const char* call_capture=getenv("XLLE_PILOT_AUDIO_CALL_CAPTURE");
+    if(retained_trace && *retained_trace && (!call_capture || !*call_capture))
+        stop("original retained stage trace requires original call journal",0xfe800000u);
+    audio_error=pilot_audio_device_lle_retained_trace_start(retained_trace);
+    if(audio_error)stop(audio_error,0xfe800000u);
     audio_error=original_audio_call_capture_start(getenv("XLLE_PILOT_AUDIO_CALL_CAPTURE"));
     if(audio_error)stop(audio_error,0xfe800000u);
     audio_error=pilot_audio_device_observation_on_finish(original_audio_call_capture_finish);

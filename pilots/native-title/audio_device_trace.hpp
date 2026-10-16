@@ -7,9 +7,11 @@
 class PilotAudioStageTrace {
 public:
     static const char* create(std::unique_ptr<PilotAudioStageTrace>& out,const char* path,
-                             uint64_t lifetime,uint64_t epoch);
+                             uint64_t lifetime,uint64_t epoch,bool retained=false);
     ~PilotAudioStageTrace();
     void record(uint64_t ticks,const xlle::ApuObservation& event) noexcept;
+    // External one-shot diagnostic trigger. No samples/time are generated.
+    const char* trigger(uint64_t ticks);
     const char* finish();
 private:
     struct Storage;
