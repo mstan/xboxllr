@@ -24,10 +24,13 @@ require palette state merely because an unrelated RAM tile is active. The affect
 NV2A/shader checks pass in 0.93s. A private captured-queue diagnostic now executes
 all eight draws in 0.313s, exposing method gaps without another title startup.
 It omits original callbacks, tile/control state and lifetime, so its pixels and
-completion do not establish original-title acceptance. The previous original run
-passed actual LOAD and stopped at 1B68 after 169.063s; one changed original run is
-now checking the complete path. Connected rendering, enabled-noise output and
-lifecycle remain required. GPU/graphics remain open.
+completion do not establish original-title acceptance. The changed original run
+passes the prior 1B68 boundary and stops after 190.093s at the required enabled
+DXT1-noise pixel guard, with no captured presentation. This establishes the next
+implementation boundary, not eight successful original draws. Next complete the
+bounded physical draw owner and paired noise observation using retained inputs;
+the prepared capture module cannot yet draw because bootstrap stops at RAMFC.
+Connected rendering and lifecycle remain required. GPU/graphics remain open.
 
 Latest completed family: audio A01-A05 closes after actual same-object Stop/status/Play
 and96000 continued frames on both output routes. The single changed muted capture

@@ -79,9 +79,27 @@ authored setup and acknowledges seven startup notifications without executing
 their original callbacks; it stops at the next software notification. GFC1 also
 lacks tile/control state and initialized-byte provenance. These omissions forbid
 using its pixels, retirement or success as original-title qualification. The
-actual unchanged CPU/callback route is being run separately in
-`gpu-lle-loaded-batch-20261016`. Seven families remain qualified; GPU/graphics,
-reached enabled-noise output and normal lifecycle remain open.
+actual unchanged CPU/callback route ran separately in
+`gpu-lle-loaded-batch-20261016`: it exits2 after190.093s at
+`NV2A DXT1 noise pixel behavior remains unqualified`, entries56382, with no
+captured presentation. It passes the previous1B68 boundary but does not establish
+eight original draws or qualified pixels. Root verifies its complete binary/source
+identity and the worker pins in `build/blinx/loaded-batch-root-review.aot-private.json`
+(SHA256 `8e17b19760dffe9c8f3172797fc6acb739b63c8358690e649b797a0f62c21a10`).
+The implementation is committed as `bcc7973`.
+
+G04 now has retained original geometry/program/texture inputs and a confirmed
+connected noise consumer. Its missing independent pixel observation requires a
+working physical draw owner. The existing paired module is finite, but its
+separate bootstrap still stops before RAMFC and cannot produce its genuine SDK
+success certificate. Finish that continuation as a coherent batch, then measure
+a representative original sampling profile. The authored nearest-only microcase
+alone cannot establish the reached mip/filter behavior. A read-only INFO confirms
+the installed probe is responsive; the last successful surface experiment has no
+failure hold, but retained resources require the already established remote
+recovery route before another takeover. No live write or recovery was performed
+for this checkpoint. Seven families remain qualified; GPU/graphics, reached
+enabled-noise output and normal lifecycle remain open.
 
 Independent branch/source review:
 `build/blinx/remaining-first8-audit-20261016/review.aot-private.json`, SHA256
