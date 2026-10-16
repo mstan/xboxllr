@@ -52,6 +52,44 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Remaining burndown and observed startup retirement - 2026-10-16
+
+| Remaining step | Closing evidence / current state |
+| --- | --- |
+| Reach actual attract gameplay through the original graphics route | Saved-display retirement passes; all 420 observed texture creations succeed. The subsequent passive method-history overflow is fixed and the connected run is resumed. |
+| Complete G05 gameplay output and content lifetime | Two completed gameplay pictures with actual Swap/completion and ownership evidence; reuse G01-G04. |
+| Exit with real Start and reenter with neutral input | Delivered input, visible title return, content retirement, fresh submissions and two completed reentry gameplay pictures. |
+| Close GPU and graphics together | Review/seal the connected sequence and update both family rows; total becomes9/9 bounded. |
+
+The saved-display connected run actually enters/returns from original137060 on
+the title thread. The saved pointer changes from83868000 to zero and original
+available pages rise from5693 to5993: exactly300 pages recovered. It stops after
+445.766 seconds on `NV2A reference method observation history overflow`, with no
+failed observed CreateTexture2/SurfaceLevel2 returns. This does not establish
+gameplay or complete resolution of memory pressure. All29 component inputs and
+the closed run are frozen under `build/blinx/graphics-saved-display-connected-20261016/`.
+
+Offline ownership analysis accounts for the initial1805 contiguous pages. Of
+these,1548 belong to an unpublished boot-APU allocation. Its descriptor remains
+zero and its original zeroing-loop interrupt frame belongs to captured current
+threadD0008A98, distinct from the suspended image-launch workerD0008BF8. The
+retained interrupt frame is historical, not proof of the current instruction;
+the original allocation is not established as disposable. No pages are freed by
+inference. The source-pinned census is under
+`build/blinx/boot-contiguous-ownership-20261016/`. Investigate further only if a
+reached required consumer makes it necessary; no broad boot cleanup is added to
+G05. New Game/save and strict game-plus-kernel AOT remain separate work.
+
+The method observer now consumes each actual dispatched record into its existing
+bounded 2048-DWORD table, including all three bulk paths. A single submission can
+exceed the old 4096-record window without losing observations or changing GPU
+execution. Sequence gaps still fail. Independent review finds no implementation
+blocker; three affected suites pass in 2.00 seconds, and the reference ABI check
+passes a submission of over 6000 methods in 0.14 seconds. The native fixture
+compares ordinary/bulk and held/resumed queues, including exact notifications,
+metadata, GET and unchanged RAM. The source-bound rerun is under
+`build/blinx/graphics-method-observer-20261016/`; G05 remains open and total 7/9.
+
 ## Startup allocation failure and saved-display handoff - 2026-10-16
 
 The bounded status capture confirms original D3DX returns `8007000E` at caller

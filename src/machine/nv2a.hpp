@@ -327,6 +327,14 @@ public:
         uint32_t parser_get = 0;
         uint32_t parser_put = 0;
     };
+    // Passive ordered dispatch observation. Attach before the first method;
+    // the callback must not throw, mutate/reenter the device or retain this reference.
+    // Unlike recent_methods(), this does not lose words during a large kick.
+    bool on_method_recorded(std::function<void(const PushMethod&)> observer) {
+        if (methods_.total() || method_observer_ || !observer) return false;
+        method_observer_ = std::move(observer);
+        return true;
+    }
     // Passive diagnostic: the caller retains the stopped emulation owner.
     // Copy backing state directly; no register read, seam anchor or dispatch.
     struct FirstContextDiagnosticChannel {
@@ -2655,6 +2663,11 @@ private:
     // Recycled GL->guest readback buffer for resident color resolves.
     std::vector<uint8_t> color_resolve_scratch_;
     Ring<PushMethod> methods_;
+    std::function<void(const PushMethod&)> method_observer_;
+    void record_method(const PushMethod& push) {
+        methods_.push(push);
+        if (method_observer_) method_observer_(push);
+    }
     static constexpr size_t kClearTracePreMethods = 32;
     static constexpr size_t kClearTraceMethodLimit = 4096;
     bool clear_trace_armed_ = false;

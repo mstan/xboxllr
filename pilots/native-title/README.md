@@ -3,10 +3,19 @@
 Current bounded Blinx qualification is **7/9 families**: input, display,
 memory, files, scheduling, movies and audio pass. GPU and graphics remain open
 on connected attract exit/reentry and content lifetime (G05); G01-G04 passed.
-The current startup texture-creation failure is being diagnosed offline. Use the
+The final connected GPU/graphics acceptance run remains open. Use the
 [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) for current gates
 and [audio evidence](AUDIO-LLE.md) for the latest GP/EP milestones. The earlier
 component observations below retain their original scope and limitations.
+
+The owner-facing HLE preview selects native scheduling/services and D3D11 with
+`PILOT_IO_DEVICE=OFF`. Its game code is ahead-of-time compiled; unresolved indirect
+calls stop instead of entering a CPU interpreter. This describes the executable
+route, not qualification of every campaign path. The current GPU-LLE acceptance
+build instead executes original game threads, drivers and kernel through Unicorn,
+alongside its fixed native audio components and maintained software GPU. The9/9
+behavioral qualification goal does not close the separate strict game-and-kernel
+AOT work tracked by `beads-xbox.1.25.5`.
 
 USB/PIC LLE now requires the reviewed
 [source-built Unicorn IRQ-boundary package](unicorn-engine/README.md).

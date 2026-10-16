@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Require the real reference ABI: retained observations beyond 4096 methods.
+"""Require the real reference ABI: retained observations beyond 4096 methods,
+including more than one recorder window dispatched by a single MMIO kick.
 
 Authored packets only; no game binary, host GPU, audio, network or skipped test.
 """
@@ -59,11 +60,16 @@ def qualify(library):
     try:
         assert other.value(0x200)==64<<16  # independent device instance
         for _ in range(3):other.packet(0x100,*([0]*2047))
+        other.packet(0x200,256<<16)
         other.kick()
-        assert other.error() and b'observation history overflow' in other.error()
-        assert other.value(0x200)==0  # observation gaps cannot return fabricated state
+        assert not other.error() and other.read(0x800044)==other.cursor
+        assert other.value(0x200)==256<<16 and other.value(0x204)==32<<16
+        assert other.value(0x210)==0x20000 and other.value(0x214)==0x30000
+        assert bytes(other.ram[0x20000:0x40000])==untouched
+        other.packet(0x200,128<<16);other.kick()
+        assert not other.error() and other.value(0x200)==128<<16
     finally:other.close()
-    print('PASS: retained fields after6141 later methods, live updates, untouched bytes, independent devices and explicit history-gap rejection')
+    print('PASS: retained fields after6141 later methods, single-kick history wrap, live updates, untouched bytes and independent devices')
 
 
 if __name__=='__main__':

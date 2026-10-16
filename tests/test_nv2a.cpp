@@ -1197,6 +1197,7 @@ static void test_generic_surface_dma_contract() {
 }
 
 int main() {
+    test_method_observer();
     test_generic_surface_dma_contract();
     test_gpu_initialization_controls();
     test_gpu_platform_bus();

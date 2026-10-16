@@ -36,34 +36,20 @@ struct Reference {
         if(!board_clock->active())gpu.display_clock_signals(false,false,false,false);
     }
     void (*external_irq)(int, int) = nullptr;
-    // Qualification observes the last decoded parameter, not merely a recent
-    // recorder window. A target bind can remain active across thousands of
-    // subsequent methods. Collect each bounded transport advance before its
-    // records age out; never invent a parameter for missing observation history.
+    // Qualification observes the last dispatched parameter. One transport
+    // advance can exceed the recent recorder window, so consume the actual
+    // ordered records as they arrive using fixed storage, without polling.
     std::array<uint32_t, 0x2000 / 4> observed_methods{};
     uint64_t observed_method_count = 0;
-    std::vector<xlle::Nv2a::PushMethod> observed_window;
-    void observe_methods() {
-        const uint64_t total = gpu.push_methods();
-        if (total < observed_method_count) {
-            observed_methods.fill(0); observed_method_count = 0;
-        }
-        const uint64_t delta = total - observed_method_count;
-        if (!delta) return;
-        if (delta > 4096) {
-            failure = "NV2A reference method observation history overflow";
-            return;
-        }
-        gpu.recent_methods(static_cast<size_t>(delta), observed_window);
-        if (observed_window.size() != delta || observed_window.front().seq != observed_method_count ||
-            observed_window.back().seq + 1 != total) {
+    void observe_method(const xlle::Nv2a::PushMethod& item) {
+        if (!failure.empty()) return;
+        if (item.seq != observed_method_count) {
             failure = "NV2A reference method observation sequence gap";
             return;
         }
-        for (const auto& item : observed_window)
-            if ((item.method & 3) == 0 && item.method < 0x2000)
-                observed_methods[item.method / 4] = item.parameter;
-        observed_method_count = total;
+        if ((item.method & 3) == 0 && item.method < 0x2000)
+            observed_methods[item.method / 4] = item.parameter;
+        ++observed_method_count;
     }
     void sample_encoder_field(const xlle::Cx25871Timing::State* before=nullptr) {
         const int signal=encoder->field_signal();
@@ -82,6 +68,8 @@ struct Reference {
         pci([this](const std::string& reason) { failure = reason; }),
         gpu([this](const std::string& reason) { if(failure.empty())failure = reason; }),
         smbus(0xc000, [this](const std::string& reason) { failure = reason; }) {
+        if (!gpu.on_method_recorded([this](const xlle::Nv2a::PushMethod& item) { observe_method(item); }))
+            failure = "NV2A reference method observer attachment failed";
         auto control = std::make_unique<xlle::Cx25871Control>(
             [this](const std::string& reason) { failure = reason; });
         encoder = control.get(); smbus.add_slave(std::move(control));
@@ -197,13 +185,12 @@ EXPORT int xlle_nv2a_reference_aperture(void* instance,uint32_t offset,unsigned 
 EXPORT uint32_t xlle_nv2a_reference_read(void* instance, uint32_t address, int size) {
     auto& ref = *static_cast<Reference*>(instance);
     if (!ref.failure.empty()) return 0;
-    const uint32_t result = ref.gpu.mmio_read(address, size);
-    ref.observe_methods(); return result;
+    return ref.gpu.mmio_read(address, size);
 }
 EXPORT void xlle_nv2a_reference_write(void* instance, uint32_t address, int size, uint32_t value) {
     auto& ref = *static_cast<Reference*>(instance);
     if (ref.failure.empty()) {
-        ref.gpu.mmio_write(address, size, value); ref.observe_methods();
+        ref.gpu.mmio_write(address, size, value);
         ref.refresh_board_clock();
     }
 }
@@ -269,7 +256,7 @@ EXPORT const char* xlle_nv2a_reference_draw_count_name(uint32_t index) {
     return xlle::Nv2a::generic_skip_reason_name(index - 3);
 }
 EXPORT uint32_t xlle_nv2a_reference_method_value(void* instance, uint32_t method) {
-    auto& ref = *static_cast<Reference*>(instance); ref.observe_methods();
+    auto& ref = *static_cast<Reference*>(instance);
     if (!ref.failure.empty() || (method & 3) || method >= 0x2000) return 0;
     return ref.observed_methods[method / 4];
 }

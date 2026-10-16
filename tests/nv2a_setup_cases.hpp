@@ -1,6 +1,55 @@
 // Authored hardware-control cases. nxdk supplies the independent RAM-bank
 // offsets and original driver sequence; no successful context transfer is
 // inferred from a register write or accepted before its implementation.
+static void test_method_observer() {
+    std::vector<xlle::Nv2a::PushMethod> baseline;
+    for(bool bulk:{false,true}) for(bool held:{false,true}) {
+        std::string failure;
+        xlle::Nv2a gpu([&](const std::string& why){failure=why;});
+        std::vector<uint8_t> ram(4096);
+        std::vector<xlle::Nv2a::PushMethod> observed;
+        CHECK(!gpu.on_method_recorded({}));
+        CHECK(gpu.on_method_recorded([&](const xlle::Nv2a::PushMethod& push){observed.push_back(push);}));
+        CHECK(!gpu.on_method_recorded([](const xlle::Nv2a::PushMethod&){}));
+        gpu.set_pfifo_run_bulk(bulk);
+        gpu.set_mem_access(
+            [&](uint32_t a,void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(p,ram.data()+a,n);return true;},
+            [&](uint32_t a,const void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(ram.data()+a,p,n);return true;},
+            [&](uint32_t a,size_t n)->uint8_t*{return uint64_t(a)+n<=ram.size()?ram.data()+a:nullptr;});
+        auto write=[&](uint32_t r,uint32_t v){gpu.mmio_write(0xfd000000u+r,4,v);};
+        const uint32_t setup[][2]={{0x700008,1},{0x70000c,0x80010020},{0x700200,0x97},
+            {0x700180,0x3d},{0x700184,4095},{0x700188,0},
+            {0x002504,1},{0x003204,0x100},{0x00322c,0x18},{0x003244,0},
+            {0x003220,1},{0x003250,1},{0x003200,1},{0x400720,held?0u:1u}};
+        for(auto& r:setup)write(r[0],r[1]);
+        uint32_t cursor=0;
+        auto packet=[&](uint32_t method,uint32_t n,uint32_t first){
+            put32(ram,cursor,0x40000000u|(n<<18)|method);cursor+=4;
+            for(uint32_t i=0;i<n;++i){put32(ram,cursor,first+i);cursor+=4;}
+        };
+        packet(0,1,1);packet(0x17fc,1,1);
+        for(uint32_t method:{0x1800u,0x1808u,0x1818u})packet(method,17,method);
+        const auto original=ram;
+        write(0x800040,cursor);
+        if(held){CHECK(observed.empty() && !gpu.push_methods());write(0x400720,1);}
+        CHECK(failure.empty() && gpu.mmio_read(0xfd800044,4)==cursor);
+        CHECK(observed.size()==53 && gpu.push_methods()==53 && ram==original);
+        if(!bulk)CHECK(gpu.pfifo_runs_bulk()==0);
+        if(bulk && !held)CHECK(gpu.pfifo_runs_bulk()>=3);
+        CHECK(!gpu.on_method_recorded([](const xlle::Nv2a::PushMethod&){}));
+        // An empty resume cannot duplicate notifications.
+        write(0x400720,1);write(0x800040,cursor);CHECK(observed.size()==53);
+        if(baseline.empty())baseline=observed;
+        CHECK(observed.size()==baseline.size());
+        for(size_t i=0;i<observed.size() && i<baseline.size();++i) {
+            const auto& a=observed[i];const auto& b=baseline[i];
+            CHECK(a.seq==i && a.channel==b.channel && a.subchannel==b.subchannel &&
+                  a.object_class==b.object_class && a.method==b.method && a.parameter==b.parameter &&
+                  a.parser_get==b.parser_get && a.parser_put==b.parser_put);
+        }
+    }
+}
+
 static void test_pgraph_setup() {
     std::string failure;
     xlle::Nv2a gpu([&](const std::string& why){failure=why;});

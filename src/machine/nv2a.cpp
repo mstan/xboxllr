@@ -16998,7 +16998,7 @@ void Nv2a::dispatch_method(PushMethod push) {
     {
         perf_excl::Scope recorder_region(perf_excl::kNv2aRecorder);
         push.seq = methods_.total();
-        methods_.push(push);
+        record_method(push);
         dispatch_micro::mark(dispatch_micro::kRecRing);
 
         if (clear_trace_triggered_ && !clear_trace_begin_triggered_ &&
@@ -18397,7 +18397,7 @@ uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_
                     push.parser_get = ch.get;
                     push.parser_put = ch.put;
                     push.seq = methods_.total();
-                    methods_.push(push);
+                    record_method(push);
                     vertex_indices_.push_back(word & 0xFFFFu);
                     vertex_indices_.push_back(word >> 16);
                 }
@@ -18416,7 +18416,7 @@ uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_
                     push.parser_get = ch.get;
                     push.parser_put = ch.put;
                     push.seq = methods_.total();
-                    methods_.push(push);
+                    record_method(push);
                     vertex_indices_.push_back(word);
                 }
             }
@@ -18435,7 +18435,7 @@ uint32_t Nv2a::drain_method_run(ChannelState& ch, uint8_t channel, uint32_t max_
                     push.parser_get = ch.get;
                     push.parser_put = ch.put;
                     push.seq = methods_.total();
-                    methods_.push(push);
+                    record_method(push);
                     inline_array_words_.push_back(word);
                 }
             }
