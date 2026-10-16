@@ -336,6 +336,10 @@ add_executable(test_generated_submit_perf tests/test_generated_submit_perf.cpp)
 target_include_directories(test_generated_submit_perf PRIVATE ${XLLE_INCLUDES})
 add_test(NAME generated_submit_perf COMMAND test_generated_submit_perf)
 
+add_executable(test_rational_source_clock tests/test_rational_source_clock.cpp)
+target_include_directories(test_rational_source_clock PRIVATE ${XLLE_INCLUDES})
+add_test(NAME rational_source_clock COMMAND test_rational_source_clock)
+
 # These tests exercise the CPU renderer directly without a host GPU backend.
 if(XLLE_RENDERER STREQUAL "LLE")
   add_executable(test_nv2a_surface_dma tests/test_nv2a_surface_dma.cpp)
