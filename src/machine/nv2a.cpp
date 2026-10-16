@@ -1447,6 +1447,9 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     }
     if (blk->off == 0x400000 && bo == 0x100) {
         pgraph_intr_ &= ~value;  // NV_PGRAPH_INTR is write-1-clear
+        // Primary nv4_pgraph.xml: acknowledging the relevant interrupt also
+        // clears its NSOURCE cause. It does not restore FIFO_ACCESS.
+        if (value & (1u << 20)) pgraph_nsource_ = 0;
         if (!(pgraph_intr_ & (1u << 20))) waiting_for_nop_ = false;
         update_irq();
         resume_pushbuffers();
@@ -17177,13 +17180,16 @@ void Nv2a::dispatch_method(PushMethod push) {
     case kNv097M0100: {
         if (parameter == 0) break;
         // The Xbox kernel uses a nonzero NV097_NO_OPERATION as a software method call.
-        // NV2A traps it as a PGRAPH notification and holds the puller until the ISR clears
-        // ERROR. In particular parameter 0x304 schedules the vblank-side flip increment.
+        // Kelvin rejects nonzero NOP data: DATA_ERROR stops FIFO access as well
+        // as raising ERROR. Acknowledging the interrupt alone does not restart
+        // execution; the original handler must explicitly enable FIFO again.
+        // In particular parameter 0x304 schedules the vblank-side flip increment.
         pgraph_trapped_addr_ = (static_cast<uint32_t>(channel) << 20) |
                                (static_cast<uint32_t>(subchannel) << 16) | method;
         pgraph_trapped_data_ = parameter;
-        pgraph_nsource_ = 1;
+        pgraph_nsource_ = 2; // DATA_ERROR, independently observed in the SDK service.
         pgraph_intr_ |= 1u << 20;
+        pgraph_fifo_access_ = false;
         waiting_for_nop_ = true;
         ++pgraph_notifications_;
         update_irq();

@@ -74,6 +74,15 @@ Private evidence and exact operation are in the probe's
 `results/noise-direct-recovery-20261016/` and `docs/RESTART.md`.
 G04 remains open; the family count is still7/9.
 
+The same review corrected the maintained LLE software-method trap. A nonzero
+Kelvin NOP now reports DATA_ERROR and clears FIFO access. Acknowledging its
+interrupt clears NSOURCE while leaving FIFO stopped; explicit re-enable can
+immediately reach another queued trap, even when DMA has prefetched to PUT.
+The pinned primary error producer and register contract support these effects.
+The affected NV2A check passes0.515s and the actual original Blinx callback,
+kernel IRQ/ISR/DPC/IRET check passes2.032s across three lifetimes. Native HLE
+rendering is unchanged. Evidence: `build/blinx/fifo-trap-20261016/`.
+
 ## Original DAC upload and digital gamma consumer - 2026-10-16
 
 A private diagnostic retaining original CPU/callback execution but deliberately

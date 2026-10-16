@@ -1386,11 +1386,17 @@ int main() {
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x000100, 4) == (1u << 12));
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400100, 4) == (1u << 20));
     CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400708, 4) == 0x304u);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400108, 4) == 2);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400720, 4) == 0);
     CHECK(gpu.semaphore_writes() == 2);
+
+    gpu.mmio_write(xlle::Nv2a::kBase + 0x400100, 4, 1u << 12);
+    CHECK(irq && gpu.mmio_read(xlle::Nv2a::kBase + 0x400108, 4) == 2);
 
     gpu.mmio_write(xlle::Nv2a::kBase + 0x400720, 4, 0);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x400100, 4, 1u << 20);
     CHECK(!irq);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase + 0x400108, 4) == 0);
     CHECK(gpu.semaphore_writes() == 2);
     gpu.mmio_write(xlle::Nv2a::kBase + 0x400720, 4, 1);
     CHECK(gpu.semaphore_writes() == 3);
@@ -1416,9 +1422,37 @@ int main() {
         CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x401a88,4)==0x12345678+type);
         CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0xabcdef00+type);
         gpu.mmio_write(xlle::Nv2a::kBase+0x400100,4,1u<<20);
+        CHECK(!irq && gpu.mmio_read(xlle::Nv2a::kBase+0x400720,4)==0);
+        CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0xabcdef00+type);
+        gpu.mmio_write(xlle::Nv2a::kBase+0x400720,4,1);
         CHECK(!irq && gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0xdeadbeef);
     }
     CHECK(gpu.method_count(0x0110)==1);
+
+    // Enabling after one acknowledged trap can consume the next queued trap
+    // immediately. FIFO readback is then zero again, with a new real cause;
+    // DMA GET may already have prefetched the entire published queue.
+    for(auto [method,value]:std::initializer_list<std::pair<uint32_t,uint32_t>>{
+            {0x100,0xbaa},{0x100,0xb2a},{0x1d90,0x1234abcd},{0x100,0}}) {
+        put32(ram,pb+callback_cursor,(1u<<18)|method);
+        put32(ram,pb+callback_cursor+4,value);callback_cursor+=8;
+    }
+    gpu.mmio_write(xlle::Nv2a::kBase+0x800040,4,callback_cursor);
+    CHECK(irq && gpu.mmio_read(xlle::Nv2a::kBase+0x400708,4)==0xbaa);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x400720,4)==0);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x800044,4)==callback_cursor);
+    gpu.mmio_write(xlle::Nv2a::kBase+0x400100,4,1u<<20);
+    CHECK(!irq && gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0xdeadbeef);
+    gpu.mmio_write(xlle::Nv2a::kBase+0x400720,4,1);
+    CHECK(irq && gpu.mmio_read(xlle::Nv2a::kBase+0x400708,4)==0xb2a);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x400720,4)==0);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x400108,4)==2);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0xdeadbeef);
+    gpu.mmio_write(xlle::Nv2a::kBase+0x400100,4,1u<<20);
+    gpu.mmio_write(xlle::Nv2a::kBase+0x400720,4,1);
+    CHECK(!irq && fault.empty());
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x400720,4)==1);
+    CHECK(gpu.mmio_read(xlle::Nv2a::kBase+0x40186c,4)==0x1234abcd);
 
     // The D3D runtime disables CACHE1_PUSH0 before rebuilding a channel. PUT is cleared
     // before GET; that transient mismatch must not execute stale pushbuffer data.
