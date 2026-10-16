@@ -41,7 +41,12 @@ consumer in this prefix. Read-only hardware checks identified disabled engines;
 a guarded PGRAPH-only enable now succeeds and25 fixed follow-up reads complete.
 FIFO remains disabled. A subsequent read-only reservation query and20KiB
 comparison reject both tested CPU/PRAMIN layouts; no backing map or context
-transfer is inferred. Retained state is not reset-default proof. See the
+transfer is inferred from those two hypotheses. A subsequent eleven-layout
+batch uniquely matches reversed64-byte blocks across all20KiB. A bounded
+single-core/interrupt-disabled one-word borrow then confirms the alias and
+restores the original word, with no GPU-register write. The separate fresh
+scratch allocation attempt returned NULL before data writes. Context transfer
+is still required; no recovery hold remains. Retained state is not reset-default proof. See the
 [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
 
 Earlier capture checkpoint: the retained-buffer title ended cleanly at its

@@ -52,6 +52,30 @@ Current disposition: six of nine families;43 retained deferral IDs,42 scopes.
 
 ## Instance comparison and restarted audio observability - 2026-10-16
 
+Follow-up hardware progress: probe18bb56b compares eleven reversed-block
+layouts across the complete20KiB window. Exactly64-byte blocks match; all five
+CPU pages are nonzero/nonuniform. Eight focused compiled/host methods pass in
+15.559s. The fresh20KiB allocation experiment fc7d160 returns NULL before any
+marker/MMIO write and is not retried. It does not invalidate the read comparison.
+
+Probe b40ba06 then supplies a different bounded experiment: query/pin existing
+pages, exclude other CPU work with CLI on the single-core console, recheck
+disabled PFIFO/idle PGRAPH/global GPU IRQ masking and scanout nonoverlap, change
+one CPU DWORD, check both views, and restore/check the original word only on
+success. No kernel calls/yields occur during the borrowed interval; every
+failure restores CPU flags and immediately stops hardware access. Seven focused
+compiled/host methods pass in1.024s, and independent review accepts that CPU
+exclusion boundary. The live result confirms both marker and restoration:
+two CPU stores, no GPU-register write, no retry or recovery hold. Private probe
+evidence: results/instance-block-orders-20261016/,
+instance-owned-alias-20261016/ and instance-borrowed-word-20261016/.
+
+This resolves the tested CPU/PRAMIN alias and establishes a narrow borrowing
+technique. It does not establish the full saved-state format or a successful
+context transfer. The next GPU step is a separately bounded direct load/save
+experiment using this exclusion boundary and retained original data; the full
+SDK bootstrap's unrelated control guards need not be bypassed. Families remain6/9.
+
 Probe7693dbd queries the existing GPU reservation without resizing it, verifies
 the five CPU pages and compares their complete20KiB contents with two fixed
 PRAMIN layouts. Neither ascending nor reversed-DWORD order matches any page;
