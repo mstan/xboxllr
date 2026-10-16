@@ -50,6 +50,56 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: seven of nine families;43 retained deferral IDs,42 scopes.
 
+## Owned first-context LOAD storage implemented - 2026-10-16
+
+The maintained NV2A now copies the complete37F0 producer allocation into an
+independent context owner and applies the23 measured surface words, including
+the correct2D/3D offset/pitch mirrors. RawBASE/LIMIT never manufacture DMA object
+identities. Unknown bytes remain opaque; the measured36A0 SAVE prefix is not
+misrepresented as the complete hardware LOAD extent. Original header1 and the
+measured inverse header11 admit the bounded USER11 projection. Other USER profiles,
+dynamicCONTROL readback, unknown frontend/RDI reads, replacementLOAD andSAVE remain
+guarded. The first original USER consumer preserves the low bits; this is not a
+general bit4 law or a measured full-pipeline identity.
+
+Every source byte must have an actual PRAMIN write, including the opaque tail.
+Host-zero allocation cannot satisfy input initialization. Admission requires the
+explicit original ten-mode setup, real first-context reset/FD/cache preparation,
+idle engine, disabledFIFO, channel0 and an owned in-range instance. Validation
+finishes before live mutation. LOAD supplies no CHID_VALID, FIFO release, method
+retirement, semaphore or synthetic completion. The original followingCONTROL
+write still owns channel validity. Loaded method consumers currently stop before
+retirement until their field provenance is connected; this is a storage/transfer
+milestone, not a successful original draw or family closure.
+
+Independent review catches and resolves three implementation gaps: an empty-queue
+reset could discard the unknown-state guard, invalid PRAMIN widths could mark
+non-guest bytes initialized, and a failed drain could continue fetching unreadDMA.
+Reset remains guarded afterLOAD; legal write widths and nonwrapping extents are
+checked first; drain failure propagates through both parser selections and retries.
+The full NV2A CPU fixture passes0.38s, including atomic rejection, missing prefix/
+tail bytes, source independence, mapped mirrors and both prefetched/unread queues.
+Dispatch structural guards pass. The portable decoder also accepts the retained
+actual producer and hardware-saved image, preserving every input byte and matching
+all23 independent hardware markers. No new game capture or hardware operation.
+
+The full original initializer proves titleDEBUG7=0028C3FF, matching the maintained
+pipeline. Earlier suspicion that boot0008CFFF would block these first draws was
+based on an incomplete producer slice. Boot's differing bits remain guarded;
+their supposed fragment-limit meaning was unsupported and the comment is corrected.
+The successful physical transfer did not recordDEBUG7, so no matching live profile
+is inferred. Superseded review reports are preserved.
+
+Root evidence: build/blinx/owned-context-load-20261016/root-review.aot-private.json
+(SHA25648ea75056c76eda140ed9c555e186fd9860d52e02061061f6f55ce2f411492fb).
+Three handoffs are independently pin-checked, including the corrected complete
+initializer and final adversarial source review. The first root decoder review
+mistook the inverse completion count for a raw readback vector; its failed
+assertion/script is retained, and the final review claims only the actual count
+and marker evidence. Next connect explicit state producers and guarded consumers,
+then execute the required original rendering/lifecycle. Still7/9; existing43
+deferral IDs/42 scopes unchanged.
+
 ## Consumed common state bounded; stale palette guard corrected - 2026-10-16
 
 The first-eight pending-draw common-state audit records153 setter-coverage entries
@@ -1540,7 +1590,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: original pre-title AV producer passes; connected title crosses encoder/aperture setup and produces its real context; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: actual image/table/RAMFC/queued draws captured; physical LOAD/poison/SAVE and restoration pass; consumed field mapping and maintained transfer/rendering remain | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G03 | Open: actual image/table/RAMFC/queued draws captured; physical transfer passes; maintained owned LOAD and23 surface projections pass; field-provenance consumers and connected rendering remain | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |

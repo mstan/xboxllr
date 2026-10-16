@@ -1196,6 +1196,7 @@ int main() {
     test_pgraph_fd_patch_guard();
     test_pgraph_boot_configuration();
     test_pgraph_context_admission();
+    test_pgraph_context_transfer();
     test_ptimer_reference();
     {
         std::string failure;

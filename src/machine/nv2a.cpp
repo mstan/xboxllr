@@ -1084,6 +1084,9 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             return 0;
         }
     } else if (blk->off == 0x400000) {  // PGRAPH
+        if(pgraph_loaded_context_ && (size!=4 || (bo&3))) {
+            fault_("NV2A loaded PGRAPH read size/alignment is unqualified");return 0;
+        }
         // Seam anchor 7: conservative catch-all for guest status polling of
         // PGRAPH. Cannot detect a bare framebuffer read (F7, measurement M1).
         seam_anchor(kSeamAnchorPgraphRegisterRead, true);
@@ -1141,6 +1144,9 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         if (it != user_regs_.end()) return it->second;
     }
 
+    if(blk->off==0x400000 && pgraph_loaded_context_) {
+        fault_("NV2A loaded PGRAPH register read has no qualified context value");return 0;
+    }
     // Unmodelled register inside a real block: xemu-default 0, logged as a hardware-TODO.
     if (unmodeled_cb_) unmodeled_cb_(false, addr, bo, blk->name, 0);
     (void)size;
@@ -1180,6 +1186,9 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     if (!blk) {  // undecoded aperture space: accept + log (xemu ignores; see mmio_read)
         if (unmodeled_cb_) unmodeled_cb_(true, addr, rel, "hole", value);
         return;
+    }
+    if(blk->off==0x400000 && pgraph_loaded_context_ && (size!=4 || (bo&3))) {
+        fault_("NV2A loaded PGRAPH write size/alignment is unqualified");return;
     }
     if (blk->off == 0x001000 && bo == 0x804) {
         // Original device initialization sets bus-master enable. xemu's PBUS
@@ -1224,7 +1233,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         // currently qualified control family. An in-flight or previously
         // used engine needs broader reset/resource qualification.
         if (size != 4 || (changed & ~(1u << 12)) ||
-            ((changed & (1u << 12)) && (methods_.total() || !pull_queue_.empty()))) {
+            ((changed & (1u << 12)) && (pgraph_loaded_context_ || methods_.total() || !pull_queue_.empty()))) {
             fault_("NV2A unqualified engine reset transition"); return;
         }
         if ((changed & (1u << 12)) && !(value & (1u << 12))) {
@@ -1453,11 +1462,15 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         return;
     }
     if (blk->off == 0x700000) {
-        if (bo + static_cast<uint32_t>(size) > pramin_.size()) {
+        if ((size!=1 && size!=2 && size!=4) || uint64_t(bo)+uint32_t(size)>pramin_.size()) {
             fault_("NV2A PRAMIN write exceeds aperture");
             return;
         }
         std::memcpy(pramin_.data() + bo, &value, size);
+        for(int i=0;i<size;++i) {
+            const uint32_t byte=bo+uint32_t(i);
+            pramin_initialized_[byte/64]|=uint64_t(1)<<(byte%64);
+        }
         return;
     }
     // USER block: channel GET/PUT writes drive the synchronous PFIFO recorder.
@@ -1476,6 +1489,9 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
                 process_pushbuffer(channel);
         }
         return;
+    }
+    if(blk->off==0x400000 && pgraph_loaded_context_) {
+        fault_("NV2A loaded PGRAPH register write has no qualified context effect");return;
     }
     // No modelled write side effects yet; accept + log (xemu ignores unknown writes).
     if (unmodeled_cb_) unmodeled_cb_(true, addr, bo, blk->name, value);
@@ -17965,7 +17981,7 @@ void Nv2a::resume_pushbuffers() {
     // INCREMENT_READ_3D write clears waiting_for_flip_ and calls straight
     // in), so one anchor here covers the whole path without double counting.
     seam_anchor(kSeamAnchorFlipStallClear, true);
-    drain_pull_queue();
+    if(!drain_pull_queue())return;
     if (waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_) return;
     for (uint8_t channel = 0; channel < channels_.size(); ++channel) {
         const ChannelState& ch = channels_[channel];
@@ -17976,10 +17992,10 @@ void Nv2a::resume_pushbuffers() {
     }
 }
 
-void Nv2a::drain_pull_queue() {
+bool Nv2a::drain_pull_queue() {
     if (!(pmc_enable_ & (1u << 12)) || waiting_for_flip_ || waiting_for_nop_ || !pgraph_fifo_access_ ||
         pull_queue_.empty()) {
-        return;
+        return true;
     }
     // NV2A_DISPATCH (beads-xbox.1.14.3). This definition is the single funnel every queued
     // PGRAPH method passes through, so a new dispatch call site cannot bypass the region.
@@ -17995,19 +18011,25 @@ void Nv2a::drain_pull_queue() {
     }
     while (!waiting_for_flip_ && !waiting_for_nop_ && pgraph_fifo_access_ &&
            !pull_queue_.empty()) {
-        if(pgraph_setup_[0x880/4]==0x0008cfffu) {
-            fault_("NV2A boot DEBUG_7 command execution remains unqualified");return;
-        }
         PushMethod push = pull_queue_.front();
         if(pgraph_context_managed_) {
-            if(!(pgraph_context_control_&0x10000000u) || (pgraph_ffintfc_&0x30000000u))return;
+            if(!(pgraph_context_control_&0x10000000u) || (pgraph_ffintfc_&0x30000000u))return true;
             if(push.method!=0x50 && (!(pgraph_context_control_&0x10000u) ||
                ((pgraph_context_user_>>24)&31)!=push.channel)) {
                 pgraph_trapped_addr_=(pgraph_trapped_addr_&~0x01f00000u)|(uint32_t(push.channel)<<20);
                 pgraph_intr_|=1u<<12;
                 pgraph_ffintfc_|=0x10000000u;
-                update_irq();return;
+                update_irq();return true;
             }
+        }
+        // LOAD has real owned image/surface effects. Other inherited frontend
+        // values still need producer/consumer knowledge; never execute these
+        // packets against the old fixture defaults. Keep the packet queued.
+        if(pgraph_loaded_context_) {
+            fault_("NV2A loaded context method consumers require state provenance");return false;
+        }
+        if(pgraph_setup_[0x880/4]==0x0008cfffu) {
+            fault_("NV2A boot DEBUG_7 command execution remains unqualified");return false;
         }
         pull_queue_.pop_front();
         perf::record_pfifo_queue_pop();
@@ -18029,6 +18051,7 @@ void Nv2a::drain_pull_queue() {
         // after it.
         dispatch_micro::mark(dispatch_micro::kDmHandler);
     }
+    return true;
 }
 
 // beads-xbox.1.15.1 stage (d): one resolved host window per pushbuffer kick.
@@ -18326,6 +18349,9 @@ bool Nv2a::pusher_enabled(uint8_t channel) const {
 }
 
 void Nv2a::process_pushbuffer(uint8_t channel) {
+    // A retained unknown consumer must fault before a later kick can fetch
+    // more input past it. Holds may still prefetch, as the real finite FIFO does.
+    if(pgraph_loaded_context_ && !drain_pull_queue())return;
     // NV2A_PFIFO: word fetch, DMA-object translate, command parse and CACHE1 push. The
     // drain_pull_queue() call inside the parse loop opens NV2A_DISPATCH and is carved out,
     // so this bucket's self time is the pusher alone.
@@ -18438,9 +18464,10 @@ void Nv2a::process_pushbuffer(uint8_t channel) {
             --ch.method_count;
             ++pfifo_words_per_word_;
             dispatch_micro::mark(dispatch_micro::kPfQueue);
-            drain_pull_queue();
+            const bool drained=drain_pull_queue();
             dispatch_micro::mark(dispatch_micro::kDrainExit);
             dispatch_micro::end_word();
+            if(!drained)break;
             continue;
         }
 

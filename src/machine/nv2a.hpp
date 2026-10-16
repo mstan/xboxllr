@@ -39,6 +39,7 @@
 #include "machine/nv2a_vga_registers.hpp"
 #include "machine/nv2a_display_setup_commands.hpp"
 #include "machine/nv2a_av_handshake.hpp"
+#include "machine/nv2a_context_image.hpp"
 #include "machine/nv2a_generic_vertex_scratch.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
 #include "machine/nv2a_vsh_compiled.hpp"
@@ -103,7 +104,8 @@ public:
     static constexpr uint32_t kSize = 0x01000000u;  // 16 MB
 
     explicit Nv2a(FaultFn fault, Nv2aRenderer* renderer = nullptr)
-        : fault_(std::move(fault)), renderer_(renderer), pramin_(0x100000, 0), methods_(4096) {}
+        : fault_(std::move(fault)), renderer_(renderer), pramin_(0x100000, 0),
+          pramin_initialized_(0x100000 / 64, 0), methods_(4096) {}
     // Stage (e): the draw worker's lifetime is the device's. The destructor
     // drains whatever is still queued, stops the worker and joins it, so no
     // worker can outlive the RAM it writes into.
@@ -2602,6 +2604,9 @@ private:
     bool pfifo_context_read(uint32_t offset, uint32_t& value);
     bool pfifo_context_write(uint32_t offset, uint32_t value);
     std::vector<uint8_t> pramin_;
+    // Byte knowledge for original context input. Zero-filled host allocation
+    // is not evidence of initialized instance RAM. Retained across GPU reset.
+    std::vector<uint64_t> pramin_initialized_;
     // Scratch for software-batch resident region uploads; reused to avoid
     // per-batch allocation churn.
     std::vector<uint8_t> region_upload_scratch_;
@@ -2683,6 +2688,9 @@ private:
     uint32_t pgraph_context_control_ = 0, pgraph_context_user_ = 0;
     uint32_t pgraph_context_pointer_ = 0;
     bool pgraph_context_pointer_initialized_ = false;
+    bool pgraph_context_reset_seen_ = false;
+    bool pgraph_context_cache_invalidated_ = false;
+    std::unique_ptr<Nv2aContextImage> pgraph_loaded_context_;
     uint32_t pgraph_ffintfc_ = 0, pgraph_rdi_index_ = 0;
     // RDI 3D: fifteen FD patch-state words. Only explicit inactive clears
     // are qualified; reset/power-on contents are not inferred as zero.
@@ -2694,6 +2702,7 @@ private:
     uint32_t* dxt1_noise_control_word(uint32_t select, uint32_t address);
     std::array<uint32_t, 4> pgraph_context_switch_{};
     std::array<uint32_t, 0xc00 / 4> pgraph_setup_{};
+    uint16_t pgraph_setup_mode_initialized_ = 0;
     struct RamTileConfig {
         uint32_t config0 = 0x03070003, config1 = 0, zcomp_offset = 0;
         std::array<std::array<uint32_t, 3>, 8> tiles{};
@@ -2722,6 +2731,7 @@ private:
     bool ram_tile_transfer(uint32_t address, void* data, size_t bytes, bool write);
     bool pgraph_setup_read(uint32_t offset, uint32_t& value);
     bool pgraph_setup_write(uint32_t offset, uint32_t value);
+    bool pgraph_load_context();
     void pgraph_reset_setup();
     uint32_t pgraph_status() const;
     uint32_t patt_color0_ = 0;
@@ -3942,7 +3952,7 @@ private:
 
     void process_pushbuffer(uint8_t channel);
     bool pusher_enabled(uint8_t channel) const;
-    void drain_pull_queue();
+    bool drain_pull_queue();
     // beads-xbox.1.15.1 stage (c): dispatch a RUN of method data words in one
     // pass instead of one CACHE1 round trip per word. Returns the number of
     // words consumed; 0 means the run was declined and the caller must use the
