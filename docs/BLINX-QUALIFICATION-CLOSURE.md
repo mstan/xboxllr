@@ -54,6 +54,19 @@ probe publication correction; a reached original consumer reopens that scope.
 
 ## Physical original-profile noise capture completed - 2026-10-16
 
+The compact texture-relative candidate transfers from one authored mid-color
+block to every measured green/blue channel and all206 non-low-red logical
+pixels across the original and first controlled datasets. It is not installed
+as qualified behavior:43 red mismatches remain for one reached low RGB value.
+The follow-up four-role batch (`8913d3a`) completes twelve further captures;
+all four OFF blocks equal that low RGB and all four ON patterns equal each
+other. Endpoint0, endpoint1 and both opaque interpolants therefore share the
+observed low-range result. Geometry consumption and all repeated pairs pass.
+This rules out an endpoint1-only workaround; the low-range arithmetic still
+needs a justified model before removing the maintained guard. Private evidence
+is in the probe's `results/noise-physical-low-red-20261016/`, with independent
+candidate analysis in `build/noise-controlled-pixels-review-20261016/`.
+
 A subsequent bounded authored batch (`57822f3`) completes twelve captures in
 one GPU session: four endpoint/selector controls, each sampled off/on/on/off
 at three geometry/ROI phases. All repeats match. Full OFF pictures prove the
