@@ -28,11 +28,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other eighteen graphics entries retain their deferred scopes and reopening
+- The other nineteen graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **42 retained question IDs:41 with deferred scope, and one fully
+there are **43 retained question IDs:42 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -159,3 +159,9 @@ the new source has the representative CPU contract qualification above.
 | ID | Question | Evidence and reason it can wait | Reopen when |
 | --- | --- | --- | --- |
 | GFX-D20 | What nonzero FD patch/curve/transition state, reset contents and processing are required beyond the reached inactive clear? | Pinned envytools f102b823 hwtest/pgraph_state.cc maps RDI3D to fifteen FD words. Actual original13FC4C writes fifteen zeros while idle before context loading. The maintained model supports these explicit clears and their readback, with initialization knowledge invalidated by full/subengine reset. Nonzero programming, unknown reads and NV0971DE0..1E1C processing remain guarded. No reached attract consumer currently requires active patch processing. | An actual supported command or context image requires nonzero FD state, patch/curve/transition output, or reading reset contents before explicit initialization. Saved-context load/save and ordinary draw output remain required G03/G05, not waived by this deferral. |
+
+## Unconsumed inherited fog constant - 2026-10-16
+
+| ID | Question | Evidence and reason it can wait | Reopen when |
+| --- | --- | --- | --- |
+| GFX-D21 | What exact inherited bits and arithmetic edge behavior belong to vertex constant c137 in the captured first draw batch? | The actual pending queue uploads the complete first program. Its sole c137 use is final MAD o5.x = v0.z*c137.x+c137.y; no relative reads, later instruction or paired output consumes that result. All eight captured draw states disable fog, and none of their active alpha/color/final combiner inputs selects FOG. Other read constants are explicitly uploaded; the final draw uses uploaded c0/c1. Independent review agrees that this output has no demonstrated consumer in this prefix. Retain transform-inputs-review.aot-private.json and draw-0/7-program-corrected.aot-private.txt under gpu-lle-first-transfer-20261016. | A supported draw consumes fog/c137, changes the program or combiner dependency, or an observable context save/reload requires these bits. This defers only this unconsumed value's exact semantics. It does not initialize c137, remove unknown-state guards, supply a context map, waive load/save, or qualify the still-pending draws. |

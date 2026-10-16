@@ -7,7 +7,7 @@ now governs remaining work and family acceptance. Exhaustive scene numerical
 proof stays deferred; working LLE routing/processing and connected title evidence
 remain required. Existing blocked-fence/full64-slot evidence is reused.
 
-**Current status, 2026-10-15: 6/9 bounded families qualified.** Movies and
+**Current status, 2026-10-16: 6/9 bounded families qualified.** Movies and
 scheduling now close alongside input, display, memory and files. The full Q03
 capture completed 600 GP seconds with all seven numeric gates passing. Two
 natural openings, actual later movie interruption, title return and fresh demo
@@ -17,9 +17,25 @@ continued output through that transition.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A05 normal Stop/reuse and continued output; representative connected output passes, A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 36 retained IDs; 35 contain deferred scope, including AV service-edge precision, nominal interpolation precision, additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio A05 normal Stop/reuse and continued output; representative connected output passes, A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 43 retained IDs; 42 contain deferred scope, including unconsumed inherited fog state, inactive patch processing, AV service-edge precision, nominal interpolation precision, additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
-Latest capture checkpoint: the retained-buffer title ended cleanly at its
+Latest checkpoint: the stopped, locked PCM16 restart cursor fix38f6836 passes
+its original-code reproduction and independent source-output comparison. One
+changed muted title acceptance run remains active under the audio worker; its
+same-buffer Stop/restart plus continued output is not yet accepted. GPU commits
+7765ecf/60bb8d7/897ab10 add the owned CPU UMA aperture, inactive FD clears,
+compiled callback bus ownership and explicit context-selector behavior. Actual
+original execution produced its complete context image and requested its first
+load. Eight complete draw submissions are captured but have not executed.
+Consumed saved-state mapping and real load/save remain the main GPU blocker;
+graphics output follows. GFX-D21 defers only an inherited fog value with no
+consumer in this prefix. Read-only hardware checks identified disabled engines;
+a guarded PGRAPH-only enable now succeeds and25 fixed follow-up reads complete.
+FIFO remains disabled. Retained state is not a context map or reset-default
+proof; real transfer remains open. See the
+[current closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
+
+Earlier capture checkpoint: the retained-buffer title ended cleanly at its
 one-hour host ceiling:8647 calls, five Plays, no Stop and no guards. The actual
 1440-update title transition had not occurred. Its framing/cadence and identical
 accepted initial trace are preserved. The host ceiling correction passes four
@@ -44,7 +60,7 @@ existing muted audio lifecycle run continues while the authorized Sol6.1 worker
 reviews its evidence. This is component progress; families remain6/9. See the
 [current milestone](BLINX-QUALIFICATION-CLOSURE.md#quiescent-av-protocol-and-original-initializer---2026-10-15).
 
-Latest checkpoint: the GP/EP chronology fix `4f92b9b` passes 54 affected checks
+Earlier checkpoint: the GP/EP chronology fix `4f92b9b` passes 54 affected checks
 and the changed title's 4,334 comparable input groups are all consecutive.
 Analog/digital payloads match; 393 EP blocks and derived states match the
 independent processor model. The 768.875s muted title check is complete, with

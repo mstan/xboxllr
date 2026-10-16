@@ -6,15 +6,15 @@ evidence and reopening trigger; preserve resolved questions and their outcomes.
 Deferral does not count as qualification. Missing service routing, clocks,
 ownership or required processing stages remain implementation work.
 
-The existing20 graphics questions and their replay evidence remain in the
+The existing21 graphics questions and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
-Current reconciliation, 2026-10-15: the twenty-two entries here retain their
+Current reconciliation, 2026-10-16: the twenty-two entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues,42 IDs
-are retained;41 still contain deferred scope. AUDIO-D09 records the sample
+behavior from its remaining precision question. Across both queues,43 IDs
+are retained;42 still contain deferred scope. AUDIO-D09 records the sample
 counter's remaining sub-sample phase question; AUDIO-D10 records AC-link
 control-transaction phase and bus latency. AUDIO-D11 retains unreached output
 configuration encodings and trap behavior. AUDIO-D12 retains the nontrapped
@@ -30,8 +30,10 @@ GFX-D17 retains unidentified encoder command effects without blocking separately
 specified clock/reset/sync contracts; required connected output stays open.
 AUDIO-D16 records the exact stopped-voice cursor reset edge and unreached
 ownership/format extensions; normal same-buffer restart/output remains A05.
-GFX-D20 records unreached active patch processing/reset contents; required context
-transfer and ordinary draws remain open. See the
+GFX-D20 records unreached active patch processing/reset contents. GFX-D21 retains
+exact inherited c137 behavior only where its sole fog output has no consumer in
+the captured draw batch; required context transfer and ordinary draws remain
+open. See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
 

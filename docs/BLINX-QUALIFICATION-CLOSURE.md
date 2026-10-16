@@ -48,7 +48,35 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;42 retained deferral IDs,41 scopes.
+Current disposition: six of nine families;43 retained deferral IDs,42 scopes.
+
+## Pending transform dependencies and hardware readiness - 2026-10-16
+
+The first seven pending draws upload their complete eleven-step vertex program.
+Its reads of c98/c132/c136 have explicit queue uploads; the only inherited read,
+c137, feeds final fog output o5.x alone. The eighth draw uploads its complete
+twelve-step program and both read constants c0/c1. Every captured draw disables
+fog, and no active alpha/color/final combiner input selects FOG. The latter
+dependency check avoids assuming that disabled fog alone makes its value
+irrelevant. Independent review agrees. GFX-D21 retains exact c137 semantics
+with a consumer-based reopening trigger; no value is seeded and no transfer
+or draw guard is removed. Evidence: gpu-lle-first-transfer-20261016/
+transform-inputs-review.aot-private.json and the corrected program disassemblies.
+
+The physical probe responds. Twenty-nine fixed read-only control observations
+complete, but PMC_ENABLE has both PGRAPH and PFIFO disabled. Values returned
+from those disabled blocks cannot establish initialized context contents or
+FIFO ownership. No hardware write occurred in that readiness batch. A separate
+guarded PGRAPH-only enable then succeeds with exact readback; FIFO remains
+disabled and global interrupts remain off. Twenty-five fixed follow-up reads
+complete, showing idle PGRAPH/no pending PGRAPH interrupt and some retained
+context words. These observations are not reset defaults, context ownership or
+saved-image offsets. No context command, RDI_DATA access, PRAMIN store or storage
+operation occurs. The probe remains available with PGRAPH enabled. Ten offline
+payload/host tests pass; independent review's post-EXEC receipt-error finding
+is corrected and covered. Probe evidence: results/pgraph-enable-20261016/.
+The audio worker continues its separate changed acceptance run. Still6/9;
+43 retained deferral IDs/42 deferred scopes.
 
 ## Actual first selector and bounded pending draw batch - 2026-10-15
 
