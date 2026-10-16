@@ -23,17 +23,18 @@ The [bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md)
 supersedes the original deferral status where a reopening trigger has fired:
 
 - **GFX-D06 is required work**, not a current deferral. Original resource
-  lifetime G01 is complete; startup/instance integration and connected title
-  execution remain G02/G03/G05.
-- **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
-  required G04 work. Further sampling/rounding precision can remain deferred
-  after that behavior exists; disabling noise does not satisfy G04.
+  lifetime G01 and startup/state gates G02/G03 are complete. Connected title
+  output, exit/reentry and content lifetime remain required G05.
+- **GFX-D04 retains precision scope.** Required enabled-noise G04 passed on
+  2026-10-16 with maintained reconstruction, independent physical observations
+  and a bounded native GPU comparison. Further sampling/rounding precision
+  remains deferred; acceptance did not disable or omit noise.
 - The other twenty-two graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
 there are **46 retained question IDs:45 with deferred scope, and one fully
-promoted to required work**. GFX-D04 also has the required portion above.
+promoted to required work**. GFX-D04's required portion is now complete.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
 connected output check. AUDIO-D16 records exact stopped-voice cursor reset timing;
@@ -285,3 +286,23 @@ native compressed sampling. Its accepted appearance and fast path remain the
 baseline; the eventual representative comparison must state that approximation's
 numeric limits. No per-frame random effect or forced CPU texture upload is
 introduced by this evidence. This addendum adds no question ID or family gate.
+
+## GFX-D01 addendum: inactive texture clip comparisons - 2026-10-16
+
+The reached17F8 control stores sixteen comparator-polarity bits, independently
+specified as GEQUAL/LESS. It does not enable clipping; CLIPPLANE texture-stage
+mode5 consumes those bits. Maintained storage now preserves the actual setter
+and DrawJob snapshot, while all-stage mode5 processing remains guarded before
+pixels/completion. Captured4331 API inputs and five custom shader definitions
+contain comparator zero; the retained replay has no active mode5. That corpus
+is separate from the in-progress connected acceptance run.
+
+Active texture clip processing and its zero/negative/NaN interpolation edges
+remain an extension within this clipping scope. Reopen immediately if a required
+original draw selects mode5, a visible clipping regression appears, or raw
+readback/SAVE begins consuming this control. Then establish its actual fragment
+and state-transfer behavior; neither zero comparator bits nor an unreferenced
+combiner input justifies skipping its discard effect. The source references,
+corpus-presence limitations and focused queued-draw tests are recorded under
+`build/blinx/shader-clip-storage-20261016/` and the governing closure checklist.
+No new question ID or closing requirement is introduced.
