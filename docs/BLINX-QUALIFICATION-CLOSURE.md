@@ -52,6 +52,30 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Physical original-profile noise capture completed - 2026-10-16
+
+The reviewed probe correction `c9b22ee` completes the actual hardware SDK
+bootstrap and all four original-profile off/on/on/off observations. Ten live
+FIFO enable-zero boundaries have complete next-owned-trap witnesses, including
+prefetched GET equal to PUT. Five actual foreground services reach SDK success
+with a drained queue and all six allocations retained. The final original-profile
+image is sealed against the tested bootstrap objects: five focused groups and
+22 lifetimes pass, with18 unaffected groups reused from the preceding batch.
+
+All four8x8 captures complete, with exact requested noise-bank readbacks.
+Off/off pixels match and on/on pixels match; all64 pixels change between off
+and on. Observed RGB deltas span red[-8,8], green[-2,3], blue[-6,8]; alpha is
+unchanged. These are measured properties of this retained primitive and window,
+not a general noise equation or a tolerance for unrelated scenes. The separate
+work app was uploaded only after a verified G-drive recovery backup and readback;
+the installed probe and boot files are unchanged. Private evidence is the probe's
+`results/noise-physical-fifo-20261016/root-review.aot-private.json`.
+
+G04 now has the missing physical pixel observation. Independent baseline analysis
+and supported enabled-noise implementation remain, followed by the connected
+attract/exit/reentry/lifetime acceptance. The maintained noise guard remains;
+the family count is still7/9.
+
 ## Physical noise-capture continuation and recovery - 2026-10-16
 
 The later physical noise-capture continuation passes the corrected USER
@@ -2238,7 +2262,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: pre-title startup and actual title04010101 AV3/FIELD return pass; post-mode takeover acceptance remains with the connected enabled-noise route | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: owned LOAD/projections and physical transfer pass; three completed loading-picture flips and processed digital input captured in noise-omitting diagnostic; enabled-noise connected acceptance remains | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
-| G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
+| G04 | Open: original-profile physical off/on/on/off pixels captured; needs independent baseline and enabled-noise implementation | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: digital input and phase-selected capture/input controls ready; needs enabled-noise connected attract/lifecycle run after G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
