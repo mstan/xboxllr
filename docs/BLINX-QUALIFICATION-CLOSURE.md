@@ -52,6 +52,28 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Physical noise-capture continuation and recovery - 2026-10-16
+
+The later physical noise-capture continuation passes the corrected USER
+submission check after owner-confirmed power-cycle recovery. The reviewed
+original-profile image reaches12485 stores,97 beyond the prior stop, with two
+actual foreground services/IRQs. It then stops on FIFO_ACCESS (`FD400720`),
+requested1 and observed0. No pixel capture or family acceptance follows.
+Primary error handling can clear this live execution gate; that is a candidate
+explanation, not proof of the observed cause. The bootstrap fixture previously
+could neither clear it on a trap nor advance GPU work between store/readback.
+The corrective work must distinguish a new owned trap from a dropped enable;
+ordinary zero readback is not sufficient. Physical evidence is the probe's
+`results/noise-physical-put-20261016/`.
+
+A separate owner-authorized one-shot SMC power cycle then reaches the normal
+dashboard, independently observed through FTP and a fresh startup log. This
+provides a remote recovery route without requiring dashboard graphics to start
+in the failed GPU state. It performs no boot-file, storage or EEPROM operation.
+Private evidence and exact operation are in the probe's
+`results/noise-direct-recovery-20261016/` and `docs/RESTART.md`.
+G04 remains open; the family count is still7/9.
+
 ## Original DAC upload and digital gamma consumer - 2026-10-16
 
 A private diagnostic retaining original CPU/callback execution but deliberately
