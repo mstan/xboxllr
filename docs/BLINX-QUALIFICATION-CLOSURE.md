@@ -48,7 +48,36 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: seven of nine families;44 retained deferral IDs,43 scopes.
+Current disposition: seven of nine families;45 retained deferral IDs,44 scopes.
+
+## Original DAC upload and digital gamma consumer - 2026-10-16
+
+A private diagnostic retaining original CPU/callback execution but deliberately
+omitting enabled DXT1 noise stops after165.078s at the DAC write-index port.
+This exposes required implementation work; it supplies no noise, pixel or
+lifecycle acceptance. The maintained noise guard remains unchanged.
+
+Retained original upload routines each write index zero and256 RGB byte triples.
+The original AV producer selects GENERAL_CONTROL00100030 for the32-bit path.
+The maintained DAC owner now receives that complete table and the digital
+scanout applies separate red/green/blue lookups. Identity ramps retain the
+direct framebuffer path; a changed ramp requires converted output. Gamma
+updates never alter framebuffer storage. Unsupported reads, widths, modes and
+nonzero-index updates remain guarded; incomplete uploads cannot claim output.
+
+Four affected NV2A/display/tile checks pass in0.63s. A private component check
+executes both retained upload routines against maintained DAC MMIO, verifying
+769 writes apiece, the second routine's32 ordering reads, unchanged framebuffer
+bytes and exact independently computed256-pixel output. The authored caller
+and scanout geometry do not establish original connected title acceptance.
+Evidence: `build/blinx/original-dac-upload-20261016.aot-private.json` and
+`build/blinx/dac-gamma-tests-20261016.aot-private.log`.
+
+GFX-D23 records unreached DAC extensions and partial-upload timing with explicit
+reopening triggers. Required full upload and its pixel consumer are implemented,
+not deferred. A changed private noise-omitting diagnostic is being used only
+to discover subsequent blockers. Physical noise, connected original rendering
+and normal lifecycle remain required. Families remain7/9.
 
 ## Original sampling capture integrated; physical startup still open - 2026-10-16
 

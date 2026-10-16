@@ -1776,6 +1776,15 @@ resampler/DSP attribution and dependency pins remain.
 
 ## FP register transport and original DSP control observations (2026-10-11)
 
+The authored DAC gamma owner added2026-10-16 uses the full RGB upload contract
+in [nxdk video.c](https://github.com/XboxDev/nxdk/blob/29638d0b001f179b73c3513489af10ddc2986216/lib/hal/video.c),
+`XVideoSetGammaRamp`, and the already pinned envytools `nv_vga.xml` and
+`nv3_pramdac.xml` for byte-port and eight-bit mode fields. No implementation
+body is copied. Private retained original upload code corroborates the producer
+sequence and mode; its bytes/disassembly remain outside committed source.
+This establishes a bounded digital lookup contract, not analog precision or
+partially uploaded raster timing.
+
 The authored FP register owner uses the existing credited envytools
 `nv3_pramdac.xml` and Linuxv6.12 Nouveau `nvreg.h` for offsets/control fields,
 and a bounded private Xbox observation for the tested field's write bank.

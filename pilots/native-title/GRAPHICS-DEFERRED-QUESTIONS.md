@@ -28,11 +28,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other twenty graphics entries retain their deferred scopes and reopening
+- The other twenty-one graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **44 retained question IDs:43 with deferred scope, and one fully
+there are **45 retained question IDs:44 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -183,3 +183,9 @@ or an observable cache/readback consumer requires it. This does not defer requir
 depth values, ordering or compression tags. Loaded compressed depth/stencil writes
 remain guarded until a ZROP writer owns their selector/encoding; if reached by the
 supported attract route, that writer is required implementation before closure.
+
+## DAC extensions beyond the complete original RGB upload - 2026-10-16
+
+| ID | Question | Evidence and reason it can wait | Reopen when |
+| --- | --- | --- | --- |
+| GFX-D23 | What are nonzero-index update behavior, DAC readback/reset values, other color widths/modes and the raster-visible timing of incomplete gamma uploads? | Both retained original upload routines start at index zero and emit all256 RGB triples. The original32-bit AV producer selects00100030. The maintained owner implements the full table and separate-channel digital lookup, with identity direct output preserved. nxdk XVideoSetGammaRamp explicitly avoids nonzero-index partial updates because of an NV2A caveat. Unreached modes/readback remain guarded, and output during an incomplete upload is rejected rather than assigned an invented bank-swap/partial-raster policy. | A supported original consumer requires a guarded operation, scanout observes an incomplete upload, or independent output differs from the complete-table lookup. Such a reached consumer promotes the needed behavior to required work. This does not defer the complete RGB upload, its actual pixel effect, connected output or normal lifecycle. |

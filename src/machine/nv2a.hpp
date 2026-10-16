@@ -37,6 +37,7 @@
 #include "machine/nv2a_renderer.hpp"
 #include "machine/nv2a_fp_registers.hpp"
 #include "machine/nv2a_vga_registers.hpp"
+#include "machine/nv2a_dac_gamma.hpp"
 #include "machine/nv2a_display_setup_commands.hpp"
 #include "machine/nv2a_av_handshake.hpp"
 #include "machine/nv2a_context_image.hpp"
@@ -3984,6 +3985,7 @@ private:
     std::array<uint8_t, 256> crtc_regs_{};
     uint8_t crtc_index_ = 0;
     Nv2aVgaRegisters vga_registers_;
+    Nv2aDacGamma dac_gamma_;
     Nv2aDisplaySetupCommands display_setup_commands_;
     uint32_t pcrtc_start_ = 0;
     uint32_t pramdac_general_control_ = 0;

@@ -12,10 +12,20 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: connected original startup/rendering, reached enabled-noise draw and lifecycle | 44 retained IDs / 43 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
+| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: connected original startup/rendering, reached enabled-noise draw and lifecycle | 45 retained IDs / 44 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current implementation checkpoint: loaded contexts connect to bounded programmable
-CPU draws. The next batch adds all 18 reached bump-state setters and the later
+Current implementation checkpoint: the newly reached full DAC gamma upload now
+has a real digital scanout consumer. Four affected checks pass0.63s, and two
+retained original upload routines produce exact independently computed pixels
+against maintained MMIO. A private noise-omitting diagnostic exposed this gap;
+its output cannot qualify the original title. The same diagnostic with the DAC
+fix is discovering subsequent blockers while the separate probe startup batch
+undergoes final offline review. Physical enabled-noise behavior, connected
+original rendering and normal lifecycle remain required. See the latest
+[closing checkpoint](BLINX-QUALIFICATION-CLOSURE.md#original-dac-upload-and-digital-gamma-consumer---2026-10-16).
+
+Prior implementation checkpoint: loaded contexts connect to bounded programmable
+CPU draws. The completed batch adds all 18 reached bump-state setters and the later
 1710 vertex-cache break, bringing the audited initializer/cache methods to 51.
 Inactive bump state retains exact commands; actual bump rendering stays guarded.
 Queued tests check changed indexed backing storage, retained current attributes,
@@ -29,7 +39,8 @@ passes the prior 1B68 boundary and stops after 190.093s at the required enabled
 DXT1-noise pixel guard, with no captured presentation. This establishes the next
 implementation boundary, not eight successful original draws. Next complete the
 bounded physical draw owner and paired noise observation using retained inputs;
-the prepared capture module cannot yet draw because bootstrap stops at RAMFC.
+the committed bootstrap advances through RAMFC/PRAMIN and stops at CRTC31;
+the subsequent full-startup batch is undergoing offline review.
 Connected rendering and lifecycle remain required. GPU/graphics remain open.
 
 Latest completed family: audio A01-A05 closes after actual same-object Stop/status/Play

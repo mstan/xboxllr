@@ -991,6 +991,8 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         }
         if (bo == 0x3D4) return crtc_index_;
         if (bo == 0x3D5) return crtc_regs_[crtc_index_];
+    } else if (blk->off == 0x681000 && Nv2aDacGamma::handles(bo)) {
+        fault_("NV2A DAC readback remains unqualified");return 0;
     } else if (blk->off == 0x680000) {  // PRAMDAC
         const uint32_t reg = bo & ~3u;
         if(Nv2aDisplaySetupCommands::handles(reg)) {
@@ -1371,6 +1373,11 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             if(crtc_index_==0x28)crtc28_programmed_=true;
             return;
         }
+    }
+    if (blk->off == 0x681000 && Nv2aDacGamma::handles(bo)) {
+        if(size!=1) {fault_("NV2A DAC write width is unqualified");return;}
+        if(!dac_gamma_.write(bo,value,pramdac_general_control_))fault_(dac_gamma_.error());
+        return;
     }
     if (blk->off == 0x680000) {
         if(Nv2aDisplaySetupCommands::handles(bo&~3u)) {
@@ -18670,6 +18677,16 @@ bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string
     // Screen Off disables display fetches. It neither drains queued GPU work
     // nor reads/resolves the framebuffer. Digital sync/IRQ clocks still run.
     if(vga_registers_.screen_off()) { source_size=0;return true; }
+    // The initialized no-upload profile retains its existing direct output.
+    // Once the original driver owns the DAC, every output path must use it.
+    if(dac_gamma_.started()) {
+        if(!dac_gamma_.complete()) {
+            error="NV2A scanout during incomplete DAC upload remains unqualified";return false;
+        }
+        if(pramdac_general_control_!=0x00100030 || info.bits_per_pixel!=32) {
+            error="NV2A DAC scanout outside eight-bit extended-color profile";return false;
+        }
+    }
     // Seam anchor 3 (F5): scanout reads the whole visible framebuffer out
     // of guest RAM. Guest-anchored gate point.
     seam_anchor(kSeamAnchorScanout, true);
@@ -18717,6 +18734,9 @@ const uint8_t* Nv2a::scanout_direct_bytes(ScanoutInfo& info, size_t& size,
     }
     if(ram_tiles_active()) {
         error="NV2A tiled scanout requires translated capture, not a raw pointer";return nullptr;
+    }
+    if(dac_gamma_.started() && !dac_gamma_.identity()) {
+        error="NV2A gamma-corrected scanout requires converted capture";return nullptr;
     }
     if (!mem_direct_) {
         error = "NV2A scanout has no direct guest-memory pointer";
@@ -18782,6 +18802,10 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
                 }
             }
             rgba[dest_offset + 3] = 0xff;
+            if(dac_gamma_.started()) {
+                for(unsigned c=0;c<3;++c)
+                    rgba[dest_offset+c]=dac_gamma_.map(c,rgba[dest_offset+c]);
+            }
         }
     }
     error.clear();
