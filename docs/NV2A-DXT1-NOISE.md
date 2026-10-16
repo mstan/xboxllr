@@ -68,3 +68,27 @@ Private extraction receipt SHA256:
 `5fda6a263870f0e1f380999927887cc19c3649e9c148e07fa105bf260f4a063e`.
 Independent cross-dataset analysis receipt SHA256:
 `272d2cc756f56ad5d938dc865e73e6ecf187b669eb69ee2c9455b58ba40ae10a`.
+
+## Native compressed sampler comparison
+
+A separate authored fixture links the existing production native backend archive
+and uses its texture create/upload/bind, shader/combiner, sampler and GPU readback
+interfaces. Every draw verifies an actual BC1_UNORM4x4 one-mip resource/SRV;
+the original compressed8 bytes round-trip unchanged.256 draws provide4096 RGB
+observations across32 blocks, point/linear filtering and off/on/on/off. Same-mode
+and across-mode framebuffers repeat exactly; native noise state remains its
+accepted compressed-sampling approximation.
+
+On the observed RTX3080Ti/NVIDIA32.0.16.1686 driver, maximum absolute RGB error
+against physical authored blocks is1/2/1 with noise off and8/4/8 with noise on
+(out of255). These are measured bounds for this corpus/driver, not universal
+limits for arbitrary fractional samples/mips or another native backend. They
+retain the owner's accepted HLE appearance and do not add CPU texture decoding.
+Opaque alpha255 is checked separately from physical output alpha0.
+
+The exact native archive, observation source/objects/executable, driver metadata,
+inputs and outputs are pinned in `build/blinx/noise-native-physical-20261016/`.
+The reused archive's current source mtimes provide only a freshness hint;
+source-to-archive equivalence was not independently rebuilt for this observation.
+Sealed receipt SHA256:
+`9ded827c38b82327b190a5be0e440106bc22789e9b8af6834f6cf035afc0ce8f`.
