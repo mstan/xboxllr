@@ -94,18 +94,26 @@ audible HLE output does not remove that requirement.
 `XLLE_PILOT_AUDIO_STAGE_TRACE=<path>` selects a diagnostic journal on the existing
 original audio owner before any DMA or elapsed device time. The portable APU
 lends data that its ordinary work has already produced or transferred. The
-observer performs no extra guest reads, MMIO, allocation, file I/O, processing
-or clock advancement. The default HLE route does not construct this journal.
+observer performs no extra guest reads, MMIO, processing or clock advancement.
+Ordinary records only copy into the preallocated buffer; reaching its bound
+performs one persistence operation. The default HLE route does not construct
+this journal.
 
 The Windows pilot allocates at most64MiB once, begins recording at the first
 decoded source block containing a nonzero sample, and retains at most four
 guest seconds. The block's real cursor is retained; prior silence is not
 invented or counted as captured source. Capacity
 exhaustion stops recording and marks truncation while device processing
-continues. The existing serialized observation stop flushes the journal along
-with both output captures, even if another capture fails. An invalid borrowed
+continues. A full window or capacity stop immediately writes and closes its
+immutable prefix, allowing independent review during the same title lifetime.
+The existing serialized observation stop flushes a shorter pending journal along
+with both output captures, even if another capture fails; finishing an already
+published prefix is idempotent. An invalid borrowed
 event or persistence failure is reported. Every journal remains `.partial`;
 neither a finished window nor a process exit means original device retirement.
+The four bounded storage cases verify unchanged framing and bytes, including
+reading a completed prefix before owner finalization and preserving it across
+later observations. Evidence: `audio-order-fixture-20261015/early-stage-publication/`.
 
 The little-endian v1 journal has a64-byte `XLLESTG1` header,32-byte record headers
 and24-byte `XLLEEND1` footer. It records the device lifetime, epoch, shared PIT

@@ -89,9 +89,12 @@ void PilotAudioStageTrace::record(uint64_t ticks,const xlle::ApuObservation& eve
        uint32_t(event.kind)<1 || uint32_t(event.kind)>8) {
         s.flags|=4;s.error="original audio stage trace invalid borrowed event";return;
     }
-    if(ticks-s.first>=window_ticks){s.flags|=8;return;}
+    // Publish the immutable diagnostic prefix as soon as its bound is met.
+    // A reviewer can inspect it while the same title continues toward a real
+    // lifecycle event; finishing observation never stops device processing.
+    if(ticks-s.first>=window_ticks){s.flags|=8;finish();return;}
     const uint64_t size=sizeof(Record)+uint64_t(event.metadata_words)*4+event.bytes;
-    if(size>capacity-s.bytes){s.flags|=2;return;}
+    if(size>capacity-s.bytes){s.flags|=2;finish();return;}
     const Record record{uint32_t(event.kind),event.id,event.metadata_words,event.bytes,ticks,s.records+1};
     auto* next=s.buffer+s.bytes;
     std::memcpy(next,&record,sizeof(record));next+=sizeof(record);

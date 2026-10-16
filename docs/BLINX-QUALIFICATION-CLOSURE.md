@@ -92,6 +92,13 @@ rejected by the same chronology checker. The final component receipt is
 `audio-order-fixture-20261015/qualified-component.aot-private.json`, SHA256
 `5593f83dce284ffd6ef03f8d80861e52d59aafb294a5783adc90a92418bec669`.
 
+The diagnostic recorder now publishes its immutable prefix immediately on
+capacity/window completion, while the same title continues running. Four storage
+cases check exact records, early independent readability and idempotent later
+finish. Future lifecycle runs can therefore get early stage feedback without
+repeating startup. This changes host observation only; the currently launched
+ordering checkpoint retains its already-built recorder and finalizes normally.
+
 One authorized Sol6.1 worker independently traced the startup/lifecycle source;
 root checked the source hashes and relevant original instructions. Neutral
 controller insertion sets the edge consumed by intro predicate18110. Dispatcher

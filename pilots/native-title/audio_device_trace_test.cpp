@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"stage trace FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 int main(int argc,char** argv) {
@@ -24,8 +26,22 @@ int main(int argc,char** argv) {
         trace->record(700,{xlle::ApuObservationKind::Send,96,metadata,7,samples,sizeof(samples)});
         if(mode=="window")trace->record(4500600,source);
     }
+    std::string published;
+    if(mode=="window" || mode=="capacity") {
+        // The device/title owner has not requested finalization. A full prefix
+        // must already be independently readable while that owner stays alive.
+        std::ifstream file(path+".partial",std::ios::binary);CHECK(file);
+        published.assign(std::istreambuf_iterator<char>(file),{});
+        CHECK(published.size()>=88 && !published.compare(0,8,"XLLESTG1") &&
+              !published.compare(published.size()-24,8,"XLLEEND1"));
+    }
     const char* error=trace->finish();CHECK((error!=nullptr)==(mode=="invalid"));
     CHECK(trace->finish()==error);trace->record(800,source); // finalized prefix is immutable
+    if(!published.empty()) {
+        std::ifstream file(path+".partial",std::ios::binary);CHECK(file);
+        const std::string final{std::istreambuf_iterator<char>(file),{}};
+        CHECK(final==published);
+    }
     trace.reset();CHECK(PilotAudioStageTrace::create(trace,path.c_str(),123,456));
     std::puts("PASS bounded stage persistence and explicit partial state");
 }
