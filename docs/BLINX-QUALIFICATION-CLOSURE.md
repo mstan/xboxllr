@@ -283,6 +283,21 @@ private noise omission remains explicit. Receipt:
 Implementation30b98a2; families remain7/9. The next diagnostic follows the
 post-AV path to its next required consumer, rather than rechecking this wait.
 
+The post-AV diagnostic completes its bounded observation after232.25s total,
+including60s after that actual mode return, without a guard. PIT/USB and original
+thread/ISR/DPC progress continue. No pixels were captured and the exact title
+caller after Swap was not observed, so this is not an attract/lifecycle pass.
+Source review confirms the ordinary137169..137175 tail returns through13799E
+to Swap137A52; with zero debug-overlay fields it returns the real swap serial
+without another direct kernel/MMIO operation. No missing setter batch is
+established by that tail. Optional overlay state remains conditional.
+Receipt: `build/blinx/gpu-lle-diagnostic-post-av-20261016/result.aot-private.json`;
+source review: `retrace-slice-review/post-av-caller-review.aot-private.json` under
+the earlier counter diagnostic. The next offline step is bounded output/state
+observation for the whole-GPU route: its maintained scanout API is loaded but
+the existing native/display-only presentation capture does not consume it.
+Enabled-noise physical observation and final connected lifecycle still remain.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued
