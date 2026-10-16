@@ -301,6 +301,20 @@ static void test_gpu_lle_av_mode_startup(uint32_t phase)
     const char *error=pilot_io_device_lle(3,memory,args,&result);
     fprintf(stderr,"Original AV startup: %s result=%08x\n",error?error:"returned",result);
     CHECK(!error && result==0);gpu_test_completed_av_mode(phase);
+    // Original AV2 option14 changes 96.YLPF, not V_LINESI or its FIELD epoch.
+    // Exercise the actual HAL RMW and original FIELD consumer, then the
+    // original same-mode AV3 path (which restores option14 to zero itself).
+    for(unsigned enabled=1;enabled!=3;++enabled) {
+        uint32_t filter_args[]={0,14,enabled&1,0},field_args[]={0,15,0,0x15004};
+        CHECK(!pilot_io_device_lle(2,memory,filter_args,&result));
+        MEM32(0x15000)=0x11223344;MEM32(0x15004)=0xcccccccc;MEM32(0x15008)=0x55667788;
+        const char *field_error=pilot_io_device_lle(2,memory,field_args,&result);
+        if(field_error)fprintf(stderr,"Original filter/FIELD: %s\n",field_error);
+        CHECK(!field_error);
+        CHECK(MEM32(0x15004)<=1 && MEM32(0x15000)==0x11223344 && MEM32(0x15008)==0x55667788);
+    }
+    CHECK(!pilot_io_device_lle(3,memory,args,&result) && !result);
+    gpu_test_completed_av_mode(phase);
     fprintf(stderr,"PASS: original AV3 returns after actual setup, clock-driven retraces, encoder reset and WSS; connected pixels remain guarded\n");
 }
 

@@ -41,6 +41,26 @@ int main() {
           before.input_x==after.input_x && before.output_x==after.output_x &&
           before.input_y==after.input_y && before.output_y==after.output_y,
           "selector and disabled-caption gate preserve timing");
+    uint8_t timing96=0;
+    check(encoder.read_byte(0x96,timing96),"read established line/filter register");
+    const uint64_t epoch=encoder.timing_epoch();
+    for(uint8_t filter:{0x10,0x20,0x30,0x00}) {
+        const auto value=uint8_t((timing96&~0x30u)|filter);
+        check(encoder.write_byte(0x96,value),"original horizontal luma filter setter");
+        check(encoder.read_byte(0x96,readback) && readback==value,"exact filter latch readback");
+        check(encoder.timing_state(after) && after.clocks==before.clocks &&
+              after.input_x==before.input_x && after.input_y==before.input_y &&
+              after.output_x==before.output_x && after.output_y==before.output_y &&
+              after.subcarrier_phase==before.subcarrier_phase && after.field_even==before.field_even &&
+              after.field_transitions==before.field_transitions && encoder.timing_epoch()==epoch,
+              "luma filter preserves counter, FIELD and color phase");
+    }
+    for(uint8_t changed:{0x01,0x04}) {
+        check(encoder.write_byte(0x96,uint8_t(timing96^changed)),"counter/active-line setter transport");
+        check(!encoder.timing_state(after) && encoder.field_signal()<0,
+              "input-line or active-line changes still invalidate timing and FIELD");
+        check(encoder.write_byte(0x96,timing96) && encoder.write_byte(0x6c,0xc6),"restore only via real timing reset");
+    }
     check(!encoder.receive_byte(readback),"legacy readback remains guarded");
     std::printf("CX25871 C4: %d failures\n",failures);
     return failures?1:0;

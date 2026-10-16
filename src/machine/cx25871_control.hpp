@@ -196,6 +196,7 @@ public:
         } else if(timing_.known() && reg!=0xc4 && reg!=0xc6 && reg!=0x6c &&
                   reg!=0x34 && reg!=0x36 && reg!=0xc8 &&
                   !(reg>=0x60 && reg<=0x6a) &&
+                  !(reg==0x96 && !((registers_[reg]^value)&~0x30u)) &&
                   !(reg==0xba && !((registers_[reg]^value)&0x20)) &&
                   registers_[reg]!=value) {
             // Timing changes need the documented reset before this bounded
@@ -205,6 +206,10 @@ public:
         // 100381B1.3.35/table2-5: WSS60..6A changes VBI data/insertion and
         // its waveform increment, not CLKO or the digital sync/FIELD epoch.
         // Analog WSS generation is outside the current guarded output path.
+        // Table 2-5: 96[5:4] is the luma horizontal LPF after the flicker
+        // filter/scaler. Original AV2 option14 toggles this setting without a
+        // timing reset. It does not change 96's input-line/active-line bits,
+        // CLKO, sync or FIELD epoch; numerical filtered pixels remain separate.
         // BA DACDIS/DACOFF retain digital operation (100381B power-management
         // section/table2-5). A change of SLAVER still invalidates timing;
         // SRESET and CHECK_STAT were handled above, not treated as DAC latches.

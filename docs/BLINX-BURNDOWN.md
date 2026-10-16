@@ -18,9 +18,18 @@ Current implementation checkpoint: the newly reached full DAC gamma upload now
 has a real digital scanout consumer. Four affected checks pass0.63s, and two
 retained original upload routines produce exact independently computed pixels
 against maintained MMIO. A private noise-omitting diagnostic exposed this gap;
-its output cannot qualify the original title. The same diagnostic with the DAC
-fix is discovering subsequent blockers while the separate probe startup batch
-undergoes final offline review. Physical enabled-noise behavior, connected
+its output cannot qualify the original title. The DAC-fixed diagnostic crosses
+that boundary and stops182.187s into original mode reactivation. Explicit
+software detach/reconnect now creates the next nominal FP mode epoch while
+clock-only interruptions remain guarded; four affected clock checks pass0.17s.
+The changed diagnostic reaches a FIELD continuity guard. A short original-code
+reproduction identifies a real luma-filter write incorrectly invalidating timing;
+the narrow correction passes both original startup phases and preserves genuine
+timing-change guards. A new private diagnostic is in progress.
+Separate probe startup now completes offline (273 queued methods); source and
+artifact review passed. The first physical preflight made zero hardware writes
+and establishes that the existing checked PGRAPH enable must precede startup.
+Physical enabled-noise behavior, connected
 original rendering and normal lifecycle remain required. See the latest
 [closing checkpoint](BLINX-QUALIFICATION-CLOSURE.md#original-dac-upload-and-digital-gamma-consumer---2026-10-16).
 

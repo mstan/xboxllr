@@ -70,14 +70,61 @@ executes both retained upload routines against maintained DAC MMIO, verifying
 769 writes apiece, the second routine's32 ordering reads, unchanged framebuffer
 bytes and exact independently computed256-pixel output. The authored caller
 and scanout geometry do not establish original connected title acceptance.
-Evidence: `build/blinx/original-dac-upload-20261016.aot-private.json` and
+Evidence: `build/blinx/original-dac-upload-current-20261016.aot-private.json`
+(with its preserved reference DLL) and
 `build/blinx/dac-gamma-tests-20261016.aot-private.log`.
 
 GFX-D23 records unreached DAC extensions and partial-upload timing with explicit
 reopening triggers. Required full upload and its pixel consumer are implemented,
-not deferred. A changed private noise-omitting diagnostic is being used only
-to discover subsequent blockers. Physical noise, connected original rendering
+not deferred. The changed private noise-omitting diagnostic crosses the DAC
+boundary and stops after182.187s at original AV mode reactivation. Physical
+noise, connected original rendering
 and normal lifecycle remain required. Families remain7/9.
+
+The next clock change recognizes the original software mode boundary: AV3
+explicitly clears CRTC28.SLAVE before programming and sets it afterward. This
+starts a new nominal FP epoch using the already declared functional origin,
+while preserving the shared time owner, source-edge accounting and independent
+encoder reset. Clock loss without explicit software detach still fails. Four
+affected clock/register/handshake checks pass0.17s, including no events during
+detach, new-mode vblank timing, frozen time and the unexpected-clock-loss guard.
+Exact activation phase remains in GFX-D16. The changed original-CPU diagnostic
+stops after159.063s at FIELD continuity. Its omitted noise still prevents any
+family acceptance claim.
+
+An independent short reproduction now executes actual AV3 startup, followed by
+original AV2 option14 and FIELD15. Option14 changes the documented horizontal
+luma-filter bits96[5:4]; the control owner incorrectly invalidated all timing on
+that write. Filter-only changes now preserve the established counter/FIELD epoch,
+while input-line or active-line changes still invalidate it until a real reset.
+Both original startup phases, filter on/off and same-mode AV3 pass in0.76s.
+Focused clock/control checks pass, including nonzero counter/phase preservation
+and timing-change negative controls. Root reviewed the manufacturer definitions,
+the original producer/consumer path and17 current source/result identities in
+`build/blinx/field-continuity-20261016/review.aot-private.json`.
+The prior full-title log lacks the last encoder mutation, so its precise cause
+is not inferred from this component reproduction. One changed private diagnostic
+is pending. No FIELD value, clock phase or readiness is substituted.
+
+## Separate physical draw owner ready offline - 2026-10-16
+
+Probe861b995 now reaches the genuine SDK initialization return, with273 queued
+methods and16 actual ISR/foreground service events in the offline device model.
+Twelve groups covering121 lifetimes pass in26.577s. Root reviews the source and
+failure paths and verifies214 unique artifact identities; the reviewed separate
+image contains the original first-draw sampling profile. These results establish
+the bootstrap implementation, not physical rendering or a noise algorithm.
+
+The existing remote dashboard restart and probe return completed. The reviewed
+image was uploaded as a separate work-directory app after verifying recovery
+backups and backing up the installed probe on G:. The installed app is unchanged.
+Loaded entry bytes and untouched result storage match the reviewed image.
+The first physical bootstrap rejects its initial engine-enable precondition at
+phase1 with one read, zero hardware writes, no IRQ claim and no allocations.
+Fresh boot leaves PGRAPH disabled. The previously qualified PGRAPH-only enable
+is therefore required preparation before another fresh app lifetime; no failed
+write or partial GPU initialization is being retried. Physical capture remains
+pending. Private receipts: probe `results/noise-physical-original-20261016/`.
 
 ## Original sampling capture integrated; physical startup still open - 2026-10-16
 

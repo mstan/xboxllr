@@ -56,6 +56,12 @@ public:
     // DEBUG value or encoder reset establishes/realigns that GPU phase.
     bool refresh(const Nv2aFpRegisters::Observation& input,bool slave,uint32_t routing) {
         if(failed_ || !bound_)return false;
+        // Original AvSetDisplayMode explicitly clears CRTC28.SLAVE before
+        // programming its next mode, then sets it after the complete table.
+        // That software boundary starts a new nominal FP mode epoch. A clock
+        // loss alone never grants permission to manufacture a resumed phase.
+        if(!slave && slave_selected_ && ever_active_)mode_reentry_=true;
+        slave_selected_=slave;
         Cx25871Control::Clocks clocks;const char* reason=nullptr;
         const auto state=encoder_.observe_clocks(clocks,reason);
         const bool driven=state==Cx25871Control::ClockState::Driven;
@@ -84,7 +90,7 @@ public:
             if(words_!=input.words || control_!=control)
                 return reject("display timing changed while slaved counters are active");
         } else {
-            if(ever_active_)
+            if(ever_active_ && !mode_reentry_)
                 return reject("display counter phase after routing/clock interruption remains unqualified");
             const auto axis=[&](unsigned at) {
                 return Nv2aFpTiming::Axis{input.words[at],input.words[at+1],input.words[at+3],
@@ -93,6 +99,7 @@ public:
             const Nv2aFpTiming::Mode mode{axis(7),axis(0),control};
             if(!fp_.establish(mode,0,0))return false;
             words_=input.words;control_=control;fp_origin_=source_.state().edges;active_=ever_active_=true;
+            mode_reentry_=false;
             fp_.state(last_);vertical_blank_=false;
         }
         // Only a real timing-reset epoch establishes a fresh encoder origin.
@@ -129,5 +136,6 @@ private:
     uint32_t control_=0;
     uint64_t fp_origin_=0,encoder_epoch_=0,encoder_edge_=0;
     bool bound_=false,active_=false,ever_active_=false,encoder_live_=false,vertical_blank_=false,failed_=false;
+    bool slave_selected_=false,mode_reentry_=false;
 };
 } // namespace xlle

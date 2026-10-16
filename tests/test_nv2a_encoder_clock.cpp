@@ -55,12 +55,22 @@ int main() {
         CHECK(board.refresh(registers.observe(),true,0x100a0000));
         CHECK(board.encoder_live() && encoder.timing_epoch()==epoch);
         CHECK(encoder.timing_state(state) && !state.clocks);
+        // Original AV2 option14's 96.YLPF RMW must preserve actual phase.
+        // Advance first so a silent reset/epoch replacement cannot pass.
+        advance(14);
+        CHECK(encoder.timing_state(state) && state.clocks==1);
+        for(uint8_t filter:{0x12,0x22,0x32,0x02}) {
+            CHECK(encoder.write_byte(0x96,filter));
+            CHECK(board.refresh(registers.observe(),true,0x100a0000));
+            CHECK(board.encoder_live() && encoder.timing_epoch()==epoch);
+            CHECK(encoder.timing_state(state) && state.clocks==1);
+        }
         const uint8_t wss[][2]={{0x60,0xc5},{0x62,0xa9},{0x64,0x37},{0x66,0x15},{0x68,0x4b},{0x6a,0}};
         for(const auto& command:wss) {
             CHECK(encoder.write_byte(command[0],command[1]));
             CHECK(board.refresh(registers.observe(),true,0x100a0000));
             CHECK(board.encoder_live() && encoder.timing_epoch()==epoch);
-            CHECK(encoder.timing_state(state) && !state.clocks);
+            CHECK(encoder.timing_state(state) && state.clocks==1);
         }
         // Positive VSYNC begins at line491, before that line's HSYNC at654.
         // The FIELD transition is two CLKI cycles AFTER that HSYNC.
@@ -106,6 +116,44 @@ int main() {
         CHECK(!board.refresh(registers.observe(),true,0x100a0000));
         CHECK(fault=="display timing changed while slaved counters are active");
     }
-    std::printf("%s: configured rational clock, sparse sync ordering, FIELD delay, frozen time and independent reset phase\n",failures?"FAIL":"PASS");
+    {
+        // Explicit mode programming is a new nominal FP epoch. Time spent
+        // detached creates neither vblank IRQs nor a recovered encoder phase.
+        std::string fault;Encoder encoder([&](const std::string& why){fault=why;});configure(encoder);
+        unsigned events=0,vblanks=0;
+        Board board(encoder,[&](const std::string& why){fault=why;},
+            [&](const xlle::Nv2aFpTiming::State&,bool leading){++events;vblanks+=leading;});
+        auto registers=programming();CHECK(board.bind({1,0,frequency}));
+        CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(board.advance({1,(frame-1)*512,frequency}) && vblanks==1);
+        CHECK(board.refresh(registers.observe(),false,0x100a0000));
+        unsigned prior=events;
+        CHECK(board.advance({1,(frame+1234)*512,frequency}) && events==prior);
+        CHECK(registers.write(0x824,783));
+        CHECK(board.refresh(registers.observe(),false,0x100a0000));
+        CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        xlle::Nv2aFpTiming::State fp;CHECK(board.state(fp) && fp.x==0 && fp.y==0 && fp.clocks==0);
+        CHECK(vblanks==1 && !board.encoder_live());
+        CHECK(board.advance({1,(frame+1234)*512,frequency}));
+        CHECK(board.state(fp) && fp.clocks==0 && vblanks==1);
+        CHECK(board.advance({1,(frame+1234+480*784)*512,frequency}));
+        CHECK(board.state(fp) && fp.x==0 && fp.y==480 && vblanks==2);
+        // Only a real encoder reset, after reconnection, establishes its phase.
+        CHECK(encoder.write_byte(0x6c,0xc6));
+        CHECK(board.refresh(registers.observe(),true,0x100a0000) && board.encoder_live());
+        CHECK(board.state(fp) && fp.y==480 && fp.clocks==480*784);
+        CHECK(fault.empty());
+    }
+    {
+        std::string fault;Encoder encoder([&](const std::string& why){fault=why;});configure(encoder);
+        Board board(encoder,[&](const std::string& why){fault=why;},{});
+        auto registers=programming();CHECK(board.bind({1,0,frequency}));
+        CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(encoder.write_byte(0xc4,0));CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(!board.active());
+        CHECK(encoder.write_byte(0xc4,1));CHECK(!board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(fault=="display counter phase after routing/clock interruption remains unqualified");
+    }
+    std::printf("%s: configured rational clock, sync ordering, FIELD delay, mode reentry and independent reset phase\n",failures?"FAIL":"PASS");
     return failures?1:0;
 }

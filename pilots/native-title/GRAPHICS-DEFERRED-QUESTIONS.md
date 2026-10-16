@@ -189,3 +189,14 @@ supported attract route, that writer is required implementation before closure.
 | ID | Question | Evidence and reason it can wait | Reopen when |
 | --- | --- | --- | --- |
 | GFX-D23 | What are nonzero-index update behavior, DAC readback/reset values, other color widths/modes and the raster-visible timing of incomplete gamma uploads? | Both retained original upload routines start at index zero and emit all256 RGB triples. The original32-bit AV producer selects00100030. The maintained owner implements the full table and separate-channel digital lookup, with identity direct output preserved. nxdk XVideoSetGammaRamp explicitly avoids nonzero-index partial updates because of an NV2A caveat. Unreached modes/readback remain guarded, and output during an incomplete upload is rejected rather than assigned an invented bank-swap/partial-raster policy. | A supported original consumer requires a guarded operation, scanout observes an incomplete upload, or independent output differs from the complete-table lookup. Such a reached consumer promotes the needed behavior to required work. This does not defer the complete RGB upload, its actual pixel effect, connected output or normal lifecycle. |
+
+## GFX-D16 addendum: explicit mode reentry phase - 2026-10-16
+
+The original AV producer disconnects CRTC28.SLAVE before its full mode setup
+and reconnects after programming. The existing nominal FP origin policy now
+applies to each such explicit software mode boundary. Source time is retained,
+detached time produces no invented display events, and real encoder reset
+remains necessary to establish encoder phase. A clock interruption without
+software detach remains guarded. The exact silicon counter origin at this
+mode boundary remains a precision question under GFX-D16; actual original
+reentry, continued clocks/completion and connected pixels remain required.
