@@ -17,11 +17,16 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <psapi.h>
+#include <io.h>
+#else
+#include <unistd.h>
 #endif
 
 #include "cpu/unicorn_floor.hpp"
@@ -56,6 +61,24 @@ int xlle_heap_poison_byte();
 using namespace xlle;
 
 namespace {
+
+std::FILE* create_capture_file(const char* path) {
+    // MSVCRT does not implement fopen's C11 exclusive-create mode. Keep the
+    // same atomic no-overwrite contract on Windows and POSIX hosts.
+#ifdef _WIN32
+    const int descriptor = _open(path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+                                 _S_IREAD | _S_IWRITE);
+    if (descriptor < 0) return nullptr;
+    std::FILE* file = _fdopen(descriptor, "wb");
+    if (!file) _close(descriptor);
+#else
+    const int descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (descriptor < 0) return nullptr;
+    std::FILE* file = fdopen(descriptor, "wb");
+    if (!file) close(descriptor);
+#endif
+    return file;
+}
 
 Ring<RetiredInsn> g_retired(1u << 16);
 Ring<MemEvent> g_mem(1u << 16);
@@ -1685,6 +1708,7 @@ int main(int argc, char** argv) {
     const char* det_dma_dump_path = nullptr;
     uint64_t det_dma_dump_at = 0;
     std::vector<std::pair<std::string, uint64_t>> det_ram_dumps;
+    std::vector<std::pair<std::string, uint32_t>> det_ram_entry_dumps;
     bool perf_accounting = false;
     bool perf_pull_drain = false;
     // NV2A detailed telemetry used to ride on --perf-accounting (see the set_detailed_
@@ -1946,6 +1970,16 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--det-ram-dump") && i + 2 < argc) {
             const char* path = argv[++i];
             det_ram_dumps.emplace_back(path, std::strtoull(argv[++i], nullptr, 0));
+        }
+        else if (!std::strcmp(argv[i], "--det-ram-dump-entry") && i + 2 < argc) {
+            const char* path = argv[++i];
+            char* end = nullptr;
+            const uint64_t address = std::strtoull(argv[++i], &end, 0);
+            if (!address || address > UINT32_MAX || !end || *end) {
+                std::fprintf(stderr, "[det] --det-ram-dump-entry requires a nonzero 32-bit entry address\n");
+                return 1;
+            }
+            det_ram_entry_dumps.emplace_back(path, static_cast<uint32_t>(address));
         }
         else if (!std::strcmp(argv[i], "--hdd-writeback"))
             hdd_writeback = true;
@@ -2947,6 +2981,45 @@ int main(int argc, char** argv) {
                 mach.add_det_ram_dump(dump.first, dump.second);
                 std::printf("[det] ram dump %s at insns>=%llu\n", dump.first.c_str(),
                             static_cast<unsigned long long>(dump.second));
+            }
+            for (const auto& dump : det_ram_entry_dumps) {
+                // Stop before this real function-entry instruction executes.
+                // Copy physical RAM and integer registers only: no guest
+                // service, device access, state edit or resumed continuation.
+                const std::string path = dump.first;
+                const uint32_t address = dump.second;
+                auto& floor = static_cast<UnicornFloor&>(mach.cpu());
+                if (!floor.observe_entry(address, [&mach,path,address]() {
+                    const auto regs = mach.cpu().get_regs();
+                    std::vector<uint8_t> ram(64u * 1024 * 1024);
+                    if (regs.eip != address || !mach.read(0, ram.data(), ram.size())) {
+                        mach.cpu().request_stop("RAM entry capture state read failed"); return;
+                    }
+                    // Exclusive creation preserves existing evidence on an
+                    // accidental repeated invocation. Partial files are never
+                    // reported as a completed capture.
+                    std::FILE* file = create_capture_file(path.c_str());
+                    if (!file) {mach.cpu().request_stop("RAM entry capture create failed"); return;}
+                    const bool written = std::fwrite(ram.data(),1,ram.size(),file)==ram.size();
+                    const bool closed = std::fclose(file)==0;
+                    if (!written || !closed) {mach.cpu().request_stop("RAM entry capture write failed"); return;}
+                    file = create_capture_file((path+".cpu.aot-private.json").c_str());
+                    if (!file) {mach.cpu().request_stop("RAM entry capture register create failed"); return;}
+                    const int count = std::fprintf(file,
+                        "{\"schema\":1,\"entry_before_execution\":true,\"integer_registers_only\":true,"
+                        "\"eax\":%u,\"ecx\":%u,\"edx\":%u,\"ebx\":%u,\"esp\":%u,\"ebp\":%u,"
+                        "\"esi\":%u,\"edi\":%u,\"eip\":%u,\"eflags\":%u}\n",
+                        regs.eax,regs.ecx,regs.edx,regs.ebx,regs.esp,regs.ebp,
+                        regs.esi,regs.edi,regs.eip,regs.eflags);
+                    const bool register_closed = std::fclose(file)==0;
+                    if (count<0 || !register_closed) {mach.cpu().request_stop("RAM entry capture register write failed"); return;}
+                    std::printf("[det] RAM entry capture completed at %08x: %s\n",address,path.c_str());
+                    std::fflush(stdout);
+                    mach.cpu().request_stop("RAM entry capture completed; no resumed guest execution");
+                })) {
+                    std::fprintf(stderr,"[det] RAM entry capture observer attachment failed\n");
+                    return 1;
+                }
             }
             if (det_dev_dump_path)
                 mach.set_det_dev_dump(det_dev_dump_path, det_dev_dump_at);

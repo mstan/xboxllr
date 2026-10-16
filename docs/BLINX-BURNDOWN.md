@@ -24,11 +24,16 @@ passes those guards but reaches the original texture-loader's generic error UI:
 the failing DXT1 bytes match the installed asset, and original kernel counters
 confirm allocation exhaustion. The launch framebuffer now uses the original
 saved-display handoff: connected execution confirms its 300 pages are recovered,
-and all 420 observed texture creations succeed (the earlier run failed on 328).
-The subsequent 4096-command observation-window overflow is corrected with a
-bounded per-dispatch observer. Three affected suites and the large-submission ABI
-check pass; the connected run has resumed. It must establish moving attract
-output, a genuine Start/release,
+and all 420 observed texture creations in that run succeed (the earlier run failed
+on 328). The subsequent 4096-command observation-window overflow is corrected
+with a bounded per-dispatch observer; three affected suites and the large-submission
+ABI check pass. The rerun passes that boundary but fails its 422nd texture creation:
+a 512x512 format 6 texture needs 256 pages while only 243 remain. Its two completed
+pictures are loading screens, not gameplay. The old startup snapshot retains an
+unfinished boot-APU allocation of 1548 pages. A new exact original animation-entry
+capture succeeds before those allocations; startup preconditions are under review
+before any profile replacement. No allocation is freed by inference. The remaining
+sequence must establish moving attract output, a genuine Start/release,
 visible title return, relevant content retirement and fresh attract reentry.
 No additional hardware observation is currently required for that sequence.
 See the [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md) and

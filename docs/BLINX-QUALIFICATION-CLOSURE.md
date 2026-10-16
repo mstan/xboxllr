@@ -56,7 +56,8 @@ probe publication correction; a reached original consumer reopens that scope.
 
 | Remaining step | Closing evidence / current state |
 | --- | --- |
-| Reach actual attract gameplay through the original graphics route | Saved-display retirement passes; all 420 observed texture creations succeed. The subsequent passive method-history overflow is fixed and the connected run is resumed. |
+| Correct the initialized startup profile | Current blocker: the observer-fixed run fails texture creation 422 with 243 available pages for a 256-page texture. The old seed retains an unfinished 1548-page boot allocation; an exact pre-animation capture is under review. |
+| Reach actual attract gameplay through the original graphics route | Saved-display retirement and the passive method observer pass. Two completed loading pictures are established; actual gameplay remains pending. |
 | Complete G05 gameplay output and content lifetime | Two completed gameplay pictures with actual Swap/completion and ownership evidence; reuse G01-G04. |
 | Exit with real Start and reenter with neutral input | Delivered input, visible title return, content retirement, fresh submissions and two completed reentry gameplay pictures. |
 | Close GPU and graphics together | Review/seal the connected sequence and update both family rows; total becomes9/9 bounded. |
@@ -89,6 +90,50 @@ passes a submission of over 6000 methods in 0.14 seconds. The native fixture
 compares ordinary/bulk and held/resumed queues, including exact notifications,
 metadata, GET and unchanged RAM. The source-bound rerun is under
 `build/blinx/graphics-method-observer-20261016/`; G05 remains open and total 7/9.
+
+## Later loading allocation and exact boot-entry capture - 2026-10-16
+
+The observer-fixed connected run ends after 666.125 seconds at original texture
+error entry, caller 2E7C9, EAX 8007000E. The first 421 CreateTexture2 returns succeed;
+return 422 fails for 512x512 format 6 with one mip. The original kernel reports 243
+available physical pages, less than the 256-page pixel allocation. Parser and
+format checks return success. Both captured pictures are loading screens; no
+Start input was delivered and no gameplay/lifecycle closure is claimed. Its 36
+component inputs and terminal evidence are frozen under
+`build/blinx/graphics-method-observer-20261016/`. The older analyzer's
+`d3dx_hresult_witness:false` reflects its caller 2E710-only attribution rule;
+the new original CreateTexture2 failure and memory counters directly establish
+the allocation boundary without claiming that old rule passed.
+
+This reached consumer makes the unfinished boot allocation relevant to G05.
+The existing seed was captured during the animation worker's APU allocation,
+before publication into its cleanup descriptor. Arbitrary free-by-address is
+not valid. Later 21m/30m seeds finish publication but consume more memory and do
+not establish boot cleanup. The bounded candidate is instead an initialized
+service profile captured at actual animation-worker entry 8006AA40, before its
+body executes. It is not a completed-boot or animation-cleanup claim.
+
+`--det-ram-dump-entry PATH PC` observes that original entry, copies only mapped
+physical RAM and integer registers, then stops before executing the entry.
+The CPU sidecar is explicitly integer-only, not a resumable processor snapshot.
+Atomic exclusive creation and checked writes/closures prevent overwriting prior
+evidence or reporting a partial file as complete. The Windows build passes;
+independent source review finds no guest-state mutation in the capture callback.
+The first attempt exposed unsupported MSVCRT fopen exclusive mode; the portable
+Windows/POSIX descriptor implementation corrects that issue. A subsequent 2.235s
+capture produces 64MiB, SHA256
+`559c937e91170593a1e94b16bb3972c1c86a7f442de43c24ff9e087bf8341e9e`.
+Its EIP is 8006AA40 and ESP D0025DE4. A 0.937s repeated invocation fails closed and
+preserves both completed artifact hashes. All receipts, including the initial
+failure, are retained under `build/blinx/graphics-boot-entry-20261016/`.
+
+The candidate has not replaced the pilot seed. Required next checks establish
+actual allocator/IRQL preconditions, current and launch-worker identities,
+absence of boot APU ownership and compatibility with the existing original I/O
+worker initialization. Only then may an explicitly source-bound profile be
+selected and the same G05 sequence resumed. No new hardware operation or broader
+boot-rendering qualification is required by this candidate. Total remains 7/9;
+46 retained deferral IDs / 45 scopes are unchanged.
 
 ## Startup allocation failure and saved-display handoff - 2026-10-16
 
@@ -209,7 +254,7 @@ components where their owners are unchanged; no extra precision matrix is added.
 The sealed component-gate receipt is
 `build/blinx/graphics-connected-20261016/component-gates.aot-private.json`.
 Original component inputs were frozen before later documentation changes under
-`build/blinx/dxt1-noise-20261016/frozen-component/`. Family count remains7/9,
+`build/blinx/dxt1-noise-20261016/frozen-component/`. Family count remains 7/9,
 with only GPU/graphics open;46 deferral IDs/45 scopes remain unchanged.
 
 ## Maintained enabled-noise reconstruction implemented - 2026-10-16
@@ -880,7 +925,7 @@ agreement. Evidence: `build/blinx/loaded-draw-review-20261016/root-review.aot-pr
 SHA256 `781d8c8f0cb3886f2dc46b81dbb875fc710874dcaf769f775dac27c0afc87f68`.
 This closes the implementation checkpoint, not a family. Connected original
 rendering, reached enabled-noise output and normal lifecycle remain required;
-the family count remains7/9.
+the family count remains 7/9.
 
 ## Loaded scalar consumers connected; geometry remains open - 2026-10-16
 
@@ -3232,7 +3277,7 @@ invalid addresses, malformed replies/disconnect and caller cancellation.
 
 ## EP linear output and common original boundary - 2026-10-14
 
-Two physical cases establish count78 linear format6 output from X063D with
+Two physical cases establish count78 linear format 6 output from X063D with
 control59E2/5BE2. Both copied all78 exact zero-extended words to the SG-mapped
 destination; distinct high-byte destination signatures were overwritten in
 full. The alternate destination,80 source/canary words,34 control/witness
@@ -3307,7 +3352,7 @@ checks pass. No output profile or reset guard was relaxed. Evidence:
 
 ## EP input transport and real program reload - 2026-10-14
 
-Four physical EP cases independently establish linear format6 input with bit9
+Four physical EP cases independently establish linear format 6 input with bit9
 clear/set into X0BC0 and P0400. Each fresh owner completed two24-word copies.
 The DSP captured each destination immediately after EOL, before acknowledgement;
 the second source differed from the first. Exact SG bytes, final destination,
@@ -3645,7 +3690,7 @@ acknowledgement. All four X words matched the59E0 SG signature, all five
 descriptor words were retained, and EOL80 appeared on poll10 with terminalD6=0,
 error0, the comparator token, phase2 and all eight witnesses exact. Full P
 verification passed. This supplies independent clear/set evidence for the
-four-word linear format6 GP input shape; it does not establish all bit9 cases.
+four-word linear format 6 GP input shape; it does not establish all bit9 cases.
 The next representative batch covers Y/program destinations and circular input.
 The four owner-bound checks passed, including explicit synthetic CPU control
 flow and strict production-bit9 rejection. Production LLE/HLE are unchanged.
