@@ -50,6 +50,41 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;43 retained deferral IDs,42 scopes.
 
+## Instance comparison and restarted audio observability - 2026-10-16
+
+Probe7693dbd queries the existing GPU reservation without resizing it, verifies
+the five CPU pages and compares their complete20KiB contents with two fixed
+PRAMIN layouts. Neither ascending nor reversed-DWORD order matches any page;
+all five CPU pages are nonzero/nonuniform. A separate122-read sample confirms
+varied data in both windows and unchanged PMC enable. No reservation/data/MMIO
+write, allocation, selector or context command occurs. Five compiled-payload/
+host test methods pass in0.960s; the shared identity gates pass in2.349s.
+This rejects the tested correspondences, not every possible backing relation.
+No physical alias or exclusive instance owner is inferred. Context transfer
+remains required. Evidence: probe results/instance-mapping-20261016/.
+
+Finalized audio review identifies a missing oracle precondition: another looping
+Play10819 plus one-shots overlap the scored postrestart output. The accepted
+initial stage trace reached its capacity before this transition, so it supplies
+no postrestart source/rate/send provenance. The single-source comparison neither
+qualifies the mixed output nor demonstrates an emulation defect. Its failed
+reports and fixed origin remain preserved. Actual retained-object Stop/status/
+restart, epochs and96000 frames on both routes pass independently.
+
+A separate bounded observer window is committed5439711 at the actual successful
+Stop, before concurrent starts. It borrows all existing stage events and adds no
+guest processing or time input; the accepted initial trace stays separate.
+Eight focused persistence/trigger cases pass. Replaying all12073 completed
+calls from the finalized journal through the actual compiled tracker requests
+exactly one trace: object2196917448, priorPlay63, Stop10751, lifetime1, with no
+32-slot exhaustion. The next acceptance input must contain actual concurrent
+source/rate/send and DSP state, not another assumed isolated ADX waveform.
+Root reviewed the observer, runner, test coverage and381 prepared input hashes.
+One changed muted capture started2026-10-16 at07:52:46UTC under four logical
+CPUs/Normal priority. The worker exclusively owns its live journal/PCM/HDD and
+will review the actual mixed output after automatic same-buffer lifecycle plus
+96000-frame finalization. No additional unchanged run or family closure. Still6/9.
+
 ## Pending transform dependencies and hardware readiness - 2026-10-16
 
 The first seven pending draws upload their complete eleven-step vertex program.

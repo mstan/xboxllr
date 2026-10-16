@@ -24,8 +24,13 @@ its original-code reproduction and independent source-output comparison. The
 changed muted title acceptance run now completes its actual same-buffer
 Stop/restart plus96000 continued frames on both output routes after4022.640s,
 with no guard. Finalized lifecycle provenance passes, but the continued-output
-waveform comparison fails. Source/oracle provenance is under review using the
-finalized capture; no new run or acceptance is claimed. Audio remains open. GPU commits
+waveform comparison lacks an established isolated-source premise: concurrent
+streams overlap every scored window, and the initial stage trace filled before
+restart. A separate bounded Stop-triggered stage window is committed5439711;
+its actual-journal trigger replay passes. Root reviewed381 input identities and
+the single changed muted capture started2026-10-16 at07:52:46UTC, with the same
+four-core/Normal limit and actual lifecycle/output early stop. Audio
+remains open. GPU commits
 7765ecf/60bb8d7/897ab10 add the owned CPU UMA aperture, inactive FD clears,
 compiled callback bus ownership and explicit context-selector behavior. Actual
 original execution produced its complete context image and requested its first
@@ -34,8 +39,9 @@ Consumed saved-state mapping and real load/save remain the main GPU blocker;
 graphics output follows. GFX-D21 defers only an inherited fog value with no
 consumer in this prefix. Read-only hardware checks identified disabled engines;
 a guarded PGRAPH-only enable now succeeds and25 fixed follow-up reads complete.
-FIFO remains disabled. Retained state is not a context map or reset-default
-proof; real transfer remains open. See the
+FIFO remains disabled. A subsequent read-only reservation query and20KiB
+comparison reject both tested CPU/PRAMIN layouts; no backing map or context
+transfer is inferred. Retained state is not reset-default proof. See the
 [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
 
 Earlier capture checkpoint: the retained-buffer title ended cleanly at its
