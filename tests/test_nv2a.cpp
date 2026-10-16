@@ -243,6 +243,11 @@ static void test_texture_conversion_cache() {
     CHECK(!decoded.find(source, 2, 2, true, false, 8, 0x0e));
     CHECK(!decoded.find(source, 2, 2, true, false, 16, 0x0c));
     CHECK(!decoded.find(changed, 2, 2, true, false, 16, 0x0e));
+    // A control change changes conversion even when source and layout match.
+    CHECK(!decoded.find(source, 2, 2, true, false, 16, 0x0e, 1));
+    decoded.store(source, 2, 2, true, false, source, 0, 0, 16, 0x0e, 1);
+    CHECK(decoded.find(source, 2, 2, true, false, 16, 0x0e, 1)->output == source);
+    CHECK(decoded.find(source, 2, 2, true, false, 16, 0x0e)->output == converted);
 
     // Interleaved inputs must not invalidate an already copied draw packet.
     const auto owned_packet = hit->output;

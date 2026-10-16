@@ -4,6 +4,7 @@
 // pinned sources and the absence of a matching hardware golden are documented
 // in pilots/native-title/GRAPHICS-LLE.md. No reference decoder computes output.
 #include "machine/nv2a.hpp"
+#include "nv2a_dxt1_noise_observed.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -173,11 +174,17 @@ static void noise_control_boundary() {
         disabled.draw(3,0x7f563412);disabled.expect(0x7f123456);
         for(bool complete : {false,true})for(unsigned route=0;route<4;++route) {
             Fixture f(direct);
+            f.emit(0x172c,Fixture::colors);f.emit(0x176c,0x440);
+            for(unsigned i=1;i<=3;++i)f.put(Fixture::colors+i*4,0x7f563412);
             f.write(0x400750,0xe00050);f.write(0x400754,1);
             if(complete){f.write(0x400750,0xdf0008);f.write(0x400754,1);}
             f.draw(route,0x7f563412);
-            CHECK(f.fault==(complete?"NV2A DXT1 noise pixel behavior remains unqualified"
-                                   :"NV2A DXT1 noise control banks disagree"));
+            if(complete) {
+                // DXT1 reconstruction does not alter untextured diffuse draws.
+                f.expect(route==3?0x7f123456:0x7f563412);
+                continue;
+            }
+            CHECK(f.fault=="NV2A DXT1 noise control banks disagree");
             CHECK(!f.gpu->generic_combiner_executed_batches() && !f.gpu->generic_combiner_writes());
             for(unsigned i=0;i<64*64;++i)CHECK(f.get(Fixture::frame+i*4)==0xff102030);
             CHECK(f.get(Fixture::report+12)==0xffffffff);
@@ -221,13 +228,13 @@ static void noise_empty_assembly() {
             }
         }
         // Completed BEGIN/END must retire its vertices: one following genuine
-        // triangle still hits the original guard, without publishing a report.
+        // triangle now produces actual diffuse output and its completion report.
         f.draw(route,0x7f563412,0xff102030,3,6);
-        CHECK(f.fault=="NV2A DXT1 noise pixel behavior remains unqualified");
-        CHECK(f.get(Fixture::report+12)==0xffffffff);
-        CHECK(std::equal(color.begin(),color.end(),f.ram.begin()+Fixture::frame));
+        CHECK(f.fault.empty());
+        CHECK(f.get(Fixture::report+12)==0 && f.get(Fixture::report+8)>0);
+        CHECK(!std::equal(color.begin(),color.end(),f.ram.begin()+Fixture::frame));
         CHECK(std::equal(depth.begin(),depth.end(),f.ram.begin()+0x18000));
-        CHECK(!f.gpu->generic_combiner_attempted_batches());
+        CHECK(f.gpu->generic_combiner_executed_batches()>0);
     }
     // Zero assembled primitives do not waive bank agreement or vertex fetch.
     Fixture mismatch(false);
@@ -411,6 +418,64 @@ static void texture_mips() {
         f.draw(0);CHECK(!f.fault.empty() && !f.gpu->generic_combiner_writes());
         CHECK(f.get(Fixture::report+12)==0xffffffff);
         for(unsigned i=0;i<4096;++i)CHECK(f.get(Fixture::frame+i*4)==0xff102030);
+    }
+}
+
+static void texture_noise_physical() {
+    // These32 authored blocks and their RGB oracles come from actual Xbox
+    // observations. No production decoder/helper supplies expected pixels.
+    // Exercise both texture layout funnels, interpreted/compiled shaders,
+    // callback/direct RAM and off/on/on/off reuse of the same compressed bytes.
+    constexpr uint32_t texture=0x40000;
+    for(bool direct:{false,true})for(bool linear:{false,true})
+    for(const auto& sample_case:xlle::test::authored_dxt1_noise_cases) {
+        Fixture f(direct);f.gpu->set_vsh_compile_enabled(direct);
+        f.gpu->set_dxt_decode_cache(direct);
+        f.emit(0x184,2);f.emit(0x188,2);
+        const uint32_t code[]={0,0x0020001b,0x08000000,0x0000f800,
+                              0,0x0020021b,0x08000000,0x0000f849};
+        f.emit(0x1e94,2);f.emit(0x1e9c,0);f.emit(0x1ea0,0);
+        for(unsigned i=0;i<8;++i)f.emit(0xb00+i*4,code[i]);
+        f.emit(0x1724,Fixture::colors);f.emit(0x1764,0x1042);f.emit(0x176c,0);
+        f.emit(0x1e70,1);f.emit(0xac0,0x08200000);f.emit(0x260,0x18200000);
+        f.emit(0x28c,0x1c00);f.emit(0x1b00,texture);
+        f.emit(0x1b04,linear?0x00000c29:0x02210c29);f.emit(0x1b08,0x00030303);
+        f.emit(0x1b0c,0x4003ffc0);f.emit(0x1b14,0x01012000);
+        f.emit(0x1b10,8u<<16);f.emit(0x1b1c,0x00040004);
+        f.put(texture,uint32_t(sample_case.endpoint0)|(uint32_t(sample_case.endpoint1)<<16));
+        f.put(texture+4,0x55555555u*sample_case.selector);
+        const std::vector<uint8_t> original(f.ram.begin()+texture,f.ram.begin()+texture+8);
+        for(bool noise:{false,true,true,false}) {
+            for(uint32_t address:{0xe00050u,0xdf0008u}) {
+                f.write(0x400750,address);f.write(0x400754,unsigned(noise));
+            }
+            const auto& expected=noise?sample_case.on_rgb:sample_case.off_rgb;
+            for(unsigned pixel=0;pixel<16;++pixel) {
+                const float divisor=linear?1.0f:4.0f;
+                for(unsigned i=1;i<4;++i) {
+                    f.put(Fixture::colors+i*16,bits((float(pixel%4)+.5f)/divisor));
+                    f.put(Fixture::colors+i*16+4,bits((float(pixel/4)+.5f)/divisor));
+                    f.put(Fixture::colors+i*16+8,0);f.put(Fixture::colors+i*16+12,bits(1));
+                }
+                f.draw(0);++cases;CHECK(f.fault.empty());
+                const auto actual=f.get(Fixture::frame+(16*64+16)*4);
+                const unsigned tolerance=xlle::test::authored_dxt1_rgb_tolerance[pixel];
+                for(unsigned shift:{0,8,16}) {
+                    const int error=std::abs(int((actual>>shift)&255)-int((expected[pixel]>>shift)&255));
+                    if(error>int(tolerance))std::printf("noise %s direct=%u linear=%u enabled=%u texel=%u pixel=%08x expected=%08x tolerance=%u\n",
+                        sample_case.name,direct,linear,noise,pixel,actual,expected[pixel],tolerance);
+                    CHECK(error<=int(tolerance));
+                }
+                CHECK((actual>>24)==255);
+                CHECK(f.get(Fixture::report+12)==0 && f.gpu->generic_combiner_writes()>0);
+                CHECK(f.get(Fixture::frame)==0xff102030);
+            }
+        }
+        CHECK(std::equal(original.begin(),original.end(),f.ram.begin()+texture));
+        if(direct && linear) {
+            CHECK(f.gpu->dxt_decode_cache().misses()==2);
+            CHECK(f.gpu->dxt_decode_cache().hits()==62);
+        }
     }
 }
 
@@ -987,7 +1052,7 @@ int main() {
     packed_formats(); surface_reuse(); immediate_control();
     noise_control_boundary(); noise_empty_assembly();
     programmable_fog();
-    texture_mips();
+    texture_mips(); texture_noise_physical();
     texture_packed_formats();
     output_defaults();
     colors_before_attribute_clip();

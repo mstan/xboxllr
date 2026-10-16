@@ -4,6 +4,7 @@
 #include "machine/nv2a_zeta_compression.hpp"
 #include "machine/nv2a_surface_dma.hpp"
 #include "machine/nv2a_vsh_dependencies.hpp"
+#include "machine/nv2a_dxt1_noise.hpp"
 
 #include <algorithm>
 #include <climits>
@@ -2364,6 +2365,7 @@ void Nv2a::latch_draw_job(DrawJob& job) {
     // SET_SURFACE_* and every combiner method can rewrite any of these before a
     // worker would run, so they are copied, not referenced.
     job.raster_state = raster_state_;
+    job.dxt1_noise = dxt1_noise_control_[0] != 0;
     job.surface_format = surface_format_;
     job.surface_pitch = surface_pitch_;
     job.surface_clip_horizontal = surface_clip_horizontal_;
@@ -3644,17 +3646,18 @@ bool Nv2a::submit_vertex_batch() {
     const bool no_raster_primitives = one_vertex_source && pending_vertices < 3 &&
                                      primitive_mode_ >= 5 && primitive_mode_ <= 7;
 #endif
-    // Preserve the original software handler's control writes and ordering,
-    // but never silently draw using an unimplemented enabled noise mode.
-    // This conservative boundary covers every raster/backend path before
-    // geometry, pixels or successful visibility completion are published.
+    // Preserve the original software handler's paired control writes. The
+    // software route reconstructs DXT1 in each owned decoded texture before
+    // filtering; the separate hardware-renderer admission stays unchanged.
     if(!vertex_indices_.empty() || !inline_vertices_.empty() || !immediate_vertices_.empty()) {
         if(dxt1_noise_control_[0]!=dxt1_noise_control_[1]) {
             fault_("NV2A DXT1 noise control banks disagree");return false;
         }
+#if XLLE_RENDERER_HLE
         if(dxt1_noise_control_[0] && !no_raster_primitives) {
             fault_("NV2A DXT1 noise pixel behavior remains unqualified");return false;
         }
+#endif
     }
     if(!ram_tile_configuration())return false;
     if(ram_tiles_active() && renderer_) {
@@ -11524,11 +11527,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         const uint32_t color_index =
                             (color_bits >> (texel * 2u)) & 0x3u;
                         const auto& rgba = colors[color_index];
+                        const auto reconstructed = nv2a_dxt1_reconstruct(
+                            rgba, x, y, job.dxt1_noise);
                         const size_t out =
                             (static_cast<size_t>(y) * width + x) * 4u;
-                        argb[out + 0] = rgba[2];
-                        argb[out + 1] = rgba[1];
-                        argb[out + 2] = rgba[0];
+                        argb[out + 0] = reconstructed[2];
+                        argb[out + 1] = reconstructed[1];
+                        argb[out + 2] = reconstructed[0];
                         argb[out + 3] = rgba[3];
                     }
                 }
@@ -11745,9 +11750,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                     // Our boundary owns a whole image, so cache whole decoded
                     // images using the existing bounded storage. Resolve/DMA
                     // above still run, including guest-visible failure paths.
+                    const uint32_t decode_profile = dxt1_argb8 && job.dxt1_noise ? 1u : 0u;
                     const auto* cached = dxt_decode_cache_enabled_
                         ? dxt_decode_cache_.find(source, ts.width, ts.height,
-                                                 true, false, ts.pitch, color_code)
+                                                 true, false, ts.pitch, color_code, decode_profile)
                         : nullptr;
                     if (cached) {
                         ts.data = cached->output;
@@ -11764,7 +11770,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         }
                         if (dxt_decode_cache_enabled_)
                             dxt_decode_cache_.store(source, ts.width, ts.height,
-                                true, false, ts.data, 0, 0, ts.pitch, color_code);
+                                true, false, ts.data, 0, 0, ts.pitch, color_code, decode_profile);
                     }
                 }
                 // Decoders produce tightly packed ARGB. Raw linear images

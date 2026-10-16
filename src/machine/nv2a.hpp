@@ -3506,6 +3506,7 @@ private:
 
         // --- register mirrors -------------------------------------------------
         std::array<uint32_t, kRasterStateWords> raster_state{};  // <- raster_state_
+        bool dxt1_noise = false; // latched control; decoded images belong to this job
         uint32_t surface_format = 0;            // <- surface_format_
         uint32_t surface_pitch = 0;             // <- surface_pitch_
         uint32_t surface_clip_horizontal = 0;   // <- surface_clip_horizontal_
