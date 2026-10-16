@@ -272,7 +272,16 @@ their authored post-retirement input now supplies monotonically increasing work,
 while the actual original timer/wait and PCM expectations remain unchanged.
 Evidence: `build/blinx/av-interrupt-20261016/service-before-work-budget/`,
 `service-work-budget/` and `work-final/` under the same directory.
-Actual title passage remains to be checked; families remain7/9.
+The changed original-title diagnostic completes the actual04010101 AV3 call
+with EAX0, followed by successful original FIELD15 and option9 returns. Its
+actual polling observes three high retrace intervals while frames354..357 and
+the priority9 waiter progress. The supervisor stops on that original return
+after167.0s, with no guard. This crosses the connected startup wait; it does
+not establish enabled-noise output or normal graphics lifecycle. The same
+private noise omission remains explicit. Receipt:
+`build/blinx/gpu-lle-diagnostic-work-20261016/result.aot-private.json`.
+Implementation30b98a2; families remain7/9. The next diagnostic follows the
+post-AV path to its next required consumer, rather than rechecking this wait.
 
 ## Separate physical draw owner ready offline - 2026-10-16
 
@@ -2078,7 +2087,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: original pre-title AV producer passes; connected title crosses encoder/aperture setup and produces its real context; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: pre-title startup and actual title04010101 AV3/FIELD return pass; post-mode takeover acceptance remains with the connected enabled-noise route | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: actual image/table/RAMFC/queued draws captured; physical transfer passes; maintained owned LOAD and23 surface projections pass; field-provenance consumers and connected rendering remain | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |

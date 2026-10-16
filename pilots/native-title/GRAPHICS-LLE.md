@@ -4,7 +4,9 @@ Family `.116` belongs to the shared Blinx LLE burndown `.102`. The maintained
 route is PFIFO/0x97 command consumption, physical vertex DMA or inline arrays,
 transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
-graphics-family acceptance remains open and the total remains **4/9**.
+graphics-family acceptance remains open. The current total is **7/9** under the
+[bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md); counts
+in the dated component reports below describe their historical checkpoints.
 
 ## Original physical resource backing and native lifetime - 2026-10-11
 
