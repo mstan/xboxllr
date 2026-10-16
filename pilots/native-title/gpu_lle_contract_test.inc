@@ -388,7 +388,10 @@ static void test_gpu_lle_launch_profile(void)
 #endif
     const char *error=gpu_lle_prepare_launch();
     fprintf(stderr,"Original launch profile: %s\n",error?error:"returned");CHECK(!error);
-    CHECK(gpu_lle.launch_ready && physical_find(gpu_lle.launch_framebuffer,640u*480u*4u));
+    CHECK(gpu_lle.launch_ready && !physical_find(gpu_lle.launch_framebuffer,1));
+    uint32_t extent=0,state[4]={0};
+    CHECK(!pilot_io_device_lle(180,memory,&gpu_lle.launch_framebuffer,&extent) && extent==640u*480u*4u);
+    CHECK(!pilot_io_device_av_state(state) && state[2]==gpu_lle.launch_framebuffer);
     uint32_t word=0xffffffffu;CHECK(gpu_lle_dma_read(gpu_lle.launch_framebuffer&0x03ffffffu,&word,4) && !word);
     CHECK(gpu_lle.read(gpu_lle.device,0xfd600800,4)==(gpu_lle.launch_framebuffer&0x03ffffffu));
     gpu_test_completed_av_mode(0);
@@ -399,7 +402,7 @@ static void test_gpu_lle_launch_profile(void)
     CHECK(gpu_lle_prepare_launch() && gpu_lle.launch_ready); // no duplicate init
     gpu_test_completed_av_mode(0);
     gpu_test_digital_input();
-    fprintf(stderr,"PASS: original pre-title AV producer, owned framebuffer, unchanged shared FIELD and early original encoder consumer; title takeover remains required\n");
+    fprintf(stderr,"PASS: original pre-title AV producer and saved-display ownership without a native DMA shadow, unchanged shared FIELD and early original encoder consumer; actual title retirement remains required\n");
 }
 #else
 static void test_gpu_lle_launch_profile(void){CHECK(0);}

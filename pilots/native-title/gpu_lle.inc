@@ -212,9 +212,12 @@ static void gpu_lle_open(void){gpu_lle_open_profile(0);}
  * consumers read encoder controls before their first mode setup, so execute
  * the actual AV producer once before creating any title thread. Mode0 is the
  * original API's default0F010101; format12/pitch2560 select640x480x32 storage.
- * This caller owns a real contiguous black framebuffer throughout title
- * takeover. Never free it from an MMIO/device callback or infer retirement
- * merely from a new PCRTC_START. G05 still requires connected lifetime proof. */
+ * Publish the real persistent black framebuffer through the original saved-
+ * display handoff. Original137060 waits for GPU idle, completes its new mode,
+ * then unpersists/frees the saved allocation and clears the saved pointer.
+ * Its original contiguous owner is the sole lifetime authority: do not retain
+ * a native PhysicalAllocation shadow that could admit DMA after original free.
+ * No callback or PCRTC_START observation retires memory. */
 static const char *gpu_lle_prepare_launch(void)
 {
     if(!gpu_lle.device || gpu_lle.external_clock_fixture || !pilot_io_device_clock_bound())
@@ -225,7 +228,8 @@ static const char *gpu_lle_prepare_launch(void)
     if(error)return error;
     if(before[0]!=0x8a || before[1] || before[2])
         return "GPU launch profile requires original8A with no current mode/saved image";
-    gpu_lle.launch_framebuffer=physical_allocate(640u*480u*4u,0,0x03ffffffu,4096,PAGE_READWRITE);
+    uint32_t allocate[]={640u*480u*4u,0,0x03ffffffu,4096,PAGE_READWRITE};
+    error=pilot_io_device_lle(166,memory,allocate,&gpu_lle.launch_framebuffer);if(error)return error;
     if(!gpu_lle.launch_framebuffer)return "GPU launch framebuffer allocation failed";
     memset(memory+gpu_lle.launch_framebuffer,0,640u*480u*4u);
     uint32_t args[]={0xfd000000u,0,0,0x12,2560,gpu_lle.launch_framebuffer&0x03ffffffu},result=0xccccccccu;
@@ -234,8 +238,14 @@ static const char *gpu_lle_prepare_launch(void)
     error=pilot_io_device_av_state(after);if(error)return error;
     if(after[0]!=0x8a || after[1]!=0x0f010101u || after[2] || after[3]!=before[3])
         return "Original AV launch setup produced an unexpected kernel state";
+    uint32_t persist[]={gpu_lle.launch_framebuffer,640u*480u*4u,1};
+    error=pilot_io_device_lle(178,memory,persist,&result);if(error)return error;
+    error=pilot_io_device_lle(4,memory,&gpu_lle.launch_framebuffer,&result);if(error)return error;
+    error=pilot_io_device_av_state(after);if(error)return error;
+    if(after[0]!=0x8a || after[1]!=0x0f010101u || after[2]!=gpu_lle.launch_framebuffer || after[3]!=before[3])
+        return "Original AV launch saved-display handoff failed";
     gpu_lle.launch_ready=1;
-    fprintf(stderr,"[GPU LLE LAUNCH] original AV3 default NTSC mode=%08x framebuffer=%08x bytes=1228800; owned across title takeover\n",
+    fprintf(stderr,"[GPU LLE LAUNCH] original AV3 default NTSC mode=%08x framebuffer=%08x bytes=1228800; original persistent saved-display owner\n",
         after[1],gpu_lle.launch_framebuffer);
     return NULL;
 }

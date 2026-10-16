@@ -21,8 +21,11 @@ processed digital input. Its passive observer records 483 paired original
 resource-destruction returns. Shader-control 17F8 storage and the unnecessary
 palette dependency are corrected; affected component tests pass. The next run
 passes those guards but reaches the original texture-loader's generic error UI:
-the failing DXT1 bytes match the installed asset, and its exact creation failure
-is being isolated. The connected run must still establish moving attract output, a genuine Start/release,
+the failing DXT1 bytes match the installed asset, and original kernel counters
+confirm allocation exhaustion. The launch framebuffer now uses the original
+saved-display handoff so Blinx can release its300 pages; four affected checks pass.
+Connected execution must verify that retirement and passing the failed load,
+then establish moving attract output, a genuine Start/release,
 visible title return, relevant content retirement and fresh attract reentry.
 No additional hardware observation is currently required for that sequence.
 See the [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md) and

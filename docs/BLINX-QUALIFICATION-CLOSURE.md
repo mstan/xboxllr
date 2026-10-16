@@ -52,6 +52,29 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Startup allocation failure and saved-display handoff - 2026-10-16
+
+The bounded status capture confirms original D3DX returns `8007000E` at caller
+2E710. Its parser and format checks pass, but original CreateTexture2 returns zero
+for32x64 DXT1. The original kernel reports zero available pages; its usage classes
+account for all16384 physical pages. This is allocation exhaustion, not damaged
+DDS data. The diagnostic stops at error entry after678.016 seconds and preserves
+the full64MiB physical RAM before the error loop overwrites stack evidence.
+
+The launch framebuffer still occupies300 pages. Startup now allocates through
+original166, then uses original178/4 to persist and publish the saved display.
+Original137060 owns retirement: GPU idle, completed new display mode, unpersist,
+free, then clear the saved pointer. There is no native allocation shadow to admit
+DMA after original free, and no guessed retirement from PCRTC_START. Four affected
+checks pass in10.81 seconds; independent source/ABI/ownership review finds no
+blocker. Connected execution must still demonstrate actual retirement and passing
+the failed load; recovering300 pages alone is not assumed sufficient.
+
+Evidence is under `build/blinx/graphics-texture-diagnostic-20261016/`, with24
+inputs frozen before this change. The initial capture also has1805 contiguous
+pages, but their owners/retirability are not established; they are not freed by
+category. GPU/graphics G05 remains open, total7/9. The HLE play build is unchanged.
+
 ## Connected startup texture failure isolated - 2026-10-16
 
 The palette-corrected run passes both previous guards and records three completed

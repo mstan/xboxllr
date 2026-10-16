@@ -215,7 +215,7 @@ static void gpu_framebuffer_observer_open(const char *library_sha)
     }
     const char *lifetime=getenv("XLLE_PILOT_GPU_LIFETIME");
     unsigned count=1;
-    PilotIoDiagnosticCall calls[7]={
+    PilotIoDiagnosticCall calls[8]={
         {GPU_FRAMEBUFFER_SWAP,GPU_FRAMEBUFFER_SWAP_BYTES,4,GPU_FRAMEBUFFER_SWAP_SHA},
         {GPU_RESOURCE_DESTROY,GPU_RESOURCE_DESTROY_BYTES,4,GPU_RESOURCE_DESTROY_SHA}};
     if(lifetime && !strcmp(lifetime,"1")) {
@@ -232,7 +232,7 @@ static void gpu_framebuffer_observer_open(const char *library_sha)
         HANDLE file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
         if(file==INVALID_HANDLE_VALUE)stop("GPU texture diagnostic evidence file unavailable",0);
         gpu_texture_diagnostic.file=file;
-        memcpy(calls+2,gpu_texture_diagnostic_calls,sizeof(gpu_texture_diagnostic_calls));count=7;
+        memcpy(calls+2,gpu_texture_diagnostic_calls,sizeof(gpu_texture_diagnostic_calls));count=8;
     }
     // Fresh-table API rejects competing observers; never unbind audio capture.
     const char *error=pilot_io_device_diagnostic_calls_bind(calls,count,gpu_framebuffer_record);
