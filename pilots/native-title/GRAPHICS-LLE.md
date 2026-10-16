@@ -19,9 +19,9 @@ storage as processed pixels. Full analog output and complete bus-waveform timing
 are outside this endpoint. Default HLE is unchanged.
 
 Representative color, guard and original-AV integration checks accompany the
-implementation. Whole GPU/graphics acceptance still requires enabled-noise
-behavior, connected attract output and normal lifecycle; see the current
-closing checklist for retained title-run evidence. Numerical precision remains
+implementation. Enabled-noise G04 has since passed. Whole GPU/graphics acceptance
+still requires connected attract output, exit/reentry and normal content lifetime
+(G05); see the current closing checklist for retained title-run evidence. Precision remains
 in GFX-D05/D18 without imposing a new exhaustive coefficient campaign.
 
 ## Original physical resource backing and native lifetime - 2026-10-11

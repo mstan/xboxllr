@@ -12,37 +12,20 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: connected original startup/rendering, reached enabled-noise draw and lifecycle | 46 retained IDs / 45 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
+| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 46 retained IDs / 45 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current implementation checkpoint: the newly reached full DAC gamma upload now
-has a real digital scanout consumer. Four affected checks pass0.63s, and two
-retained original upload routines produce exact independently computed pixels
-against maintained MMIO. A private noise-omitting diagnostic exposed this gap;
-its output cannot qualify the original title. The DAC-fixed diagnostic crosses
-that boundary and stops182.187s into original mode reactivation. Explicit
-software detach/reconnect now creates the next nominal FP mode epoch while
-clock-only interruptions remain guarded; four affected clock checks pass0.17s.
-The changed diagnostic reaches a FIELD continuity guard. A short original-code
-reproduction identifies a real luma-filter write incorrectly invalidating timing;
-the narrow correction passes both original startup phases and preserves genuine
-timing-change guards. The changed private diagnostic still stops at FIELD;
-an opt-in invocation trace now identifies the original vblank ISR reading FIELD
-while AV3 is still in its first retrace wait. AV3 has not returned or reached
-its final reset. The encoder counter contract during this interval is being
-checked; no guessed FIELD value or readiness is supplied.
-Separate probe startup now completes offline (273 queued methods); source and
-artifact review passed. Physical startup now crosses runout relocation, complete
-instance initialization and the exact observed CFG0 mirror pair. It reaches
-12,388 stores, then stops on the first USER PUT readback. The specific primary
-definition marks that older aperture write-only. The probe now checks the
-readable active-channel CACHE1 cursor after verifying channel0 ownership;
-16 bootstrap groups/141 lifetimes and focused authored/original capture checks
-pass. The original write and real GET progress remain required. The next fresh
-physical attempt is pending owner power-cycle: DASH was acknowledged but both
-FTP and probe status time out, preventing the remote restart command.
-Physical enabled-noise behavior, connected
-original rendering and normal lifecycle remain required. See the latest
-[closing checkpoint](BLINX-QUALIFICATION-CLOSURE.md#original-dac-upload-and-digital-gamma-consumer---2026-10-16).
+Current implementation checkpoint: G01 original lifetime and G02-G04 startup,
+owned context/drawing, enabled-noise reconstruction and bounded native comparison
+have passed. The maintained GPU-LLE title produces completed loading pictures and
+processed digital input. Its passive observer records 483 paired original
+resource-destruction returns. Shader-control 17F8 storage and the unnecessary
+palette dependency are corrected; affected component tests pass. The connected
+rerun must still establish moving attract output, a genuine Start/release,
+visible title return, relevant content retirement and fresh attract reentry.
+No additional hardware observation is currently required for that sequence.
+See the [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md) and
+[connected acceptance sequence](BLINX-GRAPHICS-ACCEPTANCE.md). The New Game/save
+crash remains deferred on `.101`; campaign progression is outside this phase.
 
 Prior implementation checkpoint: loaded contexts connect to bounded programmable
 CPU draws. The completed batch adds all 18 reached bump-state setters and the later
@@ -649,10 +632,10 @@ change the next controller-input dependency batch.
 | 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Complete for bounded Blinx files, `.108`: actual original Nt/FATX/cache/IDE title route, whole-XBE comparison, two-process persistence, 84 original metadata/directory/error/namespace cases and 64 real lifetimes. HLE corrections pass 40/40 game tests and a 190.109s Demo/interruption/title/reentry regression. Explicit resource/metadata tolerances and guarded unqualified modes remain. [Evidence and scope](../pilots/native-title/FILES-LLE.md) |
 | 6 | Remaining scheduling, threads, events and timers | Coupled ready/block/wake/preemption and interrupt state | **Qualified `.112`**: retained original thread/IRQ/KDPC/FP/common-clock ownership plus the full changed 600-GP-second Q03 title. Required movie lifetimes, second-demo publication, interruption, title return and fresh gameplay pass. Matching HLE contracts are retained. [Bounded closure](../pilots/native-title/SCHEDULING-LLE.md#bounded-attract-family-closure---2026-10-13) |
 | 7 | Audio buffers, cursor, routing and lifetime | APU/DSP plus DMA, scheduling, reuse and output | **Qualified `.113`**: A01-A05 compose actual original title routing, census and independently supported processing, configured startup, original retirement/reentry, queued DPC completion and connected Stop/reuse/output. Root verifies54 artifacts and independently replays135168 known codec frames; all96000 required postrestart frames match exactly on both output routes. Existing HLE/Q03 timing/ownership evidence and precision deferrals remain. [Bounded closure](../pilots/native-title/AUDIO-LLE.md#bounded-attract-family-closure---2026-10-16) |
-| 8 | GPU completion, callbacks and visibility: independent offline work | FIFO/traps/reports, pending results and lifetime; uses memory/display | Partial `.109`: retained completion/pixel/encoder and original CPU/RAM/PCI/idle ISR-DPC ownership. New physical seven-store observation confirms programmed HVALID write ownership under either read selector and verifies restoration; maintained FP register/MMIO ownership and existing scanout/tile checks pass3/3. Activation is not inferred. Prior82 checks/8.000s startup keep their retained DLL identity and encoder EN_REG_RD guard. Original AV initialization, handshake/activation, rendering and full integration remain required. [Evidence](../pilots/native-title/GPU-COMPLETION-LLE.md#programmed-fp-register-ownership---2026-10-11) |
-| 9 | Graphics state, shaders, textures and vertex fetch | Broad NV2A draw/state/format coverage; uses memory/completion | Partial `.116`, architecture-first phase: preserved corrected-generation state and producer pixels qualify 1-2162 (361,948 expected writing fragments /2,822,707,200 owned-pixel comparisons), retaining 117 actual-artifact fault controls. The last20 draws pass one reviewed batch with72 source-only controls and zero new writes. The earlier4,331-draw state baseline keeps its prior renderer identity. The generic consumed-color clipping correction,87 combined scene-reference tests and separate packed-byte proofs remain installed/retained. Five LLE postprocess consumers and all five original native consumers across three device lifetimes pass; default HLE float blending retains cached GPU work and14 focused tests. The combined muted330s regression covers33 presents and five controller transitions; the owner's latest scene-sheet review passes at a glance. Foundation batch complete: allocation-owned alias completion and explicit DMA/depth validity pass representative checks. Original physical backing now retains counted native resources through final reference/binding collection; three raw CPU/GPU lifetimes and original free/protection guards pass within46 combined checks. The execution/wait batch passes66 checks;216 source-bound fence identities, genuinely blocked BlockOnFence and the full64-slot capacity branch retire across three CPU/GPU lives with exact bytes, original private KWAIT/compute-peer IRQ0 progress and exact cleanup. Muted startup creates45 shaders before its35s run limit without a guard/fault observed; full startup/lifetime and broader qualification remain open. Further fine clipping/pixel/silicon questions are tracked in the [append-only queue](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md). The current coherent diagnostic instance/RAMHT batch passes97 complete lifetimes plus an elapsed/alarm check, with109 independently verified identities; it stops before RAMFC FD002214=00890110. The independently reproduced ISR stop-order failure is corrected; no aperture/consumer/capture admission is inferred. The prepared live clock read-only preflight passes9/9 and fixed PLL access-width comparison passes6/6 offline checks; neither is a live observation. A15-row initializer inventory reuses the existing original claim evidence and preserves the full-success readiness boundary. Full producer/scene pixels, enabled noise and original startup/lifetime remain open. [Current bootstrap scope](../pilots/native-title/GRAPHICS-LLE.md#idle-ramht-selection-and-instance-ownership-boundary---2026-10-11) |
+| 8 | GPU completion, callbacks and visibility | FIFO/traps/reports, pending results and lifetime; uses memory/display | **Open: G05 only**, `.109`. G01-G04 establish original resource lifetime, AV startup/activation, owned context/PFIFO processing, maintained enabled-noise drawing and completion. Connected loading output and separate completed/submitted counters are retained. Actual attract/exit/reentry and content lifetime remain required. [Current gates](BLINX-QUALIFICATION-CLOSURE.md) |
+| 9 | Graphics state, shaders, textures and vertex fetch | NV2A draw/state/format coverage; uses memory/completion | **Open: G05 only**, `.116`. Reuse accepted state/shader/texture/fetch/alias and HLE appearance evidence; G04 now includes physically supported enabled-noise reconstruction and a bounded native GPU comparison. Shader-control and unused-palette corrections pass affected checks. Finish the same connected attract/exit/reentry/content-lifetime run as GPU completion. Exhaustive scene composition and accepted precision remain in the [deferral queue](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md). |
 | 10 | Movie/A-V sequence integration | Composes qualified service selections and reference processing | **Qualified `.73`**: full original-scheduling/reference-APU Q03 and retained matching default-HLE execution pass two natural openings, actual movie interruption, title return and fresh demo. Exact movie ring provenance, whole-lifetime independent waveform and A/V bounds pass. Physical output precision and original audio/GPU families remain separate. [Bounded closure](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#bounded-movie-family-closure---2026-10-13) |
-| Final hardware batch; GPU/graphics remain | Required observations and connected integration | G02 encoder/startup; G03 context load/save and consumed instance/PFIFO state; G04 enabled-noise draw; G05 connected graphics. Audio A01-A05 complete. | Recovery backups remain on G:. Remote dashboard SMC restart and probe return are validated. Probe759d353 now completes bounded original-image LOAD/poison/SAVE and checked restoration after separate recovery. Its saved-state field map and connected drawing remain required; retained pins/VM cannot be reused as fresh ownership. Existing read/benign-write authorization persists, with immediate stop after unexpected writes. Precision-only questions stay deferred. See the [closing checklist](BLINX-QUALIFICATION-CLOSURE.md). |
+| Remaining connected execution | GPU and graphics share G05 | G01-G04 and audio A01-A05 passed. Actual moving attract output, Start/release, title return, content retirement and neutral reentry remain. | No new hardware batch is currently required. Recovery backups and physical observations remain retained; existing read/benign-write authorization and stop-after-unexpected-write rule remain. See the [closing checklist](BLINX-QUALIFICATION-CLOSURE.md). |
 
 2026-10-10 settings/status continuation: the original child now passes its
 shared-owner EEPROM query and original status mapper, then stops at

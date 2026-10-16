@@ -1,18 +1,21 @@
 # GPU completion, callbacks and visibility LLE
 
-Family `beads-xbox.1.109`, after qualified filesystem `.108`. Burndown:
-**6/9 complete, 3 open as of 2026-10-13**. Original reference execution and the selectable title
-transport now exist. The title selection still stops during device initialization;
-it is not yet a working renderer or a qualified title completion route.
+Family `beads-xbox.1.109`, after qualified filesystem `.108`. Current burndown:
+**7/9 qualified as of 2026-10-16; GPU and graphics share remaining gate G05.**
+Original lifetime, AV startup/activation, owned context/PFIFO processing and
+maintained enabled-noise drawing/completion have passed G01-G04. Actual completed
+loading pictures and digital input are retained. Connected moving attract,
+genuine exit, neutral reentry and content lifetime remain required; see the
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) and
+[acceptance sequence](../../docs/BLINX-GRAPHICS-ACCEPTANCE.md).
 
 **Owner reprioritization:** the earlier 2026-10-09 real-console deferral was
 superseded when the owner made the Xbox available and requested probing now,
 followed by completion of the entire LLE checklist. Read-only checks and benign
 volatile writes are authorized without repeated prompts; avoid dangerous work.
-The hardware observations below preserve this partial floor and open startup
-guard; they do not close dependent integration. Historical next-step entries
-describe GPU dependencies. Independent scheduling/audio/graphics work remains
-available; no unobserved behavior is waived or counted as qualified.
+The dated observations below preserve their historical partial results and
+startup guards; the current checklist above records their later disposition.
+No unobserved behavior is waived or counted as qualified.
 Earlier dated sections retain their historical family counts; the current
 [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) governs acceptance.
 
