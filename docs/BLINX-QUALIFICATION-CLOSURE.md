@@ -298,6 +298,48 @@ observation for the whole-GPU route: its maintained scanout API is loaded but
 the existing native/display-only presentation capture does not consume it.
 Enabled-noise physical observation and final connected lifecycle still remain.
 
+## Actual original GPU framebuffer captured - 2026-10-16
+
+The whole-GPU route now has an elective passive storage observer at hash-bound
+original Swap returns. It copies the current PCRTC framebuffer through the
+stopped owner's read-only RAM view, including tile translation, and retains
+separate submitted/completed driver counts, display commands, DAC table and
+encoder values with known-bit masks. It never drains rendering, advances time,
+uses device DMA or changes a retained output guard. Pending host rendering,
+invalid storage and incomplete copies cannot produce a successful pixel record.
+This endpoint is explicitly before display processing; it is not final scanout.
+
+Three model checks, the reference ABI controls and three original-pilot checks
+pass. Root's refined tile control additionally preserves the existing direct
+pointer rejection, verifies stored alpha and rejects inconsistent tile banks
+without changing device failure state. Independent source review finds no
+blocking issue. The default HLE and normal output guards remain unchanged.
+Select `XLLE_PILOT_FRAMEBUFFER_CAPTURE_DIR` with an existing private directory
+to retain at most four returns. `tools/read_gpu_framebuffer.py` decodes the
+FBD1 records and labels its preview before display processing. A competing
+original-audio call observer is rejected, never silently replaced.
+
+One changed private diagnostic reaches three actual Swap returns and stops
+after160.421s without a guard. The supervisor requested two observations; the
+third completed before its next poll, within the four-record producer bound.
+All three copy the same640x480x32 current framebuffer at03590000, showing the
+original "Warping space-time..." loading screen. The actual DAC is complete
+and identity-mapped. First Swap has completed/submitted1/1; later returns have
+1/2, proving why API return or its serial alone cannot establish the newest
+displayed flip. Current storage is identical while method counts advance from
+1395 to2361. This is connected original rendering evidence, but the explicit
+private enabled-noise omission prevents graphics qualification. Full display
+processing, enabled-noise output and normal lifecycle remain open. Families7/9.
+The actual return caller isAA711 in the loading routine, not the main-loop
+Swap caller. The pending second buffer is scheduled for the next driver frame;
+these records establish one current image, not three displayed frames.
+
+Evidence: `build/blinx/framebuffer-observer-20261016/`, including the actual
+`title/captures/` storage/state and bounded terminal receipt. Existing source
+review identifies the reached RGB-to-YCrCb transport as unresolved; framebuffer
+appearance does not establish its numerical conversion or downstream encoding.
+No console operation or unchanged-title rerun was performed for this batch.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued
@@ -2103,7 +2145,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: pre-title startup and actual title04010101 AV3/FIELD return pass; post-mode takeover acceptance remains with the connected enabled-noise route | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: actual image/table/RAMFC/queued draws captured; physical transfer passes; maintained owned LOAD and23 surface projections pass; field-provenance consumers and connected rendering remain | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G03 | Open: owned LOAD/projections and physical transfer pass; actual original loading-screen framebuffer captured in noise-omitting diagnostic; enabled-noise connected acceptance remains | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |

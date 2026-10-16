@@ -114,32 +114,37 @@ bool Nv2a::ram_tile_overlap(uint32_t address,size_t bytes) const {
     return false;
 }
 
-bool Nv2a::ram_tile_configuration() {
+const char* Nv2a::ram_tile_configuration_error() const {
     for (unsigned i=0;i<8;++i) {
         const auto& tile=pgraph_tiles_.tiles[i];
         if (!((tile[0]|pfb_tiles_.tiles[i][0]|texture_tiles_.tiles[i][0])&1))continue;
         // The qualified original/hardware-test path programs matching banks.
         // Different client views need separate evidence, not implicit aliases.
         if(tile!=pfb_tiles_.tiles[i] || tile!=texture_tiles_.tiles[i]) {
-            fault_("NV2A tile RAM-client banks disagree");return false;
+            return "NV2A tile RAM-client banks disagree";
         }
         if(pgraph_tiles_.zcomp[i]!=pfb_tiles_.zcomp[i] ||
            pgraph_tiles_.zcomp[i]!=texture_tiles_.zcomp[i]) {
-            fault_("NV2A compression RAM-client banks disagree");return false;
+            return "NV2A compression RAM-client banks disagree";
         }
         Nv2aTileLayout layout;
         const uint32_t base=tile[0]&0x03ffc000u;
         if(tile[1]<base || tile[1]>=0x04000000u ||
            !layout.configure(tile[2],(tile[0]>>1)&1)) {
-            fault_("NV2A invalid active tile extent/pitch");return false;
+            return "NV2A invalid active tile extent/pitch";
         }
         for(unsigned j=0;j<i;++j) {
             const auto& other=pgraph_tiles_.tiles[j];
             if((other[0]&1) && base<=other[1] && (other[0]&0x03ffc000u)<=tile[1]) {
-                fault_("NV2A overlapping active tiles are unqualified");return false;
+                return "NV2A overlapping active tiles are unqualified";
             }
         }
     }
+    return nullptr;
+}
+
+bool Nv2a::ram_tile_configuration() {
+    if(const char* error=ram_tile_configuration_error()) {fault_(error);return false;}
     return true;
 }
 

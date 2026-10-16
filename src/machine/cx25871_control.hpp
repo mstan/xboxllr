@@ -36,6 +36,9 @@ public:
         uint32_t received=0;
     };
     const ExtensionCommands& extension_commands() const { return extensions_; }
+    // Passive model observation; known is a bit mask, not hardware readback.
+    struct ControlObservation {std::array<uint8_t,256> values,known;};
+    ControlObservation control_observation() const {return {registers_,known_};}
     // PAL is an explicit board strap, not inferred from the game's region.
     // Construction still represents unknown warm state, not a reset event.
     explicit Cx25871Control(FaultFn fault, bool pal_pin=false, bool slave_pin=false)

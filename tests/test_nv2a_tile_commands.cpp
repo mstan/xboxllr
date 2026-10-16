@@ -182,15 +182,44 @@ static void clear_and_scanout() {
     f.write(0x680800,479);f.write(0x680820,639);f.write(0x600800,f.target);
     xlle::Nv2a::ScanoutInfo info;std::vector<uint8_t> rgba;std::string error;
     CHECK(f.gpu->capture_scanout(rgba,info,error));CHECK(error.empty());
+    size_t direct_bytes=0;
+    CHECK(!f.gpu->scanout_direct_bytes(info,direct_bytes,error));
+    CHECK(error.find("translated capture")!=std::string::npos && !direct_bytes);
+    // Passive diagnostic must translate the same independently checked RAM
+    // tile, preserve bytes, and never resolve or process display commands.
+    const auto ram_before=f.ram;const auto writes_before=f.writes;
+    std::vector<uint8_t> storage;
+    auto copy=[&](uint32_t a,void* p,size_t n) {
+        if(uint64_t(a)+n>f.ram.size())return false;
+        std::memcpy(p,f.ram.data()+a,n);return true;
+    };
+    f.write(0x680630,2); // full scanout stays guarded, raw storage is distinct
+    CHECK(f.gpu->copy_framebuffer_diagnostic(storage,copy,error));
+    CHECK(storage.size()==f.size);
+    if(storage.size()==f.size) {
+        const uint8_t expected[]={0xd4,0xc3,0xee,0xa1};
+        CHECK(!std::memcmp(storage.data()+(16*640+64)*4,expected,4));
+        const uint8_t background[]={0,0,255};
+        CHECK(!std::memcmp(storage.data(),background,3));
+    }
+    CHECK(f.ram==ram_before && f.writes==writes_before);
+    const auto state=f.gpu->framebuffer_diagnostic_state();
+    CHECK(state.commands.known==1 && state.commands.received[0]==2 && state.info.start==f.target);
+    const auto storage_before=storage;
+    f.write(0x100248,1280); // one client bank differs; diagnostic must not fault the device
+    CHECK(!f.gpu->copy_framebuffer_diagnostic(storage,copy,error));
+    CHECK(error.find("banks disagree")!=std::string::npos && f.failure.empty() && storage==storage_before);
+    f.write(0x100248,2560);
+    CHECK(!f.gpu->capture_scanout(storage,info,error) && error.find("display processing")!=std::string::npos);
+    // The pre-existing scanout assertions below concern the earlier capture.
     if(rgba.size()==f.size) {
         const uint8_t expected[]={0xee,0xc3,0xd4,255};
         CHECK(!std::memcmp(rgba.data()+(16*640+64)*4,expected,4));
         const uint8_t background[]={255,0,0,255};
         CHECK(!std::memcmp(rgba.data(),background,4));
     } else CHECK(false);
-    size_t direct_bytes=0;
     CHECK(!f.gpu->scanout_direct_bytes(info,direct_bytes,error));
-    CHECK(error.find("translated capture")!=std::string::npos && !direct_bytes);
+    CHECK(error.find("display processing")!=std::string::npos && !direct_bytes);
     if(!f.failure.empty())std::printf("clear/scanout failure: %s\n",f.failure.c_str());
 }
 

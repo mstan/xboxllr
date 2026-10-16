@@ -2510,6 +2510,21 @@ public:
         bool rgb565 = false;
     };
     ScanoutInfo scanout_info() const;
+    // Passive storage observation, BEFORE blanking, DAC, display processing or
+    // encoding. Never use this as final scanout/presentation. The stopped owner
+    // supplies a copy-only physical RAM reader; no DMA, drain, clock or resolve.
+    struct FramebufferDiagnostic {
+        ScanoutInfo info;
+        uint32_t general_control=0;
+        bool screen_off=false,dac_started=false,dac_complete=false,dac_identity=false;
+        Nv2aDisplaySetupCommands::Observation commands;
+        std::array<uint8_t,768> gamma{};
+        std::array<std::array<uint32_t,4>,8> tiles{}; // base, limit, pitch, zcomp
+        uint64_t vblanks=0,starts=0,methods=0,published=0,retired=0;
+    };
+    FramebufferDiagnostic framebuffer_diagnostic_state() const;
+    bool copy_framebuffer_diagnostic(std::vector<uint8_t>& packed,
+        const std::function<bool(uint32_t,void*,size_t)>& read,std::string& error) const;
     bool capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
                          std::string& error);
     // INTERACTIVE PRESENTER ONLY (beads-xbox.1.15.8 stage (g)). A zero-copy view of
@@ -2771,6 +2786,7 @@ private:
     bool ram_config_write(RamTileConfig& config, uint32_t offset, uint32_t value);
     bool ram_tiles_active() const;
     bool ram_tile_overlap(uint32_t address, size_t bytes) const;
+    const char* ram_tile_configuration_error() const;
     bool ram_tile_configuration();
     int ram_tile_at(uint32_t address) const;
     bool ram_tile_transfer(uint32_t address, void* data, size_t bytes, bool write);

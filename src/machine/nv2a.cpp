@@ -18662,6 +18662,70 @@ Nv2a::ScanoutInfo Nv2a::scanout_info() const {
     return info;
 }
 
+Nv2a::FramebufferDiagnostic Nv2a::framebuffer_diagnostic_state() const {
+    FramebufferDiagnostic state;
+    state.info=scanout_info();state.general_control=pramdac_general_control_;
+    state.screen_off=vga_registers_.screen_off();state.dac_started=dac_gamma_.started();
+    state.dac_complete=dac_gamma_.complete();state.dac_identity=dac_gamma_.identity();
+    state.commands=display_setup_commands_.observe();
+    for(unsigned i=0;i<256;++i)for(unsigned c=0;c<3;++c)
+        state.gamma[i*3+c]=dac_gamma_.map(c,uint8_t(i));
+    for(unsigned i=0;i<8;++i) {
+        for(unsigned k=0;k<3;++k)state.tiles[i][k]=pgraph_tiles_.tiles[i][k];
+        state.tiles[i][3]=pgraph_tiles_.zcomp[i];
+    }
+    state.vblanks=vblanks_;state.starts=scanout_writes_;state.methods=push_methods();
+    state.published=draw_published_;state.retired=draw_retired_;
+    return state;
+}
+
+bool Nv2a::copy_framebuffer_diagnostic(std::vector<uint8_t>& packed,
+    const std::function<bool(uint32_t,void*,size_t)>& read,std::string& error) const {
+    auto reject=[&](const char* reason){error=reason;return false;};
+    // A copy cannot synchronize an outstanding host renderer/worker. Refuse it
+    // instead of draining work or returning a potentially concurrent RAM image.
+    if(renderer_ || draw_published_!=draw_retired_ || draw_faulted_)
+        return reject("framebuffer diagnostic requires retired software RAM drawing");
+    if(!read)return reject("framebuffer diagnostic has no copy-only RAM reader");
+    const auto info=scanout_info();
+    if(!info.width || !info.height || info.width>1920 || info.height>1080 ||
+       (info.bits_per_pixel!=16 && info.bits_per_pixel!=32))
+        return reject("framebuffer diagnostic geometry/depth unavailable");
+    const uint32_t row_bytes=info.width*(info.bits_per_pixel/8);
+    if(info.pitch<row_bytes || uint64_t(info.start)+uint64_t(info.pitch)*(info.height-1)+row_bytes>0x04000000u)
+        return reject("framebuffer diagnostic pitch/extent invalid");
+    if(const char* reason=ram_tile_configuration_error())return reject(reason);
+    std::vector<uint8_t> result(size_t(row_bytes)*info.height);
+    for(uint32_t y=0;y<info.height;++y) {
+        const uint32_t address=info.start+y*info.pitch;
+        auto* output=result.data()+size_t(y)*row_bytes;
+        const int selected=ram_tile_at(address);
+        if(selected<0) {
+            if(ram_tile_overlap(address,row_bytes))
+                return reject("framebuffer diagnostic row crosses tile boundary");
+            if(!read(address,output,row_bytes))return reject("framebuffer diagnostic RAM copy failed");
+            continue;
+        }
+        const auto& tile=pgraph_tiles_.tiles[unsigned(selected)];
+        const uint32_t base=tile[0]&0x03ffc000u;
+        if(uint64_t(address)+row_bytes>uint64_t(tile[1])+1 ||
+           (pgraph_tiles_.zcomp[unsigned(selected)]&0x80000000u))
+            return reject("framebuffer diagnostic compressed/cross-tile row unsupported");
+        Nv2aTileLayout layout;
+        if(!layout.configure(tile[2],(tile[0]>>1)&1))return reject("framebuffer diagnostic tile layout invalid");
+        for(uint32_t x=0;x<row_bytes;) {
+            const uint32_t linear=address-base+x;
+            const uint32_t span=std::min(row_bytes-x,16u-(linear&15));
+            uint32_t physical=0;
+            if(!layout.translate(linear,physical) || uint64_t(base)+physical+span>uint64_t(tile[1])+1)
+                return reject("framebuffer diagnostic physical tile extent invalid");
+            if(!read(base+physical,output+x,span))return reject("framebuffer diagnostic tiled RAM copy failed");
+            x+=span;
+        }
+    }
+    packed.swap(result);error.clear();return true;
+}
+
 // Everything capture_scanout and scanout_direct_bytes must agree on: the seam
 // drain, the geometry validation and the resident-surface
 // resolve. Extracted verbatim from capture_scanout, which keeps calling it first.

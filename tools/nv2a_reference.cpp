@@ -313,6 +313,59 @@ EXPORT void xlle_nv2a_reference_pic(void* instance, uint16_t mask, uint16_t leve
     pic.io_write(0x4d0,1,level&255); pic.io_write(0x4d1,1,level>>8);
     pic.io_write(0x21,1,mask&255); pic.io_write(0xa1,1,mask>>8);
 }
+
+// FBD1/version1: 32 LE DWORDs, 11 display-command DWORDs, 8x4 tile DWORDs,
+// 768 DAC bytes, 256 encoder values + 256 known-bit masks, extension mask +
+// 20 bytes (18 commands, 2 zero pad), 256-byte error, then packed storage rows.
+// Stage1 is framebuffer BEFORE all display processing, never qualified output.
+// The stopped owner supplies a pure physical-RAM copy. This does not use the
+// emulation DMA callbacks or change failure state, clocks, FIFO, IRQ or owners.
+EXPORT int xlle_nv2a_reference_framebuffer_snapshot(void* instance,
+        uint8_t* output,uint32_t capacity,uint32_t* required,
+        int (*read)(uint32_t,void*,size_t)) {
+    if(!instance || !required)return 0;
+    *required=0;
+    try {
+        constexpr uint32_t header=1860;
+        const auto& ref=*static_cast<const Reference*>(instance);
+        const auto state=ref.gpu.framebuffer_diagnostic_state();
+        const auto& info=state.info;
+        const bool geometry=info.width && info.height && info.width<=1920 && info.height<=1080 &&
+            (info.bits_per_pixel==16 || info.bits_per_pixel==32);
+        const uint32_t maximum=geometry?info.width*info.height*(info.bits_per_pixel/8):0;
+        *required=header+maximum;
+        if(!output || capacity<*required)return 0; // no RAM copy on capacity query
+        std::vector<uint8_t> pixels;
+        std::string error=ref.failure;
+        bool copied=false;
+        if(error.empty()) {
+            if(!read)error="framebuffer diagnostic has no copy-only RAM reader";
+            else copied=ref.gpu.copy_framebuffer_diagnostic(pixels,
+                [read](uint32_t a,void* p,size_t n){return read(a,p,n)!=0;},error);
+        }
+        uint8_t* cursor=output;
+        auto put=[&](uint32_t value){for(unsigned s=0;s<32;s+=8)*cursor++=uint8_t(value>>s);};
+        auto put64=[&](uint64_t value){put(uint32_t(value));put(uint32_t(value>>32));};
+        put(0x31444246);put(1);put(header);put(copied);put(uint32_t(pixels.size()));
+        put(info.start);put(info.pitch);put(info.width);put(info.height);put(info.bits_per_pixel);
+        put(info.rgb565);put(state.general_control);put(state.screen_off);put(state.dac_started);
+        put(state.dac_complete);put(state.dac_identity);put(state.commands.known);
+        put(ref.encoder->programmed());put(ref.encoder->timing_known());put(ref.encoder->field_known());
+        put64(state.vblanks);put64(state.starts);put64(state.methods);put64(state.published);put64(state.retired);
+        put(1);put(0);
+        for(auto value:state.commands.received)put(value);
+        for(const auto& tile:state.tiles)for(auto value:tile)put(value);
+        std::memcpy(cursor,state.gamma.data(),state.gamma.size());cursor+=state.gamma.size();
+        const auto encoder=ref.encoder->control_observation();
+        std::memcpy(cursor,encoder.values.data(),256);cursor+=256;
+        std::memcpy(cursor,encoder.known.data(),256);cursor+=256;
+        const auto& extensions=ref.encoder->extension_commands();put(extensions.received);
+        std::memcpy(cursor,extensions.bytes.data(),18);cursor+=18;*cursor++=0;*cursor++=0;
+        std::memset(cursor,0,256);std::memcpy(cursor,error.data(),std::min(error.size(),size_t(255)));cursor+=256;
+        if(!pixels.empty())std::memcpy(cursor,pixels.data(),pixels.size());
+        *required=header+uint32_t(pixels.size());return 1;
+    } catch(...) {return 0;}
+}
 EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size, int write, uint32_t value) {
     auto& ref = *static_cast<Reference*>(instance);
     if (!ref.failure.empty()) return 0;

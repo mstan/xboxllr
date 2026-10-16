@@ -26,6 +26,7 @@ static struct {
     int (*encoder_timing)(void*,uint64_t*,int*);
     int (*scanout)(void*,uint8_t*,uint32_t,uint32_t*,uint32_t*);
     int (*first_context_snapshot)(void*,uint8_t*,uint32_t,uint32_t*);
+    int (*framebuffer_snapshot)(void*,uint8_t*,uint32_t,uint32_t*,int(*)(uint32_t,void*,size_t));
     uint64_t origin;
     int external_clock_fixture;
     uint32_t launch_framebuffer;
@@ -33,6 +34,7 @@ static struct {
 } gpu_lle;
 static const char *gpu_lle_sample(void);
 #include "gpu_first_context_observer.inc"
+#include "gpu_framebuffer_observer.inc"
 
 static int gpu_lle_dma(uint32_t pa,void *buffer,size_t bytes,int write)
 {
@@ -180,6 +182,7 @@ static void gpu_lle_open_profile_clock(uint32_t idle_phase,int external_clock_fi
     const char *error=gpu_lle.error(gpu_lle.device);
     if(error)stop(error,0xfd000000u);
     gpu_context_observer_open(hex);
+    gpu_framebuffer_observer_open(hex);
     uint64_t next=0;
     error=pilot_usb_pit_clock(&gpu_lle.origin,&next);if(error)stop(error,0xfd000000u);
     gpu_lle.external_clock_fixture=external_clock_fixture;
