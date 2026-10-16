@@ -48,7 +48,92 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
+Current disposition: six of nine families;35 retained deferral IDs,34 scopes.
+
+## Corrected title ordering checkpoint - 2026-10-15
+
+The changed muted title at `build/blinx/audio-gp-ep-order-title-20261015/`
+finalized at its 12.5-guest-second observation checkpoint after 768.875 host
+seconds, exit zero and no guards. The executable SHA256 is
+`61699ae4d4268c6a34a0ebeca2748310e08b09bab5d098c12d82e0ad8dab6216`.
+The original journal contains 1,061 completed calls, 144 successful neutral input
+reads and five Play calls, with no Stop. This checkpoint does not retire the
+guest's retained buffers or establish the normal Stop/reuse lifecycle.
+
+All 4,334 comparable EP input groups now contain consecutive producer quanta;
+the newest chunk is one or two quanta old. Eleven incomplete prefix reads are
+excluded explicitly. Both streams contain 1,367,040 identical PCM bytes, with
+1,335 contiguous codec stamps exactly on their absolute 6,000-PIT-tick edges.
+The current stage trace has 3,161 exact send-to-MIX banks, 18,966 exact main GP
+writes and 393 independently reproduced EP blocks and state loads. The latter
+starts from one observed input-state anchor after two incomplete prefix programs;
+every subsequent state is derived independently. The trace SHA256 is
+`32542a56061b8f7672cc83532afee13ad691ea84cbbdfa7898ba1b90e9d8902a`.
+
+The fixed-gain, prescribed-pitch independent title-music comparison improves
+substantially after the chronology fix, but initially misses the existing
+full-band gate. All three half-second windows meet RMSE <= 0.02. Two right-channel
+correlations are 0.98727 and 0.98173, below 0.99. Do not convert a successful
+ordering check or a small absolute error into full waveform acceptance.
+
+Saved-data localization finds no source cursor discontinuity; the original ADX
+source still agrees with the independent decoder. Over 99.99% of the source-rate
+difference power lies above 16 kHz. Applying the same fixed 16 kHz diagnostic
+filter to both signals, with zero relative lag and no fitted gain/rate, yields
+correlations above 0.999999 and RMSE below 0.000085. The maintained converter uses
+declared `SRC_SINC_FASTEST`, whereas the independent oracle uses SciPy's default
+polyphase filter. This localizes a plausible filter-response difference; it does
+not waive the full-band gate or prove silicon interpolation. The independent
+nominal-kernel reconstruction below resolves this difference without another run.
+
+The authorized Sol6.1 worker independently reconstructs the declared nominal
+kernel as a direct symmetric convolution from the pinned float32 coefficient
+table. It uses prescribed pitch -501, zero relative lag and the actual observed
+source-zero prefix, with no production resampler API or padding of unavailable
+positive-time input. All 101,184 captured stereo rate frames match bit-for-bit.
+Changed-pitch and reordered-source controls fail. Root reviewed the implementation,
+verified all 14 input pins, checked that the coefficient/source files match the
+actual build dependency, and independently reproduced the exact rate-frame bytes.
+
+The existing independent FFmpeg ADX decode through this nominal kernel, fixed
+headroom/volume and independently qualified EP transform now passes all three
+full-band windows under the unchanged RMSE <= 0.02 / correlation >= 0.99 gates.
+Worst RMSE is 0.0001381; minimum correlation is 0.9999657. The single previously
+declared alignment stays at frame 204384; gain, rate and filter response are not
+fitted to the capture. This accepts representative connected output under the
+existing nominal-rate contract. It establishes neither silicon-exact
+interpolation nor the missing normal Stop/reuse transition. AUDIO-D15 records
+the replaceable interpolation precision question and its reopening trigger.
+The independently authored check completes in 1.44s. Its private report is
+`kernel-review-worker/report.aot-private.json`, SHA256
+`0782c49edb8eb1bc0b60e2e68065b8a18a05379bff9c46f19dec79c259144e02`.
+
+Receipts are `capture-review.aot-private.json`,
+`stage-review/stage-review.aot-private.json`,
+`title-music-headroom-review.aot-private.json` and
+`rate-band-diagnostic.aot-private.json` beside the capture. All three main
+analyses completed together in under nine seconds. The title is terminal;
+no unchanged rerun is needed to investigate this resolved residual. Audio remains
+open for actual normal Stop/reuse and continued output through that transition.
+Families remain 6/9; the queues now retain 35 IDs / 34 deferred scopes.
+
+`native_audio_call_report.retained_buffer_checkpoint` now supplies the next
+capture's review trigger: successful original Play/Stop/Play on the same retained
+buffer followed by two seconds of both output streams. Final Release is not a
+prerequisite. Failed calls, a different buffer, a released/recycled pointer,
+insufficient output or another Stop cannot trigger it; regressing output counters
+are rejected. Eight observer tests pass in 0.069s. Replaying the finalized 1,061-call
+journal leaves its report unchanged and correctly produces no lifecycle trigger.
+This is an observation stopping rule, not a substitute for reviewing the output
+and lifetime evidence. The old private Release-based checkpoint is superseded.
+
+The independent worker also reviewed G02: the essential missing startup fact is
+the FD6806A0 request/acknowledgement behavior for one coherent original AV
+profile, including its service event and activation/retrace dependency. The
+original display initializer polls it before the encoder programming. Existing
+already-active D4 observations do not establish retained 8A startup semantics.
+Repeating resolved source searches or copying legacy register snapshots cannot
+close this gap. G03-G05 remain downstream; hardware stays in the final phase.
 
 ## GP/EP ordering and original startup branch - 2026-10-15
 
@@ -96,8 +181,8 @@ The diagnostic recorder now publishes its immutable prefix immediately on
 capacity/window completion, while the same title continues running. Four storage
 cases check exact records, early independent readability and idempotent later
 finish. Future lifecycle runs can therefore get early stage feedback without
-repeating startup. This changes host observation only; the currently launched
-ordering checkpoint retains its already-built recorder and finalizes normally.
+repeating startup. This changes host observation only; the completed ordering
+checkpoint retained its already-built recorder and finalized normally.
 
 One authorized Sol6.1 worker independently traced the startup/lifecycle source;
 root checked the source hashes and relevant original instructions. Neutral

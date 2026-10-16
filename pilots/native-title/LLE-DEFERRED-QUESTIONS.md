@@ -10,18 +10,19 @@ The existing 14 graphics questions and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
-Current reconciliation, 2026-10-15: the twenty entries here retain their
+Current reconciliation, 2026-10-15: the twenty-one entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues, 34 IDs
-are retained; 33 still contain deferred scope. AUDIO-D09 records the sample
+behavior from its remaining precision question. Across both queues, 35 IDs
+are retained; 34 still contain deferred scope. AUDIO-D09 records the sample
 counter's remaining sub-sample phase question; AUDIO-D10 records AC-link
 control-transaction phase and bus latency. AUDIO-D11 retains unreached output
 configuration encodings and trap behavior. AUDIO-D12 retains the nontrapped
 FE reason field's raw values and timing, not required interrupt/queue behavior.
 The owner's bounded-goal update adds LLE-D06 and AUDIO-D13/D14 for broader
 profiles and exhaustive lifecycle/fault coverage; normal required execution
-remains in the closing checklist. See the
+remains in the closing checklist. AUDIO-D15 makes the existing nominal-rate
+contract's exact silicon interpolation question explicit. See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
 
@@ -54,6 +55,7 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | LLE-D06 | Which additional encoder revisions, boot histories and saved context fields need support beyond one coherent Blinx attract profile? | The current original startup retains an 8A encoder selection; the live console caches D4. The failed 8A/C4 observation is retained and is not repeated. Qualifying every hardware revision or reproducing unrelated historical warm state is unnecessary for the owner's bounded goal. One source-supported startup profile, every consumed context field and actual original draws remain required G02/G03/G05. | A new profile is explicitly supported, a reached caller consumes another field, or evidence contradicts the selected profile. Never transplant values across different profiles to bypass startup. |
 | AUDIO-D13 | What happens for reset at arbitrary instruction boundaries, unreached pending-DMA cancellation, or additional warm-state combinations? | The normal original retirement caller submits FE control/notification before GP0/EP1. Source-bound caller evidence and the configured reset observer isolate that required contract. Both physical GP/EP no-DMA experiments now complete reset and fresh reexecution. Unsupported pending work retains its guards; actual drain, normal connected retirement and model adoption remain required A03-A05. | The bounded title reaches reset with pending work after its real retirement sequence, a supported lifecycle exposes stale work, or broader reset/cancellation support is added. Establish the reached case before widening admission; do not claim cancellation from a drained reset. |
 | AUDIO-D14 | What additional malformed-command, timeout and failure combinations need independent qualification? | Nine unchanged original FE helper cases already distinguish success, timeout, no notifier, stopped state and release under explicit synthetic replies. Return1 and final status80 do not prove completion. This is a representative caller contract, not hardware queue evidence. Required real notification ordering, actual consumer completion and safe failure/ownership checks stay A04/A05; an exhaustive fault matrix is outside the bounded goal. | A required original caller takes an uncovered failure path, a regression reveals false success or premature release, or wider error recovery becomes supported. Retain existing failure guards and replay the relevant original consumer. |
+| AUDIO-D15 | What exact interpolation kernel, bandwidth and fractional phase quantization does silicon use for source-rate conversion? | The existing isolated rate adapter declares libsamplerate 0.2.2 SRC_SINC_FASTEST as a nominal policy, following the reference choice rather than claiming silicon identity. Independent direct coefficient convolution reproduces 101,184 captured stereo rate frames exactly; independent ADX plus the declared kernel and EP model passes representative full-band output under unchanged 0.02 RMSE / 0.99 correlation limits. The earlier SciPy-filter difference is retained, not relabeled a pass. This policy is replaceable without changing source DMA, clocks, mixing or ownership. | Independent hardware evidence distinguishes required rate/filter behavior, a supported consumer exceeds the declared output tolerance, or a new interpolation policy is selected. Replay saved source/rate/output comparisons and existing cursor, partition, pause/seek and lifecycle checks. Actual Stop/reuse and continued output remain required A05; they are not deferred. |
 
 AUDIO-D11 follow-up,2026-10-15: independent analog one/two-node ring traversal
 and explicit stop/reset are resolved and adopted. Original stream/ISR/DPC helpers

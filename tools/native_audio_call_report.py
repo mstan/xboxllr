@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 
-def summarize(path, live=False):
+def _read_journal(path, live=False):
     data=path.read_bytes()
     if data and not data.endswith(b'\n'):
         if not live:raise ValueError('incomplete journal record')
@@ -14,6 +14,14 @@ def summarize(path, live=False):
     rows=[json.loads(line) for line in data.splitlines()]
     if not rows or rows[0].get('schema')!='xboxlle.original-audio-calls.v1':
         raise ValueError('missing original audio journal schema')
+    return rows
+
+
+def summarize(path, live=False):
+    return _summarize_rows(_read_journal(path, live))
+
+
+def _summarize_rows(rows):
     active={};seen=set();counts=Counter();played=set();stopped=set();restarted=set()
     releases=0;fences=pcm=spdif=ticks=0;footer=None;records=0;had_play=had_stop=False
     input_success=input_failed=input_start=0;input_first=None;input_first_start=None
@@ -78,6 +86,57 @@ def summarize(path, live=False):
             start_reads=input_start,first_success_ticks=input_first,first_start_ticks=input_first_start),
         lifecycle_candidate=all(milestones.values()),
         limits='API return/counter observations only. Candidate requests review; it does not prove DSP output, movie-relative timing, internal ownership or whole-family acceptance.')
+
+
+def retained_buffer_checkpoint(path, post_restart_frames=96000):
+    """Request review after original Stop/reuse and continued stereo output.
+
+    Blinx retains its title-music buffer through normal Stop. Final Release and
+    the independently qualified device-fence component are not capture triggers.
+    This observes real API results; it neither supplies them nor certifies audio.
+    """
+    if post_restart_frames <= 0:
+        raise ValueError('post-restart observation must contain output frames')
+    if not path.exists() or not path.stat().st_size:
+        return None
+    rows = _read_journal(path, live=True)
+    report = _summarize_rows(rows)  # Validate the exact immutable prefix used below.
+    active = {}; playing = set(); stopped = {}; candidate = None
+    pcm = spdif = 0
+    for row in rows[1:]:
+        if row.get('footer'):
+            continue
+        if row['pcm_words'] < pcm or row['spdif_words'] < spdif:
+            raise ValueError('output counter moved backwards in lifecycle observation')
+        pcm, spdif = row['pcm_words'], row['spdif_words']
+        if row['phase'] == 'enter':
+            active[row['id']] = row
+            continue
+        enter = active.pop(row['id'])
+        obj = enter['args'][0] if enter['args'] else None
+        if row['eax'] == 0:
+            if row['name'] == 'IDirectSoundBuffer_Play':
+                playing.add(obj)
+                if obj in stopped:
+                    candidate = dict(object=obj, stop=stopped.pop(obj), restart=row)
+            elif row['name'] == 'IDirectSoundBuffer_Stop':
+                if obj in playing:
+                    stopped[obj] = row
+                playing.discard(obj)
+                if candidate and candidate['object'] == obj:
+                    candidate = None
+            elif row['name'] == 'IDirectSoundBuffer_Release':
+                playing.discard(obj); stopped.pop(obj, None)
+                if candidate and candidate['object'] == obj:
+                    candidate = None
+        if candidate:
+            restart = candidate['restart']
+            if (pcm >= restart['pcm_words'] + 2*post_restart_frames and
+                    spdif >= restart['spdif_words'] + 2*post_restart_frames):
+                return dict(scope='Original same-buffer Stop/reuse with continued analog/digital output; request review only',
+                    **candidate, observed_through=row, post_restart_frames=post_restart_frames,
+                    report=report, lifecycle_acceptance=False)
+    return None
 
 
 def main():

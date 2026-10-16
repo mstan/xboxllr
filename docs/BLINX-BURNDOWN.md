@@ -12,13 +12,33 @@ scheduling now close alongside input, display, memory and files. The full Q03
 capture completed 600 GP seconds with all seven numeric gates passing. Two
 natural openings, actual later movie interruption, title return and fresh demo
 gameplay are accepted after root scene/ownership review. Final audio census A01
-also closes; the audio family still requires original device startup/output.
+also closes; the audio family now requires normal connected Stop/reuse and
+continued output through that transition.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio connected A05; A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 34 retained IDs; 33 contain deferred scope, including additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio A05 normal Stop/reuse and continued output; representative connected output passes, A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 35 retained IDs; 34 contain deferred scope, including nominal interpolation precision, additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
 
-Latest feedback milestone: the real hotplug/Start capture finishes without a
+Latest checkpoint: the GP/EP chronology fix `4f92b9b` passes 54 affected checks
+and the changed title's 4,334 comparable input groups are all consecutive.
+Analog/digital payloads match; 393 EP blocks and derived states match the
+independent processor model. The 768.875s muted title check is complete, with
+no guards. An independent worker's direct reconstruction of the declared nominal
+resampler matches all 101,184 captured stereo rate frames bit-for-bit. Root
+verified the reconstruction and input pins. Independent ADX through that kernel
+and the EP model passes all three output windows under unchanged limits: worst
+RMSE 0.0001381, minimum correlation 0.9999657. The initial mismatch came from
+using a different comparison filter. Exact silicon interpolation is recorded as
+AUDIO-D15; no full-band threshold was loosened. Next observe actual normal
+Stop/reuse and continued output. The first Start only
+opens a menu, and final Release is not required for this retained-buffer path.
+`c3e0127` publishes a completed stage prefix while a future title run continues,
+allowing early diagnosis without repeated startup. One Sol6.1 worker completed
+independent waveform, lifecycle and G02 reviews; the essential graphics startup
+hardware fact remains deferred to the final phase. See the current closing
+checklist for evidence and limits. No family closes in this checkpoint.
+
+Earlier feedback milestone: the real hotplug/Start capture finishes without a
 guard;3479 analog/digital blocks contain3,562,496 identical payload bytes per
 stream. The1806s host run represents18.555s of audio. It does not close connected
 lifecycle/timing. The owner requested shorter feedback loops: affected fixture
