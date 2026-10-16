@@ -10,7 +10,14 @@ const char *pilot_reference_clock_init(PilotReferenceClock *clock,PilotIoClock i
     if(error)return error;
     memset(clock,0,sizeof(*clock));
     clock->input=input;clock->drive=drive;clock->input_context=context;
-    clock->origin=clock->ticks=initial;clock->initialized=1;return NULL;
+    clock->origin=clock->ticks=clock->pending=initial;clock->initialized=1;return NULL;
+}
+const char *pilot_reference_clock_quantum(PilotReferenceClock *clock,uint32_t max_ticks)
+{
+    if(!clock || !clock->initialized || clock->busy || clock->pending!=clock->ticks)
+        return "reference clock quantum outside stopped drained owner";
+    if(clock->failure)return clock->failure;
+    clock->max_step=max_ticks;return NULL;
 }
 const char *pilot_reference_clock_audio(PilotReferenceClock *clock,
     PilotReferenceAudioAdvance advance,void *context)
@@ -46,10 +53,16 @@ const char *pilot_reference_clock_step(void *context,uint64_t block_entries)
     if(!clock || !clock->initialized || clock->busy)return "reference clock step outside stopped owner";
     if(clock->failure)return clock->failure;
     clock->busy=1;
-    const char *error=clock->drive(clock->input_context,block_entries);
-    uint64_t proposed=0,target=clock->frames;
-    if(!error)error=clock->input(clock->input_context,&proposed);
-    if(!error && proposed<clock->ticks)error="reference clock input went backwards";
+    const char *error=NULL;
+    uint64_t proposed=clock->pending,target=clock->frames;
+    if(proposed==clock->ticks) {
+        error=clock->drive(clock->input_context,block_entries);
+        if(!error)error=clock->input(clock->input_context,&proposed);
+        if(!error && proposed<clock->ticks)error="reference clock input went backwards";
+        if(!error)clock->pending=proposed;
+    }
+    if(!error && clock->max_step && proposed-clock->ticks>clock->max_step)
+        proposed=clock->ticks+clock->max_step;
     if(!error) {
         uint64_t elapsed=proposed-clock->origin,seconds=elapsed/1125000;
         if(seconds>(UINT64_MAX-47999)/48000)error="reference audio frame clock overflow";

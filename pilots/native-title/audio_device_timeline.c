@@ -75,3 +75,5 @@ const char *pilot_audio_device_timeline_start(unsigned blocks_per_ms,
 }
 const char *pilot_audio_device_timeline_counter(uint64_t *counter)
 {return timeline_counter(&timeline,counter);}
+const char *pilot_audio_device_timeline_quantum(uint32_t max_ticks)
+{return pilot_reference_clock_quantum(&timeline.clock,max_ticks);}

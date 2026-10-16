@@ -1,5 +1,15 @@
 static uint32_t reference_test_device,reference_test_buffer;
 static float *reference_test_pcm;
+static void reference_test_drain_input(void)
+{
+    /* The GPU profile subdivides an input interval. Drain the real pending
+     * interval through ordinary stopped opportunities, not a forced rebase. */
+    unsigned opportunities=0;
+    do {
+        CHECK(++opportunities<=1125);
+        CHECK(!audio_reference_step(&audio_reference_clock,audio_reference_blocks+PILOT_REFERENCE_BLOCKS_PER_MS));
+    } while(audio_reference_clock.ticks<audio_reference_clock.pending);
+}
 static void reference_test_open(void)
 {
     input_host_is_keyboard();input_host_keyboard=0;
@@ -59,11 +69,13 @@ static void test_audio_reference_runtime(void)
     a[0]=reference_test_buffer;CHECK(!audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,a));
     CHECK(!audio_device && !audio_reference_clock.audio && !reference_output_frames());
     uint64_t previous_input_ms=input_host_reference_ms;
-    CHECK(!audio_reference_step(&audio_reference_clock,audio_reference_blocks+PILOT_REFERENCE_BLOCKS_PER_MS));
+    reference_test_drain_input();
     CHECK(input_host_reference_ms==previous_input_ms+1);
     CHECK(xbox_ReadTimeStampCounter()>tsc);
     CHECK(!pilot_usb_pit_time(audio_reference_clock.ticks) && !pilot_usb_lle_tick());
-    uint32_t observed=0;CHECK(!pilot_usb_lle_access(0xfe80200c,0,&observed) && observed==counter+48);
+    uint64_t after_ticks=0;CHECK(!pilot_usb_pit_clock(&after_ticks,&next));
+    uint32_t expected_samples=(uint32_t)(after_ticks/1125000)*48000+(uint32_t)((after_ticks%1125000)*48000/1125000);
+    uint32_t observed=0;CHECK(!pilot_usb_lle_access(0xfe80200c,0,&observed) && observed==expected_samples && observed>counter);
     CHECK(!pilot_usb_lle_access(0xfed0003c,0,&observed) && (uint16_t)observed==(uint16_t)(frame+1));
     control=0;CHECK(!pilot_usb_lle_access(0xfed00004,1,&control));
     free(reference_test_pcm);
@@ -102,7 +114,7 @@ static void test_reference_tsc(int mode)
         CHECK(MEM32(context+28)>0x60000000);
         MEM32(stats)=12;CHECK(!event_lle_call(256,&stats));
         CHECK(MEM32(stats+4)==initial_threads && MEM32(stats+8)==initial_handles);
-        CHECK(!audio_reference_step(&audio_reference_clock,audio_reference_blocks+PILOT_REFERENCE_BLOCKS_PER_MS));
+        reference_test_drain_input();
         CHECK(xbox_ReadTimeStampCounter()>expected);
     }
     CHECK(thread_cpu_calls==3);

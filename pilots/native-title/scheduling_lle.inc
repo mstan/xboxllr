@@ -46,10 +46,18 @@ static void scheduling_lle_run(void)
     audio_reference_clock_start();
 #elif defined(PILOT_AUDIO_DEVICE_LLE)
     clock_error=pilot_audio_device_timeline_start(PILOT_REFERENCE_BLOCKS_PER_MS,pilot_input_host_reference_time);
+#ifdef PILOT_GPU_LLE
+    if(!clock_error)clock_error=pilot_audio_device_timeline_quantum(32);
+#endif
     if(clock_error)stop(clock_error,0);
     fprintf(stderr,"[ORIGINAL AUDIO TIME] stopped reference input: %u observed blocks per 1ms PIT opportunity; shared original/compiled TSC, USB/input and GP/EP/ACI; no hardware CPU-cycle claim\n",PILOT_REFERENCE_BLOCKS_PER_MS);
 #endif
 #ifdef PILOT_GPU_LLE
+    /* The bounded NTSC profile's shortest reached VSYNC is 95.33us.
+     * 32 PIT ticks (28.44us) give CPU opportunities inside that pulse while
+     * preserving every rational oscillator edge. This is functional input
+     * cadence, not a hardware instruction/cycle timing claim. All consumers
+     * use the same admitted time; host-speed tuning cannot provide this. */
     // The selected timeline owns the initializer and title from the same epoch.
     clock_error=gpu_lle_prepare_launch();if(clock_error)stop(clock_error,3);
 #endif

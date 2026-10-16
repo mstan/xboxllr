@@ -149,6 +149,33 @@ unchanged full-title run. Receipt:
 This is not connected rendering or lifecycle acceptance; the private noise
 omission still precludes family qualification. Families remain7/9.
 
+The short retrace investigation establishes a concrete CPU/device ordering
+counterexample: six complete maintained FP VSYNC pulses occur while the exact
+original polling instructions read only low and complete no retraces. Giving
+the same CPU opportunities inside those unchanged pulses completes all three.
+This authored schedule is not a replay of unrecorded title polling timestamps.
+
+Whole GPU LLE now requires the existing coherent stopped reference composition:
+native audio uses APU_REFERENCE, or original audio uses its shared device
+timeline. The former QPC/XAudio2 composition cannot coherently slow only PIT
+while guest audio cursors, USB frames, replay and TSC continue on host time.
+Default HLE remains unchanged. Reference input proposals are now split into at
+most32 PIT ticks (28.44us) per CPU opportunity for this GPU profile, below its
+shortest reached95.33us VSYNC. The remaining interval is retained exactly;
+audio advances to admitted time before publication. Reads do not advance time,
+and oscillator rates/pulse widths are unchanged. This functional interleaving
+policy does not claim physical CPU instruction/cycle timing.
+
+Eleven focused checks pass in5.22s, including actual original direct/thread AV3
+startup and mode reentry in both phases under this production clock selection,
+the original launch producer, PCM/USB/input/TSC coherence, and bounded interval
+publication. The portable standalone quantum fixture also passes with GCC;
+the maintained CMake checks use MSVC. Attach/detach and failed-publication
+guards remain intact. Evidence:
+`build/blinx/reference-timeline-20261016/checks.aot-private.json` and
+`build/blinx/gpu-lle-diagnostic-counter-20261016/retrace-slice-review/`.
+Actual connected title passage, enabled noise and lifecycle remain open.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued

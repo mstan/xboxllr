@@ -12,6 +12,9 @@ static void test_gpu_thread_av_lle(int mode_guard)
         gpu_lle_open_profile(mode_guard==2?1:0);
         if(mode_guard) {
             CHECK(!pilot_io_device_clock_start());
+#ifdef PILOT_AUDIO_REFERENCE
+            audio_reference_clock_start();
+#endif
             // Produce the real boot mode first, then run the captured title's
             // distinct display request through the original thread transport.
             uint32_t boot_args[]={0xfd000000,0,0,0x12,2560,0},boot_result=0xcccccccc;

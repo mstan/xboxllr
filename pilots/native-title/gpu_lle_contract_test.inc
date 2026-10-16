@@ -295,6 +295,9 @@ static void test_gpu_lle_av_mode_startup(uint32_t phase)
     // Startup now reaches actual retrace waits. Use the existing original
     // PIT initialization/shared runtime clock, as the title selection does.
     CHECK(!pilot_io_device_clock_start());
+#ifdef PILOT_AUDIO_REFERENCE
+    audio_reference_clock_start();
+#endif
     // Actual original mode setup executes all tables, waits for three real
     // retraces, resets encoder timing, programs WSS and returns through RET24.
     uint32_t args[]={0xfd000000,0,0,0x12,2560,0},result=0xcccccccc;
@@ -331,6 +334,9 @@ static void test_gpu_lle_launch_profile(void)
     CHECK(gpu_lle_prepare_launch()); // no clock/producer/owned allocation yet
     CHECK(!gpu_lle.launch_framebuffer && !gpu_lle.launch_ready);
     CHECK(!pilot_io_device_clock_start());
+#ifdef PILOT_AUDIO_REFERENCE
+    audio_reference_clock_start();
+#endif
     const char *error=gpu_lle_prepare_launch();
     fprintf(stderr,"Original launch profile: %s\n",error?error:"returned");CHECK(!error);
     CHECK(gpu_lle.launch_ready && physical_find(gpu_lle.launch_framebuffer,640u*480u*4u));

@@ -1,6 +1,9 @@
 # Whole original renderer: preserved XDK bodies drive the maintained NV2A.
 # This is a bring-up selection, not a claim of qualified title rendering.
 if(PILOT_RENDERER STREQUAL "LLE")
+  if(NOT pilot_audio_device_lle AND NOT PILOT_AUDIO_BACKEND STREQUAL "APU_REFERENCE")
+    message(FATAL_ERROR "Whole GPU LLE requires a shared stopped timeline: select APU_REFERENCE with NATIVE audio, or the original audio LLE device. Wall-time audio/USB/CPU cannot share a subdivided display timeline.")
+  endif()
   if(NOT PILOT_USB STREQUAL "LLE" OR NOT PILOT_DISPLAY STREQUAL "NATIVE")
     message(FATAL_ERROR "Whole GPU LLE requires the shared original machine bus and excludes the separate native-rendered display floor")
   endif()
