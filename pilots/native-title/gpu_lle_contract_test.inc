@@ -328,6 +328,55 @@ static void test_gpu_lle_av_mode_startup(uint32_t phase)
 }
 
 #ifdef PILOT_GPU_FILES_WORKER
+static unsigned gpu_test_digital_reads;
+static int gpu_test_digital_read(uint32_t address,void *output,size_t bytes)
+{
+    ++gpu_test_digital_reads;
+    const uint32_t base=gpu_lle.launch_framebuffer&0x03ffffffu;
+    if(address<base || (uint64_t)address+bytes>(uint64_t)base+640u*480u*4u)return 0;
+    memcpy(output,memory+gpu_lle.launch_framebuffer+(address-base),bytes);return 1;
+}
+static void gpu_test_digital_input(void)
+{
+    *(FARPROC*)&gpu_lle.digital_snapshot=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_digital_snapshot");
+    CHECK(gpu_lle.digital_snapshot);
+    unsigned char *wire=malloc(GPU_DIGITAL_MAX);CHECK(wire);uint32_t required=0;
+    memset(wire,0x5a,GPU_DIGITAL_MAX);
+    CHECK(!gpu_lle.digital_snapshot(gpu_lle.device,wire,320,&required,gpu_test_digital_read));
+    CHECK(required==GPU_DIGITAL_MAX && wire[0]==0x5a && !gpu_test_digital_reads);
+    // Actual original AV3 supplies the reached mode. The following RGB pixels
+    // and identity DAC upload are explicitly authored component inputs, not
+    // original title drawing or evidence of original DAC-upload execution.
+    uint32_t args[]={0xfd000000,0,0x04010101,0x12,2560,gpu_lle.launch_framebuffer&0x03ffffffu},result=0xcccccccc;
+    CHECK(!pilot_io_device_lle(3,memory,args,&result) && !result);
+    gpu_lle.write(gpu_lle.device,0xfd680600,4,0x00100030);
+    gpu_lle.write(gpu_lle.device,0xfd6813c8,1,0);
+    for(unsigned value=0;value<256;++value)for(unsigned channel=0;channel<3;++channel)
+        gpu_lle.write(gpu_lle.device,0xfd6813c9,1,value);
+    // Red, green, blue and white; ignore stored alpha at this opaque output.
+    const uint32_t colors[]={0x12ff0000,0x3400ff00,0x560000ff,0x78ffffff};
+    memcpy(memory+gpu_lle.launch_framebuffer,colors,sizeof(colors));
+    CHECK(!gpu_lle.error(gpu_lle.device));
+    CHECK(gpu_lle.digital_snapshot(gpu_lle.device,wire,GPU_DIGITAL_MAX,&required,gpu_test_digital_read));
+    if(!gpu_context_word(wire+12))fprintf(stderr,"Digital input: %s\n",wire+64);
+    CHECK(required==GPU_DIGITAL_MAX && gpu_context_word(wire)==0x31445047 && gpu_context_word(wire+12)==1);
+    // AV3 leaves the screen blank for its caller. First verify genuine black
+    // without fetching the authored pixels; then explicitly unblank this
+    // component fixture. Actual title unblanking is a separate producer.
+    CHECK(!gpu_test_digital_reads && gpu_context_word(wire+52)==1);
+    CHECK(gpu_context_word(wire+320)==0x00800801);
+    gpu_lle.write(gpu_lle.device,0xfd0c03c4,1,1);
+    gpu_lle.write(gpu_lle.device,0xfd0c03c5,1,1);
+    CHECK(gpu_lle.digital_snapshot(gpu_lle.device,wire,GPU_DIGITAL_MAX,&required,gpu_test_digital_read));
+    CHECK(gpu_context_word(wire+12)==1 && !gpu_context_word(wire+52));
+    CHECK(gpu_test_digital_reads==480 && gpu_context_word(wire+60)==2);
+    // Independent published color-bar vectors, encoded directly as edge words.
+    const uint16_t words[]={0xf05,0x15a,0x229,0x136,0x6e2,0x9f0,0x80e,0xb80};
+    CHECK(!memcmp(wire+320,words,sizeof(words)));
+    const unsigned char rgba[]={254,0,0,255,0,255,1,255,0,0,255,255,255,255,255,255};
+    CHECK(!memcmp(wire+320+640*480*4,rgba,sizeof(rgba)));
+    CHECK(!gpu_lle.error(gpu_lle.device));free(wire);
+}
 static void test_gpu_lle_launch_profile(void)
 {
     install_fault_handler();CHECK(!pilot_io_device_files(memory));gpu_lle_open_profile(0);
@@ -349,6 +398,7 @@ static void test_gpu_lle_launch_profile(void)
     CHECK(!pilot_io_device_lle(2,memory,args,&result));
     CHECK(gpu_lle_prepare_launch() && gpu_lle.launch_ready); // no duplicate init
     gpu_test_completed_av_mode(0);
+    gpu_test_digital_input();
     fprintf(stderr,"PASS: original pre-title AV producer, owned framebuffer, unchanged shared FIELD and early original encoder consumer; title takeover remains required\n");
 }
 #else

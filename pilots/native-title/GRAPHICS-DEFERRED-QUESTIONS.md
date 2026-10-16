@@ -227,3 +227,29 @@ Private evidence remains in probe `results/noise-physical-runout-20261016/`,
 `results/noise-physical-cfg0-20261016/`, `results/noise-cfg0-profile-20261016/`
 and `results/noise-put-owner-20261016/`. The physical zero USER read does not
 establish that all reads of the write-only aperture always return zero.
+
+## GFX-D05/D18 addendum: nominal SD digital picture - 2026-10-16
+
+The reached original640x480 NTSC tuple now has a bounded functional digital
+contract, documented in [NV2A-DIGITAL-INPUT](../../docs/NV2A-DIGITAL-INPUT.md).
+Independent X-HD bus-receiver code identifies SD601 limited-range DDR444;
+ITU601/Khronos define the nominal conversion, and Conexant100381B supplies
+actual input packing and code remapping. The maintained GPU emits those digital
+samples, and the encoder input owner receives them. It does not treat the
+PRAMDAC words as inert or substitute raw RGB storage for a converted result.
+
+Exact silicon coefficient widths, rounding and LUT/conversion ordering stay
+in GFX-D05/D18. The supported identity DAC and disabled scaling avoid claiming
+unresolved order or interpolation. Arithmetic is explicitly nearest-rounded
+standard601; the two-level RGB roundtrip bound describes that mathematical
+model, not measured silicon agreement. Different command profiles, nonidentity
+TV gamma, and enabled input-edge corrections stay guarded. Reopen when a
+supported original consumer reaches them or independent representative output
+distinguishes the nominal policy. Further coefficient measurements are not a
+prerequisite for implementing this declared functional profile.
+
+The endpoint is active digital input before encoder decimation/flicker/analog
+processing, with a host RGB preview. It neither describes a complete timed bus
+waveform nor establishes analog output. Enabled noise, connected original
+attract output and normal lifecycle remain required. No deferral ID is added
+or removed by this clarification.

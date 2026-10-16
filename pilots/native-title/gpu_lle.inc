@@ -27,6 +27,7 @@ static struct {
     int (*scanout)(void*,uint8_t*,uint32_t,uint32_t*,uint32_t*);
     int (*first_context_snapshot)(void*,uint8_t*,uint32_t,uint32_t*);
     int (*framebuffer_snapshot)(void*,uint8_t*,uint32_t,uint32_t*,int(*)(uint32_t,void*,size_t));
+    int (*digital_snapshot)(void*,uint8_t*,uint32_t,uint32_t*,int(*)(uint32_t,void*,size_t));
     uint64_t origin;
     int external_clock_fixture;
     uint32_t launch_framebuffer;

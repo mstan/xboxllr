@@ -7,6 +7,7 @@
 #include "machine/smbus.hpp"
 #include "machine/cx25871_timing.hpp"
 #include "machine/cx25871_field.hpp"
+#include "machine/sd601_pixel.hpp"
 #include <array>
 #include <cstdio>
 #include <numeric>
@@ -39,6 +40,22 @@ public:
     // Passive model observation; known is a bit mask, not hardware readback.
     struct ControlObservation {std::array<uint8_t,256> values,known;};
     ControlObservation control_observation() const {return {registers_,known_};}
+    // Actual input connection, before 4:2:2 decimation/flicker/analog processing.
+    // 100381B table1-2 and sections1.3.11/12: IN_MODE1100, 12-bit DDR,
+    // YCrCb444. Invalid requests leave both output and hardware state unchanged.
+    bool receive_sd601_pixel(Sd601Pixel::Ddr12 pins,Sd601Pixel::YCrCb& pixel) const {
+        if((known_[0x32]&8)!=8 || (known_[0xc6]&7)!=7 ||
+           !(registers_[0x32]&8) || (registers_[0xc6]&7)!=4)return false;
+        // 100381B DATDLY/DATSWP/DATDLY_RE need edge history. This paired
+        // active-pixel interface supports only the reached correction bypass.
+        if((known_[0x74]&0xc0)!=0xc0 || (registers_[0x74]&0xc0) ||
+           !(known_[0x32]&4) || (registers_[0x32]&4))return false;
+        Sd601Pixel::YCrCb result;
+        if(!Sd601Pixel::unpack(pins,result))return false;
+        auto clamp=[](uint8_t value){return uint8_t(value==0?1:value==255?254:value);};
+        result.y=clamp(result.y);result.cr=clamp(result.cr);result.cb=clamp(result.cb);
+        pixel=result;return true;
+    }
     // PAL is an explicit board strap, not inferred from the game's region.
     // Construction still represents unknown warm state, not a reset event.
     explicit Cx25871Control(FaultFn fault, bool pal_pin=false, bool slave_pin=false)

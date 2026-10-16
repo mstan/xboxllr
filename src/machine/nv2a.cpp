@@ -18726,6 +18726,44 @@ bool Nv2a::copy_framebuffer_diagnostic(std::vector<uint8_t>& packed,
     packed.swap(result);error.clear();return true;
 }
 
+bool Nv2a::copy_digital_encoder_input(std::vector<Sd601Pixel::Ddr12>& pixels,
+    const std::function<bool(uint32_t,void*,size_t)>& read,std::string& error) const {
+    auto reject=[&](const char* reason){error=reason;return false;};
+    // Original source-bound 640x480 NTSC tuple. Its SD601/limited-range digital
+    // contract is independently corroborated by the X-HD physical-bus receiver
+    // (69babd44, adv7511_xbox.c19..35,88..118), not inferred from HLE appearance.
+    // The constants remain commands; this grants no individual bit/readback
+    // semantics. Other modes and scaler/margin profiles retain their guards.
+    constexpr std::array<uint32_t,11> commands{{2,0xc6ed0,525,155,620,0,
+        0x00801080,0x10000000,0x10000000,0,0x40801080}};
+    constexpr Nv2aFpRegisters::Words words{{479,524,479,490,493,0,479,
+        639,775,599,653,685,0,639}};
+    const auto setup=display_setup_commands_.observe();const auto fp=fp_registers_.observe();
+    if(setup.known!=0x7ff || setup.received!=commands || fp.known!=0x3fff || fp.words!=words ||
+       !fp.control_known || fp.control!=0x10100111 || !fp.debug_known || fp.debug!=0x21101100)
+        return reject("NV2A digital picture outside fixed NTSC SD601 profile");
+    if(!display_signals_known_ || !display_slaved() || pramdac_pll_control_!=0x100a0000u)
+        return reject("NV2A digital picture requires established display clock/routing");
+    const auto info=scanout_info();
+    if(info.bits_per_pixel!=32 || info.width!=640 || info.height!=480 || info.pitch!=2560 ||
+       pramdac_general_control_!=0x00100030)
+        return reject("NV2A digital picture storage format outside supported profile");
+    // Identity makes LUT/CSC order immaterial. Do not generalize the existing
+    // unprogrammed-display gamma consumer into an unsupported TV-path order.
+    if(!dac_gamma_.complete() || !dac_gamma_.identity())
+        return reject("NV2A digital picture requires complete identity DAC table");
+    std::vector<Sd601Pixel::Ddr12> result(size_t(info.width)*info.height);
+    if(vga_registers_.screen_off()) {
+        std::fill(result.begin(),result.end(),Sd601Pixel::pack({16,128,128}));
+    } else {
+        std::vector<uint8_t> storage;
+        if(!copy_framebuffer_diagnostic(storage,read,error))return false;
+        for(size_t i=0;i<result.size();++i)
+            result[i]=Sd601Pixel::pack(Sd601Pixel::encode({storage[4*i+2],storage[4*i+1],storage[4*i]}));
+    }
+    pixels.swap(result);error.clear();return true;
+}
+
 // Everything capture_scanout and scanout_direct_bytes must agree on: the seam
 // drain, the geometry validation and the resident-surface
 // resolve. Extracted verbatim from capture_scanout, which keeps calling it first.

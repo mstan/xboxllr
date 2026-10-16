@@ -8,6 +8,22 @@ graphics-family acceptance remains open. The current total is **7/9** under the
 [bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md); counts
 in the dated component reports below describe their historical checkpoints.
 
+## Fixed SD digital input - 2026-10-16
+
+The [digital input contract](../../docs/NV2A-DIGITAL-INPUT.md) connects actual
+GPU storage through nominal SD601 limited-range conversion and12-bit DDR
+packing to the maintained encoder input receiver. It admits the reached exact
+NTSC profile, complete identity DAC, disabled scaling and known edge-correction
+bypass. The host preview decodes the receiver result; it does not reuse raw RGB
+storage as processed pixels. Full analog output and complete bus-waveform timing
+are outside this endpoint. Default HLE is unchanged.
+
+Representative color, guard and original-AV integration checks accompany the
+implementation. Whole GPU/graphics acceptance still requires enabled-noise
+behavior, connected attract output and normal lifecycle; see the current
+closing checklist for retained title-run evidence. Numerical precision remains
+in GFX-D05/D18 without imposing a new exhaustive coefficient campaign.
+
 ## Original physical resource backing and native lifetime - 2026-10-11
 
 Actual original contiguous allocations now support counted native resource

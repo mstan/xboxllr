@@ -39,6 +39,7 @@
 #include "machine/nv2a_vga_registers.hpp"
 #include "machine/nv2a_dac_gamma.hpp"
 #include "machine/nv2a_display_setup_commands.hpp"
+#include "machine/sd601_pixel.hpp"
 #include "machine/nv2a_av_handshake.hpp"
 #include "machine/nv2a_context_image.hpp"
 #include "machine/nv2a_context_initializers.hpp"
@@ -2524,6 +2525,12 @@ public:
     };
     FramebufferDiagnostic framebuffer_diagnostic_state() const;
     bool copy_framebuffer_diagnostic(std::vector<uint8_t>& packed,
+        const std::function<bool(uint32_t,void*,size_t)>& read,std::string& error) const;
+    // Functional active-picture samples at the 12-bit DDR encoder connection.
+    // Edge words are labeled, not a timed stream of porches/DE. This is the
+    // guarded captured SD profile, not a decoded matrix-register implementation
+    // or analog TV picture. Exact arithmetic precision remains GFX-D05/D18.
+    bool copy_digital_encoder_input(std::vector<Sd601Pixel::Ddr12>& pixels,
         const std::function<bool(uint32_t,void*,size_t)>& read,std::string& error) const;
     bool capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
                          std::string& error);

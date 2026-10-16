@@ -366,6 +366,59 @@ EXPORT int xlle_nv2a_reference_framebuffer_snapshot(void* instance,
         *required=header+uint32_t(pixels.size());return 1;
     } catch(...) {return 0;}
 }
+// GPD1/version1: 16 LE DWORDs, 256-byte local error, paired 12-bit DDR words
+// (falling then rising, each LE16), then RGBA8 host preview. Stage2 is the
+// encoder DIGITAL INPUT, before decimation/flicker/analog processing. Model1
+// uses nominal SD601 arithmetic; it does not claim silicon coefficient bits.
+// Contains active-picture samples only, not porch/DE or a timed bus waveform.
+// Reuses the stopped pure-RAM observer contract of FBD1. No device mutation.
+EXPORT int xlle_nv2a_reference_digital_snapshot(void* instance,
+        uint8_t* output,uint32_t capacity,uint32_t* required,
+        int (*read)(uint32_t,void*,size_t)) {
+    if(!instance || !required)return 0;
+    *required=0;
+    try {
+        constexpr uint32_t header=320, maximum=640*480*8;
+        *required=header+maximum;
+        if(!output || capacity<*required)return 0;
+        const auto& ref=*static_cast<const Reference*>(instance);
+        const auto state=ref.gpu.framebuffer_diagnostic_state();
+        std::string error=ref.failure;
+        std::vector<xlle::Sd601Pixel::Ddr12> pins;
+        std::vector<uint8_t> rgba;
+        xlle::Sd601Pixel::YCrCb sample{};
+        bool copied=false;
+        if(error.empty()) {
+            if(!ref.board_clock || !ref.board_clock->active() || !ref.board_clock->encoder_live() ||
+               !ref.encoder->timing_known())error="digital input requires active board clock and acquired encoder timing";
+            else if(!ref.encoder->receive_sd601_pixel({0,0},sample))error="digital input requires known encoder mode1100 and edge-correction bypass";
+            else if(!read)error="digital input has no copy-only RAM reader";
+            else copied=ref.gpu.copy_digital_encoder_input(pins,
+                [read](uint32_t a,void* p,size_t n){return read(a,p,n)!=0;},error);
+        }
+        if(copied) {
+            rgba.reserve(pins.size()*4);
+            for(const auto words:pins) {
+                if(!ref.encoder->receive_sd601_pixel(words,sample)) {
+                    copied=false;error="digital input receiver rejected DDR sample";break;
+                }
+                const auto rgb=xlle::Sd601Pixel::decode(sample);
+                rgba.insert(rgba.end(),{rgb.r,rgb.g,rgb.b,255});
+            }
+        }
+        if(!copied) {pins.clear();rgba.clear();}
+        uint8_t* cursor=output;
+        auto put=[&](uint32_t value){for(unsigned s=0;s<32;s+=8)*cursor++=uint8_t(value>>s);};
+        put(0x31445047);put(1);put(header);put(copied);
+        put(state.info.width);put(state.info.height);put(uint32_t(pins.size()*4));put(uint32_t(rgba.size()));
+        put(1);put(copied?12:0xffffffffu);put(state.info.start);put(state.info.pitch);
+        put(state.dac_identity);put(state.screen_off);put(0);put(2);
+        std::memset(cursor,0,256);std::memcpy(cursor,error.data(),std::min(error.size(),size_t(255)));cursor+=256;
+        for(const auto words:pins) {put(uint32_t(words.falling)|(uint32_t(words.rising)<<16));}
+        if(!rgba.empty())std::memcpy(cursor,rgba.data(),rgba.size());
+        *required=header+uint32_t(pins.size()*4+rgba.size());return 1;
+    } catch(...) {return 0;}
+}
 EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size, int write, uint32_t value) {
     auto& ref = *static_cast<Reference*>(instance);
     if (!ref.failure.empty()) return 0;

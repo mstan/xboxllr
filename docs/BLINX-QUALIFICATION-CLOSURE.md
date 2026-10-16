@@ -298,6 +298,52 @@ observation for the whole-GPU route: its maintained scanout API is loaded but
 the existing native/display-only presentation capture does not consume it.
 Enabled-noise physical observation and final connected lifecycle still remain.
 
+## Completed flip progression and digital input processing - 2026-10-16
+
+The passive observer can now select distinct real driver completion counts.
+One changed private diagnostic stops after187.828s with no guard: completed
+counts1,2,3 accompany current framebuffer addresses03590000,036BC000,03590000
+and vblank counts378,379,380. Original Swap serials1,4,5 remain separately
+recorded. These are successive completed flips of the loading picture, not
+three API returns assumed to be completions. Evidence:
+`build/blinx/framebuffer-completion-20261016/`. Its deliberate noise omission
+still precludes enabled-noise, attract or normal-lifecycle acceptance.
+
+The [fixed SD digital contract](NV2A-DIGITAL-INPUT.md) now models RGB storage
+through nominal BT.601 limited-range conversion,12-bit DDR packing and the
+actual Conexant input receiver. Identity DAC, disabled scaling, the reached
+exact NTSC command profile and known input-edge correction bypass are required.
+The host RGB preview decodes received digital codes. It is before encoder
+decimation/flicker/analog processing, not a full timed video waveform. X-HD's
+physical bus receiver independently corroborates the format; ITU/Khronos and
+Conexant100381B provide the functional math/input rules. Exact coefficient
+widths, rounding and alternate profiles remain in GFX-D05/D18; nominal support
+does not assert bit-exact silicon agreement or qualify another display mode.
+
+Five focused model checks pass0.422s, existing storage ABI controls pass0.375s,
+and two original-pilot checks pass1.078s. The original AV integration check
+initially exposed an authored-fixture error: AV3 intentionally leaves the screen
+blank. The corrected check verifies real black/no-fetch first, explicitly
+unblanks its authored inputs, then checks independent color-bar edge words and
+receiver RGB. It is not original title rendering. Independent source review
+also found and corrected missing DATDLY/DATSWP/DATDLY_RE guards; unknown or
+enabled edge corrections cannot silently use the paired-pixel decoder.
+Evidence: `build/blinx/digital-input-20261016/final-checks.aot-private.json`.
+Legacy full-video guards and default HLE remain unchanged. Enabled-noise output
+and connected attract/normal lifecycle remain required; families remain7/9.
+
+One changed original-title diagnostic now obtains processed digital input on
+all three completed flips in172.953s, with no guard. All921,600 samples match
+an independent normalized standard601 matrix and inverse; maximum RGB roundtrip
+error is two levels, mean approximately0.395. These compare against the declared
+nominal math, not measured hardware coefficients. The original loading picture
+is retained in `build/blinx/digital-input-20261016/title/captures/`; numeric and
+wire checks are in `title-review.aot-private.json`. Active clock/timing, exact
+mode, complete identity DAC and edge-correction bypass are established by the
+actual producer, with no authored unblank/table inputs in this title run.
+The private enabled-noise omission remains explicit, and supervisor termination
+is not title retirement. No analog, attract or lifecycle acceptance is inferred.
+
 ## Actual original GPU framebuffer captured - 2026-10-16
 
 The whole-GPU route now has an elective passive storage observer at hash-bound

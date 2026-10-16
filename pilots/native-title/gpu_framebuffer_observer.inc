@@ -6,9 +6,11 @@
 #define GPU_FRAMEBUFFER_SWAP_BYTES 219u
 #define GPU_FRAMEBUFFER_SWAP_SHA "83eda516e4ec44e46a83880796d99461ac3e16d5f32fb32e13401747e305ae4a"
 #define GPU_FRAMEBUFFER_MAX (1860u+1920u*1080u*4u)
+#define GPU_DIGITAL_MAX (320u+640u*480u*8u)
 static struct {
     char directory[4096],library_sha[65];
-    unsigned enabled,failed,records;
+    unsigned enabled,failed,records,completed_only,digital;
+    uint32_t last_device,last_completed;
 } gpu_framebuffer_observer;
 static int gpu_framebuffer_read(uint32_t address,void *output,size_t bytes)
 {
@@ -27,12 +29,19 @@ static const char *gpu_framebuffer_record(const PilotIoCallDiagnosticEvent *even
 {
     if(!gpu_framebuffer_observer.enabled || gpu_framebuffer_observer.failed ||
        gpu_framebuffer_observer.records>=4 || event->kind!=PILOT_IO_DIAGNOSTIC_RETURN)return NULL;
-    const unsigned record=++gpu_framebuffer_observer.records;
     uint32_t device=0,serial=0;unsigned char miniport[0x1d0]={0};
     int driver_ok=pilot_io_device_diagnostic_read(0x00141b78u,&device,4,0) &&
         device && (uint64_t)device+0x2c14<=0x100000000ull &&
         pilot_io_device_diagnostic_read(device+0x2c10,&serial,4,0) &&
         pilot_io_device_diagnostic_read(device+0x23c0,miniport,sizeof(miniport),0);
+    const uint32_t completed=gpu_context_word(miniport+0x1bc);
+    // Elective collection of distinct completed-count observations. Do not
+    // equate the Swap return serial with completion. A different device address
+    // is also retained; this does not identify allocation generations/reuse.
+    if(driver_ok && gpu_framebuffer_observer.completed_only && gpu_framebuffer_observer.records &&
+       device==gpu_framebuffer_observer.last_device && completed==gpu_framebuffer_observer.last_completed)return NULL;
+    const unsigned record=++gpu_framebuffer_observer.records;
+    gpu_framebuffer_observer.last_device=device;gpu_framebuffer_observer.last_completed=completed;
     unsigned char *wire=malloc(GPU_FRAMEBUFFER_MAX);uint32_t required=0;
     int copied=wire && gpu_lle.framebuffer_snapshot(gpu_lle.device,wire,GPU_FRAMEBUFFER_MAX,
         &required,gpu_framebuffer_read) && required>=1860 && required<=GPU_FRAMEBUFFER_MAX;
@@ -42,25 +51,43 @@ static const char *gpu_framebuffer_record(const PilotIoCallDiagnosticEvent *even
     int saved=gpu_framebuffer_file(record,"cpu.bin",event,sizeof(*event));
     if(driver_ok)saved=gpu_framebuffer_file(record,"miniport.bin",miniport,sizeof(miniport)) && saved;
     if(copied)saved=gpu_framebuffer_file(record,"fbd1.bin",wire,required) && saved;
+    int digital_copied=0,digital_pixels=0;
+    if(gpu_framebuffer_observer.digital) {
+        unsigned char *digital=malloc(GPU_DIGITAL_MAX);uint32_t digital_bytes=0;
+        digital_copied=digital && gpu_lle.digital_snapshot(gpu_lle.device,digital,GPU_DIGITAL_MAX,
+            &digital_bytes,gpu_framebuffer_read) && digital_bytes>=320 && digital_bytes<=GPU_DIGITAL_MAX;
+        if(digital_copied && (gpu_context_word(digital)!=0x31445047 || gpu_context_word(digital+4)!=1 ||
+            gpu_context_word(digital+8)!=320 || gpu_context_word(digital+60)!=2 ||
+            320ull+gpu_context_word(digital+24)+gpu_context_word(digital+28)!=digital_bytes))digital_copied=0;
+        if(digital_copied) {
+            digital_pixels=gpu_context_word(digital+12)==1;
+            saved=gpu_framebuffer_file(record,"gpd1.bin",digital,digital_bytes) && saved;
+        }
+        free(digital);
+    }
     char json[2048];
     int length=sprintf_s(json,sizeof(json),
         "{\"stage\":\"framebuffer-before-display-processing\",\"qualified\":false,"
         "\"actual_swap_return\":true,\"call_id\":%llu,\"thread\":%u,\"caller\":%u,\"entry_sp\":%u,"
         "\"return_eax\":%u,\"device\":%u,\"device_swap_serial\":%u,\"driver_copied\":%s,"
         "\"completed\":%u,\"submitted\":%u,\"driver_frame\":%u,\"snapshot_copied\":%s,"
-        "\"storage_copied\":%s,\"latest_submission_displayed_claim\":false,"
+        "\"storage_copied\":%s,\"distinct_completed_counts\":%s,\"latest_submission_displayed_claim\":false,"
+        "\"digital_requested\":%s,\"digital_snapshot_copied\":%s,\"digital_input_pixels\":%s,"
         "\"source_entry\":%u,\"source_bytes\":%u,\"source_sha256\":\"%s\",\"library_sha256\":\"%s\","
         "\"diagnostic_device_reads_writes_clocks_drains\":0}\n",
         (unsigned long long)event->id,event->thread,event->caller,event->entry_sp,event->regs[0],device,serial,
         driver_ok?"true":"false",gpu_context_word(miniport+0x1bc),gpu_context_word(miniport+0x1cc),
         gpu_context_word(miniport+0x1c0),copied?"true":"false",
-        copied && gpu_context_word(wire+12)?"true":"false",GPU_FRAMEBUFFER_SWAP,GPU_FRAMEBUFFER_SWAP_BYTES,
+        copied && gpu_context_word(wire+12)?"true":"false",gpu_framebuffer_observer.completed_only?"true":"false",
+        gpu_framebuffer_observer.digital?"true":"false",digital_copied?"true":"false",digital_pixels?"true":"false",
+        GPU_FRAMEBUFFER_SWAP,GPU_FRAMEBUFFER_SWAP_BYTES,
         GPU_FRAMEBUFFER_SWAP_SHA,gpu_framebuffer_observer.library_sha);
-    if(length<0 || !gpu_framebuffer_file(record,"json",json,(uint32_t)length) || !saved || !copied || !driver_ok)
+    if(length<0 || !gpu_framebuffer_file(record,"json",json,(uint32_t)length) || !saved || !copied || !driver_ok ||
+       (gpu_framebuffer_observer.digital && (!digital_copied || !digital_pixels)))
         gpu_framebuffer_observer.failed=1;
-    fprintf(stderr,"[GPU FRAMEBUFFER] record=%u swap_return=%u completed=%u submitted=%u storage=%u failed=%u; pre-display diagnostic only\n",
+    fprintf(stderr,"[GPU FRAMEBUFFER] record=%u swap_return=%u completed=%u submitted=%u storage=%u digital=%u failed=%u; diagnostic only\n",
         record,event->regs[0],gpu_context_word(miniport+0x1bc),gpu_context_word(miniport+0x1cc),
-        copied?gpu_context_word(wire+12):0,gpu_framebuffer_observer.failed);
+        copied?gpu_context_word(wire+12):0,digital_pixels,gpu_framebuffer_observer.failed);
     free(wire);return NULL;
 }
 static void gpu_framebuffer_observer_open(const char *library_sha)
@@ -74,10 +101,19 @@ static void gpu_framebuffer_observer_open(const char *library_sha)
     if(!gpu_lle.framebuffer_snapshot)stop("GPU passive framebuffer ABI missing",0);
     strcpy_s(gpu_framebuffer_observer.directory,sizeof(gpu_framebuffer_observer.directory),directory);
     strcpy_s(gpu_framebuffer_observer.library_sha,sizeof(gpu_framebuffer_observer.library_sha),library_sha);
+    const char *completed_only=getenv("XLLE_PILOT_FRAMEBUFFER_COMPLETED_ONLY");
+    gpu_framebuffer_observer.completed_only=completed_only && !strcmp(completed_only,"1");
+    const char *digital=getenv("XLLE_PILOT_DIGITAL_INPUT_CAPTURE");
+    gpu_framebuffer_observer.digital=digital && !strcmp(digital,"1");
+    if(gpu_framebuffer_observer.digital) {
+        *(FARPROC*)&gpu_lle.digital_snapshot=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_digital_snapshot");
+        if(!gpu_lle.digital_snapshot)stop("GPU digital input ABI missing",0);
+    }
     const PilotIoDiagnosticCall call={GPU_FRAMEBUFFER_SWAP,GPU_FRAMEBUFFER_SWAP_BYTES,4,GPU_FRAMEBUFFER_SWAP_SHA};
     // Fresh-table API rejects competing observers; never unbind audio capture.
     const char *error=pilot_io_device_diagnostic_calls_bind(&call,1,gpu_framebuffer_record);
     if(error)stop(error,GPU_FRAMEBUFFER_SWAP);
     gpu_framebuffer_observer.enabled=1;
-    fprintf(stderr,"[GPU FRAMEBUFFER] at most4 actual Swap-return observations; full output guards retained\n");
+    fprintf(stderr,"[GPU FRAMEBUFFER] at most4 actual Swap-return observations; distinct_completed_counts=%u; full output guards retained\n",
+        gpu_framebuffer_observer.completed_only);
 }
