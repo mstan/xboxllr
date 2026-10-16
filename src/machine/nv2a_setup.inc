@@ -217,6 +217,7 @@ void Nv2a::pgraph_reset_setup() {
     pgraph_context_pointer_=0;pgraph_context_pointer_initialized_=false;
     pgraph_context_reset_seen_=pgraph_context_cache_invalidated_=false;
     pgraph_loaded_context_.reset();
+    pgraph_method_faulted_=false;
     pgraph_fd_state_.fill(0);pgraph_fd_initialized_=0;
     dxt1_noise_control_.fill(0);
     pgraph_tiles_=RamTileConfig{};texture_tiles_=RamTileConfig{};
@@ -282,6 +283,22 @@ bool Nv2a::pgraph_load_context() {
     // The rest of the live frontend is unknown after LOAD, not reset-to-zero.
     // Its method/read consumers remain guarded until explicit provenance exists.
     pgraph_loaded_context_=std::move(staged);
+    pgraph_method_faulted_=false;
+    context_known_=0;
+    context_objects_known_=context_semaphore_dma_known_=context_semaphore_offset_known_=0;
+    context_raster_known_.fill(0);
+    context_raster_known_[kRasterSurfaceColorOffset]=0xffffffffu;
+    context_raster_known_[kRasterSurfaceZetaOffset]=0xffffffffu;
+    context_raster_known_[kRasterSurfacePitch]=0xffffffffu;
+    context_program_known_.fill(0);context_constants_known_.fill(0);
+    context_vertex_format_known_=context_vertex_offset_known_=0;
+    context_viewport_scale_known_=context_viewport_offset_known_=0;
+    // Bound flags represent provenance, not loaded register values. Resolved
+    // raw BASE/LIMIT cannot establish a descriptor identity or its ownership.
+    color_dma_bound_=zeta_dma_bound_=texture_dma_a_bound_=texture_dma_b_bound_=false;
+    vertex_dma_a_bound_=vertex_dma_b_bound_=false;
+    context_surfaces_2d_.dma_source_bound=context_surfaces_2d_.dma_dest_bound=false;
+    image_blit_.context_surfaces_bound=false;report_dma_bound_.fill(false);
     pgraph_context_user_=0x11;
     pgraph_fd_initialized_=0;
     invalidate_vsh_program_cache();
@@ -304,7 +321,7 @@ bool Nv2a::pgraph_setup_read(uint32_t offset,uint32_t& value) {
     int ram_offset=pgraph_ram_offset(offset);
     if(ram_offset>=0){value=*ram_config_word(pgraph_tiles_,uint32_t(ram_offset));return true;}
     if(offset>=0x820 && offset<=0x878) {
-        if(!pgraph_loaded_context_) {
+        if(!pgraph_loaded_context_ || !pgraph_loaded_context_->surface_known((offset-0x820)/4)) {
             fault_("NV2A surface register has no established context value");value=0;return true;
         }
         value=pgraph_loaded_context_->surface_word((offset-0x820)/4);return true;
@@ -351,7 +368,11 @@ bool Nv2a::pgraph_setup_read(uint32_t offset,uint32_t& value) {
         value=pgraph_context_pointer_;return true;
     case 0x710:case 0xb10:case 0x186c:case 0x1a88:
         if(pgraph_loaded_context_) {
-            fault_("NV2A loaded frontend read requires qualified context mapping");value=0;return true;
+            const uint64_t needed=offset==0x710 ? kContextFlipRead|kContextFlipWrite|kContextFlipModulo :
+                offset==0xb10 ? kContextPatternColor : offset==0x186c ? kContextClearColor : kContextClearZeta;
+            if((context_known_&needed)!=needed) {
+                fault_("NV2A loaded frontend read requires qualified context mapping");value=0;return true;
+            }
         }
         return false;
     default:return false;
@@ -432,7 +453,9 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
         else if(value==2)fault_("NV2A PGRAPH context save is not implemented");
         else fault_("NV2A unsupported PGRAPH context transfer command");
         return true;
-    case 0x71c:case 0xb10:case 0x186c:case 0x1a88:
+    case 0x71c:
+        return false; // guarded known flip inputs are checked in the actual handler
+    case 0xb10:case 0x186c:case 0x1a88:
         if(pgraph_loaded_context_) {
             fault_("NV2A loaded frontend write requires qualified context mapping");return true;
         }

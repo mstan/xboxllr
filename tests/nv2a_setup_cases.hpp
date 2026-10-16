@@ -254,7 +254,7 @@ static void test_pgraph_context_transfer() {
         auto read=[&](uint32_t r){return gpu.mmio_read(0xfd000000u+r,4);};
         auto write=[&](uint32_t r,uint32_t v){gpu.mmio_write(0xfd000000u+r,4,v);};
         for(auto& r:modes)write(r[0],r[1]);
-        const uint32_t packet[]={0x40000,1,0x401a4,2,0x81d6c,4096,0x12345678};
+        const uint32_t packet[]={0x40100,1,0x401a4,2,0x81d6c,4096,0x12345678};
         std::memcpy(ram.data(),packet,sizeof(packet));put32(ram,4096,0xabcdef01);
         const uint32_t setup[][2]={{0x700008,1},{0x70000c,0x80010020},{0x700200,0x97},
             {0x700010,2},{0x700014,0x80010030},{0x700300,0x3d},{0x700304,8191},{0x700308,0},
@@ -274,20 +274,20 @@ static void test_pgraph_context_transfer() {
               after.ffintfc==before.ffintfc && !after.fifo_access && !gpu.push_methods() &&
               get32(ram,4096)==0xabcdef01);
         // Original USER rewrite, explicit channel-valid write, then FIFO hold
-        // release. No method is consumed until its inherited-state contract is
-        // implemented. Both parser modes preserve exactly the pending queue.
+        // release. The first command has no established object binding. Both
+        // parser modes preserve exactly the pending queue at that consumer.
         write(0x400148,0x11);write(0x400144,0x10010100);write(0x400764,0x08000000);
         CHECK(failure.empty());write(0x400720,1);
         if(!prefetched) {
             CHECK(failure.empty());write(0x800040,sizeof(packet));
         }
-        CHECK(failure=="NV2A loaded context method consumers require state provenance");
+        CHECK(failure.find("object binding is unknown")!=std::string::npos);
         after=gpu.first_context_diagnostic_snapshot();
         CHECK(after.pending.size()==(prefetched?4u:1u) && !gpu.push_methods() &&
               get32(ram,4096)==0xabcdef01 && !gpu.semaphore_writes() && !gpu.pfifo_runs_batched());
         CHECK(read(0x800044)==(prefetched?uint32_t(sizeof(packet)):8u));
         failure.clear();write(0x800040,sizeof(packet));
-        CHECK(failure=="NV2A loaded context method consumers require state provenance");
+        CHECK(failure.find("object binding is unknown")!=std::string::npos);
         CHECK(read(0x800044)==(prefetched?uint32_t(sizeof(packet)):8u));
         for(size_t i=0;i<before.pending.size();++i) {
             CHECK(after.pending[i].method==before.pending[i].method &&

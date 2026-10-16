@@ -64,6 +64,9 @@ bool Nv2a::ram_zeta_write(const ZetaBlock& block,const std::array<uint32_t,16>& 
 
 bool Nv2a::ram_zeta_clear(unsigned index,uint32_t first,uint32_t pitch,uint32_t width,
                          uint32_t height,uint32_t value,uint32_t mask) {
+    if(pgraph_loaded_context_ && !(context_known_&kContextCompression)) {
+        fault_("NV2A loaded compressed clear selector is unknown");return false;
+    }
     const auto& tile=pgraph_tiles_.tiles[index];
     const uint32_t base=tile[0]&0x03ffc000u;
     if(pitch!=tile[2] || first<base || (first&3)) {

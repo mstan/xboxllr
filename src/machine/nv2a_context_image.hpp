@@ -56,17 +56,26 @@ public:
         }
         std::copy_n(bytes, kSourceBytes, source_.begin());
         surfaces_ = surfaces;
+        surfaces_known_ = (1u<<23)-1;
         return true;
     }
 
     // Physical tag/SAVE/clear/LOAD maps these 23 contiguous registers to the
     // 23 image words at E0..138. BASE/LIMIT do NOT identify a DMA object.
     uint32_t surface_word(size_t index) const { return surfaces_.at(index); }
+    bool surface_known(size_t index) const { return index<23 && (surfaces_known_&(1u<<index)); }
+    // A later method changes live storage, never the retained LOAD source.
+    // Unmapped side effects invalidate readback instead of returning stale data.
+    void set_surface_word(size_t index,uint32_t value) {
+        surfaces_.at(index)=value;surfaces_known_|=1u<<index;
+    }
+    void invalidate_surface_word(size_t index) { surfaces_known_&=~(1u<<index); }
     const std::array<uint8_t, kSourceBytes>& source() const { return source_; }
 
 private:
     std::array<uint8_t, kSourceBytes> source_{};
     std::array<uint32_t, 23> surfaces_{};
+    uint32_t surfaces_known_=0;
 };
 
 } // namespace xlle

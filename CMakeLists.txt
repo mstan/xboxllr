@@ -304,6 +304,11 @@ target_include_directories(test_vsh_dot_prefix PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_vsh_dot_prefix PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
 add_test(NAME vsh_dot_prefix COMMAND test_vsh_dot_prefix)
 
+add_executable(test_vsh_dependencies tests/test_vsh_dependencies.cpp)
+target_include_directories(test_vsh_dependencies PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(test_vsh_dependencies PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
+add_test(NAME vsh_dependencies COMMAND test_vsh_dependencies)
+
 add_executable(test_vsh_capture tests/test_vsh_capture.cpp)
 target_include_directories(test_vsh_capture PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_vsh_capture PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)

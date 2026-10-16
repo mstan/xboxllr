@@ -50,6 +50,55 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: seven of nine families;43 retained deferral IDs,42 scopes.
 
+## Loaded scalar consumers connected; geometry remains open - 2026-10-16
+
+Loaded contexts now admit established object/state producers and supported scalar
+operations through the actual queued dispatcher. Per-bit raster knowledge preserves
+unwritten enable bits; program/constant uploads require explicit cursors and record
+the components they establish. DMA identities require actual binding, separately
+from raw loaded surface values. PRAMIN descriptor/table reads require initialized
+bytes. Unknown methods and connected vertex consumers still stop before retirement.
+A returning fault callback cannot allow a failed handler to continue the queue.
+
+Focused fixtures execute a real LOAD followed by 2D copies, color clears, semaphore
+publication and flip progression. They check actual destination pixels, loaded
+offset/pitch use, live register updates and both parser selections. Missing clear
+inputs, second-plane descriptor bytes or a consumed compression selector reject
+before the valid first plane writes. Unsupported consumers preserve their packet
+and GET on retry; missing or crossing semaphore inputs cannot publish completion.
+Subsequent DMA bindings invalidate unqualified raw BASE/LIMIT readback rather than
+return stale loaded values. The immutable original image remains retained.
+
+Independent review found and resolved the old MMIO flip guard intercepting valid
+increments, missing second-plane descriptor provenance and an unknown compression
+selector. The final NV2A fixture passes in 0.28 seconds; the shader dependency test
+passes in 0.01 seconds, and dispatch structural checks pass. Initial compile errors
+(mixed auto deduction and the standalone test's include dependency) are corrected;
+their logs remain private. Existing optional OpenGL skips are unchanged.
+
+The portable shader helper walks existing decoded operations backward from selected
+output components. It preserves parallel MAC/ILU reads, partial writes, scalar fog
+and R12/oPos aliasing; unsupported state writes/addressing reject transactionally.
+Five authored groups and 24 queries over all eight retained actual programs pass.
+The first seven require c98.XY, c132.XYW and c136.XY for the tested visible outputs;
+c137.XY appears only when fog is requested. Full texture output queries explicitly
+retain unknown initial Z/W dependencies. The eighth requires c0/c1. This helper is
+tested but not yet connected to draw admission; it does not supply unknown values.
+
+Root verified 33 helper pins and the six scalar-review inputs, retaining the exact
+worker-reviewed fixture before root added the final 2D-copy cases. Evidence:
+build/blinx/context-method-review-20261016/review.aot-private.json, SHA256
+52d55cd05a19224d51b2f6e0b300c6407d01c9a0062ae4201d5764f01a281032.
+
+A retained-queue check identifies 32 initializer method/class pairs outside the
+old dispatcher before the first draw; the first is class39 method0180 at index4.
+These formerly fell through silently. A grouped source audit will distinguish
+retained setters with guarded later consumers from required effects. No new long
+capture is needed to rediscover this known stop. Next finish that initializer
+batch and connect shader/vertex/raster provenance, then demonstrate original LLE
+rendering and the required lifecycle. No title capture or hardware operation in
+this milestone. Still 7/9 qualified, with 43 deferral IDs / 42 scopes unchanged.
+
 ## Owned first-context LOAD storage implemented - 2026-10-16
 
 The maintained NV2A now copies the complete37F0 producer allocation into an

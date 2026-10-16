@@ -1413,6 +1413,14 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         pgraph_context_table_ = value; return;
     }
     if (blk->off == 0x400000 && bo == 0x71C) {
+        if(pgraph_loaded_context_ && (value&~2u)) {
+            fault_("NV2A loaded flip increment operation is unsupported");return;
+        }
+        if(pgraph_loaded_context_ && (value&2u) &&
+           (context_known_&(kContextFlipRead|kContextFlipWrite|kContextFlipModulo))!=
+                           (kContextFlipRead|kContextFlipWrite|kContextFlipModulo)) {
+            fault_("NV2A loaded flip increment input is unknown");return;
+        }
         // NV_PGRAPH_INCREMENT_READ_3D is written by the kernel's vblank ISR. It retires
         // one displayed surface and wakes a PFIFO puller blocked in NV097_FLIP_STALL.
         if ((value & 2u) && flip_modulo_) {
@@ -1499,7 +1507,8 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
 }
 
 bool Nv2a::dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const {
-    if (instance > pramin_.size() - 12) return false;
+    if (instance > pramin_.size() - 12 ||
+        (pgraph_loaded_context_ && !pramin_range_initialized(instance,12))) return false;
     uint32_t flags = 0, limit = 0, frame = 0;
     std::memcpy(&flags, pramin_.data() + instance, 4);
     std::memcpy(&limit, pramin_.data() + instance + 4, 4);
@@ -1526,7 +1535,8 @@ bool Nv2a::ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance,
     hash ^= static_cast<uint32_t>(channel) << (bits - 4);
     uint32_t base = (ramht & 0x000001F0u) << 8;
     uint32_t entry = base + hash * 8;
-    if (entry > pramin_.size() - 8) return false;
+    if (entry > pramin_.size() - 8 ||
+        (pgraph_loaded_context_ && !pramin_range_initialized(entry,8))) return false;
     uint32_t entry_handle = 0, context = 0;
     std::memcpy(&entry_handle, pramin_.data() + entry, 4);
     std::memcpy(&context, pramin_.data() + entry + 4, 4);
@@ -1554,7 +1564,8 @@ bool Nv2a::bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle) {
     if(!ramht_instance(channel,handle,instance,&engine) || engine!=1) {
         fault_("NV2A unsupported RAMHT object engine");return false;
     }
-    if (instance > pramin_.size() - 4) {
+    if (instance > pramin_.size() - 4 ||
+        (pgraph_loaded_context_ && !pramin_range_initialized(instance,4))) {
         char why[128];
         std::snprintf(why, sizeof(why),
                       "NV2A graphics object exceeds PRAMIN: instance=0x%08x", instance);
@@ -16827,6 +16838,8 @@ constexpr Nv097Table kNv097Table = build_nv097_table();
 
 }  // namespace
 
+#include "nv2a_context_methods.inc"
+
 void Nv2a::dispatch_method(PushMethod push) {
     const uint8_t channel = push.channel;
     const uint8_t subchannel = push.subchannel;
@@ -17093,7 +17106,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         if (resolve_object(channel, parameter, instance)) {
             texture_dma_a_ = instance;
             texture_dma_a_bound_ = true;
-            raster_state_[kRasterTextureDmaA] = instance;
+            set_raster_word(kRasterTextureDmaA, instance);
         }
         break;
     }
@@ -17102,7 +17115,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         if (resolve_object(channel, parameter, instance)) {
             texture_dma_b_ = instance;
             texture_dma_b_bound_ = true;
-            raster_state_[kRasterTextureDmaB] = instance;
+            set_raster_word(kRasterTextureDmaB, instance);
         }
         break;
     }
@@ -17141,12 +17154,12 @@ void Nv2a::dispatch_method(PushMethod push) {
     // NV097 color-surface state and the first software raster operation.
     case kNv097M0200: {
         surface_clip_horizontal_ = parameter;
-        raster_state_[kRasterSurfaceClipHorizontal] = parameter;
+        set_raster_word(kRasterSurfaceClipHorizontal, parameter);
         break;
     }
     case kNv097M0204: {
         surface_clip_vertical_ = parameter;
-        raster_state_[kRasterSurfaceClipVertical] = parameter;
+        set_raster_word(kRasterSurfaceClipVertical, parameter);
         break;
     }
     case kNv097M0208: {
@@ -17154,7 +17167,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         // destination and can alias a pending job's.
         seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_format_ = parameter;
-        raster_state_[kRasterSurfaceFormat] = parameter;
+        set_raster_word(kRasterSurfaceFormat, parameter);
         break;
     }
     case kNv097M020C: {
@@ -17162,7 +17175,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         // destination and can alias a pending job's.
         seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_pitch_ = parameter;
-        raster_state_[kRasterSurfacePitch] = parameter;
+        set_raster_word(kRasterSurfacePitch, parameter);
         break;
     }
     case kNv097M0210: {
@@ -17170,7 +17183,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         // destination and can alias a pending job's.
         seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_color_offset_ = parameter;
-        raster_state_[kRasterSurfaceColorOffset] = parameter;
+        set_raster_word(kRasterSurfaceColorOffset, parameter);
         break;
     }
     case kNv097M0214: {
@@ -17178,7 +17191,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         // destination and can alias a pending job's.
         seam_anchor(kSeamAnchorSurfaceRetarget, true);
         surface_zeta_offset_ = parameter;
-        raster_state_[kRasterSurfaceZetaOffset] = parameter;
+        set_raster_word(kRasterSurfaceZetaOffset, parameter);
         break;
     }
     case kNv097M1D80: {
@@ -17221,284 +17234,254 @@ void Nv2a::dispatch_method(PushMethod push) {
     // blend, cull, depth, dither, stencil, logic, point-params/smooth,
     // line/poly smooth, and point/line/fill polygon offset respectively.
     case kNv097R0260_0280: {
-        raster_state_[kRasterCombinerAlphaIcw0 +
-                      (method - 0x0260) / 4] = parameter;
+        set_raster_word(kRasterCombinerAlphaIcw0 +
+                      (method - 0x0260) / 4, parameter);
         break;
     }
     case kNv097M0288: {
-        raster_state_[kRasterCombinerSpecularFog0] = parameter;
+        set_raster_word(kRasterCombinerSpecularFog0, parameter);
         break;
     }
     case kNv097M028C: {
-        raster_state_[kRasterCombinerSpecularFog1] = parameter;
+        set_raster_word(kRasterCombinerSpecularFog1, parameter);
         break;
     }
     case kNv097M0290: {
-        raster_state_[kRasterControl0] = parameter;
+        set_raster_word(kRasterControl0, parameter);
         break;
     }
     case kNv097M02C0: {
-        raster_state_[kRasterWindowClipHorizontal] = parameter;
+        set_raster_word(kRasterWindowClipHorizontal, parameter);
         break;
     }
     case kNv097M02E0: {
-        raster_state_[kRasterWindowClipVertical] = parameter;
+        set_raster_word(kRasterWindowClipVertical, parameter);
         break;
     }
     case kNv097M0300: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 0)) |
-            ((parameter != 0) << 0);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 0, 1u << 0);
         break;
     }
     case kNv097M0304: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 1)) |
-            ((parameter != 0) << 1);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 1, 1u << 1);
         break;
     }
     case kNv097M0308: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 2)) |
-            ((parameter != 0) << 2);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 2, 1u << 2);
         break;
     }
     case kNv097M030C: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 3)) |
-            ((parameter != 0) << 3);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 3, 1u << 3);
         break;
     }
     case kNv097M0310: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 4)) |
-            ((parameter != 0) << 4);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 4, 1u << 4);
         break;
     }
     case kNv097M0318: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 7)) |
-            ((parameter != 0) << 7);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 7, 1u << 7);
         break;
     }
     case kNv097M031C: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 8)) |
-            ((parameter != 0) << 8);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 8, 1u << 8);
         break;
     }
     case kNv097M0320: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 9)) |
-            ((parameter != 0) << 9);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 9, 1u << 9);
         break;
     }
     case kNv097M0324: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 10)) |
-            ((parameter != 0) << 10);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 10, 1u << 10);
         break;
     }
     case kNv097M032C: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 5)) |
-            ((parameter != 0) << 5);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 5, 1u << 5);
         break;
     }
     case kNv097M0330: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 11)) |
-            ((parameter != 0) << 11);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 11, 1u << 11);
         break;
     }
     case kNv097M0334: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 12)) |
-            ((parameter != 0) << 12);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 12, 1u << 12);
         break;
     }
     case kNv097M0338: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 13)) |
-            ((parameter != 0) << 13);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 13, 1u << 13);
         break;
     }
     case kNv097M033C: {
-        raster_state_[kRasterAlphaFunc] = parameter;
+        set_raster_word(kRasterAlphaFunc, parameter);
         break;
     }
     case kNv097M0340: {
-        raster_state_[kRasterAlphaRef] = parameter;
+        set_raster_word(kRasterAlphaRef, parameter);
         break;
     }
     case kNv097M0344: {
-        raster_state_[kRasterBlendSrc] = parameter;
+        set_raster_word(kRasterBlendSrc, parameter);
         break;
     }
     case kNv097M0348: {
-        raster_state_[kRasterBlendDst] = parameter;
+        set_raster_word(kRasterBlendDst, parameter);
         break;
     }
     case kNv097M034C: {
-        raster_state_[kRasterBlendColor] = parameter;
+        set_raster_word(kRasterBlendColor, parameter);
         break;
     }
     case kNv097M0350: {
-        raster_state_[kRasterBlendEquation] = parameter;
+        set_raster_word(kRasterBlendEquation, parameter);
         break;
     }
     case kNv097M0354: {
-        raster_state_[kRasterDepthFunc] = parameter;
+        set_raster_word(kRasterDepthFunc, parameter);
         break;
     }
     case kNv097M0358: {
-        raster_state_[kRasterColorMask] = parameter;
+        set_raster_word(kRasterColorMask, parameter);
         break;
     }
     case kNv097M035C: {
-        raster_state_[kRasterDepthMask] = parameter;
+        set_raster_word(kRasterDepthMask, parameter);
         break;
     }
     case kNv097M0360: {
-        raster_state_[kRasterStencilWriteMask] = parameter;
+        set_raster_word(kRasterStencilWriteMask, parameter);
         break;
     }
     case kNv097M0364: {
-        raster_state_[kRasterStencilFunc] = parameter;
+        set_raster_word(kRasterStencilFunc, parameter);
         break;
     }
     case kNv097M0368: {
-        raster_state_[kRasterStencilRef] = parameter;
+        set_raster_word(kRasterStencilRef, parameter);
         break;
     }
     case kNv097M036C: {
-        raster_state_[kRasterStencilFuncMask] = parameter;
+        set_raster_word(kRasterStencilFuncMask, parameter);
         break;
     }
     case kNv097M0370: {
-        raster_state_[kRasterStencilOpFail] = parameter;
+        set_raster_word(kRasterStencilOpFail, parameter);
         break;
     }
     case kNv097M0374: {
-        raster_state_[kRasterStencilOpZFail] = parameter;
+        set_raster_word(kRasterStencilOpZFail, parameter);
         break;
     }
     case kNv097M0378: {
-        raster_state_[kRasterStencilOpZPass] = parameter;
+        set_raster_word(kRasterStencilOpZPass, parameter);
         break;
     }
     case kNv097M09FC: {
-        raster_state_[kRasterProvokingVertex] = parameter;
+        set_raster_word(kRasterProvokingVertex, parameter);
         break;
     }
     case kNv097M037C: {
-        raster_state_[kRasterShadeMode] = parameter;
+        set_raster_word(kRasterShadeMode, parameter);
         break;
     }
     case kNv097M0384: {
-        raster_state_[kRasterPolygonOffsetScale] = parameter;
+        set_raster_word(kRasterPolygonOffsetScale, parameter);
         break;
     }
     case kNv097M0388: {
-        raster_state_[kRasterPolygonOffsetBias] = parameter;
+        set_raster_word(kRasterPolygonOffsetBias, parameter);
         break;
     }
     case kNv097M038C: {
-        raster_state_[kRasterFrontPolygonMode] = parameter;
+        set_raster_word(kRasterFrontPolygonMode, parameter);
         break;
     }
     case kNv097M0390: {
-        raster_state_[kRasterBackPolygonMode] = parameter;
+        set_raster_word(kRasterBackPolygonMode, parameter);
         break;
     }
     case kNv097M0394: {
-        raster_state_[kRasterClipMin] = parameter;
+        set_raster_word(kRasterClipMin, parameter);
         break;
     }
     case kNv097M0398: {
-        raster_state_[kRasterClipMax] = parameter;
+        set_raster_word(kRasterClipMax, parameter);
         break;
     }
     case kNv097M039C: {
-        raster_state_[kRasterCullFace] = parameter;
+        set_raster_word(kRasterCullFace, parameter);
         break;
     }
     case kNv097M03A0: {
-        raster_state_[kRasterFrontFace] = parameter;
+        set_raster_word(kRasterFrontFace, parameter);
         break;
     }
     case kNv097M17BC: {
-        raster_state_[kRasterEnables] =
-            (raster_state_[kRasterEnables] & ~(1u << 6)) |
-            ((parameter != 0) << 6);
+        set_raster_word(kRasterEnables, uint32_t(parameter != 0) << 6, 1u << 6);
         break;
     }
     case kNv097M17C0: {
-        raster_state_[kRasterLogicOp] = parameter;
+        set_raster_word(kRasterLogicOp, parameter);
         break;
     }
     case kNv097M1D78: {
-        raster_state_[kRasterZMinMaxControl] = parameter;
+        set_raster_word(kRasterZMinMaxControl, parameter);
         break;
     }
     case kNv097M1E20: {
-        raster_state_[kRasterCombinerFinalFactor0] = parameter;
+        set_raster_word(kRasterCombinerFinalFactor0, parameter);
         break;
     }
     case kNv097M1E24: {
-        raster_state_[kRasterCombinerFinalFactor1] = parameter;
+        set_raster_word(kRasterCombinerFinalFactor1, parameter);
         break;
     }
     case kNv097R1E40_1E60: {
-        raster_state_[kRasterCombinerColorOcw0 +
-                      (method - 0x1E40) / 4] = parameter;
+        set_raster_word(kRasterCombinerColorOcw0 +
+                      (method - 0x1E40) / 4, parameter);
         break;
     }
     case kNv097M1E60: {
-        raster_state_[kRasterCombinerControl] = parameter;
+        set_raster_word(kRasterCombinerControl, parameter);
         break;
     }
     case kNv097M1E6C: {
-        raster_state_[kRasterShadowDepthFunc] = parameter;
+        set_raster_word(kRasterShadowDepthFunc, parameter);
         break;
     }
     case kNv097M1E70: {
-        raster_state_[kRasterShaderStageProgram] = parameter;
+        set_raster_word(kRasterShaderStageProgram, parameter);
         break;
     }
     case kNv097M1E74: {
-        raster_state_[kRasterDotRgbMapping] = parameter;
+        set_raster_word(kRasterDotRgbMapping, parameter);
         break;
     }
     case kNv097M1E78: {
-        raster_state_[kRasterShaderOtherStageInput] = parameter;
+        set_raster_word(kRasterShaderOtherStageInput, parameter);
         break;
     }
     case kNv097R1B00_1C00: {
         const uint32_t stage = (method - 0x1B00) / 0x40;
         const uint32_t local = (method - 0x1B00) & 0x3Fu;
         if (local == 0x00) {
-            raster_state_[kRasterTextureOffset0 + stage] = parameter;
+            set_raster_word(kRasterTextureOffset0 + stage, parameter);
         } else if (local == 0x04) {
-            raster_state_[kRasterTextureFormat0 + stage] = parameter;
+            set_raster_word(kRasterTextureFormat0 + stage, parameter);
         } else if (local == 0x08) {
-            raster_state_[kRasterTextureAddress0 + stage] = parameter;
+            set_raster_word(kRasterTextureAddress0 + stage, parameter);
         } else if (local == 0x0C) {
-            raster_state_[kRasterTextureControl0_0 + stage] = parameter;
+            set_raster_word(kRasterTextureControl0_0 + stage, parameter);
             const uint32_t enable = (parameter >> 30) & 1u;
-            raster_state_[kRasterTextureEnableMask] =
-                (raster_state_[kRasterTextureEnableMask] & ~(1u << stage)) |
-                (enable << stage);
+            set_raster_word(kRasterTextureEnableMask, enable << stage, 1u << stage);
         } else if (local == 0x10) {
-            raster_state_[kRasterTextureControl1_0 + stage] = parameter;
+            set_raster_word(kRasterTextureControl1_0 + stage, parameter);
         } else if (local == 0x14) {
-            raster_state_[kRasterTextureFilter0 + stage] = parameter;
+            set_raster_word(kRasterTextureFilter0 + stage, parameter);
         } else if (local == 0x1C) {
-            raster_state_[kRasterTextureImageRect0 + stage] = parameter;
+            set_raster_word(kRasterTextureImageRect0 + stage, parameter);
         } else if (local == 0x20) {
-            raster_state_[kRasterTexturePalette0 + stage] = parameter;
+            set_raster_word(kRasterTexturePalette0 + stage, parameter);
         } else if (local == 0x24) {
-            raster_state_[kRasterTextureBorderColor0 + stage] = parameter;
+            set_raster_word(kRasterTextureBorderColor0 + stage, parameter);
         }
         break;
     }
@@ -17521,23 +17504,23 @@ void Nv2a::dispatch_method(PushMethod push) {
             return;
         }
         fixed_fog_ = parameter != 0;
-        raster_state_[kRasterFogEnable] = parameter;
+        set_raster_word(kRasterFogEnable, parameter);
         break;
     }
     case kNv097M029C: {
-        raster_state_[kRasterFogMode] = parameter;
+        set_raster_word(kRasterFogMode, parameter);
         break;
     }
     case kNv097M02A0: {
-        raster_state_[kRasterFogGeneration] = parameter;
+        set_raster_word(kRasterFogGeneration, parameter);
         break;
     }
     case kNv097M02A8: {
-        raster_state_[kRasterFogColor] = parameter;
+        set_raster_word(kRasterFogColor, parameter);
         break;
     }
     case kNv097R09C0_09CC: {
-        raster_state_[kRasterFogParams0 + (method - 0x09C0) / 4] = parameter;
+        set_raster_word(kRasterFogParams0 + (method - 0x09C0) / 4, parameter);
         break;
     }
     case kNv097M0314: {
@@ -17646,32 +17629,40 @@ void Nv2a::dispatch_method(PushMethod push) {
         const uint32_t slot = (method - 0x0A20) / 4;
         std::memcpy(&viewport_offset_[slot], &parameter, sizeof(parameter));
         transform_constants_[0x3B][slot] = viewport_offset_[slot];
+        if(pgraph_loaded_context_) {
+            context_viewport_offset_known_|=uint8_t(1u<<slot);
+            context_constants_known_[0x3B]|=uint8_t(1u<<slot);
+        }
         break;
     }
     case kNv097R0A60_0A80: {
-        raster_state_[kRasterCombinerFactor0_0 +
-                      (method - 0x0A60) / 4] = parameter;
+        set_raster_word(kRasterCombinerFactor0_0 +
+                      (method - 0x0A60) / 4, parameter);
         break;
     }
     case kNv097R0A80_0AA0: {
-        raster_state_[kRasterCombinerFactor1_0 +
-                      (method - 0x0A80) / 4] = parameter;
+        set_raster_word(kRasterCombinerFactor1_0 +
+                      (method - 0x0A80) / 4, parameter);
         break;
     }
     case kNv097R0AA0_0AC0: {
-        raster_state_[kRasterCombinerAlphaOcw0 +
-                      (method - 0x0AA0) / 4] = parameter;
+        set_raster_word(kRasterCombinerAlphaOcw0 +
+                      (method - 0x0AA0) / 4, parameter);
         break;
     }
     case kNv097R0AC0_0AE0: {
-        raster_state_[kRasterCombinerColorIcw0 +
-                      (method - 0x0AC0) / 4] = parameter;
+        set_raster_word(kRasterCombinerColorIcw0 +
+                      (method - 0x0AC0) / 4, parameter);
         break;
     }
     case kNv097R0AF0_0B00: {
         const uint32_t slot = (method - 0x0AF0) / 4;
         std::memcpy(&viewport_scale_[slot], &parameter, sizeof(parameter));
         transform_constants_[0x3A][slot] = viewport_scale_[slot];
+        if(pgraph_loaded_context_) {
+            context_viewport_scale_known_|=uint8_t(1u<<slot);
+            context_constants_known_[0x3A]|=uint8_t(1u<<slot);
+        }
         break;
     }
     case kNv097R0B00_0B80: {
@@ -17681,6 +17672,7 @@ void Nv2a::dispatch_method(PushMethod push) {
             return;
         }
         transform_program_[transform_program_load_][slot & 3u] = parameter;
+        if(pgraph_loaded_context_)context_program_known_[transform_program_load_]|=uint8_t(1u<<(slot&3));
         // Phase 5 item 3: one of exactly TWO inputs the parsed-program cache
         // depends on. Writing any program word invalidates it.
         invalidate_vsh_program_cache();
@@ -17696,6 +17688,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         }
         std::memcpy(&transform_constants_[transform_constant_load_][slot & 3u],
                     &parameter, sizeof(parameter));
+        if(pgraph_loaded_context_)context_constants_known_[transform_constant_load_]|=uint8_t(1u<<(slot&3));
         ++transform_constant_words_;
         if ((slot & 3u) == 3) ++transform_constant_load_;
         break;
@@ -17810,10 +17803,13 @@ void Nv2a::dispatch_method(PushMethod push) {
         const uint32_t slot = (method - 0x1720) / 4;
         vertex_attributes_[slot].dma_b = (parameter & 0x80000000u) != 0;
         vertex_attributes_[slot].offset = parameter & 0x7FFFFFFFu;
+        if(pgraph_loaded_context_)context_vertex_offset_known_|=uint16_t(1u<<slot);
         break;
     }
     case kNv097R1760_17A0: {
-        set_vertex_array_format((method - 0x1760) / 4, parameter);
+        const unsigned slot=(method-0x1760)/4;
+        if(set_vertex_array_format(slot, parameter) && pgraph_loaded_context_)
+            context_vertex_format_known_|=uint16_t(1u<<slot);
         break;
     }
     case kNv097M17FC: {
@@ -18022,12 +18018,8 @@ bool Nv2a::drain_pull_queue() {
                 update_irq();return true;
             }
         }
-        // LOAD has real owned image/surface effects. Other inherited frontend
-        // values still need producer/consumer knowledge; never execute these
-        // packets against the old fixture defaults. Keep the packet queued.
-        if(pgraph_loaded_context_) {
-            fault_("NV2A loaded context method consumers require state provenance");return false;
-        }
+        // Preflight before retirement; unsupported consumers retain their packet.
+        if(pgraph_loaded_context_ && !context_method_ready(push))return false;
         if(pgraph_setup_[0x880/4]==0x0008cfffu) {
             fault_("NV2A boot DEBUG_7 command execution remains unqualified");return false;
         }
@@ -18044,6 +18036,10 @@ bool Nv2a::drain_pull_queue() {
             dispatch_method(push);
         }
         pgraph_executing_=was_executing;
+        if(pgraph_loaded_context_) {
+            if(pgraph_method_faulted_ || draw_faulted_)return false;
+            context_method_completed(push);
+        }
         // The handler slot closes here rather than at the tail of
         // dispatch_method: the call and return are part of what a per-word
         // dispatch costs, and the tail of dispatch_method is pinned by

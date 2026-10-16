@@ -104,7 +104,12 @@ public:
     static constexpr uint32_t kSize = 0x01000000u;  // 16 MB
 
     explicit Nv2a(FaultFn fault, Nv2aRenderer* renderer = nullptr)
-        : fault_(std::move(fault)), renderer_(renderer), pramin_(0x100000, 0),
+        : fault_([this, sink=std::move(fault)](const std::string& why) {
+              // A returning diagnostic callback must not let a failed loaded
+              // method execute subsequent commands using its preceding state.
+              if(pgraph_loaded_context_ && pgraph_executing_) pgraph_method_faulted_=true;
+              sink(why);
+          }), renderer_(renderer), pramin_(0x100000, 0),
           pramin_initialized_(0x100000 / 64, 0), methods_(4096) {}
     // Stage (e): the draw worker's lifetime is the device's. The destructor
     // drains whatever is still queued, stops the worker and joins it, so no
@@ -2691,6 +2696,34 @@ private:
     bool pgraph_context_reset_seen_ = false;
     bool pgraph_context_cache_invalidated_ = false;
     std::unique_ptr<Nv2aContextImage> pgraph_loaded_context_;
+    bool pgraph_method_faulted_ = false;
+    enum ContextField : uint64_t {
+        kContextClearColor=1ull<<0, kContextClearZeta=1ull<<1,
+        kContextClearH=1ull<<2, kContextClearV=1ull<<3,
+        kContextFlipRead=1ull<<4, kContextFlipWrite=1ull<<5, kContextFlipModulo=1ull<<6,
+        kContext2dObject=1ull<<7, kContext2dFormat=1ull<<8,
+        kContextBlitObject=1ull<<9, kContextBlitOperation=1ull<<10,
+        kContextBlitIn=1ull<<11, kContextBlitOut=1ull<<12,
+        kContextProgramLoad=1ull<<13, kContextConstantLoad=1ull<<14,
+        kContextProgramStart=1ull<<15, kContextTransformMode=1ull<<16,
+        kContextCompression=1ull<<17, kContextZpassEnable=1ull<<18,
+        kContextZpassCount=1ull<<19, kContextPatternColor=1ull<<20,
+    };
+    uint64_t context_known_ = 0;
+    uint8_t context_objects_known_ = 0, context_semaphore_dma_known_ = 0,
+            context_semaphore_offset_known_ = 0;
+    std::array<uint32_t, kRasterStateWords> context_raster_known_{};
+    std::array<uint8_t,136> context_program_known_{};
+    std::array<uint8_t,192> context_constants_known_{};
+    uint16_t context_vertex_format_known_=0, context_vertex_offset_known_=0;
+    uint8_t context_viewport_scale_known_=0, context_viewport_offset_known_=0;
+    bool pramin_range_initialized(uint32_t offset,size_t size) const;
+    bool context_method_ready(const PushMethod& push);
+    void context_method_completed(const PushMethod& push);
+    void set_raster_word(size_t word,uint32_t value,uint32_t mask=0xffffffffu) {
+        raster_state_[word]=(raster_state_[word]&~mask)|(value&mask);
+        if(pgraph_loaded_context_)context_raster_known_[word]|=mask;
+    }
     uint32_t pgraph_ffintfc_ = 0, pgraph_rdi_index_ = 0;
     // RDI 3D: fifteen FD patch-state words. Only explicit inactive clears
     // are qualified; reset/power-on contents are not inferred as zero.
