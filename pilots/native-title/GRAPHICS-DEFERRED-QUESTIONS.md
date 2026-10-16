@@ -253,3 +253,35 @@ processing, with a host RGB preview. It neither describes a complete timed bus
 waveform nor establishes analog output. Enabled noise, connected original
 attract output and normal lifecycle remain required. No deferral ID is added
 or removed by this clarification.
+
+## GFX-D04 addendum: observed noise and filtering precision - 2026-10-16
+
+Physical original-profile off/on/on/off pixels now exist. Two authored batches
+separate texture-relative phase from screen position and compare the same low
+RGB through all four opaque BC1 palette roles. The candidate coordinate-bit
+equation transfers to every measured green/blue channel and the non-low-red
+samples; the shared low-range red result still requires supported arithmetic.
+That unresolved decoding behavior remains required G04 work. No enabled-noise
+runtime or family acceptance is claimed from these observations.
+
+Three edge locations have a one-unit red residual beside higher-red neighbors;
+the residual disappears when those neighbors share the low color. This is
+compatible with filtering, but does not measure the filter weight or prove its
+internal order. Exact subtexel phase, fixed-point filter weights and rounding
+remain in GFX-D04's existing precision scope after supported decoding exists.
+Reopen if a supported representative output exceeds its declared error bound,
+the residue changes coverage/ordering or a required consumer distinguishes it.
+Do not replace actual sampling with copied observed pixels, or use this scope
+to waive the unresolved color-range behavior or connected title run. The private
+evidence is the probe's `build/noise-low-red-pixels-review-20261016/` and
+`results/noise-physical-{fifo,controlled,low-red}-20261016/`.
+
+The implementation boundary can remain replaceable: apply supported decoding
+to owned texture bytes before sampling, and include the selected noise/decode
+profile in any decoded-image cache identity. The existing LLE draw packets own
+their texture snapshots; no worker should consult mutable live noise state.
+Native HLE currently preserves state159's boolean caller contract while using
+native compressed sampling. Its accepted appearance and fast path remain the
+baseline; the eventual representative comparison must state that approximation's
+numeric limits. No per-frame random effect or forced CPU texture upload is
+introduced by this evidence. This addendum adds no question ID or family gate.
