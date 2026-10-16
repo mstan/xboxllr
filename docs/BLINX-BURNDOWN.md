@@ -23,8 +23,9 @@ Latest checkpoint: the stopped, locked PCM16 restart cursor fix38f6836 passes
 its original-code reproduction and independent source-output comparison. The
 changed muted title acceptance run now completes its actual same-buffer
 Stop/restart plus96000 continued frames on both output routes after4022.640s,
-with no guard. Finalized lifecycle provenance passes; independent waveform
-review is pending, so audio remains open. GPU commits
+with no guard. Finalized lifecycle provenance passes, but the continued-output
+waveform comparison fails. Source/oracle provenance is under review using the
+finalized capture; no new run or acceptance is claimed. Audio remains open. GPU commits
 7765ecf/60bb8d7/897ab10 add the owned CPU UMA aperture, inactive FD clears,
 compiled callback bus ownership and explicit context-selector behavior. Actual
 original execution produced its complete context image and requested its first

@@ -78,8 +78,12 @@ is corrected and covered. Probe evidence: results/pgraph-enable-20261016/.
 The changed audio run subsequently terminates successfully after4022.640s,
 with no guard or supervisor error. Its actual retained-buffer Stop/status/restart
 and96000 continued frames on each output route trigger cooperative finalization.
-The worker's finalized lifecycle provenance review passes; independent waveform
-review remains pending, so this checkpoint does not yet qualify audio. Still6/9;
+The worker's finalized lifecycle provenance review passes, but the unchanged
+three-window continued-output comparison fails (correlation0.105..0.203,
+RMSE0.0311..0.0518). Its single early alignment was already weak; the result
+does not yet distinguish an output defect from source/oracle provenance error.
+The worker is diagnosing the finalized evidence without another capture or
+lag/gain/rate retuning. Audio remains open. Still6/9;
 43 retained deferral IDs/42 deferred scopes.
 
 ## Actual first selector and bounded pending draw batch - 2026-10-15
