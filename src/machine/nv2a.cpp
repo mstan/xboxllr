@@ -17002,6 +17002,11 @@ void Nv2a::dispatch_method(PushMethod push) {
         return;
     }
     if (object_class_[subchannel] != 0x97) return;
+    // FD patch/curve/transition methods can change RDI3D state. They are
+    // outside the implemented primitive pipeline, not successful no-ops.
+    if(method>=0x1de0 && method<0x1e20) {
+        fault_("NV2A FD patch processing is not implemented");return;
+    }
     if(ram_tiles_active() && method==0x17fc && parameter) {
         if(!ram_tile_configuration())return;
         if(renderer_) {fault_("NV2A tiled 3D requires the software RAM path");return;}

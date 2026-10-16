@@ -65,6 +65,11 @@ static int gpu_lle_dma_write(uint32_t a,const void *b,size_t n){return gpu_lle_d
 static const char *gpu_lle_access(uint32_t address,unsigned size,int write,uint32_t *value)
 {
     if(!gpu_lle.device)return "NV2A access before whole GPU initialization";
+    // Compiled ISR/DPC continuations must retain the stopped CPU's ownership
+    // and synchronous DMA borrow, just like their original instruction path.
+    // Do not fall back to idle access after any scoped device rejection.
+    if(pilot_io_device_compiled_mmio_active())
+        return pilot_io_device_compiled_mmio(address,size,write,value);
     gpu_lle_tick();
     if(write)gpu_lle.write(gpu_lle.device,address,size,*value);
     else *value=gpu_lle.read(gpu_lle.device,address,size);

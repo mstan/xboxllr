@@ -4,6 +4,9 @@
 #define OBSERVER_BYTES(c,...) do {const uint8_t b[]={__VA_ARGS__};child_emit(c,b,sizeof(b));} while(0)
 static unsigned observer_entries,observer_returns,observer_mmio;
 static unsigned observer_expect_enabled;
+static uint32_t observer_memory_address;
+static const char *observer_memory_forbidden(uint32_t address,unsigned size,int write,uint64_t *value)
+{(void)address;(void)size;(void)write;(void)value;CHECK(0);return "diagnostic invoked bus memory";}
 static uint32_t observer_caller,observer_mmio_pc,observer_entry_sp,observer_thread;
 static const unsigned char observer_helper[]={0x8b,0x41,4,0x83,0xc0,0x11,0x89,0x41,8,0xc3};
 static void observer_receiver(const PilotIoDiagnosticEvent *event)
@@ -38,6 +41,11 @@ static const char *observer_checked_mmio(uint32_t address,unsigned size,int writ
     CHECK(event.kind==PILOT_IO_DIAGNOSTIC_MMIO && event.pc==observer_mmio_pc &&
           event.regs[1]==0x1b000 && event.thread && !event.in_kernel);
     CHECK(address==0xfd001804 && size==4 && !write);++observer_mmio;
+    unsigned char copy[4]={0xa5,0xa5,0xa5,0xa5};
+    if(observer_expect_enabled) {
+        CHECK(!pilot_io_device_diagnostic_read(observer_memory_address,copy,sizeof(copy),0));
+        CHECK(!memcmp(copy,"\xa5\xa5\xa5\xa5",4));
+    } else CHECK(pilot_io_device_diagnostic_read(observer_memory_address,copy,sizeof(copy),0));
     if(observer_expect_enabled)CHECK(event.entry==GPU_THREAD_CPU+0x80 && event.driver==0x1b000);
     else CHECK(!event.entry);
     return gpu_lle_kernel_mmio(address,size,write,value);
@@ -75,10 +83,16 @@ static void test_gpu_first_context_observer(void)
     free(pramin);
     uint32_t stats=0x19700;MEM32(stats)=12;CHECK(!event_lle_call(256,&stats));
     uint32_t threads=MEM32(stats+4),handles=MEM32(stats+8);
+    uint32_t memory_bytes=4096;
+    CHECK(!pilot_io_device_lle(165,memory,&memory_bytes,&observer_memory_address));
+    CHECK(observer_memory_address && !(observer_memory_address&4095));
     for(unsigned life=0;life<2;++life) {
         uint32_t context=0x1b000;memset(memory+context,0,96);MEM32(context+4)=0x12345678;
         MEM32(context+64)=GPU_THREAD_CPU;observer_expect_enabled=life;
         if(life) {
+            // The same real RAM translation read above is now a registered
+            // memory bus owner; passive reads must not bypass that boundary.
+            CHECK(!pilot_io_device_bus_memory_bind(observer_memory_address,4096,observer_memory_forbidden));
             CHECK(pilot_io_device_diagnostic_bind(GPU_THREAD_CPU+0x80,sizeof(observer_helper),
                 "0000000000000000000000000000000000000000000000000000000000000000",observer_receiver));
             unsigned char digest[32];char hash[65];
@@ -92,6 +106,8 @@ static void test_gpu_first_context_observer(void)
         CHECK(!event_lle_call(256,&stats));CHECK(MEM32(stats+4)==threads && MEM32(stats+8)==handles);
     }
     CHECK(!pilot_io_device_diagnostic_bind(0,0,NULL,NULL));
+    CHECK(!pilot_io_device_bus_memory_bind(observer_memory_address,4096,NULL));
+    uint32_t unused=0;CHECK(!pilot_io_device_lle(171,memory,&observer_memory_address,&unused));
     PilotIoDiagnosticEvent event;memset(&event,0xa5,sizeof(event));
     CHECK(!pilot_io_device_diagnostic_context(&event));
     unsigned char canary[4]={0xa5,0xa5,0xa5,0xa5};CHECK(!pilot_io_device_diagnostic_read(0x10000,canary,4,0));
@@ -172,6 +188,48 @@ static void test_gpu_first_context_capture_guard(const char *directory)
     uint32_t object=MEM32(out+4),priority[]={object,29};CHECK(event_lle_call(148,priority)==8);
     uint32_t join[]={object,0,0,0,0},result=0xa5a5a5a5;
     observer_guard_verify(pilot_io_device_lle(159,memory,join,&result));CHECK(0);
+}
+static unsigned gpu_compiled_observations;
+static const char *gpu_compiled_checked_mmio(uint32_t address,unsigned size,int write,uint32_t *value)
+{
+    PilotIoDiagnosticEvent event;
+    CHECK(pilot_io_device_compiled_mmio_active() && pilot_io_device_diagnostic_context(&event));
+    CHECK(event.kind==PILOT_IO_DIAGNOSTIC_COMPILED_MMIO && event.pc && event.thread);
+    ++gpu_compiled_observations;
+    return gpu_lle_kernel_mmio(address,size,write,value);
+}
+static void gpu_compiled_setup(void)
+{
+    CHECK(!pilot_io_device_compiled_mmio_active());gpu_lle_open();
+    CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));
+    CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,gpu_compiled_checked_mmio));
+}
+static void gpu_compiled_check(void)
+{
+    CHECK(pilot_io_device_compiled_mmio_active());
+    uint64_t before=0,after=0,next=0;CHECK(!pilot_usb_pit_clock(&before,&next));
+    unsigned observations=gpu_compiled_observations;
+    gpu_test_write(0x400750,0x3d0000);
+    for(unsigned i=0;i<15;++i)gpu_test_write(0x400754,0);
+    CHECK(gpu_test_read(0x400750)==0x3d003c);
+    gpu_test_write(0x400750,0x3d0000);
+    for(unsigned i=0;i<15;++i)CHECK(gpu_test_read(0x400754)==0);
+    CHECK(gpu_compiled_observations==observations+33);
+    CHECK(!pilot_usb_pit_clock(&after,&next) && after==before);
+}
+static void test_gpu_compiled_context_prepare(void)
+{
+    timer_lle_device_setup=gpu_compiled_setup;timer_lle_device_check=gpu_compiled_check;
+    test_timer_dpc_lle();
+    timer_lle_device_setup=timer_lle_device_check=NULL;
+    CHECK(gpu_compiled_observations && !pilot_io_device_compiled_mmio_active());
+    CHECK(!gpu_lle.error(gpu_lle.device));
+    CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));
+    gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
+    CHECK(!pilot_io_device_bus_memory_bind(0xf0000000u,0x04000000u,NULL));
+    CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));pilot_io_device_port_bind(0,0,NULL);
+    CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
+    fprintf(stderr,"PASS: original DPC -> compiled GPU MOV -> scoped bus, distinct diagnostic context, FD clear/read and unchanged PIT\n");
 }
 #undef OBSERVER_BYTES
 #endif

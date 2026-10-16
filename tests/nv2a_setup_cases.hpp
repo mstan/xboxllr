@@ -36,6 +36,26 @@ static void test_pgraph_setup() {
     write(0x400144,0x10000100);write(0x400148,0x03000000);write(0x400764,0x08000000);
     CHECK(read(0x400144)==0x10000100 && read(0x400148)==0x03000000);
     write(0x400080,0x70000);CHECK(read(0x400080)==0x70000);write(0x400080,0);
+    // Independent bank map: fifteen FD words at3D:00..38. The reached
+    // original context-switch clear must neither execute queued methods nor
+    // claim that unknown initial or nonzero active patch state is supported.
+    write(0x400750,0x3d0000);read(0x400754);
+    CHECK(failure=="NV2A FD state read has no initialized word");failure.clear();
+    CHECK(read(0x400750)==0x3d0000);
+    for(unsigned i=0;i<15;++i)write(0x400754,0);
+    CHECK(failure.empty() && read(0x400750)==0x3d003c && gpu.push_methods()==0);
+    write(0x400750,0x3d0000);
+    for(unsigned i=0;i<15;++i)CHECK(read(0x400754)==0);
+    CHECK(failure.empty() && read(0x400750)==0x3d003c);
+    write(0x400754,0);CHECK(!failure.empty() && read(0x400750)==0x3d003c);failure.clear();
+    write(0x400750,0x3d0038);write(0x400754,1);
+    CHECK(!failure.empty() && read(0x400750)==0x3d0038);failure.clear();
+    CHECK(read(0x400754)==0);
+    write(0x400080,0x70000);write(0x400080,0);
+    write(0x400750,0x3d0038);read(0x400754);
+    CHECK(failure=="NV2A FD state read has no initialized word");failure.clear();
+    write(0x400754,0);write(0x400750,0x3d0034);read(0x400754);
+    CHECK(failure=="NV2A FD state read has no initialized word");failure.clear();
     for(uint32_t address : {0xe00050u,0xdf0008u}) {
         write(0x400750,address);write(0x400754,1);
         CHECK(read(0x400750)==address+4);
@@ -47,6 +67,8 @@ static void test_pgraph_setup() {
     write(0x7110a0,0x12345678);write(0x200,0xffffefff);
     CHECK(read(0x400084)==0 && read(0x400144)==0 && read(0x400750)==0);
     CHECK(read(0x400904)==0 && read(0x100244)==0x1000 && read(0x7110a0)==0x12345678);
+    write(0x400750,0x3d0000);read(0x400754);
+    CHECK(failure=="NV2A FD state read has no initialized word");failure.clear();
     for(uint32_t address : {0xe00050u,0xdf0008u}) {
         write(0x400750,address);CHECK(read(0x400754)==0);
     }
@@ -73,6 +95,33 @@ static void test_pgraph_setup() {
     CHECK(failure.empty());
     write(0x40008c,0);CHECK(!failure.empty() && !read(0x40008c));failure.clear();
     write(0x400750,0xea0008);read(0x400754);CHECK(!failure.empty());
+}
+
+static void test_pgraph_fd_patch_guard() {
+    for(bool batching:{false,true}) for(uint32_t method=0x1de0;method<0x1e20;method+=4) {
+        std::string failure;
+        xlle::Nv2a gpu([&](const std::string& why){failure=why;});
+        std::vector<uint8_t> ram(4096);
+        gpu.set_pfifo_run_batching(batching);
+        gpu.set_mem_access([&](uint32_t a,void* p,size_t n){
+            if(uint64_t(a)+n>ram.size())return false;std::memcpy(p,ram.data()+a,n);return true;},
+            [&](uint32_t a,const void* p,size_t n){
+            if(uint64_t(a)+n>ram.size())return false;std::memcpy(ram.data()+a,p,n);return true;},
+            [&](uint32_t a,size_t n)->uint8_t*{return uint64_t(a)+n<=ram.size()?ram.data()+a:nullptr;});
+        auto write=[&](uint32_t reg,uint32_t value){gpu.mmio_write(0xfd000000u+reg,4,value);};
+        write(0x400750,0x3d0000);for(unsigned i=0;i<15;++i)write(0x400754,0);
+        const uint32_t packet[]={0x40000,1,0x40000|method,0};
+        std::memcpy(ram.data(),packet,sizeof(packet));
+        const uint32_t setup[][2]={{0x700008,1},{0x70000c,0x80010020},{0x700200,0x97},
+            {0x700180,0x3d},{0x700184,4095},{0x700188,0},
+            {0x002504,1},{0x003204,0x100},{0x00322c,0x18},{0x003244,0},
+            {0x003220,1},{0x003250,1},{0x003200,1},{0x400720,1}};
+        for(auto& r:setup)write(r[0],r[1]);
+        CHECK(failure.empty());write(0x800040,sizeof(packet));
+        CHECK(failure=="NV2A FD patch processing is not implemented");
+        CHECK(gpu.semaphore_writes()==0);
+        CHECK(batching ? gpu.pfifo_runs_batched()>0 : gpu.pfifo_runs_batched()==0);
+    }
 }
 
 static void test_pgraph_boot_configuration() {

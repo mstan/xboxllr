@@ -2,6 +2,7 @@
  * equivalents through the same ABI bridge used by title callbacks. */
 static unsigned timer_lle_callbacks,timer_lle_queued;
 static int timer_lle_cancel;
+static void (*timer_lle_device_setup)(void),(*timer_lle_device_check)(void);
 static uint32_t timer_callback_lle_call(unsigned ordinal,const uint32_t *args,unsigned count)
 {
 #ifdef PILOT_SCHEDULING_LLE
@@ -15,6 +16,7 @@ static void test_timer_lle_dpc(void)
     uint32_t object=MEM32(g_esp+4),context=MEM32(g_esp+8);
     CHECK(dispatch_in_dpc && pilot_io_device_irql()==2 && MEM8(g_fs_base+0x24)==2);
     CHECK(g_fs_base==PILOT_IO_PCR_BASE);
+    if(timer_lle_device_check)timer_lle_device_check();
     CHECK(!MEM8(object+2) && timer_callback_lle_call(121,NULL,0)!=0);
     CHECK(g_esp>=0xd001e000u && g_esp<0xd0021000u); // qualified original stack, never relocated
     if(object==0x19540) {
@@ -60,6 +62,7 @@ static void test_timer_dpc_lle(void)
     install_fault_handler();CHECK(!pilot_io_device_files(memory));
     g_fs_base=0x19000;MEM8(g_fs_base+0x24)=0;
     uint32_t revision=0;CHECK(!usb_access(0xfed00000,0,&revision) && revision==0x10);
+    if(timer_lle_device_setup)timer_lle_device_setup();
     uint32_t dpc[]={0x19540,0x12480,0x195a0};event_lle_call(107,dpc);
     dpc[0]=0x19560;dpc[2]=0xabcdef01;event_lle_call(107,dpc);
     uint32_t command=0x34,low=0x65,high=4;

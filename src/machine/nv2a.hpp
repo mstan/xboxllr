@@ -2682,6 +2682,10 @@ private:
     bool pgraph_executing_ = false;
     uint32_t pgraph_context_control_ = 0, pgraph_context_user_ = 0;
     uint32_t pgraph_ffintfc_ = 0, pgraph_rdi_index_ = 0;
+    // RDI 3D: fifteen FD patch-state words. Only explicit inactive clears
+    // are qualified; reset/power-on contents are not inferred as zero.
+    std::array<uint32_t, 15> pgraph_fd_state_{};
+    uint16_t pgraph_fd_initialized_ = 0;
     // Original/nxdk DXT1-noise controls in RDI E0:50 and DF:08. Transport
     // is modeled separately; enabled pixel behavior remains guarded.
     std::array<uint32_t, 2> dxt1_noise_control_{};

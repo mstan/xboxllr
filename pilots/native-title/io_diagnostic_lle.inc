@@ -50,7 +50,7 @@ int pilot_io_device_diagnostic_read(uint32_t address,void *out,uint32_t bytes,in
             if(!backing)return 0;break;
         }
         if(!backing) {
-            for(unsigned i=0;i<8;++i)if(device_mmio[i].callback && at>=device_mmio[i].first &&
+            for(unsigned i=0;i<8;++i)if((device_mmio[i].callback || device_mmio[i].memory) && at>=device_mmio[i].first &&
                (uint64_t)at<(uint64_t)device_mmio[i].first+device_mmio[i].bytes)return 0;
             if(!diagnostic_translation(at,&pa) || (uint64_t)pa+span>RAM_BYTES)return 0;
             backing=physical_backing(pa)-(at&4095);
@@ -78,7 +78,8 @@ int pilot_io_device_diagnostic_context(PilotIoDiagnosticEvent *event)
 {
     if(!event || !device_bus_borrow || original_diagnostic_borrow || !execution_depth)return 0;
     if(!diagnostic_context(cpu,event))return 0;
-    event->kind=PILOT_IO_DIAGNOSTIC_MMIO;return 1;
+    event->kind=compiled_mmio_scope?PILOT_IO_DIAGNOSTIC_COMPILED_MMIO:PILOT_IO_DIAGNOSTIC_MMIO;
+    return 1;
 }
 static void diagnostic_block(uc_engine *engine,uint32_t address)
 {

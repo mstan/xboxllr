@@ -654,6 +654,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"gpu-lle-transport")) { test_gpu_lle_transport(); return 0; }
         if (!strcmp(argv[1],"gpu-thread-cpu-lle")) {test_gpu_thread_cpu_lle();return 0;}
         if (!strcmp(argv[1],"gpu-first-context-observer")) {test_gpu_first_context_observer();return 0;}
+        if (!strcmp(argv[1],"gpu-compiled-context-prepare")) {test_gpu_compiled_context_prepare();return 0;}
         if (!strcmp(argv[1],"gpu-first-context-capture-guard") && argc==3) {test_gpu_first_context_capture_guard(argv[2]);return 0;}
         if (!strcmp(argv[1],"gpu-thread-av-lle")) {test_gpu_thread_av_lle(0);return 0;}
         if (!strcmp(argv[1],"gpu-thread-av-mode-startup")) {test_gpu_thread_av_lle(1);return 0;}

@@ -1193,6 +1193,7 @@ int main() {
     test_gpu_initialization_controls();
     test_gpu_platform_bus();
     test_pgraph_setup();
+    test_pgraph_fd_patch_guard();
     test_pgraph_boot_configuration();
     test_pgraph_context_admission();
     test_ptimer_reference();

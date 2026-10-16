@@ -1827,6 +1827,8 @@ const char *pilot_io_device_bus_memory_bind(uint32_t first,uint32_t bytes,PilotI
 {return device_mmio_bind(first,bytes,NULL,callback,PILOT_IO_DMA_SYNC);}
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback)
 {return pilot_io_device_mmio_bind_dma(first,bytes,callback,PILOT_IO_DMA_SYNC);}
+int pilot_io_device_compiled_mmio_active(void)
+{return compiled_mmio_scope!=NULL;}
 const char *pilot_io_device_compiled_mmio(uint32_t address,unsigned size,int write,uint32_t *value)
 {
     /* Reject from TLS alone before touching shared state or taking a lock:

@@ -68,7 +68,7 @@ const char *pilot_io_device_thread_trace(uint32_t entry);
  * owner is stopped. It may not call services, clocks, device work or reenter.
  * The receiver cannot admit execution or change a retained transport guard. */
 enum { PILOT_IO_DIAGNOSTIC_ENTRY=1,PILOT_IO_DIAGNOSTIC_RETURN=2,
-       PILOT_IO_DIAGNOSTIC_MMIO=3 };
+       PILOT_IO_DIAGNOSTIC_MMIO=3,PILOT_IO_DIAGNOSTIC_COMPILED_MMIO=4 };
 typedef struct PilotIoDiagnosticEvent {
     uint32_t kind,pc,regs[8],flags,thread,in_kernel;
     uint32_t entry,entry_sp,caller,driver,address,size,value;
@@ -76,14 +76,15 @@ typedef struct PilotIoDiagnosticEvent {
 typedef void (*PilotIoDiagnostic)(const PilotIoDiagnosticEvent *event);
 const char *pilot_io_device_diagnostic_bind(uint32_t entry,uint32_t bytes,
     const char *sha256,PilotIoDiagnostic receiver);
-/* Borrowed context only inside the actual raw-MMIO callback. The caller
- * chooses its exact pre-write point after ordinary device sampling. */
+/* Borrowed context inside a registered MMIO callback. For COMPILED_MMIO,
+ * pc/regs/flags describe the suspended raw CPU, NOT the compiled instruction.
+ * The caller chooses its exact pre-write point after device sampling. */
 int pilot_io_device_diagnostic_context(PilotIoDiagnosticEvent *event);
 /* Copy-only existing plain engine RAM/native view, or original RAM translation
  * when no alias is cached. MMIO aliases and ROM are rejected. No publication, fault
  * admission, guest service, DMA lease, MMIO or transport-failure mutation.
  * physical!=0 selects actual retail RAM addresses. Valid only in receiver or
- * raw-MMIO callback on the sole engine owner. Validate entire extent first. */
+ * registered MMIO callback on the sole engine owner. Validate entire extent first. */
 int pilot_io_device_diagnostic_read(uint32_t address,void *out,uint32_t bytes,int physical);
 /* Repeated stdcall observations on the actual CPU. Source bytes are verified
  * before execution. Entry/return pairing uses the original thread, caller and
@@ -216,6 +217,9 @@ const char *pilot_io_device_bus_memory_bind(uint32_t first,uint32_t bytes,PilotI
  * A callback failure poisons this transport; failed reads leave value intact.
  * Does not execute/pump CPU, clocks or device work. */
 const char *pilot_io_device_compiled_mmio(uint32_t address,unsigned size,int write,uint32_t *value);
+/* Same-thread callback routing query only; compiled_mmio still validates the
+ * complete stopped CPU ownership. Never retry a failed compiled access as idle. */
+int pilot_io_device_compiled_mmio_active(void);
 /* Admit one explicit RAM lease capability for this device owner. Generic
  * mappings use synchronous DMA; only the shared OHCI owner admits USB leases. */
 const char *pilot_io_device_mmio_bind_dma(uint32_t first,uint32_t bytes,PilotIoMmio callback,unsigned dma_lease);

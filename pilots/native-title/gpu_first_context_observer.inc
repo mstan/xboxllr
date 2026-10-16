@@ -101,6 +101,7 @@ static void gpu_context_capture(const PilotIoDiagnosticEvent *event)
     char json[2048];
     int length=sprintf_s(json,sizeof(json),
         "{\"kind\":%u,\"raw_pc\":%u,\"raw_thread\":%u,\"raw_in_kernel\":%u,"
+        "\"compiled_callback_request\":%s,\"raw_pc_is_request_pc\":%s,"
         "\"driver_address\":%u,\"same_original_driver\":%s,\"source_entry\":%u,\"source_bytes\":%u,\"source_sha256\":\"%s\","
         "\"observed_source_sha256\":\"%s\",\"raw_source_copied\":%s,\"original_source_bound\":%s,"
         "\"library_sha256\":\"%s\",\"driver_copied\":%s,\"const_snapshot_copied\":%s,"
@@ -108,7 +109,9 @@ static void gpu_context_capture(const PilotIoDiagnosticEvent *event)
         "\"actual_producer_return_observed\":%s,\"selector_request_observed\":%s,"
         "\"selector_accepted_before_this_record\":%s,\"load_request_observed\":%s,"
         "\"g03_qualified\":false,\"diagnostic_device_reads_writes_clocks_drains\":0}\n",
-        event->kind,event->pc,event->thread,event->in_kernel,driver_address,
+        event->kind,event->pc,event->thread,event->in_kernel,
+        event->kind==PILOT_IO_DIAGNOSTIC_COMPILED_MMIO?"true":"false",
+        event->kind==PILOT_IO_DIAGNOSTIC_COMPILED_MMIO?"false":"true",driver_address,
         driver_address && driver_address==gpu_context_observer.entry.driver?"true":"false",GPU_CONTEXT_PRODUCER,
         GPU_CONTEXT_PRODUCER_BYTES,GPU_CONTEXT_PRODUCER_SHA,gpu_context_observer.observed_source_sha,
         gpu_context_observer.source_copied?"true":"false",gpu_context_observer.source_bound?"true":"false",
@@ -153,6 +156,7 @@ static void gpu_context_prewrite(uint32_t address,unsigned size,uint32_t value)
     PilotIoDiagnosticEvent event;
     if(!pilot_io_device_diagnostic_context(&event))return;
     event.address=address;event.size=size;event.value=value;
+    const int compiled=event.kind==PILOT_IO_DIAGNOSTIC_COMPILED_MMIO;
     /* This actual function carries driver in EBX and aperture in ESI. Copy
      * those current registers, never substitute earlier trace metadata. */
     static const unsigned char selector[]={0x89,0x86,0x84,0x07,0x40,0x00};
@@ -160,9 +164,17 @@ static void gpu_context_prewrite(uint32_t address,unsigned size,uint32_t value)
     unsigned char instruction[10];unsigned bytes=address==0xfd400784u?sizeof(selector):sizeof(load);
     const unsigned char *expected=address==0xfd400784u?selector:load;
     uint32_t pc=address==0xfd400784u?0x0013fd25u:0x0013fd2bu;
-    int instruction_copied=pilot_io_device_diagnostic_read(event.pc,instruction,bytes,0);
-    event.driver=size==4 && event.pc==pc && event.regs[6]==0xfd000000u &&
+    int instruction_copied=!compiled && pilot_io_device_diagnostic_read(event.pc,instruction,bytes,0);
+    event.driver=!compiled && size==4 && event.pc==pc && event.regs[6]==0xfd000000u &&
         instruction_copied && !memcmp(instruction,expected,bytes)?event.regs[3]:0;
+    if(compiled) {
+        // Current generated registers are separate evidence from the saved
+        // raw dispatcher entry. There is no invented guest instruction PC.
+        const uint32_t regs[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi};
+        if(!gpu_context_file(gpu_context_observer.records+1,"compiled-regs.bin",regs,sizeof(regs)))
+            gpu_context_observer.failed=1;
+        event.driver=size==4 && g_esi==0xfd000000u?g_ebx:0;
+    }
     if(instruction_copied && !gpu_context_file(gpu_context_observer.records+1,"request-source.bin",instruction,bytes))
         gpu_context_observer.failed=1;
     /* Preserve even mismatched raw requests as evidence, never as admission. */

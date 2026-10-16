@@ -213,6 +213,7 @@ void Nv2a::pgraph_reset_setup() {
     pgraph_context_managed_=false;
     pgraph_executing_=false;
     pgraph_context_control_=pgraph_context_user_=pgraph_ffintfc_=pgraph_rdi_index_=0;
+    pgraph_fd_state_.fill(0);pgraph_fd_initialized_=0;
     dxt1_noise_control_.fill(0);
     pgraph_tiles_=RamTileConfig{};texture_tiles_=RamTileConfig{};
     compress_zbuffer_=false; // controller tags are not PGRAPH context state
@@ -240,6 +241,14 @@ bool Nv2a::pgraph_setup_read(uint32_t offset,uint32_t& value) {
     case 0x750:value=pgraph_rdi_index_;return true;
     case 0x754: {
         uint32_t select=(pgraph_rdi_index_>>16)&0x1ff,address=pgraph_rdi_index_&0x1ffc;
+        if(select==0x3d) {
+            if(address>=pgraph_fd_state_.size()*4 ||
+               !(pgraph_fd_initialized_&(1u<<(address/4)))) {
+                fault_("NV2A FD state read has no initialized word");value=0;return true;
+            }
+            value=pgraph_fd_state_[address/4];
+            pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);return true;
+        }
         auto* word=select==0xea?ram_config_word(texture_tiles_,address)
                              :dxt1_noise_control_word(select,address);
         if(!word){fault_("NV2A unsupported RDI read bank/address");value=0;return true;}
@@ -286,6 +295,8 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
         if(value) {
             vertex_indices_.clear();inline_array_words_.clear();inline_vertices_.clear();immediate_vertices_.clear();
             primitive_mode_=0;invalidate_vsh_program_cache();
+            // A subengine reset does not establish FD SRAM contents.
+            pgraph_fd_initialized_=0;
         }
         pgraph_setup_[offset/4]=value;return true;
     case 0x144:
@@ -299,6 +310,17 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
         pgraph_rdi_index_=value;return true;
     case 0x754: {
         uint32_t select=(pgraph_rdi_index_>>16)&0x1ff,address=pgraph_rdi_index_&0x1ffc;
+        if(select==0x3d) {
+            // envytools f102b823 pgraph_state.cc maps bank3D to fifteen
+            // FD patch-state words. Original13FC4C clears all fifteen while
+            // PGRAPH is idle, before context loading. Active patch commands
+            // remain explicit faults; no tessellation state is discarded.
+            if(address>=pgraph_fd_state_.size()*4 || value || pgraph_status()) {
+                fault_("NV2A unsupported active/nonzero FD state write");return true;
+            }
+            pgraph_fd_state_[address/4]=0;pgraph_fd_initialized_|=uint16_t(1u<<(address/4));
+            pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);return true;
+        }
         if(auto* word=dxt1_noise_control_word(select,address)) {
             if(value>1 || pgraph_status()) {
                 fault_("NV2A unsupported DXT1 noise control transition");return true;

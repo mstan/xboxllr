@@ -48,7 +48,47 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;41 retained deferral IDs,40 scopes.
+Current disposition: six of nine families;42 retained deferral IDs,41 scopes.
+
+## Inactive FD preparation and compiled GPU bus ownership - 2026-10-15
+
+The maintained RDI3D bank now supports the reached fifteen-word inactive clear.
+Independent [envytools f102b823 state load/dump](https://github.com/envytools/envytools/blob/f102b82381f3f11cee113d16374c87091db039d9/hwtest/pgraph_state.cc#L2302)
+maps these words to FD patch state; nxdk pb_load_gr_ctx independently issues the
+same clear before context loading. Only explicitly initialized words can be
+read, index advancement stops on rejection, and both PGRAPH/subengine resets
+invalidate initialization knowledge. Nonzero state and active patch/curve/
+transition methods remain guarded. Review found that those methods previously
+fell through the generic unknown-method case; explicit rejection now prevents
+a false claim that the cleared state remained valid. GFX-D20 retains unreached
+active processing/reset contents without waiving required context transfer.
+
+Compiled GPU ISR/DPC accesses now use the existing stopped original-CPU bus
+scope and its synchronous DMA borrow. A failed scoped access never retries as
+idle access. Passive capture distinguishes the suspended raw CPU from current
+compiled registers, retaining the latter separately without inventing an
+original instruction PC. Review also caught a diagnostic-read exclusion that
+missed memory-bus owners. The corrected test reads an actual original allocation,
+registers that same address as a memory-bus region, and verifies rejection with
+unchanged canaries before unbinding/freeing it. The initial fixed-address test
+failed because the assumed address was not mapped; its log is retained.
+
+The existing NV2A suite passes in0.53s with actual direct-memory PFIFO batching
+telemetry as well as the strict path. Seven affected original GPU suites pass
+in1.26s, including genuine DPC -> compiled MOV -> registered GPU clear/readback
+with unchanged PIT time. Raw capture guard also passes. The strengthened memory
+owner test passes in0.31s. Evidence: display-clock-20261016/fd-context-*.
+
+The changed connected run reaches its180.203s supervisor ceiling without a
+device guard, but has only actual producer entry/return records, no selector,
+load or pixels. The final samples show continued original execution, three
+threads and changing PCs; this is not evidence of completion or a diagnosed
+deadlock. Executable383ad9292ec26abfe1c5ea7a0745752d7bdea06f462bc4fe436e34b6cd88d988
+and DLL30f3e6a6b23804f8b633e5944f3ec9e671641c4fd8af69d612bdaeb6a91f9c4d
+are pinned under build/blinx/gpu-lle-fd-context-20261016/. Next is a sufficiently
+bounded observation of the first actual transfer, followed by its independently
+established saved-image semantics. No context-transfer success is supplied.
+Audio commit38f6836 is in its separate changed acceptance run; still6/9.
 
 ## Retained audio restart and reached context-switch preparation - 2026-10-15
 
@@ -73,7 +113,9 @@ by this small check. AUDIO-D16 defers exact silicon reset-edge precision and
 unreached start profiles, not required normal restart. Production preparation
 is complete: the updated executable and four original synchronization/callback/
 timer controls pass. Root verified the reviewed source, executable and build-log
-pins. The connected title run remains pending. Evidence:
+pins. The changed connected title run is active under the audio worker, using the
+reviewed private executable. Its automatic same-buffer restart/output checkpoint
+remains the acceptance target; no new success is claimed. Evidence:
 audio-synchronize-lifecycle-20261016/worker-review/ and
 audio-cursor-lifecycle-20261016/PREPARED.aot-private.md.
 
@@ -1166,7 +1208,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: original pre-title AV producer passes; connected title crosses encoder/aperture setup and produces its real context; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: complete actual producer image/table/RAMFC captured; first context-switch caller reaches RDI3D clear before load; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G03 | Open: complete actual producer image/table/RAMFC captured; inactive FD clear modeled; scoped connected route awaits first transfer; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |

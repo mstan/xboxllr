@@ -28,11 +28,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other seventeen graphics entries retain their deferred scopes and reopening
+- The other eighteen graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **41 retained question IDs:40 with deferred scope, and one fully
+there are **42 retained question IDs:41 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -153,3 +153,9 @@ audio synchronization or complete numerical LLE qualification.
 Subsequent GFX-F02 core source changes do not inherit the pinned original
 prefix's numerical qualification. Its preserved DLL and snapshots stay intact;
 the new source has the representative CPU contract qualification above.
+
+## Additional inactive patch-state boundary - 2026-10-15
+
+| ID | Question | Evidence and reason it can wait | Reopen when |
+| --- | --- | --- | --- |
+| GFX-D20 | What nonzero FD patch/curve/transition state, reset contents and processing are required beyond the reached inactive clear? | Pinned envytools f102b823 hwtest/pgraph_state.cc maps RDI3D to fifteen FD words. Actual original13FC4C writes fifteen zeros while idle before context loading. The maintained model supports these explicit clears and their readback, with initialization knowledge invalidated by full/subengine reset. Nonzero programming, unknown reads and NV0971DE0..1E1C processing remain guarded. No reached attract consumer currently requires active patch processing. | An actual supported command or context image requires nonzero FD state, patch/curve/transition output, or reading reset contents before explicit initialization. Saved-context load/save and ordinary draw output remain required G03/G05, not waived by this deferral. |
