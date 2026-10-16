@@ -28,15 +28,17 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other fifteen graphics entries retain their deferred scopes and reopening
+- The other seventeen graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
-Together with the twenty-one entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **38 retained question IDs: 37 with deferred scope, and one fully
+Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
+there are **41 retained question IDs:40 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
-connected output check. Earlier entries and their evidence remain unchanged. Earlier reports
+connected output check. AUDIO-D16 records exact stopped-voice cursor reset timing;
+GFX-D18/D19 retain PRAMDAC interpretation and analog WSS questions. Earlier
+entries and their evidence remain unchanged. Earlier reports
 calling all 27 then-recorded questions "precision deferrals" were imprecise;
 they are historical counts, not 27 currently waived closing requirements.
 The current family count is **6/9**; this reconciliation qualifies no new work.

@@ -6,15 +6,15 @@ evidence and reopening trigger; preserve resolved questions and their outcomes.
 Deferral does not count as qualification. Missing service routing, clocks,
 ownership or required processing stages remain implementation work.
 
-The existing 17 graphics questions and their replay evidence remain in the
+The existing19 graphics questions and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
-Current reconciliation, 2026-10-15: the twenty-one entries here retain their
+Current reconciliation, 2026-10-15: the twenty-two entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues, 38 IDs
-are retained; 37 still contain deferred scope. AUDIO-D09 records the sample
+behavior from its remaining precision question. Across both queues,41 IDs
+are retained;40 still contain deferred scope. AUDIO-D09 records the sample
 counter's remaining sub-sample phase question; AUDIO-D10 records AC-link
 control-transaction phase and bus latency. AUDIO-D11 retains unreached output
 configuration encodings and trap behavior. AUDIO-D12 retains the nontrapped
@@ -28,6 +28,8 @@ GFX-D16 retains isolated DEBUG-bit interpretation and exact field-publication
 research while preserving required functional startup, clocks and output.
 GFX-D17 retains unidentified encoder command effects without blocking separately
 specified clock/reset/sync contracts; required connected output stays open.
+AUDIO-D16 records the exact stopped-voice cursor reset edge and unreached
+ownership/format extensions; normal same-buffer restart/output remains A05.
 See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
@@ -62,6 +64,8 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | AUDIO-D13 | What happens for reset at arbitrary instruction boundaries, unreached pending-DMA cancellation, or additional warm-state combinations? | The normal original retirement caller submits FE control/notification before GP0/EP1. Source-bound caller evidence and the configured reset observer isolate that required contract. Both physical GP/EP no-DMA experiments now complete reset and fresh reexecution. Unsupported pending work retains its guards; actual drain, normal connected retirement and model adoption remain required A03-A05. | The bounded title reaches reset with pending work after its real retirement sequence, a supported lifecycle exposes stale work, or broader reset/cancellation support is added. Establish the reached case before widening admission; do not claim cancellation from a drained reset. |
 | AUDIO-D14 | What additional malformed-command, timeout and failure combinations need independent qualification? | Nine unchanged original FE helper cases already distinguish success, timeout, no notifier, stopped state and release under explicit synthetic replies. Return1 and final status80 do not prove completion. This is a representative caller contract, not hardware queue evidence. Required real notification ordering, actual consumer completion and safe failure/ownership checks stay A04/A05; an exhaustive fault matrix is outside the bounded goal. | A required original caller takes an uncovered failure path, a regression reveals false success or premature release, or wider error recovery becomes supported. Retain existing failure guards and replay the relevant original consumer. |
 | AUDIO-D15 | What exact interpolation kernel, bandwidth and fractional phase quantization does silicon use for source-rate conversion? | The existing isolated rate adapter declares libsamplerate 0.2.2 SRC_SINC_FASTEST as a nominal policy, following the reference choice rather than claiming silicon identity. Independent direct coefficient convolution reproduces 101,184 captured stereo rate frames exactly; independent ADX plus the declared kernel and EP model passes representative full-band output under unchanged 0.02 RMSE / 0.99 correlation limits. The earlier SciPy-filter difference is retained, not relabeled a pass. This policy is replaceable without changing source DMA, clocks, mixing or ownership. | Independent hardware evidence distinguishes required rate/filter behavior, a supported consumer exceeds the declared output tolerance, or a new interpolation policy is selected. Replay saved source/rate/output comparisons and existing cursor, partition, pause/seek and lifecycle checks. Actual Stop/reuse and continued output remain required A05; they are not deferred. |
+
+| AUDIO-D16 | At which exact hardware edge does a stopped voice's CBO reset, and what are the rules for other formats/ownership? | The original stopped-buffer position0/frequency44100 and complete179EFD/179C4B start sequence has no CBO command but requires playback from source0. The bounded model resets low24 CBO at VOICE_ON for stopped, locked ordinary2D PCM16, preserving the adjacent envelope byte. Original-code and contrasting source-origin fixtures pass; the previous model reproduces the title's guard. Pinned xemu corroborates reset but labels it FIXME, so this is a functional nominal contract, not a new silicon measurement. Unsupported nonzero active/unlocked/spatial/stream/linked/multipass/other-format starts remain guarded. | A supported caller distinguishes cursor timing between Stop/start or VOICE_ON/unlock, reaches another nonzero start profile, or independent hardware evidence contradicts the reset/preservation policy. Actual title restart, continued output and A/V timing remain required A05. |
 
 AUDIO-D11 follow-up,2026-10-15: independent analog one/two-node ring traversal
 and explicit stop/reset are resolved and adopted. Original stream/ISR/DPC helpers

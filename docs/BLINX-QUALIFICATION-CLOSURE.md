@@ -48,7 +48,44 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;40 retained deferral IDs,39 scopes.
+Current disposition: six of nine families;41 retained deferral IDs,40 scopes.
+
+## Retained audio restart and reached context-switch preparation - 2026-10-15
+
+The changed audio capture is terminal after4259.766s, return2. The original153
+synchronization callback now succeeds on the required retained object: Stop10751
+returns0 at45333000PITticks and GetStatus10752 reports stopped. Public position0
+and frequency44100 also return successfully; looping Play10783 then reaches the
+VOICE_ON68 nonzero-cursor guard. Other-object playback is not substituted for
+this required restart. No lifecycle checkpoint or successful capture footer exists.
+
+The source-bound short reproduction now runs original Stop/status/unlink/cancel,
+public position0/frequency44100 and the complete179EFD/179C4B region/start sequence
+under its declared allocated-SGE precondition. It emits no explicit CBO store.
+The maintained stopped, locked ordinaryPCM16 VOICE_ON resets low24 CBO before
+ACTIVE, retaining the adjacent envelope byte and existing converter/envelope
+owners. Source-origin and negative ownership fixtures pass; the exact same
+original restart reproduces the previous guard with the old implementation.
+After restart,2048 frames match the independently specified source with residual
+6.21e-6 and unchanged source bytes. Root review retains the fixture's limit:
+outer Play SGE acquisition and full title/DPC/output acceptance are not supplied
+by this small check. AUDIO-D16 defers exact silicon reset-edge precision and
+unreached start profiles, not required normal restart. Production preparation
+is complete: the updated executable and four original synchronization/callback/
+timer controls pass. Root verified the reviewed source, executable and build-log
+pins. The connected title run remains pending. Evidence:
+audio-synchronize-lifecycle-20261016/worker-review/ and
+audio-cursor-lifecycle-20261016/PREPARED.aot-private.md.
+
+Graphics aperture commit7765ecf passes the six affected original suites. The
+40s follow-up with existing progress diagnostics shows continued initialization,
+not a device fault. A justified180s ceiling then reaches a real terminal guard
+after144.062s: the original13FC4C context-switch caller clears RDI bank3D with
+fifteen zero words before its first400784/400788 load. That bank is unsupported.
+The actual complete producer image is retained, but the selector/load request
+has not yet executed. Next is this reached preparation batch and consumed context
+semantics. Evidence: build/blinx/gpu-lle-context-startup-20261016/ and the private
+13FC4C caller extract under gpu-lle-cpu-aperture-20261016/. Still6/9.
 
 ## CPU UMA aperture and actual context production - 2026-10-15
 
@@ -1128,15 +1165,15 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: original pre-title AV producer passes; connected title crosses encoder guard and reaches CPU memory-aperture transport; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G02 | Open: original pre-title AV producer passes; connected title crosses encoder/aperture setup and produces its real context; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G03 | Open: complete actual producer image/table/RAMFC captured; first context-switch caller reaches RDI3D clear before load; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Component complete: all3 original timeout retirement/reentry configurations and actual queued DPC/FEMEM completion pass; connected acceptance remains A05 | `.115` complete | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
-| A05 | Processing/output prefix passes; retained Stop exposed original153 callback gap, now implemented/reviewed with focused tests; changed title reuse/output acceptance remains | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Processing/output prefix and actual retained Stop/status pass; restart reaches cursor reset, now fixed with original source/output checks; changed title reuse/output acceptance remains | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and

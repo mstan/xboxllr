@@ -115,15 +115,25 @@ int main() {
         const auto stopped=f.ram;f.quantum(n,done,9);
         CHECK(!n && !done && f.completions==1 && f.ram==stopped && f.source_reads==reads);
         // A stopped converter must not leak old positive PCM into a new owner.
-        f.reg(0x1000,0x60);f.reg(0x2054,0xffff);f.reg(0x203d8,0);
+        f.reg(0x1000,0x60);f.reg(0x2054,0xffff);
+        CHECK((f.word(f.object+0x58)&0xffffff)!=0);
+        const uint32_t old_cursor_word=f.word(f.object+0x58),old_end_word=f.word(f.object+0x5c);
         for(unsigned i=0;i<f.pcm.size();i+=2) {
-            const int16_t sample=-8192;
+            // Only the first256 source frames are negative. A retained old
+            // cursor would read positive samples even with converter reset.
+            const int16_t sample=i/4<256?-8192:8192;
             for(unsigned lane=0;lane<2;++lane) {
                 const unsigned a=f.base+i+lane;
                 f.ram[f.word(f.sge+(a>>12)*8)+(a&4095)]=uint8_t(uint16_t(sample)>>(lane*8));
             }
         }
-        f.ram[f.notify+15]=0x80;f.reg(0x20120,0x1ffff);f.reg(0x20124,f.voice);
+        f.ram[f.notify+15]=0x80;f.reg(0x20120,0x1ffff);f.reg(0x202fc,1);
+        const unsigned before_reads=f.source_reads,before_completions=f.completions;
+        f.reg(0x20124,f.voice);
+        CHECK(f.error.empty() && f.word(f.object+0x58)==(old_cursor_word&0xff000000));
+        CHECK(f.source_reads==before_reads && f.completions==before_completions && f.ram[f.notify+15]==0x80);
+        CHECK(f.word(f.object+0x5c)==old_end_word);
+        f.reg(0x202fc,0);
         const auto restarted=f.quantum(n,done);CHECK(n==32 && !done && f.error.empty());
         for(unsigned at=0;at<32;++at)CHECK(restarted[at]<-0.2f && restarted[32+at]<-0.2f);
         // VOICE_ON also resets the release origin, not only the converter.
@@ -135,6 +145,25 @@ int main() {
         uint32_t n;bool done;f.quantum(n,done);
         CHECK(n==32 && !done && !f.completions && (f.word(f.object+0x54)&(1u<<21)));
         CHECK((f.word(f.object+0x5c)>>24)==0);
+    }
+    // A nonzero start is admitted only for the reached stopped, locked PCM16
+    // owner. Unsupported ownership cannot alter links/cursors/notifiers.
+    {
+        Fixture f;f.put(f.object+0x58,0x7b000123);
+        f.put(f.object+0x54,f.word(f.object+0x54)&~(1u<<21));
+        f.reg(0x20120,0x1ffff);const auto before=f.ram;
+        f.reg(0x20124,f.voice); // inactive ordinary PCM16, deliberately unlocked
+        CHECK(!f.error.empty() && f.ram==before && !f.source_reads && !f.completions);
+    }
+    for(unsigned bad:{0u,1u<<21,1u<<22,1u<<24,0x80000000u}) {
+        Fixture f;f.put(f.object+0x58,0x7b000123);f.reg(0x202fc,1);
+        if(bad) {
+            f.put(f.object+0x54,f.word(f.object+0x54)&~(1u<<21));
+            f.put(f.object+4,f.word(f.object+4)^bad);
+        }
+        f.reg(0x20120,0x1ffff);const auto before=f.ram;
+        f.reg(0x20124,f.voice);
+        CHECK(!f.error.empty() && f.ram==before && !f.source_reads && !f.completions);
     }
     // Zero-rate release is a nominal immediate force-release; pause and lock
     // freeze both envelope clocks and resume the same pending ordinary owner.

@@ -22,8 +22,9 @@ from unicorn.x86_const import (UC_X86_REG_EAX,UC_X86_REG_EBX,UC_X86_REG_ECX,UC_X
     UC_X86_REG_CS,UC_X86_REG_SS,UC_X86_REG_DS,UC_X86_REG_ES,UC_X86_REG_FS)
 
 
-def run(xbe,library,dependencies,kernel=None,natural=False,expectations=None):
+def run(xbe,library,dependencies,kernel=None,natural=False,expectations=None,retained_restart=False):
     assert not natural or kernel, 'natural completion requires the original kernel/driver owner'
+    assert not retained_restart or kernel, 'retained restart requires original stop/unlink owners'
     blob=xbe.read_bytes();assert hashlib.sha256(blob).hexdigest()==IMAGE
     dependency=os.add_dll_directory(str(dependencies.resolve())) if dependencies else None
     dll=c.CDLL(str(library.resolve()))
@@ -159,6 +160,7 @@ def run(xbe,library,dependencies,kernel=None,natural=False,expectations=None):
         return dict(fits=fits)
     for life in range(3):
       for g in golden:
+        if retained_restart and (life or g['kind']!='pcm16' or g['frequency']!=44100):continue
         channels=g['channels'];frequency=g['frequency'];kind=g['kind'];payload=g['positive']
         cpu.mem_write(obj,bytes(0x168));cpu.mem_write(settings,bytes(0xdc));cpu.mem_write(device,bytes(0x1000))
         # Explicit precondition: original 175F5F requests zeroed class storage;
@@ -193,6 +195,11 @@ def run(xbe,library,dependencies,kernel=None,natural=False,expectations=None):
         for offset in (0x730,0x738,0x740,0x748,0x750):
             head=device+offset;put(head,head);put(head+4,head)
         put(outer+0xc,obj);put(outer+0x10,settings)
+        if retained_restart:
+            # Public position/Play wrappers select the derived voice at+20;
+            # frequency selects the base voice at+0C. Both are this actual
+            # already allocated derived object, not replacement service code.
+            put(outer+0x20,obj)
         # Execute actual caller-owned buffer attachment. The allocation branch
         # is deliberately outside this fixture; no allocator is replaced.
         assert call(0x176fa7,[0x32000000,len(payload)],settings)==0
@@ -326,6 +333,41 @@ def run(xbe,library,dependencies,kernel=None,natural=False,expectations=None):
             call(0x17a45c,[0]) # original cancellation is void; verify ownership below
             assert get(device+0x750)==device+0x750 and get(device+0x754)==device+0x750
             assert get(obj+0x98)==obj+0x98 and get(obj+0x9c)==obj+0x98 and get(obj+0xa0)==5
+            if retained_restart:
+                # Keep the same allocation, attachment and source bytes. Unlike
+                # configuration(), the full original region/start producer
+                # must establish its own source position from the retained
+                # cursor. The allocated-SGE precondition remains explicit;
+                # outer Play's separate SGE-manager acquisition is not replaced.
+                assert stopped_cursor&0xffffff
+                source_before=bytes(ram[0xa000:0xc000]);cursor_before=word(base+0x58)
+                transactions.clear()
+                assert call(0x176ad8,[outer+0x1c,0])==0
+                assert get(obj+0x158)==0 and word(base+0x58)==cursor_before
+                assert call(0x176d56,[outer+0x1c,44100])==0
+                assert word(base+0x7c)>>16==(g['pitch']&0xffff)
+                # The fixture's actual allocated SGE source starts at linear0;
+                # the full buffer attachment/regions remain original-owned.
+                assert get(obj+0x164)==0
+                call(0x179efd,[1])
+                restart_commands=[(a,v) for op,a,v in transactions if op=='write']
+                assert (0xfe820124,voice) in restart_commands
+                assert all(a!=0xfe8203d8 for a,v in restart_commands)
+                assert word(base+0x58)==cursor_before&0xff000000
+                assert word(base+0x54)&(1<<21) and ram[notify_physical+15]==0x80
+                assert bytes(ram[0xa000:0xc000])==source_before
+                continued=stage(64);continued_fit=fitted(continued,g['nominal_hz'],1,kind)
+                assert bytes(ram[0xa000:0xc000])==source_before
+                rows.append(dict(life=life,kind=kind,frequency=frequency,
+                    stopped_cursor=stopped_cursor,restart_commands=restart_commands,
+                    retained_attachment=get(settings+0xb8),retained_bytes=get(settings+0xbc),
+                    source_sha256=hashlib.sha256(source_before).hexdigest(),
+                    source_unchanged=True,original_stop_unlink_cancel=True,
+                    original_position0_frequency44100_region_start=True,
+                    continued_frames=len(continued),continued_fit=continued_fit,
+                    final_cursor=word(base+0x58)))
+                print('PASS retained original public position0/frequency44100, region/start, cursor reset and output',flush=True)
+                continue
             stable=bytes(cpu.mem_read(settings+0xc,0xa8))
             assert call(0x176fa7,[0,0],settings)==0
             assert get(settings+0xb8)==0 and get(settings+0xbc)==0
@@ -365,15 +407,19 @@ def run(xbe,library,dependencies,kernel=None,natural=False,expectations=None):
             print('PASS life',life,kind,frequency,'pitch',g['pitch'],'finite',len(final_data),flush=True)
         finally:dll.xlle_apu_reference_destroy(instance);instance=None
     if dependency:dependency.close()
+    scope=('original settings/derived constructors and allocated-SGE source bridge; complete original static Stop/status/inactive-frame/unlink/cancel, public position0/frequency44100, complete179EFD region/start and2048frames source-bound output on unchanged attachment; no outer Play SGE acquisition, full ISR/DPC/title, or silicon cursor-reset-edge precision qualification'
+           if retained_restart else 'whole original settings/derived voice constructors and init/filter-bypass defaults; original helper configuration bridge; actual maintained source/rate/phase0 amplitude/ordered-send pipeline; live original headroom600 to0 setter; original static Stop/inactive-frame/unlink, caller-owned detach/rebind and finite completion consumer; explicit allocated voice/coherent clock/synchronous PIO preconditions; no full DirectSound allocation/configuration emitter, ISR/DPC/SSL/title/effects/silicon precision qualification')
     return dict(xbe_sha256=IMAGE,kernel_sha256=kernel_hash,library_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),
         expectation_sha256=hashlib.sha256(expectation_path.read_bytes()).hexdigest(),cases=rows,guards=faults,
-        source_gain_oracle_faults=len(rows),scope='whole original settings/derived voice constructors and init/filter-bypass defaults; original helper configuration bridge; actual maintained source/rate/phase0 amplitude/ordered-send pipeline; live original headroom600 to0 setter; original static Stop/inactive-frame/unlink, caller-owned detach/rebind and finite completion consumer; explicit allocated voice/coherent clock/synchronous PIO preconditions; no full DirectSound allocation/configuration emitter, ISR/DPC/SSL/title/effects/silicon precision qualification')
+        source_gain_oracle_faults=len(rows),scope=scope)
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description='Private original-default A02 composed voice fixture')
     for arg in ('xbe','library','kernel','output'):p.add_argument('--'+arg,type=Path,required=True)
     p.add_argument('--dependencies',type=Path)
-    p.add_argument('--expectations',type=Path,required=True);args=p.parse_args()
-    result=run(args.xbe,args.library,args.dependencies,args.kernel,expectations=args.expectations)
+    p.add_argument('--expectations',type=Path,required=True)
+    p.add_argument('--retained-restart',action='store_true',help='One reached PCM16/44100 retained-buffer stop/public restart/output case')
+    args=p.parse_args()
+    result=run(args.xbe,args.library,args.dependencies,args.kernel,expectations=args.expectations,retained_restart=args.retained_restart)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
     print('PASS:',len(result['cases']),'original-default composed lives;',len(result['guards']),'real guards')

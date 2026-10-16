@@ -1420,7 +1420,10 @@ private:
         }
 
         // The command supplies both initial envelope phases. Only the four
-        // documented start phases are admitted; no guessed phase/cursor reset.
+        // documented start phases are admitted. The reached ordinary PCM16
+        // restart has no explicit CBO store: the original stopped-buffer start
+        // producer relies on VOICE_ON to return to source frame0. Keep this
+        // functional reset separate from unqualified stream/spatial starts.
         const unsigned amplitude=argument>>28,filter=(argument>>24)&15;
         uint32_t state=0,counters=0,cursor=0,configuration[4]{};
         if(amplitude>3 || filter>3 || (argument&0x00ff0000)) {
@@ -1430,8 +1433,17 @@ private:
            !read_voice_word(voice,0x58,cursor)) {
             device_fault("VOICE_ON envelope state DMA failed");return;
         }
-        if(cursor&0xffffff) {
-            device_fault("VOICE_ON nonzero initial cursor reset remains unqualified");return;
+        const bool reset_cursor=(cursor&0xffffff)!=0;
+        if(reset_cursor) {
+            uint32_t format=0;
+            if(!read_voice_word(voice,kVoiceCfgFmt,format)) {
+                device_fault("VOICE_ON cursor owner DMA failed");return;
+            }
+            if(voice<64 || (state&kVoiceActive) || !voice_locked_[voice] ||
+               (format&((1u<<21)|(1u<<22)|kVoiceStream)) ||
+               (format&0xf0000000u)!=0x50000000u) {
+                device_fault("VOICE_ON nonzero cursor outside stopped ordinary PCM16 owner");return;
+            }
         }
         for(unsigned i=0;i<4;++i)if(!read_voice_word(voice,8+i*4,configuration[i])) {
             device_fault("VOICE_ON envelope configuration DMA failed");return;
@@ -1469,7 +1481,10 @@ private:
         }
 
         state=(state&0x00ffffff)|(argument&0xff000000)|kVoiceActive;
-        if (!write_voice_word(voice,0x34,counters) ||
+        // Cursor publication precedes ACTIVE and preserves the neighboring
+        // envelope byte. Locked original programming consumes no source here.
+        if ((reset_cursor && !write_voice_word(voice,0x58,cursor&0xff000000u)) ||
+            !write_voice_word(voice,0x34,counters) ||
             !write_voice_word(voice, kVoiceState, state)) {
             device_fault("VOICE_ON guest state update failed");
             return;
