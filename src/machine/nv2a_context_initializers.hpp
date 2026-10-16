@@ -34,11 +34,15 @@ struct ContextInitializerState {
     // cannot evict another object's knowledge or inherit its bindings.
     std::array<Object, 16> objects{};
 
-    Word edge_flag, shadow_threshold, line_width, point_size;
+    Word edge_flag, vertex_cache_break, shadow_threshold, line_width, point_size;
     Word window_clip_type, polygon_stipple, two_side_lighting;
     Word multisample, context_write_enable;
     Word opaque_raster_09f8, opaque_z_1d84;
     std::array<Word, 4> color_key{};
+    // Stages1..3, in method order: four matrix commands, scale, offset.
+    // Raw command receipts, not transformed PGRAPH/context readback. The
+    // current draw admission excludes bump texture modes6/7.
+    std::array<std::array<Word, 6>, 3> texture_bump{};
 };
 
 } // namespace xlle

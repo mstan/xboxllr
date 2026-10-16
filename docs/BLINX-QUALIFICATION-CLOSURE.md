@@ -50,6 +50,45 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: seven of nine families;44 retained deferral IDs,43 scopes.
 
+## Captured-queue batch removes two reached command gaps - 2026-10-16
+
+The 1B68 stop is addressed with all 18 stage1..3 bump matrix/scale/offset setters.
+Exact raw command receipts are preserved; matrix encodings are bounded by the
+primary Kelvin tests, while scale/offset accept their full word. Stage0, physical
+readback projection and actual bump shader modes remain guarded. Authored queued
+checks establish that inactive bump state cannot change ordinary textured pixels.
+
+Auditing actual dispatch branches through the eighth END found one additional
+missing method at queue index1115: 1710=0, BREAK_VERTEX_BUFFER_CACHE. The loaded
+path has no persistent vertex/transform cache, so its idle-boundary admission
+preserves current attributes and refetches subsequent indexed storage. It does
+not invalidate shader instructions or invent a clock/global idle event. Tests
+change positions/colors behind the same indices and check changed pixels, retained
+current values, and active/nonzero rejection without later completion.
+
+Root also narrowed the palette provenance gate: normalized direct/DXT textures
+do not consume palette state when an unrelated RAM tile is active. The separate
+pitch-linear tiled profile retains its existing layout/palette guard. Both shader
+execution paths pass an active unrelated-tile regression. The four-job build and
+two affected checks pass (`context-batch-build2`/`context-batch-tests2`, 0.93s).
+
+The private `preflight-loaded-queue.aot-private.py` reuses captured physical RAM
+and PRAMIN to find command guards cheaply. It first reproduced 1710 after seven
+draws, then executed eight draws in 0.313s after this batch. This diagnostic uses
+authored setup and acknowledges seven startup notifications without executing
+their original callbacks; it stops at the next software notification. GFC1 also
+lacks tile/control state and initialized-byte provenance. These omissions forbid
+using its pixels, retirement or success as original-title qualification. The
+actual unchanged CPU/callback route is being run separately in
+`gpu-lle-loaded-batch-20261016`. Seven families remain qualified; GPU/graphics,
+reached enabled-noise output and normal lifecycle remain open.
+
+Independent branch/source review:
+`build/blinx/remaining-first8-audit-20261016/review.aot-private.json`, SHA256
+`a1ba2578b8414225ec2270cd41fba41caef7c515a772685e8a3c0eace47aba77`.
+No physical console operation, new HLE performance claim or additional precision
+closing requirement is introduced by this batch.
+
 ## Loaded draw implementation checkpoint; title acceptance pending - 2026-10-16
 
 The maintained batch connects actual queued LOAD/state production to

@@ -20,10 +20,12 @@ ContextInitializerResult Nv2a::context_initializer_method(const PushMethod& push
     const bool eye = cls == 0x97 && m >= 0xa50 && m <= 0xa5c && !(m & 3);
     const bool fog = cls == 0x97 && m >= 0x9d0 && m <= 0x9dc && !(m & 3);
     const bool color_key = cls == 0x97 && m >= 0xae0 && m <= 0xaec && !(m & 3);
-    const bool named = cls == 0x97 && (m == 0x16bc || m == 0x1e68 || m == 0x380 ||
+    const bool texture_bump = cls == 0x97 && m >= 0x1b00 && m < 0x1c00 &&
+        (m & 0x3f) >= 0x28 && !(m & 3);
+    const bool named = cls == 0x97 && (m == 0x16bc || m == 0x1710 || m == 0x1e68 || m == 0x380 ||
         m == 0x2b4 || m == 0x9f8 || m == 0x147c || m == 0x1d84 || m == 0x1d7c ||
         m == 0x1e98 || m == 0x43c || m == 0x17c4);
-    if (!(notifier || state_dma || null_selector || eye || fog || color_key || named))
+    if (!(notifier || state_dma || null_selector || eye || fog || color_key || texture_bump || named))
         return Result::Unhandled;
     if (push.subchannel >= object_class_.size() || push.channel >= channels_.size())
         return reject("invalid owner index");
@@ -31,6 +33,22 @@ ContextInitializerResult Nv2a::context_initializer_method(const PushMethod& push
         return reject("current loaded object binding is unknown");
     if (pgraph_method_faulted_ || draw_faulted_)
         return reject("previous method failed");
+
+    if (texture_bump) {
+        const unsigned stage = (m - 0x1b00) / 0x40;
+        const unsigned word = ((m & 0x3f) - 0x28) / 4;
+        // Envytools registers TexUnk10..15 only for stages1..3. Stage0 is
+        // deliberately unqualified, not asserted to be a hardware error.
+        if (!stage) return reject("stage0 bump commands are unqualified");
+        // Primary matrix-command validation: sign-independent IEEE bits
+        // through8.0. Scale/offset accept all32bits. The primary matrix tests
+        // are marked XXX broken, so retain exact commands without inventing
+        // their transformed storage, quantization, or readback projection.
+        if (word < 4 && (p & 0x7fffffffu) > 0x41000000u)
+            return reject("bump matrix command is outside the bounded +/-8 encoding");
+        if (apply) context_initializers_.texture_bump[stage - 1][word] = {p, true};
+        return Result::Ready;
+    }
 
     if (notifier || state_dma || null_selector) {
         // Identify the current graphics object separately from its selected
@@ -130,6 +148,19 @@ ContextInitializerResult Nv2a::context_initializer_method(const PushMethod& push
         // idle boundary the maintained frontend has no in-flight assembly or
         // such cache; no active vertex state is discarded or fabricated.
         word = &context_initializers_.edge_flag;
+        break;
+    case 0x1710:
+        if (p) return reject("vertex-cache break requires the zero command");
+        if (primitive_mode_ || !vertex_indices_.empty() || !inline_array_words_.empty() ||
+            !inline_vertices_.empty() || !immediate_vertices_.empty())
+            return reject("vertex-cache break with active assembly is unqualified");
+        // nxdk BREAK_VERTEX_BUFFER_CACHE; primary Kelvin Unkcf0 accepts0 and
+        // clears IDX_STATE_B[15:10]. At this reached idle boundary there is no
+        // assembly/cache to retain: loaded draws always refetch attributes,
+        // and their transform cache is disabled (the other cache is local to
+        // one batch). Preserve actual current values, formats and shader
+        // decode caches; none is the invalidated vertex-buffer cache.
+        word = &context_initializers_.vertex_cache_break;
         break;
     case 0x1e68: word = &context_initializers_.shadow_threshold; break;
     case 0x380:

@@ -1,5 +1,5 @@
 // Queued initializer controls after LoadedContextFixture's real PRAMIN LOAD.
-// Include after nv2a_context_method_cases.hpp; no private device access.
+// Include after the context method/draw cases; no private device access.
 static void context_initializer_emit(LoadedContextFixture& f, unsigned sub,
                                      uint32_t method, uint32_t value) {
     put32(f.ram, f.put, 0x40000u | (sub << 13) | method);
@@ -31,6 +31,22 @@ static void context_initializer_objects(LoadedContextFixture& f) {
     CHECK(f.failure.empty());
 }
 
+static void context_initializer_bumps(LoadedContextFixture& f, bool overwrite) {
+    // Matrix boundaries, negative zero and denormals are legal encodings.
+    // Scale/offset are uninterpreted32-bit commands while bump is inactive.
+    const uint32_t words[3][6] = {
+        {0x3f800000,0x80000000,0xbf800000,0x41000000,0x7fc12345,0xff800000},
+        {0x40800000,0,0x40800000,0,0xdeadbeef,0x80000000},
+        {0xc1000000,1,0x3f000000,0x80000001,0xffffffff,0x7f800000}
+    };
+    for (unsigned stage=1; stage<4; ++stage) for (unsigned word=0; word<6; ++word) {
+        const uint32_t value=overwrite
+            ? (stage==2 && (word==0 || word==2) ? 0x40800000u : 0u)
+            : words[stage-1][word];
+        f.emit(0x1b00+stage*0x40+0x28+word*4,value);
+    }
+}
+
 static void test_loaded_context_initializers() {
     for (bool batching : {false,true}) {
         LoadedContextFixture f(batching);
@@ -53,6 +69,7 @@ static void test_loaded_context_initializers() {
             {0x1e98,0}, {0x43c,8}, {0x17c4,0}
         };
         for (const auto& r : setters) f.emit(r[0],r[1]);
+        context_initializer_bumps(f,false);
         // Actual memory consequence, not a counter-only accepted setter batch.
         // Opaque 1D84=3 is retained without inventing a blanket clear blocker.
         f.emit(0x194,2); f.emit(0x198,2); f.emit(0x208,0x128);
@@ -69,6 +86,107 @@ static void test_loaded_context_initializers() {
         // Successful notifier selection changes only the owner projection,
         // never the selected DMA descriptor's readable backing bytes.
         CHECK(f.read(0x700a00)==0x3d && f.read(0x700a04)==0x1f && f.read(0x700a08)==0);
+    }
+
+    for (bool batching : {false,true}) {
+        LoadedDrawFixture f;
+        f.gpu.set_pfifo_run_batching(batching);
+        f.state();f.shader();f.color();
+        // Append MOV oT0,v9 to the authored program. Stage0 is PROJECT2D;
+        // stages1..3 are NONE, so none consumes the bump command receipts.
+        f.emit(0x1e9c,2);
+        f.emit(0xb00,0);f.emit(0xb04,0x0020081b);f.emit(0xb08,0x08000000);f.emit(0xb0c,0x0000f820);
+        f.emit(0xb10,0);f.emit(0xb14,0x0020121b);f.emit(0xb18,0x08000000);f.emit(0xb1c,0x0000f849);
+        for (unsigned lane=0; lane<4; ++lane)
+            f.emit(0x1a90+lane*4,LoadedDrawFixture::bits(lane==3?1:lane==0?.625f:0));
+        f.emit(0x184,2);f.emit(0x1e70,1);f.emit(0x1b00,0x3000);
+        f.emit(0x1b04,0x00210629);f.emit(0x1b08,0x303);f.emit(0x1b0c,0x40000000);
+        f.emit(0x1b14,0x01010000);
+        f.emit(0xac0,0x08200000);f.emit(0x260,0x18200000);
+        put32(f.ram,0x3000,0xff0000ff);put32(f.ram,0x3004,0xff00ff00);
+        put32(f.ram,0x3008,0xffff0000);put32(f.ram,0x300c,0xffffffff);
+        context_initializer_bumps(f,false);
+        f.triangle();f.kick();
+        CHECK(f.failure.empty() && f.gpu.generic_combiner_executed_batches()==1);
+        CHECK(get32(f.ram,0x1044)==0xffff0000 && f.read(0x800048)==0x1234);
+        const std::vector<uint8_t> before(f.ram.begin()+0x1000,f.ram.begin()+0x1200);
+        // Reprogram every receipt, including the reached stage2 matrix4.0.
+        // Inactive bump state must not affect the entire rendered target.
+        context_initializer_bumps(f,true);
+        f.triangle();f.emit(0x50,0x5678);f.kick();
+        CHECK(f.failure.empty() && f.gpu.generic_combiner_executed_batches()==2);
+        CHECK(f.read(0x800048)==0x5678);
+        CHECK(std::equal(before.begin(),before.end(),f.ram.begin()+0x1000));
+        f.read(0x40181c);
+        CHECK(f.failure.find("no qualified context value")!=std::string::npos);
+        f.failure.clear();
+        // Receipts confer no authority to execute either bump shader mode.
+        f.emit(0x1e70,1u|((batching?7u:6u)<<5));f.triangle();f.kick();
+        CHECK(f.failure.find("texture shader side effects")!=std::string::npos);
+        CHECK(f.gpu.generic_combiner_executed_batches()==2 && f.read(0x800048)==0x5678);
+        CHECK(std::equal(before.begin(),before.end(),f.ram.begin()+0x1000));
+    }
+    for (unsigned word=0; word<6; ++word) {
+        LoadedContextFixture f;
+        f.emit(0,1);const uint32_t stopped_get=f.put+8;
+        f.emit(0x1b28+word*4,0);f.emit(0x50,0x1234);f.kick();
+        CHECK(f.failure.find("stage0 bump commands")!=std::string::npos);
+        CHECK(f.read(0x800044)==stopped_get && f.gpu.push_methods()==1);
+        CHECK(!f.read(0x800048) && get32(f.ram,0x1000)==0xa5a5a5a5);
+    }
+    const uint32_t invalid_bumps[][2] = {
+        {0x1b68,0x41000001},{0x1bac,0xc1000001},
+        {0x1bf0,0x7f800000},{0x1bf4,0x7fc00000}
+    };
+    for (const auto& command : invalid_bumps) {
+        LoadedContextFixture f;
+        f.emit(0,1);const uint32_t stopped_get=f.put+8;
+        f.emit(command[0],command[1]);f.emit(0x50,0x1234);f.kick();
+        CHECK(f.failure.find("bump matrix command")!=std::string::npos);
+        CHECK(f.read(0x800044)==stopped_get && f.gpu.push_methods()==1);
+        CHECK(!f.read(0x800048) && get32(f.ram,0x1000)==0xa5a5a5a5);
+        f.failure.clear();f.kick();
+        CHECK(!f.failure.empty() && f.gpu.push_methods()==1 && !f.read(0x800048));
+    }
+
+    for (bool batching : {false,true}) {
+        LoadedDrawFixture f;f.gpu.set_pfifo_run_batching(batching);
+        f.state();f.shader();f.color(false,true);
+        for (unsigned slot=0; slot<16; ++slot) f.emit(0x1760+slot*4,0);
+        f.emit(0x1760,0x1042);f.emit(0x176c,0x0444);
+        f.emit(0x19c,2);f.emit(0x1720,0x3000);f.emit(0x172c,0x3100);
+        auto backing=[&](float extent,uint32_t color) {
+            unsigned index=0;
+            for (const auto& xy : {std::pair{0.f,0.f},std::pair{extent,0.f},std::pair{0.f,extent}}) {
+                const uint32_t v[]={LoadedDrawFixture::bits(xy.first),LoadedDrawFixture::bits(xy.second),
+                                    LoadedDrawFixture::bits(1),LoadedDrawFixture::bits(1)};
+                for (unsigned lane=0; lane<4; ++lane) put32(f.ram,0x3000+index*16+lane*4,v[lane]);
+                put32(f.ram,0x3100+index*4,color);++index;
+            }
+        };
+        auto indexed=[&](uint32_t ref) {
+            f.emit(0x17fc,5);for (unsigned i=0;i<3;++i)f.emit(0x1808,i);
+            f.emit(0x17fc,0);f.emit(0x50,ref);f.kick();
+        };
+        backing(8,0xff0000ff);indexed(0x1111);
+        CHECK(f.failure.empty() && get32(f.ram,0x1044)==0xffff0000);
+        CHECK(get32(f.ram,0x1050)==0xffff0000);
+        backing(4,0xff00ff00);f.emit(0x1710,0);indexed(0x2222);
+        CHECK(f.failure.empty() && f.read(0x800048)==0x2222);
+        // Same indices must fetch changed positions/colors, not cached output.
+        CHECK(get32(f.ram,0x1044)==0xff00ff00 && get32(f.ram,0x1050)==0xffff0000);
+        f.emit(0x176c,0);f.emit(0x1710,0);f.triangle();f.emit(0x50,0x3333);f.kick();
+        // Breaking the buffer cache must preserve the last actual current color.
+        CHECK(f.failure.empty() && f.read(0x800048)==0x3333);
+        CHECK(get32(f.ram,0x1050)==0xff00ff00 && f.gpu.generic_combiner_executed_batches()==3);
+    }
+    for (bool active : {false,true}) {
+        LoadedContextFixture f;f.emit(0,1);if(active)f.emit(0x17fc,5);
+        const uint32_t stopped_get=f.put+8;
+        f.emit(0x1710,active?0:1);f.emit(0x50,0x1234);f.kick();
+        CHECK(f.failure.find(active?"active assembly":"zero command")!=std::string::npos);
+        CHECK(f.read(0x800044)==stopped_get && f.gpu.push_methods()==(active?2u:1u));
+        CHECK(!f.read(0x800048) && get32(f.ram,0x1000)==0xa5a5a5a5);
     }
 
     for (unsigned bad=0; bad<4; ++bad) {

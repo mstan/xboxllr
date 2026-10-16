@@ -14,21 +14,20 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: connected original startup/rendering, reached enabled-noise draw and lifecycle | 44 retained IDs / 43 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current implementation checkpoint: the maintained route now connects loaded contexts
-to bounded programmable CPU draws and the 32 reached startup initializer methods.
-Authored queued tests cover immediate, indexed and inline vertex input, retained
-attributes, constant aliases, required-state rejection and texture Q initialization
-through both shader execution paths. Review corrected an unrelated visibility-count
-gate and the eighth draw's actual read-only LESS depth test. The affected NV2A and
-shader tests pass in0.32s; five original-driver checks pass in2.48s. Dispatch and
-repository hygiene checks pass. One changed original run passes actual context
-LOAD, then stops after169.063s at texture setter1B68, before drawing. The handler's
-range entry had hidden missing bump-state setters from the earlier preflight;
-this is required implementation, not a qualified no-op. The pre-LOAD64MiB RAM
-snapshot matches all1733 independently captured packet words and now supplies
-actual vertex/texture storage for offline diagnosis. Next finish those18 reached
-setters and replay the captured queue, then connected original rendering,
-enabled-noise output and lifecycle. GPU/graphics remain open.
+Current implementation checkpoint: loaded contexts connect to bounded programmable
+CPU draws. The next batch adds all 18 reached bump-state setters and the later
+1710 vertex-cache break, bringing the audited initializer/cache methods to 51.
+Inactive bump state retains exact commands; actual bump rendering stays guarded.
+Queued tests check changed indexed backing storage, retained current attributes,
+and rejection without packet retirement. Direct normalized textures no longer
+require palette state merely because an unrelated RAM tile is active. The affected
+NV2A/shader checks pass in 0.93s. A private captured-queue diagnostic now executes
+all eight draws in 0.313s, exposing method gaps without another title startup.
+It omits original callbacks, tile/control state and lifetime, so its pixels and
+completion do not establish original-title acceptance. The previous original run
+passed actual LOAD and stopped at 1B68 after 169.063s; one changed original run is
+now checking the complete path. Connected rendering, enabled-noise output and
+lifecycle remain required. GPU/graphics remain open.
 
 Latest completed family: audio A01-A05 closes after actual same-object Stop/status/Play
 and96000 continued frames on both output routes. The single changed muted capture

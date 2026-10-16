@@ -115,7 +115,11 @@ bool Nv2a::context_draw_ready(std::array<uint8_t,13>& observable) {
         if(((address&255)==4 || ((address>>8)&255)==4) &&
            !known(kRasterTextureBorderColor0+stage))return false;
         if((color==0x24 || color==0x25) && !known(kRasterControl0,1u<<28))return false;
-        if(ram_tiles_active() && !known(kRasterTexturePalette0+stage))return false;
+        // Direct normalized/DXT texels do not consume a palette, including
+        // when an unrelated RAM tile is active. The pitch-linear tiled path
+        // still checks its separately bounded palette/layout profile.
+        if(ram_tiles_active() && !normalized &&
+           !known(kRasterTexturePalette0+stage))return false;
         // The real fetch helper validates the selected DMA and full extent.
         // No array/current-value knowledge is manufactured by this selection.
         observable[9+stage]=mode==3 ? 7 : mode==1 ? 11 : 3;

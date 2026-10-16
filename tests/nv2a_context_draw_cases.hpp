@@ -181,8 +181,22 @@ static void test_loaded_context_draws() {
         CHECK(f.failure.empty() && f.gpu.generic_combiner_executed_batches()==2);
         CHECK(get32(f.ram,0x1044)==0xff00ff00 && f.read(0x800048)==0x1234);
     }
-    for(bool compiled:{false,true})for(unsigned mode:{0u,1u})for(bool write_q:{false,true}) {
-        LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);f.state();f.shader();f.color();
+    for(bool compiled:{false,true})for(unsigned mode:{0u,1u})for(bool write_q:{false,true})
+    for(bool unrelated_tile:{false,true}) {
+        LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);
+        if(unrelated_tile) {
+            // The active tile is outside this direct-color texture and target.
+            // It cannot make this nonindexed fetch consume unknown palette state.
+            f.ram.resize(0x8000,0xa5);
+            for(uint32_t base:{0x100240u,0x400900u}) {
+                f.write(base,0x4001);f.write(base+4,0x7fff);f.write(base+8,512);
+            }
+            for(const auto& setting:std::vector<std::pair<uint32_t,uint32_t>>{
+                    {0x10,0x4001},{0x30,0x7fff},{0x50,512}}) {
+                f.write(0x400750,0xea0000|setting.first);f.write(0x400754,setting.second);
+            }
+        }
+        f.state();f.shader();f.color();
         f.emit(0x1e9c,2); // reopen final instruction, then append MOV oT0,v9
         f.emit(0xb00,0);f.emit(0xb04,0x0020081b);f.emit(0xb08,0x08000000);f.emit(0xb0c,0x0000f820);
         f.emit(0xb10,0);f.emit(0xb14,0x0020121b);f.emit(0xb18,0x08000000);
