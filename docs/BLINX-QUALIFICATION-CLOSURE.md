@@ -50,6 +50,49 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: seven of nine families;44 retained deferral IDs,43 scopes.
 
+## Original sampling capture integrated; physical startup still open - 2026-10-16
+
+The separate probe can now build a private-input capture from the actual first
+draw's shader, four vertices, consumed constants and full eleven-level DXT1 mip
+chain. It preserves geometry/viewport/filtering and crops only an8x8 output
+window. Texture/vertex allocations are relocated; target and DMA objects remain
+owned by the genuine SDK. Four identical off/on/on/off observations use actual
+draw and M2M commands. No original handle, callback or target address is replayed.
+
+The profile generator verifies its reviewed input and every binary hash/length,
+and confines generated title bytes to ignored build storage. The real nxdk object
+and diagnostic PE/XBE compile, with executable conversion identity checked.
+Three focused transport groups pass both authored and actual inputs (248 actual
+configuration commands). They establish byte copying, multi-submission relocation,
+ordered readback and failure stops using deliberately arbitrary model pixels;
+they provide no silicon noise or original-frame acceptance.
+
+The parallel bootstrap batch completes the actual20KiB PRAMIN initialization in
+the offline linked-SDK model. It uses the previously measured alias, preserves
+unknown RAMFC/NVM bits, and retains resources on failure. Eleven methods covering
+111 lifetimes pass. Root verifies176 retained identities and the source ownership
+changes in `build/blinx/noise-instance-root-review-20261016.aot-private.json`
+(SHA256 `b00b5ee1729658ed642b09c410b50a9ceed17160bf9b32234d385800a85214d2`).
+This supersedes the RAMFC stop: the next unsupported effect is CRTC index31,
+before successful SDK initialization, channel submission or physical drawing.
+
+Capture review found an asynchronous error gap: uninstrumented CPU copies could
+continue after an ISR's failed hardware write. A checked polling-only capture
+entry now masks GPU interrupts before these copies and prohibits SDK service.
+Fixed authored polling helpers retain their own immediate checks; automatic
+block instrumentation is excluded only there so it cannot insert work between
+a failed readback and return. The genuine SDK and pre-mask entry stay guarded.
+Full initialization, the physical representative comparison, connected original
+rendering and normal lifecycle remain required. No Xbox operation was performed
+for this batch. Still7/9 qualified;44 deferral IDs/43 scopes are unchanged.
+
+Probe commit `956d8dd` contains the reviewed instance/polling owner and original
+capture integration. The final SDK-prefix checks pass11/11; shared transport
+passes5 groups/22 cases; original and authored profile transport each pass3 groups.
+Root verifies378 current-source, retained test and final original-profile image
+identities in the probe's `build/noise-original-linked-20261016-final/root-review.aot-private.json`
+(SHA256 `818ceaf2d5132f07dd15a33319a61080edbf998074f245ececb638d556f7eda0`).
+
 ## Captured-queue batch removes two reached command gaps - 2026-10-16
 
 The 1B68 stop is addressed with all 18 stage1..3 bump matrix/scale/offset setters.
