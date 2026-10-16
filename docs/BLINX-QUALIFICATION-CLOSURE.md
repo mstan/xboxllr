@@ -104,7 +104,12 @@ the original producer/consumer path and17 current source/result identities in
 `build/blinx/field-continuity-20261016/review.aot-private.json`.
 The prior full-title log lacks the last encoder mutation, so its precise cause
 is not inferred from this component reproduction. One changed private diagnostic
-is pending. No FIELD value, clock phase or readiness is substituted.
+stops after154.063s at FIELD with encoder timing unknown. Its transition trace
+records early mode reset, later invalidation and attachment without a subsequent
+observed final reset. Static original-title review places FIELD after the
+synchronous AV3 call returns; the exact branch/continuation is being traced.
+This does not establish an asynchronous early FIELD consumer or justify a timing
+fallback. No FIELD value, clock phase or readiness is substituted.
 
 ## Separate physical draw owner ready offline - 2026-10-16
 
@@ -123,8 +128,23 @@ The first physical bootstrap rejects its initial engine-enable precondition at
 phase1 with one read, zero hardware writes, no IRQ claim and no allocations.
 Fresh boot leaves PGRAPH disabled. The previously qualified PGRAPH-only enable
 is therefore required preparation before another fresh app lifetime; no failed
-write or partial GPU initialization is being retried. Physical capture remains
-pending. Private receipts: probe `results/noise-physical-original-20261016/`.
+write or partial GPU initialization is being retried.
+
+The next preflight distinguishes pending PCRTC input from disabled global IRQ
+delivery. Probe a627afb admits only the documented globally masked vblank and
+lets the actual SDK mask PCRTC before enabling delivery. Thirteen offline groups
+pass. Physical initialization then claims IRQ, retains four allocations and
+completes13 stores with matching readbacks. It stops before instance writes at
+an inherited512-byte runout ring overlapping the new context. The new bounded
+owner reserves an unused512-byte tail inside its verified existing allocation,
+with independent compiled drift/readback/publication checks. Probe e9a820f passes
+14 groups/132 lifetimes in31.268s; root verifies206 artifact identities and exact
+bootstrap/SDK code, data and resolved relocations in the original-profile build.
+This is an offline ownership result, not physical completion. A fresh hardware
+owner and physical continuation are pending; no capture or family acceptance is
+claimed. Private receipts: probe `results/noise-physical-original-20261016/`,
+`results/noise-physical-vblank-20261016/` and
+`results/noise-runout-owner-20261016-final/`.
 
 ## Original sampling capture integrated; physical startup still open - 2026-10-16
 

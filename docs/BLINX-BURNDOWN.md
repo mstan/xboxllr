@@ -25,10 +25,14 @@ clock-only interruptions remain guarded; four affected clock checks pass0.17s.
 The changed diagnostic reaches a FIELD continuity guard. A short original-code
 reproduction identifies a real luma-filter write incorrectly invalidating timing;
 the narrow correction passes both original startup phases and preserves genuine
-timing-change guards. A new private diagnostic is in progress.
+timing-change guards. The changed private diagnostic still stops at FIELD;
+original synchronous return/branch behavior is being traced before more changes.
 Separate probe startup now completes offline (273 queued methods); source and
-artifact review passed. The first physical preflight made zero hardware writes
-and establishes that the existing checked PGRAPH enable must precede startup.
+artifact review passed. The physical continuation now passes preflight, claims
+IRQ and completes13 checked stores. It stops before instance writes because the
+inherited runout buffer overlaps the new context. The bounded owner now reserves
+an unused512-byte tail inside its existing allocation; physical continuation is
+pending after fresh remote recovery.
 Physical enabled-noise behavior, connected
 original rendering and normal lifecycle remain required. See the latest
 [closing checkpoint](BLINX-QUALIFICATION-CLOSURE.md#original-dac-upload-and-digital-gamma-consumer---2026-10-16).
