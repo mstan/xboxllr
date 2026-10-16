@@ -50,6 +50,38 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;43 retained deferral IDs,42 scopes.
 
+## Bounded physical context transfer stops at load witness - 2026-10-16
+
+Probe15e74e4 supplies a separately owned64KiB VM buffer, checked upload of the
+actual hash-bound37F0 producer image, and a bounded CLI/pinned-reservation
+transaction. The planned successful path backs up20KiB, loads the real image,
+poisons only the image RAM, saves actual PGRAPH state, checks outside canaries,
+then restores borrowed RAM/pointer/FIFO. Failure restores CPU flags only and
+performs no later hardware operation. Five actual compiled/host test methods
+pass in9.041s, including LOAD/SAVE timeout/interrupt and failed restoration;
+independent review accepts the ownership/stop boundary and primary
+nxdk/Linux STATUS-zero completion ordering. This is probe validation, not
+physical context-format qualification.
+
+The single physical attempt returns prepareCA000001 and passes every input
+write/readback. Execute returnsDE40001B: pointer111D and LOAD1 were issued,
+idle/no-interrupt passed, but CTX_USER was not the required1. Its unexpected
+raw value is not encoded in this receipt. No sentinel, SAVE, restoration,
+result-buffer read or retry follows. VM/pins and potentially changed volatile
+state remain; hardware is stopped pending the requested power cycle.
+Evidence: probe results/context-transfer-20261016/. Nothing touches storage or
+boot configuration. The alias result remains valid; this is not a successful
+transfer or an emulator defect diagnosis.
+
+Offline source audit identifies a concrete profile discrepancy: this direct
+experiment required CTX_CONTROL0, while original14003D and pinned pbkit set
+DEVICE_ENABLED10000000 before loading. The actual load helper additionally
+performs conditional local resets/inactive FD clear, cache invalidation and
+channel selection. Resolve that preparation as a batch before a changed
+attempt, preserving the failed observation and all current transfer guards.
+Audio's sole muted mixed-output capture continues independently. Still6/9;
+43 retained deferral IDs/42 scopes.
+
 ## Instance comparison and restarted audio observability - 2026-10-16
 
 Follow-up hardware progress: probe18bb56b compares eleven reversed-block
