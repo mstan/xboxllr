@@ -50,6 +50,48 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: seven of nine families;43 retained deferral IDs,42 scopes.
 
+## Consumed common state bounded; stale palette guard corrected - 2026-10-16
+
+The first-eight pending-draw common-state audit records153 setter-coverage entries
+and both pre-draw clears. Required object/DMA bindings, surface scalars, active
+raster/combiner state, texture0 descriptors and array formats are explicitly
+produced before use. Original driver+144=149C makes the actual first-context
+DEBUG0=70000/0 reset branch execute before LOAD; the maintained admitted reset
+already clears primitive mode and assembly vectors. This is an actual reset
+origin, not an inferred image zero or a claim that STATUS idle proves no assembly.
+The eighth draw's disabled v4 consumes current secondary color produced by the
+preceding seven draws; replay must preserve that history. Initial COMMON/raster/
+texture/surface values are not established as visible dependencies for these
+eight outputs. This is a source/queue dependency result, not executed rendering.
+
+The audit finds one artificial dependency: the normalized sampler rejected any
+nonzero inherited palette even though its admitted formats are all nonindexed.
+The correction removes that check inside the existing whitelist only. Palette
+storage/readback is preserved and indexed0B/unknown formats remain guarded.
+The CPU fixture compares all256 target bytes with palette0 and a validly encoded
+palette address outside fixture RAM, requires actual sampling, and verifies0B
+still has its named rejection with unchanged pixels/executed-batch count.
+
+The first full fixture also exposes a stale older negative: alphaRef9 misses a
+dedicated A4 profile but is supported by generic GEQUAL, so it no longer implies
+global rejection after stale palette state stops blocking fallback. The negative
+now uses unsupported alphaFunc0208, retaining every no-output/dedicated-counter
+assertion and adding its named kAlphaFunc skip. The failed result is retained.
+Independent review agrees with this consumer distinction. Final nv2a CTest passes
+in0.79s (1.39s total); unrelated OpenGL fixtures retain their existing SDL3-unavailable
+skips. No game capture, HLE renderer change, threshold adjustment or hardware
+operation is needed for this correction.
+
+Root verifies20 source/input identities and preserves the predecessor source from
+Git. Private evidence: build/blinx/common-consumer-audit-20261016/review.aot-private.json
+(SHA25693422f490bcf31bdef5777dcd1139160d58fa8c24ffb79c8d6d6270e88091ddf),
+and build/blinx/nonindexed-palette-20261016/root-review.aot-private.json.
+Next implement actual owned context/header/control transfer, preserve unknown
+bytes and field provenance, use measured mappings, and guard any observable
+inherited read/partial write/readback/save until its semantics are established.
+This avoids exhaustive unused-default mapping without admitting a no-op loader.
+GPU/graphics remain open;7/9 and the existing deferral counts are unchanged.
+
 ## Surface context map measured; transform dependencies bounded - 2026-10-16
 
 Probe37ec5df completes one23-field surface batch after autonomous remote recovery.

@@ -11679,11 +11679,9 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                                            format);
                 return true;
             }
-            if (raster_state[kRasterTexturePalette0 + stage] != 0) {
-                record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
-                                           0x80000000ull | format);
-                return true;
-            }
+            // Every admitted format above stores direct colors/alpha or DXT
+            // blocks. Palette state belongs to indexed color0x0B, which stays
+            // outside this whitelist; stale palette words cannot affect these texels.
             const uint32_t address_word = raster_state[kRasterTextureAddress0 + stage];
             bool u_ok = false, v_ok = false;
             const TextureAddressMode address_u =

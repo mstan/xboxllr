@@ -38,7 +38,13 @@ reviews the bytes and all checks pass. First-eight-draw analysis proves complete
 explicit uploads of consumed transform programs/constants; inherited c137 remains
 unused fog under existing GFX-D21. Remaining consumed common-state mapping and
 the maintained context route are still required, followed by connected
-drawing/visibility and lifecycle.
+drawing/visibility and lifecycle. The common-state audit now binds153 setter
+entries and the actual pre-LOAD reset: first-eight live fields are queue-produced,
+and current secondary color must persist across draws. An overstrict nonindexed
+palette guard is corrected; full CPU-renderer fixture passes0.79s with exact
+target invariance and retained indexed/unsupported-alpha guards. Next is the
+owned context implementation with preserved unknown-state provenance, not an
+exhaustive mapping of unused initial defaults.
 No GPU/graphics family closure is inferred from captured submissions.
 
 Earlier capture checkpoint: the retained-buffer title ended cleanly at its

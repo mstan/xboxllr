@@ -5092,24 +5092,29 @@ int main() {
                        sample.executed_batches == 1;
             }));
 
-        // A one-word state change remains recorder-only and must not touch the
-        // dedicated counters or target.
+        // An unsupported alpha-function selector remains recorder-only and must
+        // not touch the dedicated counters or target. AlphaRef9 is valid for
+        // the generic fallback and cannot serve as a rejection witness.
         const size_t color_bytes = 0x0C00u * 480u;
         const std::vector<uint8_t> before_rejected(
             quad_ram.begin() + color_address,
             quad_ram.begin() + color_address + color_bytes);
-        emit_quad(0x0340, 9);
+        const size_t alpha_reason = static_cast<size_t>(
+            xlle::Nv2a::GenericSkipReason::kAlphaFunc);
+        const uint64_t alpha_skips = quad_gpu.generic_skip_reason_batches(alpha_reason);
+        emit_quad(0x033C, 0x0208);
         submit_seven_quads();
         CHECK(quad_fault.empty());
         CHECK(quad_gpu.immediate_quad_raster_batches() == 1);
         CHECK(quad_gpu.immediate_quad_raster_triangles() == 14);
         CHECK(quad_gpu.immediate_quad_raster_writes() == 7 * 16 * 24);
+        CHECK(quad_gpu.generic_skip_reason_batches(alpha_reason) == alpha_skips + 1);
         CHECK(std::equal(before_rejected.begin(), before_rejected.end(),
                          quad_ram.begin() + color_address));
 
         // Restore RS1, make the same texture fully transparent, and prove that
         // fragments/samples execute while GEQUAL rejects every color write.
-        emit_quad(0x0340, 8);
+        emit_quad(0x033C, 0x0206);
         fill_quad_texture(0);
         const std::vector<uint8_t> before_transparent(
             quad_ram.begin() + color_address,
@@ -8979,25 +8984,57 @@ int main() {
             std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
 
             const uint64_t before_h2_samples = gc_gpu.generic_combiner_texture_samples();
-            emit_gc(0x17FC, 5);
-            for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
-                            std::pair{0.0f, 8.0f}}) {
-                emit_gc(0x1A90, gc_float_bits(0.625f));
-                emit_gc(0x1A94, gc_float_bits(0.625f));
-                emit_gc(0x1A98, gc_float_bits(0.0f));
-                emit_gc(0x1A9C, gc_float_bits(1.0f));
-                emit_gc(0x1518, gc_float_bits(xy.first));
-                emit_gc(0x151C, gc_float_bits(xy.second));
-                emit_gc(0x1520, gc_float_bits(10.0f));
-                emit_gc(0x194C, gc_pack_ub4(0x30, 0x50, 0x70, 0x80));
-                emit_gc(0x1524, gc_float_bits(1.0f));
-            }
-            emit_gc(0x17FC, 0);
-            kick_gc();
+            auto draw_h2 = [&]() {
+                emit_gc(0x17FC, 5);
+                for (auto xy : {std::pair{0.0f, 0.0f}, std::pair{8.0f, 0.0f},
+                                std::pair{0.0f, 8.0f}}) {
+                    emit_gc(0x1A90, gc_float_bits(0.625f));
+                    emit_gc(0x1A94, gc_float_bits(0.625f));
+                    emit_gc(0x1A98, gc_float_bits(0.0f));
+                    emit_gc(0x1A9C, gc_float_bits(1.0f));
+                    emit_gc(0x1518, gc_float_bits(xy.first));
+                    emit_gc(0x151C, gc_float_bits(xy.second));
+                    emit_gc(0x1520, gc_float_bits(10.0f));
+                    emit_gc(0x194C, gc_pack_ub4(0x30, 0x50, 0x70, 0x80));
+                    emit_gc(0x1524, gc_float_bits(1.0f));
+                }
+                emit_gc(0x17FC, 0);
+                kick_gc();
+            };
+            draw_h2();
             CHECK(gc_fault.empty());
             CHECK(gc_gpu.generic_combiner_texture_samples() > before_h2_samples);
             const uint32_t h2_offset = 3u * 32u + 3u * 4u;
             CHECK(get32(gc_ram, 0x10000u + h2_offset) == 0x20243238u);
+
+            // Nonindexed texels must not resolve this validly encoded palette
+            // address, which deliberately lies outside the fixture's RAM.
+            const std::vector<uint8_t> direct_pixels(
+                gc_ram.begin() + 0x10000, gc_ram.begin() + 0x10000 + 8 * 32);
+            emit_gc(0x1B20, 0x03FFFFC1);
+            std::memset(gc_ram.data() + 0x10000, 0, 8 * 32);
+            const uint64_t palette_samples = gc_gpu.generic_combiner_texture_samples();
+            draw_h2();
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_combiner_texture_samples() > palette_samples);
+            CHECK(std::equal(direct_pixels.begin(), direct_pixels.end(),
+                             gc_ram.begin() + 0x10000));
+
+            // Indexed0B still needs a separately qualified palette route.
+            const size_t indexed_reason = static_cast<size_t>(
+                xlle::Nv2a::GenericSkipReason::kUnsupportedTextureFormat);
+            const uint64_t indexed_skips = gc_gpu.generic_skip_reason_batches(indexed_reason);
+            const uint64_t indexed_batches = gc_gpu.generic_combiner_batches();
+            emit_gc(0x1B04, 0x02200B29);
+            draw_h2();
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_skip_reason_batches(indexed_reason) == indexed_skips + 1);
+            CHECK(gc_gpu.generic_combiner_batches() == indexed_batches);
+            CHECK(std::equal(direct_pixels.begin(), direct_pixels.end(),
+                             gc_ram.begin() + 0x10000));
+            emit_gc(0x1B20, 0);
+            emit_gc(0x1B04, 0x02200629);
+            kick_gc();
         }
 
         // The texture-modulate OpenGL fixture is test-only at this size. It gates
