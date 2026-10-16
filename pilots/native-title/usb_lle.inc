@@ -13,7 +13,7 @@ static RECOMP_TLS struct OriginalThreadExit {
     int active;
 } original_thread_exit;
 static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_dpc,
-    unsigned thread_arguments,int *terminate,uint32_t *exit_status)
+    unsigned thread_arguments,int *terminate,uint32_t *exit_status,uint32_t sync_flags)
 {
     recomp_func_t routine=recomp_lookup(entry);
 #ifdef PILOT_SCHEDULING_LLE
@@ -30,7 +30,7 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     if(!routine)return "original kernel callback has no AOT binding";
 #endif
     if(++usb_isr_count<=4)
-        fprintf(stderr,"[%s] call=%llu entry=%08x irql=%u\n",thread_arguments?"KERNEL LLE THREAD":is_dpc?"KERNEL LLE DPC":"USB LLE ISR",
+        fprintf(stderr,"[%s] call=%llu entry=%08x irql=%u\n",thread_arguments?"KERNEL LLE THREAD":is_dpc==2?"KERNEL LLE SYNC":is_dpc?"KERNEL LLE DPC":"USB LLE ISR",
                 (unsigned long long)usb_isr_count,entry,pilot_io_device_irql());
     uint32_t saved[]={g_eax,g_ecx,g_edx,g_ebx,g_esp,g_ebp,g_esi,g_edi,
         next_kernel_ordinal,g_icall_saved_esp,g_icall_dispatch_form,g_seh_ebp};
@@ -47,16 +47,17 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     if(thread_arguments)g_pilot_suspend_count=(volatile uint32_t*)pilot_io_device_thread_checkpoint_request();
     /* The qualified original ISR/DPC dispatchers enable interrupts before
      * calling generated code. Their actual IRQL remains authoritative. */
-    cpu_interrupt_flag=1;cpu_interrupt_shadow=0;pilot_io_device_set_if(1);
+    cpu_interrupt_flag=is_dpc==2?!!(sync_flags&0x200):1;
+    cpu_interrupt_shadow=0;pilot_io_device_set_if(cpu_interrupt_flag);
     g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];
     g_esp=regs[4];g_ebp=regs[5];g_esi=regs[6];g_edi=regs[7];
     // ISR/DPC continuations borrow the same original CPU PCR as threads.
     // A host worker may enter with no generated TLS at all; retaining that
     // host's zero/private FS base would break original FS:[IRQL]/SEH reads.
     g_fs_base=PILOT_IO_PCR_BASE;
-    g_df=0; /* The original interrupt thunk executed CLD. */
+    g_df=is_dpc==2?!!(sync_flags&0x400):0; /* ISR/DPC thunk executed CLD. */
     if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();
-    if(is_dpc)dispatch_in_dpc=1;
+    if(is_dpc==1)dispatch_in_dpc=1;
     ++usb_in_interrupt;
 #ifdef PILOT_SCHEDULING_LLE
     if(!thread_arguments)++usb_device_callback_depth;
@@ -79,9 +80,11 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
 #endif
     --usb_in_interrupt;
     dispatch_in_dpc=saved_in_dpc;
-    if(usb_isr_count<=4)fprintf(stderr,"[MACHINE CALLBACK RETURN] entry=%08x dpc=%d context=%08x\n",entry,is_dpc,MEM32(regs[4]+8));
-    if(!(thread_arguments && *terminate) && g_esp!=regs[4]+(thread_arguments?(thread_arguments+1)*4:(is_dpc?20:12)))
+    if(usb_isr_count<=4)fprintf(stderr,"[MACHINE CALLBACK RETURN] entry=%08x mode=%d context=%08x\n",entry,is_dpc,MEM32(regs[4]+(is_dpc==2?4:8)));
+    if(!(thread_arguments && *terminate) && g_esp!=regs[4]+(thread_arguments?(thread_arguments+1)*4:(is_dpc==2?8:is_dpc?20:12)))
         stop("original callback stdcall imbalance",entry);
+    if(is_dpc==2 && cpu_interrupt_flag!=!!(sync_flags&0x200))
+        stop("original synchronous callback changed interrupt flag",entry);
     if(thread_arguments && !*terminate && (g_ebx!=regs[3] || g_ebp!=regs[5] || g_esi!=regs[6] || g_edi!=regs[7]))
         stop("original thread callback preserved register changed",entry);
     if(!thread_arguments && (g_ebx!=regs[3] || g_esi!=regs[6] || g_edi!=regs[7]))
@@ -111,12 +114,14 @@ static const char *usb_original_callback(uint32_t entry,uint32_t regs[8],int is_
     return NULL;
 }
 static const char *usb_original_isr(uint32_t entry,uint32_t regs[8])
-{return usb_original_callback(entry,regs,0,0,NULL,NULL);}
+{return usb_original_callback(entry,regs,0,0,NULL,NULL,0);}
 static const char *usb_original_dpc(uint32_t entry,uint32_t regs[8])
-{return usb_original_callback(entry,regs,1,0,NULL,NULL);}
+{return usb_original_callback(entry,regs,1,0,NULL,NULL,0);}
+static const char *usb_original_sync(uint32_t entry,uint32_t regs[8],uint32_t flags)
+{return usb_original_callback(entry,regs,2,0,NULL,NULL,flags);}
 static const char *usb_original_thread(uint32_t entry,uint32_t regs[8],unsigned arguments,
     int *terminate,uint32_t *status)
-{return usb_original_callback(entry,regs,0,arguments,terminate,status);}
+{return usb_original_callback(entry,regs,0,arguments,terminate,status,0);}
 static void original_thread_kernel_dispatch(void)
 {
     if(next_kernel_ordinal==258) {
@@ -143,6 +148,7 @@ static const char *original_callback_kernel_call(unsigned ordinal)
     case 97:case 128:case 137:case 138:case 151:case 173:count=1;break;
     case 113:count=2;break;
     case 107:case 108:case 119:case 145:case 175:count=3;break;
+    case 153:count=3;break;
     case 149:count=4;break;
     case 150:count=5;break;
     default:return "original ISR/DPC kernel service requires qualification";
@@ -154,7 +160,13 @@ static const char *original_callback_kernel_call(unsigned ordinal)
     if(ordinal==145 && args[2])
         return "original ISR/DPC Wait=TRUE requires scheduler handoff";
     if(ordinal==160 || ordinal==161)args[0]=g_ecx;
-    const char *error=pilot_io_device_lle(ordinal,memory,args,&result);
+    const char *error;
+    if(ordinal==153) {
+        if(MEM32(g_esp)!=0x178326u || args[0]!=0x17de78u ||
+           args[1]!=0x177eccu || args[2]!=g_esi)
+            return "original synchronize call differs from qualified audio caller";
+        error=pilot_io_device_synchronize_call(memory,MEM32(g_esp),args,usb_original_sync,&result);
+    } else error=pilot_io_device_lle(ordinal,memory,args,&result);
     if(error)return error;
     g_eax=result;g_esp+=(count+1)*4;
     if(g_fs_base)MEM8(g_fs_base+0x24)=(uint8_t)pilot_io_device_irql();

@@ -42,6 +42,14 @@ void pilot_io_device_isr_bind(PilotIoIsr callback);
  * Admission requires the captured kernel dispatcher, active IRQL2 and the
  * real dequeued DPC object. Its original stack pages share native backing. */
 void pilot_io_device_dpc_bind(PilotIoIsr callback);
+/* The reached original KeSynchronizeExecution call from a stopped generated
+ * ISR/DPC. Execute the original service, including its raise/lower IRQL, and
+ * borrow the same CPU only for its actual one-argument callback CALL. The
+ * connected interrupt ledger, callback frame and original call site are
+ * checked before admission. IF/FP remain owned by that suspended CPU. */
+typedef const char *(*PilotIoSync)(uint32_t entry,uint32_t regs[8],uint32_t flags);
+const char *pilot_io_device_synchronize_call(unsigned char *guest,uint32_t caller,
+    const uint32_t args[3],PilotIoSync callback,uint32_t *result);
 /* An original created thread invokes its generated body on the original
  * stack/PCR. A SystemRoutine has two arguments and must request termination;
  * a PsCreateSystemThread start body has one argument and may return normally.

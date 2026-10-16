@@ -58,6 +58,10 @@ static void test_thread_fp_body(void);
 static void test_thread_lifetime_body(void);
 #ifdef PILOT_EVENT_TIMER_LLE
 static void test_timer_lle_dpc(void);
+#ifdef PILOT_SCHEDULING_LLE
+static void test_synchronize_dpc(void);
+static void test_synchronize_callback(void);
+#endif
 static void test_thread_lle_body(void);
 static void test_thread_wait_body(void);
 static void test_thread_timeout_body(void);
@@ -103,6 +107,10 @@ recomp_func_t recomp_lookup(uint32_t va) {
     if(va==0x12680)return test_thread_lifetime_body;
 #ifdef PILOT_EVENT_TIMER_LLE
     if(va==0x12480)return test_timer_lle_dpc;
+#ifdef PILOT_SCHEDULING_LLE
+    if(va==0x124c0)return test_synchronize_dpc;
+    if(va==0x177ecc)return test_synchronize_callback;
+#endif
     if(va==0x12500)return test_thread_lle_body;
     if(va==0x12520)return test_idle_interrupt_callback;
     if(va==0x12560)return test_idle_dpc_callback;
@@ -155,6 +163,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #ifdef PILOT_EVENT_TIMER_LLE
 #include "event_timer_lle_contract_test.inc"
 #include "callback_kernel_lle_contract_test.inc"
+#include "synchronize_lle_contract_test.inc"
 #include "timer_dpc_lle_contract_test.inc"
 #include "thread_lle_contract_test.inc"
 #include "thread_wait_lle_contract_test.inc"
@@ -552,6 +561,7 @@ int main(int argc,char **argv)
     /* Statistics supplies a larger authored image reservation below. Match
      * that loader input in the original allocator before any dynamic calls. */
     uint32_t fixture_image_size=argc==2 && !strcmp(argv[1],"memory-statistics")?0x20000:0x10000;
+    if(argc==2 && !strncmp(argv[1],"callback-synchronize",20))fixture_image_size=0x170000;
     if(argc==2 && !strcmp(argv[1],"sections"))fixture_image_size=0x16000;
     if(argc==3 && (!strcmp(argv[1],"sections-readonly") || !strcmp(argv[1],"thread-component-sections-lle") || !strcmp(argv[1],"thread-component-sections-pinned-lle"))) {
         FILE *input=fopen(argv[2],"rb");uint32_t header[2];CHECK(input);
@@ -845,6 +855,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-device-pin-guard-lle")) {test_thread_device_cpu_lle(1);return 0;}
 #ifdef PILOT_SCHEDULING_LLE
         if (!strcmp(argv[1],"callback-kernel-guard-lle")) {test_callback_kernel_guard_lle();return 0;}
+        if (!strcmp(argv[1],"callback-synchronize-lle")) {test_synchronize_lle(0);return 0;}
+        if (!strcmp(argv[1],"callback-synchronize-disconnected-lle")) {test_synchronize_lle(1);return 0;}
         if (!strcmp(argv[1],"idle-isr-stack-lle")) {test_idle_interrupt_stack_lle(0);return 0;}
         if (!strcmp(argv[1],"idle-isr-stack-guard-lle")) {test_idle_interrupt_stack_lle(1);return 0;}
         if (!strcmp(argv[1],"idle-isr-service-stack-lle")) {test_idle_interrupt_stack_lle(2);return 0;}

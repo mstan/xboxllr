@@ -128,6 +128,14 @@ static __declspec(thread) unsigned device_bus_borrow,device_bus_dma_lease;
  * A nested original entry suspends it before CPU/clock/device work starts. */
 struct CompiledMmioScope {uc_context *saved_cpu;unsigned depth;};
 static __declspec(thread) struct CompiledMmioScope *compiled_mmio_scope;
+struct SynchronousScope {
+    uint32_t args[3],frame,irql;
+    PilotIoSync callback;
+    unsigned entered,completed;
+};
+static __declspec(thread) struct SynchronousScope *synchronous_scope;
+static DWORD synchronous_owner;
+static int pending_sync;
 static volatile LONG current_irql;
 static volatile LONG caller_if=1;
 static unsigned execution_depth;
@@ -621,6 +629,19 @@ static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *da
         }
     }
 #endif
+    if(synchronous_scope && address==synchronous_scope->args[1]) {
+        struct SynchronousScope *scope=synchronous_scope;
+        uint32_t sp=0,frame[2]={0};
+        if(scope->entered || GetCurrentThreadId()!=synchronous_owner ||
+           uc_reg_read(engine,UC_X86_REG_ESP,&sp)!=UC_ERR_OK || sp!=scope->frame ||
+           owned_cpu_read(engine,sp,frame,sizeof(frame))!=UC_ERR_OK ||
+           frame[0]!=0x8001e1ecu || frame[1]!=scope->args[2] ||
+           (kernel_word(0x8003da60u)&255)!=scope->irql) {
+            forbidden(engine,"device LLE synchronous callback frame/owner changed");return;
+        }
+        scope->entered=1;pending_callback=(uint32_t)address;pending_sync=1;
+        uc_emu_stop(engine);return;
+    }
     if(thread_cpu_admit(engine,(uint32_t)address))return;
     if(thread_cpu_import_fault(engine,address))return;
     if(section_boot_admit(engine,(uint32_t)address))return;
@@ -1135,7 +1156,7 @@ static void run_original_impl(uint32_t entry,size_t instruction_limit,uint32_t d
             }
             calls=0;
         }
-        pending_callback=0;pending_dpc=0;pending_thread=NULL;pending_thread_return=NULL;pending_component=NULL;
+        pending_callback=0;pending_dpc=0;pending_sync=0;pending_thread=NULL;pending_thread_return=NULL;pending_component=NULL;
         pending_cpu_service=NULL;pending_cpu_birth=NULL;
         pending_section_boot=0;
 #ifdef PILOT_USB_LLE
@@ -1240,6 +1261,7 @@ resume_translation:
         }
         uint32_t routine=pending_callback,regs[8],return_pc;
         int is_dpc=pending_dpc;
+        int is_sync=pending_sync;
         struct OriginalThread *thread=pending_thread;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],regs+i));
         IO_UC(owned_cpu_read(cpu,regs[4],&return_pc,4));
@@ -1267,7 +1289,7 @@ resume_translation:
             }
             if(!dpc_stack_top){publish_range(top-0x3000u,0x3000u);if(failure)return;dpc_stack_top=top;}
         }
-        if(!is_dpc && !thread) {publish_idle_callback_stack(regs[4],12);if(failure)return;}
+        if(!is_dpc && !is_sync && !thread) {publish_idle_callback_stack(regs[4],12);if(failure)return;}
         if(thread) {
             /* Original termination may free a previous thread's stack before
              * selecting this entry. Reconcile that actual kernel mutation
@@ -1298,9 +1320,13 @@ resume_translation:
             struct CompiledMmioScope scope={context,execution_depth};
             struct CompiledMmioScope *previous=compiled_mmio_scope;
             compiled_mmio_scope=&scope;
+            uint32_t callback_flags=0;
+            if(is_sync)error=uc_reg_read(cpu,UC_X86_REG_EFLAGS,&callback_flags);
             ReleaseSRWLockExclusive(&lock);
             uint64_t callback_cost=original_cost_begin();
-            const char *callback_error=(is_dpc?dpc_callback:isr_callback)(routine,regs);
+            const char *callback_error=error?uc_strerror(error):is_sync?
+                synchronous_scope->callback(routine,regs,callback_flags):
+                (is_dpc?dpc_callback:isr_callback)(routine,regs);
             compiled_mmio_scope=previous;
             AcquireSRWLockExclusive(&lock);
             original_cost_end(ORIGINAL_COST_CALLBACK,callback_cost);
@@ -1309,6 +1335,15 @@ resume_translation:
         error=uc_context_restore(cpu,context);uc_context_free(context);
         if(error){if(!failure)failure=uc_strerror(error);return;}
         if(failure)return;
+        if(is_sync) {
+            uint32_t original[8];
+            for(unsigned i=0;i<8;++i)IO_UC(uc_reg_read(cpu,general_regs[i],original+i));
+            if(regs[4]!=original[4]+8 || regs[3]!=original[3] ||
+               regs[5]!=original[5] || regs[6]!=original[6] || regs[7]!=original[7]) {
+                failure="device LLE synchronous callback ABI changed";return;
+            }
+            synchronous_scope->completed=1;
+        }
         check_publications(1);if(failure)return;
         for(unsigned i=0;i<8;++i)IO_UC(uc_reg_write(cpu,general_regs[i],regs+i));
         entry=return_pc;
@@ -1349,12 +1384,16 @@ static void image_vm(uint32_t base,uint32_t bytes,uint32_t type)
 static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
     struct DeviceCallerAccess access;
+    if(ordinal==153 && (!synchronous_scope || synchronous_scope->entered ||
+                       GetCurrentThreadId()!=synchronous_owner)) {
+        failure="device LLE synchronize service requires qualified callback ownership";return;
+    }
     storage_caller_prepare(ordinal,args);if(failure)return;
     if(ordinal!=1 && ordinal!=2 && ordinal!=3 && ordinal!=4 && ordinal!=14 && ordinal!=15 && ordinal!=17 && ordinal!=23 &&
        ordinal!=44 && ordinal!=45 && ordinal!=46 && ordinal!=47 && ordinal!=50 && ordinal!=65 && ordinal!=68 && ordinal!=107 && ordinal!=108 && ordinal!=109 && ordinal!=165 && ordinal!=166 &&
        ordinal!=168 && ordinal!=171 && ordinal!=173 && ordinal!=175 && ordinal!=178 && ordinal!=179 && ordinal!=180 && ordinal!=181 && ordinal!=182 &&
        ordinal!=98 && ordinal!=99 && ordinal!=100 && ordinal!=103 && ordinal!=119 && ordinal!=121 && ordinal!=128 && ordinal!=129 && ordinal!=137 && ordinal!=138 && ordinal!=145 && ordinal!=151 &&
-       ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
+       ordinal!=153 && ordinal!=160 && ordinal!=161 && ordinal!=184 && ordinal!=199 && ordinal!=204 && ordinal!=217
 #ifdef PILOT_FILES_LLE
        && ordinal!=24 && ordinal!=35 && ordinal!=36 && ordinal!=37 && ordinal!=67 && ordinal!=69 &&
        ordinal!=97 && ordinal!=113 && ordinal!=125 && ordinal!=148 && ordinal!=149 && ordinal!=150 && ordinal!=159 &&
@@ -1372,9 +1411,12 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
     uint32_t pe=kernel_word(0x8001003cu),exports=0x80010000u+kernel_word(0x80010000u+pe+120);
     uint32_t base=kernel_word(exports+16),table=0x80010000u+kernel_word(exports+28);
     uint32_t entry=0x80010000u+kernel_word(table+4*(ordinal-base));
+    if(ordinal==153 && entry!=0x8001e1d0u) {
+        failure="device LLE synchronize export differs from reviewed kernel";return;
+    }
     if(failure)return;
     unsigned count=(ordinal==3 || ordinal==46 || ordinal==65)?6:ordinal==109?7:(ordinal==166 || ordinal==184)?5:(ordinal==2 || ordinal==45 || ordinal==50 || ordinal==204)?4:
-                   (ordinal==99 || ordinal==107 || ordinal==108 || ordinal==119 || ordinal==145 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
+                   (ordinal==99 || ordinal==107 || ordinal==108 || ordinal==119 || ordinal==145 || ordinal==153 || ordinal==175 || ordinal==178 || ordinal==182 || ordinal==199)?3:
                    (ordinal==15 || ordinal==44 || ordinal==47 || ordinal==168 || ordinal==217)?2:
                    (ordinal==1 || ordinal==103 || ordinal==121 || ordinal==129 || ordinal==160 || ordinal==161)?0:1;
 #ifdef PILOT_FILES_LLE
@@ -1858,6 +1900,9 @@ const char *pilot_io_device_lle(unsigned ordinal,unsigned char *guest,
 {
     if(device_bus_borrow)return "device LLE CPU service reentry from device work";
     AcquireSRWLockExclusive(&lock);
+    if(synchronous_owner && synchronous_owner!=GetCurrentThreadId()) {
+        ReleaseSRWLockExclusive(&lock);return "device LLE service has another synchronous CPU owner";
+    }
     if(!guest_memory)initialize(guest);
     if(!failure && guest_memory!=guest)failure="device LLE guest address space changed";
     if(native_thread_worker)failure="thread LLE continuation handoff requires its real guest-call frame";
@@ -1869,6 +1914,61 @@ const char *pilot_io_device_lle(unsigned ordinal,unsigned char *guest,
         --execution_depth;
     }
     const char *error=failure; /* An incomplete service poisons this context. */
+    ReleaseSRWLockExclusive(&lock);return error;
+}
+
+const char *pilot_io_device_synchronize_call(unsigned char *guest,uint32_t caller,
+    const uint32_t args[3],PilotIoSync callback,uint32_t *result)
+{
+    struct CompiledMmioScope *owner=compiled_mmio_scope;
+    if(!owner || device_bus_borrow)
+        return "device LLE synchronize requires a stopped compiled callback owner";
+    if(synchronous_scope)return "device LLE nested synchronize service is unqualified";
+    AcquireSRWLockExclusive(&lock);
+    const char *error=failure;
+    if(!error && (!cpu || cpu_running || !owner->saved_cpu || !execution_depth ||
+       owner->depth!=execution_depth || guest_memory!=guest || !args || !callback || !result ||
+       execution_depth>=PILOT_IO_SERVICE_FRAMES ||
+       (synchronous_owner && synchronous_owner!=GetCurrentThreadId())))
+        error="device LLE synchronize without matching stopped CPU ownership";
+    /* The only reached caller is original DirectSound1782F2, CALL EDI at
+     *178324. Its actual generated stack supplies all three stdcall arguments.
+     * A broader driver/callback pair needs its own source qualification. */
+    if(!error && (caller!=0x178326u || args[0]!=0x17de78u || args[1]!=0x177eccu || !args[2]))
+        error="device LLE synchronize caller/callback outside qualified original path";
+    uint32_t object[5]={0};
+    unsigned irq=16;
+    if(!error) {
+        for(unsigned i=0;i<16;++i)if(interrupt_objects[i]==args[0]){irq=i;break;}
+        if(irq==16 || owned_cpu_read(cpu,args[0],object,sizeof(object))!=UC_ERR_OK)
+            error="device LLE synchronize requires an initialized interrupt owner";
+    }
+    uint32_t prior_irql=0;
+    if(!error) {
+        const uint32_t low=kernel_word(0x8003de40u+irq*8),high=kernel_word(0x8003de44u+irq*8);
+        prior_irql=kernel_word(0x8003da60u)&255;
+        if(object[2]!=irq || (object[4]&255)!=1 || object[3]>31 || object[3]<prior_irql ||
+           ((low&65535)|(high&0xffff0000u))!=args[0]+0x18 ||
+           (low>>16)!=8 || (high&65535)!=0x8e00)
+            error="device LLE synchronize requires its connected interrupt/IRQL owner";
+    }
+    if(!error) {
+        struct SynchronousScope scope={{args[0],args[1],args[2]},
+            PILOT_IO_SERVICE_BASE+(execution_depth+1)*PILOT_IO_SERVICE_STRIDE-0x100u-20,
+            object[3],callback,0,0};
+        const LONG saved_if=caller_if;
+        synchronous_scope=&scope;synchronous_owner=GetCurrentThreadId();
+        ++execution_depth;
+        uint32_t value=0;
+        execute(153,args,&value);
+        --execution_depth;
+        synchronous_scope=NULL;synchronous_owner=0;
+        if(!failure && (!scope.entered || !scope.completed ||
+                        (kernel_word(0x8003da60u)&255)!=prior_irql || caller_if!=saved_if))
+            failure="device LLE synchronize did not retire callback/restore original state";
+        if(!failure)*result=value;
+        error=failure;
+    }
     ReleaseSRWLockExclusive(&lock);return error;
 }
 

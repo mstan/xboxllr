@@ -50,6 +50,30 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;38 retained deferral IDs,37 scopes.
 
+## Original synchronous audio callback transport - 2026-10-15
+
+The reached KeSynchronizeExecution route now executes original kernel153,
+including its actual interrupt-level raise/lower and one-argument callback.
+Admission binds the original audio caller/context, connected interrupt object,
+stopped same-thread CPU owner and exact original callback frame. The generated
+callback preserves the actual interrupt flag, shares the existing CPU/PCR/MMIO
+owner and returns through the original service. Generic or nested unsupported
+synchronization calls remain guarded; no native service replacement or lifecycle
+completion is supplied.
+
+Root reviewed the source, exact original instruction extracts and four passing
+focused cases: synchronization with IF0/IF1 and nested original query, rejected
+disconnected owner, existing callback guards and existing timer/DPC behavior.
+The prior dispatcher reproduces the original153 rejection in the same fixture.
+These callbacks are authored generated-body equivalents: the tests establish
+transport, ownership and ABI, not the actual title callback's driver effects.
+Private source pins, red control and results are in
+build/blinx/audio-synchronize-20261016/REVIEW.aot-private.md.
+
+Next is one changed connected title run for actual retained-buffer Stop/reuse,
+continued output and timing. The failed capture below remains preserved;
+existing unchanged waveform/component evidence is reused. A05 remains open.
+
 ## Retained audio Stop reaches synchronous callback gap - 2026-10-15
 
 The two-hour-ceiling capture is now terminal after4029.016 host seconds, with
@@ -958,7 +982,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Component complete: all3 original timeout retirement/reentry configurations and actual queued DPC/FEMEM completion pass; connected acceptance remains A05 | `.115` complete | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
-| A05 | Processing/output prefix passes; normal retained Stop reached, but its original KeSynchronizeExecution callback transport is missing; connected reuse/output acceptance remains | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Processing/output prefix passes; retained Stop exposed original153 callback gap, now implemented/reviewed with focused tests; changed title reuse/output acceptance remains | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
