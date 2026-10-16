@@ -30,10 +30,10 @@ public:
             return reject("display source edge accumulation failed");
         now_=time;
         if(!active_) {
-            // No established incoming sync: never preserve a stale encoder
-            // phase as current merely because no consumer sampled it yet.
-            if(edges)encoder_live_=false;
-            return true;
+            // Input sync acquisition is unavailable; the independently
+            // clocked encoder output generator is still running.
+            if(edges) {encoder_input_live_=false;encoder_.invalidate_input_timing();}
+            return advance_encoder(source_.state().edges);
         }
         if(!fp_.advance(edges,[this](const Nv2aFpTiming::State& state){
             if(failed_)return;
@@ -42,7 +42,10 @@ public:
             const bool h=state.hsync&&!last_.hsync,v=state.vsync&&!last_.vsync;
             if(encoder_live_ && (h || v)) {
                 if(!encoder_.positive_sync_input()) {reject("display encoder sync polarity is unavailable");return;}
-                if(h ? !encoder_.input_sync(v) : !encoder_.input_vsync()) {failed_=true;return;}
+                const bool synced=encoder_input_live_?
+                    (h?encoder_.input_sync(v):encoder_.input_vsync()):
+                    (h?encoder_.field_sync(v):encoder_.field_vsync());
+                if(!synced) {failed_=true;return;}
             }
             publish(state);
         }))return false;
@@ -65,7 +68,9 @@ public:
         Cx25871Control::Clocks clocks;const char* reason=nullptr;
         const auto state=encoder_.observe_clocks(clocks,reason);
         const bool driven=state==Cx25871Control::ClockState::Driven;
-        if(driven) {
+        const bool clock_known=driven || state==Cx25871Control::ClockState::Undriven;
+        const bool synchronous=clock_known && equal(clocks.encoder,clocks.input) && equal(clocks.input,clocks.clko);
+        if(clock_known) {
             if(!equal(clocks.encoder,clocks.input) || !equal(clocks.input,clocks.clko)) {
                 if(slave)return reject("display clock requires equal synchronous input/CLKO rates");
             } else {
@@ -75,11 +80,14 @@ public:
             }
         }
         if(encoder_.timing_epoch()!=encoder_epoch_) {
-            encoder_epoch_=encoder_.timing_epoch();encoder_live_=active_ && encoder_.timing_known();
+            encoder_epoch_=encoder_.timing_epoch();
+            encoder_input_live_=active_ && encoder_.timing_known();
             encoder_edge_=source_.state().edges;
-        } else if(!encoder_.timing_known())encoder_live_=false;
+        } else if(!encoder_.timing_known())encoder_input_live_=false;
+        if(!synchronous)encoder_.invalidate_field();
+        encoder_live_=synchronous && source_.state().bound && encoder_.field_known();
         if(!slave || !driven || !input.control_known || !input.debug_known || input.known!=0x3fff) {
-            active_=false;encoder_live_=false;return true;
+            active_=false;encoder_input_live_=false;encoder_.invalidate_input_timing();return true;
         }
         if(routing!=0x100a0000u)return reject("display clock routing outside measured initialized profile");
         if((input.debug&(1u<<28)) || (input.control&0x1000000u) ||
@@ -107,7 +115,7 @@ public:
         publish(last_);return !failed_;
     }
     bool active() const {return active_ && !failed_;}
-    bool encoder_live() const {return encoder_live_ && active();}
+    bool encoder_live() const {return encoder_live_ && !failed_;}
     bool state(Nv2aFpTiming::State& output) const {return active() && fp_.state(output);}
 private:
     static bool equal(Cx25871Control::Rate a,Cx25871Control::Rate b) {
@@ -115,7 +123,8 @@ private:
     }
     bool advance_encoder(uint64_t edge) {
         if(encoder_live_) {
-            if(edge<encoder_edge_ || !encoder_.advance_timing(edge-encoder_edge_)) {failed_=true;return false;}
+            if(edge<encoder_edge_ || !(encoder_input_live_?
+                encoder_.advance_timing(edge-encoder_edge_):encoder_.advance_field(edge-encoder_edge_))) {failed_=true;return false;}
         }
         encoder_edge_=edge;return true;
     }
@@ -136,6 +145,7 @@ private:
     uint32_t control_=0;
     uint64_t fp_origin_=0,encoder_epoch_=0,encoder_edge_=0;
     bool bound_=false,active_=false,ever_active_=false,encoder_live_=false,vertical_blank_=false,failed_=false;
+    bool encoder_input_live_=false;
     bool slave_selected_=false,mode_reentry_=false;
 };
 } // namespace xlle

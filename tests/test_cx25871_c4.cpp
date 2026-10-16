@@ -57,9 +57,32 @@ int main() {
     }
     for(uint8_t changed:{0x01,0x04}) {
         check(encoder.write_byte(0x96,uint8_t(timing96^changed)),"counter/active-line setter transport");
-        check(!encoder.timing_state(after) && encoder.field_signal()<0,
-              "input-line or active-line changes still invalidate timing and FIELD");
+        check(!encoder.timing_state(after) && encoder.field_known() && encoder.field_signal()>=0,
+              "input-line changes invalidate full timing without halting the output counter");
         check(encoder.write_byte(0x96,timing96) && encoder.write_byte(0x6c,0xc6),"restore only via real timing reset");
+    }
+    const int phase=encoder.field_signal();
+    check(encoder.write_byte(0xc6,0xbc) && encoder.field_signal()==(phase^1),"FIELDI applies to running output");
+    check(encoder.write_byte(0xc6,0x9c) && encoder.field_signal()==phase,"FIELDI does not reset phase");
+    uint8_t horizontal=0;
+    check(encoder.read_byte(0x76,horizontal),"known output total");
+    check(encoder.write_byte(0x76,uint8_t(horizontal|1)) && encoder.field_signal()<0,
+          "unrepresentable output half-line cadence keeps FIELD guarded");
+    // These latches were previously protected indirectly by full-raster
+    // invalidation. Keeping the running output counter cannot admit them.
+    const uint8_t unsupported[][2]={{0xa2,0x01},{0xa2,0x80},{0x88,1},{0x6e,1},{0x70,0x42}};
+    for(const auto& write:unsupported) {
+        xlle::Cx25871Control domain([&](const std::string& why){fault=why;});
+        check(domain.write_byte(0xba,0x80) && domain.write_byte(0xba,0) &&
+              domain.write_byte(0x6c,0x46) && domain.write_byte(0xc6,0x9c) &&
+              domain.write_byte(0xc4,1) && domain.write_byte(0x6e,0) && domain.write_byte(0x70,2) &&
+              domain.write_byte(0x6c,0xc6),"known master FIELD origin");
+        uint8_t original=0;
+        check(domain.read_byte(write[0],original),"known interface latch");
+        check(domain.write_byte(write[0],write[1]) && !domain.field_known() && domain.field_signal()<0,
+              "unqualified FIELD interface mutation guards pin");
+        check(domain.write_byte(write[0],original) && !domain.field_known(),"latch restoration does not seed phase");
+        check(domain.write_byte(0x6c,0xc6) && domain.field_known(),"real reset restores qualified FIELD");
     }
     check(!encoder.receive_byte(readback),"legacy readback remains guarded");
     std::printf("CX25871 C4: %d failures\n",failures);

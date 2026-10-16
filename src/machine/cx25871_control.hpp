@@ -6,6 +6,7 @@
 #pragma once
 #include "machine/smbus.hpp"
 #include "machine/cx25871_timing.hpp"
+#include "machine/cx25871_field.hpp"
 #include <array>
 #include <cstdio>
 #include <numeric>
@@ -214,6 +215,20 @@ public:
         // section/table2-5). A change of SLAVER still invalidates timing;
         // SRESET and CHECK_STAT were handled above, not treated as DAC latches.
         registers_[reg] = value; known_[reg] = 0xff; programmed_ = true;
+        if(reg==0x76 || reg==0x86 || reg==0xa2)
+            field_.configure(registers_[0x76] | ((registers_[0x86]&15u)<<8),
+                             (registers_[0xa2]&4)?625:525);
+        if(reg==0xba && timing_selected_ && ((value^field_interface_)&0x20))field_.invalidate();
+        // Preserve the FIELD interface restrictions independently of the full
+        // raster knowledge that ordinary picture/input writes may invalidate.
+        // These alter field detection, output standard, clock relationship or
+        // the master's digital HSYNC edge; this counter floor does not model
+        // their transient effects. Restoring a latch alone cannot revive phase.
+        if(field_.known() && ((registers_[0x38]&0x30) || (registers_[0xd4]&0xe0) ||
+            registers_[0x3a] || (registers_[0xa0]&0xc0) || registers_[0x88] ||
+            (registers_[0xa2]&0x81) ||
+            (!(slave_pin_ || (registers_[0xba]&0x20)) &&
+             (registers_[0x6e] || (registers_[0x70]&0xc0)))))field_.invalidate();
         // Conexant table 2-5: DIV2 is one latch exposed through two registers.
         if (reg == 0x38) mirror_div2(value & 0x10);
         if (reg == 0xd4) {
@@ -228,21 +243,27 @@ public:
     bool quick(bool) override { return reject("CX25871 quick command outside qualified transport"); }
     bool programmed() const { return programmed_; }
     bool timing_known() const { return timing_.known(); }
+    bool field_known() const {return field_.known();}
+    uint64_t field_transitions() const {return field_.transitions();}
+    void invalidate_field() {field_.invalidate();}
+    void invalidate_input_timing() {timing_.invalidate();}
+    bool advance_field(uint64_t clocks) {return field_.advance(clocks);}
+    bool field_sync(bool vertical) {return field_.hsync(vertical);}
+    bool field_vsync() {return field_.vsync();}
     bool timing_selected() const { return timing_selected_; }
     uint64_t timing_epoch() const { return timing_epoch_; }
     // The admitted C6 values both select positive HSYNC/VSYNC (bits3/4).
     bool positive_sync_input() const { return known_[0xc6]==0xff && (registers_[0xc6]&0x18)==0x18; }
-    bool advance_timing(uint64_t clocks) { return timing_.advance(clocks); }
-    bool input_sync(bool vertical) { return timing_.sync(vertical); }
-    bool input_vsync() { return timing_.vertical_sync(); }
+    bool advance_timing(uint64_t clocks) { return timing_.advance(clocks) && field_.advance(clocks); }
+    bool input_sync(bool vertical) { return timing_.sync(vertical) && field_.hsync(vertical); }
+    bool input_vsync() { return timing_.vertical_sync() && field_.vsync(); }
     bool timing_state(Cx25871Timing::State& state) const { return timing_.state(state); }
     // -1 unknown; -2 high impedance; otherwise physical FIELD low/high.
     int field_signal() const {
         if(!(known_[0xc4]&1))return -1;
         if(!(registers_[0xc4]&1))return -2;
-        Cx25871Timing::State state;
-        if(!(known_[0xc6]&0x20) || !timing_.state(state))return -1;
-        return int(state.field_even ^ bool(registers_[0xc6]&0x20));
+        if(!(known_[0xc6]&0x20) || !field_.known())return -1;
+        return int(field_.even() ^ bool(registers_[0xc6]&0x20));
     }
 private:
     bool reset_timing() {
@@ -273,6 +294,8 @@ private:
                             (known_[0x70]==0xff && (registers_[0x70]&0xc0))))
             return reject("CX25871 nonzero master HSYNC offset phase remains unqualified");
         if(!timing_.reset(config))return false;
+        if(!field_.reset(config.output_clocks,config.output_lines))return false;
+        field_interface_=registers_[0xba];
         timing_selected_=true;++timing_epoch_;return true;
     }
     static bool supported(uint8_t reg) {
@@ -298,6 +321,7 @@ private:
     }
     void autoconfigure(unsigned mode) {
         timing_.invalidate();
+        field_.invalidate();
         // Factual ROM values from Conexant 100381B table C-1, modes 0/1,
         // 13.500 MHz crystal. Register 38 and even registers 76..B4 only.
         // All other control latches survive this command, including readback,
@@ -336,6 +360,8 @@ private:
     bool reject(const char* reason) { if (fault_) fault_(reason); return false; }
     FaultFn fault_;
     Cx25871Timing timing_;
+    Cx25871Field field_;
+    uint8_t field_interface_=0;
     std::array<uint8_t, 256> registers_{};
     std::array<uint8_t, 256> known_{};
     ExtensionCommands extensions_{};

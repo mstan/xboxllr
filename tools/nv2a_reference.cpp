@@ -136,7 +136,18 @@ EXPORT int xlle_nv2a_reference_board_advance(void* instance,uint64_t owner,uint6
     auto& ref=*static_cast<Reference*>(instance);
     if(!ref.failure.empty())return 0;
     if(!ref.board_clock) {ref.failure="display board clock has no owner";return 0;}
-    return ref.board_clock->advance({owner,ticks,frequency});
+    const uint64_t prior=ref.encoder->field_transitions();
+    if(!ref.board_clock->advance({owner,ticks,frequency}))return 0;
+    // The encoder output clock also runs while FP sync acquisition is absent.
+    // Preserve the MCPX activity latch across a large clock advance as before.
+    if(ref.board_clock->encoder_live()) {
+        const int signal=ref.encoder->field_signal();
+        if(signal>=0) {
+            if(ref.encoder->field_transitions()-prior>1)ref.field.set_level(signal==0);
+            ref.field.set_level(signal!=0);
+        }
+    }
+    return 1;
 }
 EXPORT void xlle_nv2a_reference_memory(void* instance, uint8_t* ram, uint32_t bytes) {
     auto& ref = *static_cast<Reference*>(instance);

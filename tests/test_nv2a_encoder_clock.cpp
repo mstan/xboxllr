@@ -23,6 +23,66 @@ static void configure(Encoder& encoder) {
     for(const auto& write:writes)CHECK(encoder.write_byte(write[0],write[1]));
 }
 int main() {
+    {
+        // Independent half-line arithmetic, including a live total update.
+        xlle::Cx25871Field output;
+        CHECK(!output.known() && !output.advance(1));
+        CHECK(output.reset(1552,525));
+        CHECK(output.advance(407399) && !output.even());
+        CHECK(output.advance(1) && !output.even());
+        CHECK(output.advance(1) && !output.even());
+        CHECK(output.advance(1) && output.even());
+        CHECK(output.advance(407400) && !output.even());
+        CHECK(output.reset(16,525));CHECK(output.advance(9)); // half-line1,pixel1
+        CHECK(output.configure(8,525));
+        CHECK(output.advance(2094) && !output.even());
+        CHECK(output.advance(1) && !output.even()); // raw edge, delayed pin
+        CHECK(output.advance(2) && output.even()); // retained counters, no new origin
+        CHECK(output.reset(1552,525));CHECK(output.advance(100));
+        CHECK(output.vsync() && output.hsync(false));
+        CHECK(output.advance(1) && !output.even());
+        CHECK(output.advance(1) && output.even());
+        xlle::Cx25871Field split;CHECK(split.reset(1552,525));
+        CHECK(split.advance(100) && split.vsync() && split.hsync(false));
+        for(unsigned n=0;n<100000;++n)CHECK(split.advance(17));
+        CHECK(output.advance(1699998));
+        CHECK(output.clocks()==split.clocks() && output.even()==split.even() && output.transitions()==split.transitions());
+        CHECK(!output.configure(1553,525) && !output.known());
+        CHECK(output.reset(16,525));CHECK(output.advance(8400));
+        CHECK(output.even() && output.transitions()==1); // second raw edge not yet published
+        CHECK(output.hsync(true)); // same-edge correction cancels that unpublished edge
+        CHECK(output.advance(2) && output.even() && output.transitions()==1);
+    }
+    {
+        // Original AV3's early reset occurs while CRTC28 is detached. A real
+        // vblank ISR reads FIELD before the first new VSYNC/final timing reset.
+        // Full input/raster acquisition must remain unknown in this interval.
+        std::string fault;Encoder encoder([&](const std::string& why){fault=why;});configure(encoder);
+        unsigned irq_reads=0;
+        Board board(encoder,[&](const std::string& why){fault=why;},
+            [&](const xlle::Nv2aFpTiming::State& state,bool leading){
+                if(leading) {
+                    ++irq_reads;CHECK(state.x==0 && state.y==480 && !state.vsync);
+                    CHECK(encoder.field_known() && !encoder.timing_known());
+                    CHECK(encoder.field_signal()==1); // running counter, not reattach origin
+                }
+            });
+        auto registers=programming();CHECK(board.bind({1,0,frequency}));
+        CHECK(board.refresh(registers.observe(),false,0x100a0000));
+        CHECK(encoder.write_byte(0x6c,0xc6));
+        CHECK(board.refresh(registers.observe(),false,0x100a0000) && board.encoder_live());
+        CHECK(board.advance({1,(frame/2)*512,frequency}));CHECK(encoder.field_signal()==0);
+        CHECK(encoder.write_byte(0x32,0x28)); // input format/pad drive, no reset
+        CHECK(encoder.write_byte(0x8a,9)); // incomplete input-line programming
+        CHECK(board.refresh(registers.observe(),false,0x100a0000));
+        CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(board.advance({1,(frame/2+480*line)*512,frequency}));
+        CHECK(irq_reads==1 && board.encoder_live() && !encoder.timing_known());
+        CHECK(encoder.write_byte(0x8a,8));
+        CHECK(encoder.write_byte(0x6c,0xc6));
+        CHECK(board.refresh(registers.observe(),true,0x100a0000));
+        CHECK(encoder.timing_known() && encoder.field_signal()==0 && fault.empty());
+    }
     for(unsigned split=0;split<2;++split) {
         std::string fault;
         Encoder encoder([&](const std::string& why){fault=why;});

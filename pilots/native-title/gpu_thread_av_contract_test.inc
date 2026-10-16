@@ -12,7 +12,12 @@ static void test_gpu_thread_av_lle(int mode_guard)
         gpu_lle_open_profile(mode_guard==2?1:0);
         if(mode_guard) {
             CHECK(!pilot_io_device_clock_start());
-            const uint32_t context=0x1b000,args[]={0xfd000000,0,0,0x12,2560,0};
+            // Produce the real boot mode first, then run the captured title's
+            // distinct display request through the original thread transport.
+            uint32_t boot_args[]={0xfd000000,0,0,0x12,2560,0},boot_result=0xcccccccc;
+            CHECK(!pilot_io_device_lle(3,memory,boot_args,&boot_result) && !boot_result);
+            gpu_test_completed_av_mode(mode_guard==2?1:0);
+            const uint32_t context=0x1b000,args[]={0xfd000000,0,0x04010101,0x12,2560,0};
             memset(memory+context,0,96);MEM32(context)=0xcccccccc;
             MEM32(context+16)=6;MEM32(context+20)=0xfe000000+3*4;
             memcpy(memory+context+32,args,sizeof(args));MEM32(context+64)=THREAD_DEVICE_CPU;
@@ -24,7 +29,7 @@ static void test_gpu_thread_av_lle(int mode_guard)
             fprintf(stderr,"Original thread AV startup: %s join=%08x call=%08x completed=%u\n",
                 error?error:"returned",result,MEM32(context),MEM32(context+4));
             CHECK(!error && result==0 && MEM32(context)==0 && MEM32(context+4)==1);
-            gpu_test_completed_av_mode(mode_guard==2?1:0);
+            gpu_test_completed_av_mode(mode_guard==2?0:1);
             uint32_t object=MEM32(out+4);CHECK(!event_lle_call(187,&handle));event_lle_call(250,&object);
             CHECK(event_lle_call(187,&handle)==0xc0000008u);
             CHECK(!event_lle_call(256,&stats));

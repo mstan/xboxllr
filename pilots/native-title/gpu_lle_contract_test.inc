@@ -315,6 +315,12 @@ static void test_gpu_lle_av_mode_startup(uint32_t phase)
     }
     CHECK(!pilot_io_device_lle(3,memory,args,&result) && !result);
     gpu_test_completed_av_mode(phase);
+    // Actual first-draw Device+23C8 requests04010101, distinct from the boot
+    // default0F010101. This natural reentry must run full AV3 and its final
+    // encoder reset; no test-side mode/global invalidation supplies the path.
+    args[2]=0x04010101;
+    CHECK(!pilot_io_device_lle(3,memory,args,&result) && !result);
+    gpu_test_completed_av_mode(phase^1u);
     fprintf(stderr,"PASS: original AV3 returns after actual setup, clock-driven retraces, encoder reset and WSS; connected pixels remain guarded\n");
 }
 

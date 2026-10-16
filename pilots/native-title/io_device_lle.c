@@ -622,9 +622,11 @@ static void interrupt(uc_engine *engine,uint32_t number,void *data)
 #include "io_thread_lle.inc"
 #include "io_diagnostic_lle.inc"
 #include "io_call_diagnostic_lle.inc"
+#include "io_av_diagnostic_lle.inc"
 static void code_block(uc_engine *engine,uint64_t address,uint32_t size,void *data)
 {
     (void)size;(void)data;
+    av_diagnostic_block(engine,(uint32_t)address);
     if(original_diagnostic.receiver)diagnostic_block(engine,(uint32_t)address);
     if(original_call_diagnostic.receiver)diagnostic_calls_block(engine,(uint32_t)address);
     if(failure)return;
@@ -1491,6 +1493,9 @@ static void execute(unsigned ordinal,const uint32_t *args,uint32_t *result)
         IO_UC(uc_reg_read(cpu,saved[i],&observed));
         if(observed!=0x12345678u+i){failure="device LLE preserved register changed";return;}
     }
+    /* uc_emu_start's real RETURN_PC end boundary does not invoke a block hook.
+     * Observe only after the existing PC/stack/IF/register checks succeeded. */
+    if(ordinal==2 || ordinal==3)av_diagnostic_block(cpu,RETURN_PC);
     IO_UC(uc_reg_read(cpu,UC_X86_REG_EAX,result));
     device_caller_complete(ordinal,args,*result,&access);
     if(!failure && execution_depth>2)fprintf(stderr,"[ORIGINAL SERVICE RETURN] depth=%u ordinal=%u result=%08x\n",
