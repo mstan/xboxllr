@@ -123,6 +123,32 @@ window was exhausted, so exact final sync counters are not claimed. The
 counter's live-update contract remains under source review. Terminal receipt:
 `build/blinx/gpu-lle-diagnostic-boundary-20261016/run.aot-private.json`.
 
+Commit3217c5e separates the documented running output FIELD counter from full
+input/raster acquisition. Actual rational clock edges continue during explicit
+FP detach; real resets establish origin, and ordinary input/picture changes
+preserve the output counter. Both natural and actual-sync FIELD transitions
+retain the two-clock publication delay. Unsupported live interfaces remain
+guarded, including master HSYNC offsets; restoring a latch cannot seed phase.
+Full raster/scaler validity is never inferred from FIELD availability. Exact
+partial-write phase stays in GFX-D16 with its supported-consumer trigger.
+Two affected device checks pass0.078s; four original direct/thread AV mode
+checks pass1.797s. The previous board coupling fails the new early-vblank
+control. Root reviewed the primary definitions, corrected two initial review
+findings and verified39 source/build/result identities. The optional observer
+also has a bounded overflow control. Evidence:
+`build/blinx/field-boundary-observer-20261016/counter-seal.aot-private.json` and
+`build/blinx/noise-original-roi-review-20261016/counter-root-review.aot-private.json`.
+The one changed private original-CPU diagnostic reaches its300.157s supervisor
+ceiling without a guard failure. Actual interrupt-side FIELD reads now succeed
+before the new mode's first VSYNC, while full input timing remains unknown.
+This crosses the earlier consumer failure. AV3 itself has not returned and is
+still observed at its first retrace-poll loop while timers/interrupts advance.
+The next work is a short poll/clock/IRQ liveness investigation, not another
+unchanged full-title run. Receipt:
+`build/blinx/gpu-lle-diagnostic-counter-20261016/final-review.aot-private.json`.
+This is not connected rendering or lifecycle acceptance; the private noise
+omission still precludes family qualification. Families remain7/9.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued
