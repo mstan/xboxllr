@@ -2,8 +2,8 @@
 
 Owner-approved finishing plan, 2026-10-11. Parent `beads-xbox.1.102`.
 This checklist governs the current NTSC attract path. It replaces open-ended
-component validation with explicit family closing conditions. Six of nine
-families are qualified: input, display, memory, files, scheduling and movies.
+component validation with explicit family closing conditions. Seven of nine
+families are qualified: input, display, memory, files, scheduling, movies and audio.
 Calendar belongs to scheduling and is not a tenth family.
 
 LLE may be slow. HLE remains the performant default. Each closed family needs
@@ -48,7 +48,60 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;43 retained deferral IDs,42 scopes.
+Current disposition: seven of nine families;43 retained deferral IDs,42 scopes.
+
+## Audio family qualified; GPU transfer investigation continues - 2026-10-16
+
+Audio A01-A05 closes for the bounded attract profile. Root reviewed54 unique
+artifacts and the original producers, maintained device ordering, independent
+processor models and authored failure controls. The changed muted capture exits0
+after3748.5 host seconds with no guards. Original retained object2196917448
+performs Stop10751, observes retired status, restarts at Play10783, and produces
+96000 further frames on both analog and digital routes under the same owner.
+Normal retained-buffer reuse is the actual lifecycle; observer cutoff is not
+claimed as guest teardown. Previously accepted retirement/reentry covers that
+separate contract.
+
+The complete post-Stop trace contains192072 records. Independent reconstruction
+matches4293 concurrent Send sums,25752 original GP publications and535 continuous
+mixed-input EP blocks. Actual GP/EP programs and state are retained, with one
+initial filter state and no reseeding. Original SG and codec initialization bind
+both ends to the same8KiB ring. Replaying captured FIFO cursors/timestamps and
+absolute codec reads yields135168 known frames exactly, including all96000
+required postrestart frames. Root separately reproduced this result with an
+event-merged bytewise ring implementation. Seven unknown initial codec blocks
+are excluded before restart; every required scored frame is known. All three
+unchanged waveform windows pass with zero error; there is no fitted lag/gain/rate.
+
+The initial accepted trace is bit-identical. A01 census, A02 independent stages,
+A03 configured startup/drained reentry, A04 actual timeout/queued-DPC completion,
+and matching HLE/Q03 output/timing/ownership evidence remain reusable. The final
+all-three timeout proof is audio-compute-retirement-20261015; the earlier
+audio-timeout-retirement-20261015 retains its selector2 failure and the accepted
+drained route. No new family requirement or precision deferral is introduced.
+Default HLE remains unchanged and performant; LLE speed is not an acceptance gate.
+
+Root proof: build/blinx/audio-family-qualified-20261016/qualified-root.aot-private.json,
+SHA256 e5e7a9b380248bd3aa3e1d85e3f3126166a19755dbea3f37e3b9c0d807776e1d.
+Worker handoff: audio-postrestart-window-20261016/worker-review/final-handoff.aot-private.json,
+SHA256 e8cde0d441bb89a3ece88af21252824918fb4d232a33ba18f5958011df972d88.
+The failed context-per-frame parser and linear-spool alignment remain preserved;
+source-bound resident-context and actual ring models corrected the offline review,
+without changing runtime samples, scoring windows or thresholds.
+
+Hardware recovery used the already authorized probe DASH, dashboard SMC Restart,
+fresh dashboard startup log and remote probe launch. No owner navigation was
+needed. The configured fa2b513 experiment then passes fresh allocation, upload,
+instance/context enable, cache invalidation and LOAD/idle checks, but returns raw
+CTX_USER11 instead of the probe's exact1 witness. No SAVE, restoration, result
+buffer read or retry follows; changed volatile state is retained pending recovery.
+Original13FD3C and pinned pbkit preserve all non-CHID CTX_USER bits after LOAD;
+the image producer sets bit0 but does not assert whole-register equality. Thus
+the exact witness needs source review; neither full transfer nor the bit4 meaning
+is qualified by this result. Private receipts: probe results/context-recovery-20261016/
+and context-transfer-configured-20261016/. Remaining required work is G02-G05.
+
+Earlier dated milestones below retain their historical counts and open scopes.
 
 ## Bounded physical context transfer stops at load witness - 2026-10-16
 
@@ -1397,9 +1450,9 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
-| A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
-| A04 | Component complete: all3 original timeout retirement/reentry configurations and actual queued DPC/FEMEM completion pass; connected acceptance remains A05 | `.115` complete | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
-| A05 | Processing/output prefix and actual retained Stop/status pass; restart reaches cursor reset, now fixed with original source/output checks; changed title reuse/output acceptance remains | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A03 | Complete: configured reset and three original drained retirement/reentry lifetimes compose with accepted A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
+| A04 | Complete: all3 original timeout retirement/reentry configurations, actual queued DPC/FEMEM completion and connected A05 acceptance | `.115` complete | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
+| A05 | Complete: actual original retained Stop/status/Play plus96000 continued frames; independent mixed GP/EP and causal codec-ring output exact, root accepted | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and

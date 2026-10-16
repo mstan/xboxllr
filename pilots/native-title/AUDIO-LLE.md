@@ -1,5 +1,34 @@
 # Bounded original audio contract
 
+## Bounded attract family closure - 2026-10-16
+
+**Audio is qualified for the bounded Blinx NTSC attract profile; overall7/9.**
+The build-selected original DirectSound route executes through maintained
+APU/GP/EP/AC97 owners and the shared device clock. Root accepted A01-A05 after
+reviewing54 artifacts and independently replaying the causal output ring.
+The actual retained buffer completes Stop, retired status, Play and continued
+streaming. All96000 required postrestart frames match the independently mixed
+and processed output exactly on analog/digital routes. All135168 fully observed
+codec frames agree; seven unknown prefix blocks precede the scored interval.
+No lag/gain/rate fitting or processor-state reseeding is used.
+
+Existing census, source/rate/processing, configured startup, drained and timed-out
+retirement/reentry, queued DPC completion, and HLE/Q03 timing/ownership evidence
+compose this acceptance. The all-three original timeout result is in
+audio-compute-retirement-20261015; earlier failures remain retained. The supported
+connected run uses disconnected startup followed by neutral hotplug at nine
+guest seconds. Initial-connected calibration and existing precision/profile
+extensions remain guarded or deferred with their existing reopening triggers.
+Host observer cutoff is not guest teardown; normal retained-buffer reuse and
+independently accepted retirement/reentry establish the required lifecycle.
+
+Root proof: build/blinx/audio-family-qualified-20261016/qualified-root.aot-private.json,
+SHA256 e5e7a9b380248bd3aa3e1d85e3f3126166a19755dbea3f37e3b9c0d807776e1d.
+The governing [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#audio-family-qualified-gpu-transfer-investigation-continues---2026-10-16)
+contains component composition and retained evidence. Default HLE remains
+unchanged; LLE speed is not required. GPU/graphics remain open. Earlier dated
+observations below preserve their historical counts and remaining-work statements.
+
 Feedback policy,2026-10-15: use focused original-driver/device checks for changes,
 then a connected capture with live inspection of the exact remaining events.
 The last1806s title capture produced18.555s of actual audio; LLE speed is not an
@@ -69,9 +98,9 @@ connected output remain required. See the source/physical evidence distinction
 and scope in the current
 [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-timeout-retirement-now-passes-all-configurations---2026-10-15).
 
-Tracked by `beads-xbox.1.113`. Audio is the active independent offline family;
-the original-scheduler/GPU startup experiments are not prerequisites. The family
-remains **open**, and the overall burndown is **6/9 qualified**. Earlier dated
+Tracked by `beads-xbox.1.113`. Audio is now qualified as recorded above;
+the original-scheduler/GPU startup experiments are not prerequisites. The overall
+burndown is **7/9 qualified**. Earlier dated
 observations retain their historical counts. Hardware access has resumed after
 the dashboard migration. Physical EP input/output and delayed acknowledgement
 now admit the original input, linear output and interleaved stereo FIFO0 routes.
@@ -84,8 +113,8 @@ selector2 retains the ten-transfer Y:0FC9 stop. The earlier malformed-descriptor
 closing checklist for the current evidence and timing/reset requirements.
 
 The native title continues to select its real XAudio2/DSP implementation.
-The audio LLE floor still needs active FE ordering and whole-driver
-integration before it is a qualified selectable title backend. Processing scope
+The audio LLE selection now includes required FE ordering and whole-driver
+integration for the qualified bounded attract profile. Processing scope
 follows the reached voice census in the bounded closing checklist. Existing
 audible HLE output does not remove that requirement.
 
