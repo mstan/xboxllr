@@ -89,3 +89,26 @@ or retrigger replay. Stale, inaccessible or malformed markers are errors.
 These are elective host observation/input controls. They neither seed game state
 nor classify phases, and they do not change default HLE execution. Xbox recovery
 and enabled-noise hardware evidence remain separate prerequisites.
+
+## Passive content-lifetime evidence
+
+For the connected run, also set `XLLE_PILOT_GPU_LIFETIME=1` with the capture
+directory above. One fresh call table observes original Swap and the source-hashed
+resource destruction helper at `136B00` (156 bytes, stdcall4). This covers final
+unbinding as well as public Release. It retains paired original entry/return
+identity, the resource header on entry only, and separate driver completion and
+submission counts in `gpu-lifetime.jsonl`. No freed header is read on return.
+
+Each requested picture also records the four original texture-binding slots at
+`device+B38` in its `.owners.json`. Associate relevant owners with scene output
+and matching normal destruction returns; a binding alone does not prove sampling.
+Resource views or shared backing can survive an object's destruction, so do not
+interpret every return as freeing its backing allocation. The accepted G01
+components supply unchanged lower-level ownership contracts.
+
+The observer copies existing RAM and writes host evidence. It adds no guest
+services, clock advances, GPU drains or fabricated completions. Failed reads,
+failed writes or the 65536-event bound stop observation; unmatched entries cannot
+establish retirement. Seal the files after process exit. These observations and
+the unchanged G01 evidence support the normal content transition, not exhaustive
+allocation or cancellation coverage.

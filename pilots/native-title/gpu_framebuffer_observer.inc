@@ -5,6 +5,9 @@
 #define GPU_FRAMEBUFFER_SWAP 0x001379a0u
 #define GPU_FRAMEBUFFER_SWAP_BYTES 219u
 #define GPU_FRAMEBUFFER_SWAP_SHA "83eda516e4ec44e46a83880796d99461ac3e16d5f32fb32e13401747e305ae4a"
+#define GPU_RESOURCE_DESTROY 0x00136b00u
+#define GPU_RESOURCE_DESTROY_BYTES 156u
+#define GPU_RESOURCE_DESTROY_SHA "2ea087f1543427f3025c3aa4e55330e079d4c5acd914a32a55d567d932bb950d"
 #define GPU_FRAMEBUFFER_MAX (1860u+1920u*1080u*4u)
 #define GPU_DIGITAL_MAX (320u+640u*480u*8u)
 static struct {
@@ -12,6 +15,8 @@ static struct {
     unsigned enabled,failed,records,completed_only,digital,requests;
     uint32_t last_device,last_completed;
     uint32_t progress_device,progress_completed,progress_caller;
+    HANDLE lifetime_file;
+    unsigned lifetime_records;
 } gpu_framebuffer_observer;
 static int gpu_framebuffer_read(uint32_t address,void *output,size_t bytes)
 {
@@ -40,8 +45,62 @@ static int gpu_framebuffer_request(const char *directory,unsigned record)
         !memcmp(bytes,marker,sizeof(marker)-1);
     if(!CloseHandle(file))okay=0;return okay?1:-1;
 }
+/* Actual original destruction, including final unbinding. The callback only
+ * copies pre-existing RAM and writes host evidence. Header bytes are sampled
+ * on entry; a paired normal return never dereferences the freed object. */
+static const char *gpu_lifetime_record(const PilotIoCallDiagnosticEvent *event)
+{
+    if(!gpu_framebuffer_observer.lifetime_file || event->index!=1 ||
+       (event->kind!=PILOT_IO_DIAGNOSTIC_ENTRY && event->kind!=PILOT_IO_DIAGNOSTIC_RETURN))
+        return "GPU lifetime observation has an invalid event";
+    if(gpu_framebuffer_observer.lifetime_records>=65536)
+        return "GPU lifetime observation record bound exhausted";
+    uint32_t header[3]={0},device=0,counters[5]={0};
+    const int entering=event->kind==PILOT_IO_DIAGNOSTIC_ENTRY;
+    if(entering && (!event->args[0] ||
+       !pilot_io_device_diagnostic_read(event->args[0],header,sizeof(header),0)))
+        return "GPU lifetime entry header unavailable";
+    if(!pilot_io_device_diagnostic_read(0x00141b78u,&device,4,0) || !device ||
+       (uint64_t)device+0x2590>0x100000000ull ||
+       !pilot_io_device_diagnostic_read(device+0x257c,counters,sizeof(counters),0))
+        return "GPU lifetime driver counters unavailable";
+    char line[1024];
+    int bytes=sprintf_s(line,sizeof(line),
+        "{\"phase\":\"%s\",\"id\":%llu,\"thread\":%u,\"caller\":%u,\"entry_sp\":%u,"
+        "\"resource\":%u,\"header_copied\":%s,\"common\":%u,\"data\":%u,\"lock\":%u,"
+        "\"device\":%u,\"completed\":%u,\"submitted\":%u,\"driver_frame\":%u,"
+        "\"last_capture\":%u,\"source_entry\":%u,\"source_sha256\":\"%s\",\"qualified\":false}\n",
+        entering?"enter":"return",(unsigned long long)event->id,event->thread,event->caller,event->entry_sp,
+        event->args[0],entering?"true":"false",header[0],header[1],header[2],device,
+        counters[0],counters[4],counters[1],gpu_framebuffer_observer.records,
+        GPU_RESOURCE_DESTROY,GPU_RESOURCE_DESTROY_SHA);
+    DWORD written=0;
+    if(bytes<0 || !WriteFile(gpu_framebuffer_observer.lifetime_file,line,(DWORD)bytes,&written,NULL) || written!=(DWORD)bytes)
+        return "GPU lifetime evidence write failed";
+    ++gpu_framebuffer_observer.lifetime_records;return NULL;
+}
+static int gpu_framebuffer_owners(unsigned record,uint32_t device)
+{
+    uint32_t owners[4]={0},headers[4][3]={{0}};
+    if(!pilot_io_device_diagnostic_read(device+0xb38,owners,sizeof(owners),0))return 0;
+    for(unsigned stage=0;stage<4;++stage)
+        if(owners[stage] && !pilot_io_device_diagnostic_read(owners[stage],headers[stage],sizeof(headers[stage]),0))return 0;
+    char json[1024];
+    int bytes=sprintf_s(json,sizeof(json),
+        "{\"qualified\":false,\"device\":%u,\"binding_offset\":2872,\"textures\":["
+        "{\"stage\":0,\"resource\":%u,\"header\":[%u,%u,%u]},"
+        "{\"stage\":1,\"resource\":%u,\"header\":[%u,%u,%u]},"
+        "{\"stage\":2,\"resource\":%u,\"header\":[%u,%u,%u]},"
+        "{\"stage\":3,\"resource\":%u,\"header\":[%u,%u,%u]}]}\n",device,
+        owners[0],headers[0][0],headers[0][1],headers[0][2],
+        owners[1],headers[1][0],headers[1][1],headers[1][2],
+        owners[2],headers[2][0],headers[2][1],headers[2][2],
+        owners[3],headers[3][0],headers[3][1],headers[3][2]);
+    return bytes>=0 && gpu_framebuffer_file(record,"owners.json",json,(uint32_t)bytes);
+}
 static const char *gpu_framebuffer_record(const PilotIoCallDiagnosticEvent *event)
 {
+    if(gpu_framebuffer_observer.enabled && event->index==1)return gpu_lifetime_record(event);
     if(!gpu_framebuffer_observer.enabled || gpu_framebuffer_observer.failed ||
        gpu_framebuffer_observer.records>=(gpu_framebuffer_observer.requests?16u:4u) ||
        event->kind!=PILOT_IO_DIAGNOSTIC_RETURN)return NULL;
@@ -84,6 +143,8 @@ static const char *gpu_framebuffer_record(const PilotIoCallDiagnosticEvent *even
         gpu_context_word(wire+8)!=1860 || gpu_context_word(wire+120)!=1 ||
         (uint64_t)gpu_context_word(wire+16)+1860!=required))copied=0;
     int saved=gpu_framebuffer_file(record,"cpu.bin",event,sizeof(*event));
+    if(gpu_framebuffer_observer.lifetime_file)
+        saved=driver_ok && gpu_framebuffer_owners(record,device) && saved;
     if(driver_ok)saved=gpu_framebuffer_file(record,"miniport.bin",miniport,sizeof(miniport)) && saved;
     if(copied)saved=gpu_framebuffer_file(record,"fbd1.bin",wire,required) && saved;
     int digital_copied=0,digital_pixels=0;
@@ -149,9 +210,20 @@ static void gpu_framebuffer_observer_open(const char *library_sha)
         *(FARPROC*)&gpu_lle.digital_snapshot=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_digital_snapshot");
         if(!gpu_lle.digital_snapshot)stop("GPU digital input ABI missing",0);
     }
-    const PilotIoDiagnosticCall call={GPU_FRAMEBUFFER_SWAP,GPU_FRAMEBUFFER_SWAP_BYTES,4,GPU_FRAMEBUFFER_SWAP_SHA};
+    const char *lifetime=getenv("XLLE_PILOT_GPU_LIFETIME");
+    unsigned count=1;
+    const PilotIoDiagnosticCall calls[]={
+        {GPU_FRAMEBUFFER_SWAP,GPU_FRAMEBUFFER_SWAP_BYTES,4,GPU_FRAMEBUFFER_SWAP_SHA},
+        {GPU_RESOURCE_DESTROY,GPU_RESOURCE_DESTROY_BYTES,4,GPU_RESOURCE_DESTROY_SHA}};
+    if(lifetime && !strcmp(lifetime,"1")) {
+        char path[4352];
+        if(sprintf_s(path,sizeof(path),"%s/gpu-lifetime.jsonl",directory)<0)stop("GPU lifetime path too long",0);
+        HANDLE file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(file==INVALID_HANDLE_VALUE)stop("GPU lifetime evidence file unavailable",0);
+        gpu_framebuffer_observer.lifetime_file=file;count=2;
+    }
     // Fresh-table API rejects competing observers; never unbind audio capture.
-    const char *error=pilot_io_device_diagnostic_calls_bind(&call,1,gpu_framebuffer_record);
+    const char *error=pilot_io_device_diagnostic_calls_bind(calls,count,gpu_framebuffer_record);
     if(error)stop(error,GPU_FRAMEBUFFER_SWAP);
     gpu_framebuffer_observer.enabled=1;
     fprintf(stderr,"[GPU FRAMEBUFFER] at most%u actual Swap-return observations; distinct_completed_counts=%u request_controlled=%u; full output guards retained\n",
