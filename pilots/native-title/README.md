@@ -1,8 +1,9 @@
 # Native title reference pilot
 
-Current bounded Blinx qualification is **6/9 families**: input, display,
-memory, files, scheduling and movies pass. Audio, GPU and graphics remain open;
-hardware work is currently deferred by the owner. Use the
+Current bounded Blinx qualification is **7/9 families**: input, display,
+memory, files, scheduling, movies and audio pass. GPU and graphics remain open
+on connected attract exit/reentry and content lifetime (G05); G01-G04 passed.
+The current startup texture-creation failure is being diagnosed offline. Use the
 [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) for current gates
 and [audio evidence](AUDIO-LLE.md) for the latest GP/EP milestones. The earlier
 component observations below retain their original scope and limitations.

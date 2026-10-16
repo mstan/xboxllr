@@ -112,3 +112,18 @@ failed writes or the 65536-event bound stop observation; unmatched entries canno
 establish retirement. Seal the files after process exit. These observations and
 the unchanged G01 evidence support the normal content transition, not exhaustive
 allocation or cancellation coverage.
+
+## Optional startup texture-error diagnosis
+
+With the same private capture directory, `XLLE_PILOT_GPU_TEXTURE_DIAGNOSTIC=1`
+adds five source-hashed original call observations to the existing fresh table.
+They record parser/format checks, texture and surface creation, and error UI entry
+in `gpu-texture.jsonl`. The60-byte D3DX helper is not bound under the diagnostic
+interface's32-byte argument limit. Instead, error UI entry with caller2E710
+preserves its exact return in EAX. Other error callers have no such status claim.
+
+At the first error UI entry, this option copies the64MiB physical RAM and CPU event
+to `framebuffer-00.texture-error.*.bin`, then stops diagnosis. These are existing
+RAM reads and host-file writes only. No guest query, allocator call, clock advance,
+hardware access or error recovery occurs. This deliberate diagnostic stop does
+not qualify the connected sequence. The option is off for ordinary HLE play.

@@ -52,6 +52,23 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Connected startup texture failure isolated - 2026-10-16
+
+The palette-corrected run passes both previous guards and records three completed
+pictures and483 paired original destruction returns. Its third picture is Blinx's
+generic disc-error screen, not attract. A retained read-only RAM snapshot identifies
+original in-memory D3DX helper1459C6 returning nonzero for `t_kinoko_03_b.dds`.
+All1152 bytes of that32x64 DXT1 input match both the installed manifest and local
+source. The filename fallback and extension-rejection branches are excluded;
+the original HRESULT and failing suboperation remain unknown. Do not infer corrupt
+media, allocation exhaustion or timeout from the generic message.
+
+Private run evidence is under `build/blinx/graphics-palette-connected-20261016/`,
+with20 original component inputs frozen before rebuilding. The independent offline
+receipt is `build/blinx/disc-error-diagnosis-20261016/diagnosis.aot-private.json`.
+This startup failure prevents G05; there is still no attract exit/reentry or guest
+teardown claim. GPU/graphics remain open and the family count stays7/9.
+
 ## Connected lifetime run and palette dependency correction - 2026-10-16
 
 The maintained run passes the former17F8 stopping point, records two completed

@@ -19,8 +19,10 @@ owned context/drawing, enabled-noise reconstruction and bounded native compariso
 have passed. The maintained GPU-LLE title produces completed loading pictures and
 processed digital input. Its passive observer records 483 paired original
 resource-destruction returns. Shader-control 17F8 storage and the unnecessary
-palette dependency are corrected; affected component tests pass. The connected
-rerun must still establish moving attract output, a genuine Start/release,
+palette dependency are corrected; affected component tests pass. The next run
+passes those guards but reaches the original texture-loader's generic error UI:
+the failing DXT1 bytes match the installed asset, and its exact creation failure
+is being isolated. The connected run must still establish moving attract output, a genuine Start/release,
 visible title return, relevant content retirement and fresh attract reentry.
 No additional hardware observation is currently required for that sequence.
 See the [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md) and

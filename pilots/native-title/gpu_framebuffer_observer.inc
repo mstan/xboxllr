@@ -31,6 +31,7 @@ static int gpu_framebuffer_file(unsigned record,const char *suffix,const void *d
     DWORD written=0;int okay=WriteFile(file,data,bytes,&written,NULL) && written==bytes;
     if(!CloseHandle(file))okay=0;return okay;
 }
+#include "gpu_texture_diagnostic.inc"
 // The supervisor publishes an immutable marker after observing the phase it
 // wants. A request is selection intent, never proof of title/demo/reentry state.
 // Missing next marker waits without touching GPU state or consuming a record.
@@ -100,7 +101,9 @@ static int gpu_framebuffer_owners(unsigned record,uint32_t device)
 }
 static const char *gpu_framebuffer_record(const PilotIoCallDiagnosticEvent *event)
 {
-    if(gpu_framebuffer_observer.enabled && event->index==1)return gpu_lifetime_record(event);
+    if(gpu_framebuffer_observer.enabled && event->index>=2)return gpu_texture_diagnostic_record(event);
+    if(gpu_framebuffer_observer.enabled && event->index==1)
+        return gpu_framebuffer_observer.lifetime_file?gpu_lifetime_record(event):NULL;
     if(!gpu_framebuffer_observer.enabled || gpu_framebuffer_observer.failed ||
        gpu_framebuffer_observer.records>=(gpu_framebuffer_observer.requests?16u:4u) ||
        event->kind!=PILOT_IO_DIAGNOSTIC_RETURN)return NULL;
@@ -212,7 +215,7 @@ static void gpu_framebuffer_observer_open(const char *library_sha)
     }
     const char *lifetime=getenv("XLLE_PILOT_GPU_LIFETIME");
     unsigned count=1;
-    const PilotIoDiagnosticCall calls[]={
+    PilotIoDiagnosticCall calls[7]={
         {GPU_FRAMEBUFFER_SWAP,GPU_FRAMEBUFFER_SWAP_BYTES,4,GPU_FRAMEBUFFER_SWAP_SHA},
         {GPU_RESOURCE_DESTROY,GPU_RESOURCE_DESTROY_BYTES,4,GPU_RESOURCE_DESTROY_SHA}};
     if(lifetime && !strcmp(lifetime,"1")) {
@@ -221,6 +224,15 @@ static void gpu_framebuffer_observer_open(const char *library_sha)
         HANDLE file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
         if(file==INVALID_HANDLE_VALUE)stop("GPU lifetime evidence file unavailable",0);
         gpu_framebuffer_observer.lifetime_file=file;count=2;
+    }
+    const char *texture=getenv("XLLE_PILOT_GPU_TEXTURE_DIAGNOSTIC");
+    if(texture && !strcmp(texture,"1")) {
+        char path[4352];
+        if(sprintf_s(path,sizeof(path),"%s/gpu-texture.jsonl",directory)<0)stop("GPU texture diagnostic path too long",0);
+        HANDLE file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(file==INVALID_HANDLE_VALUE)stop("GPU texture diagnostic evidence file unavailable",0);
+        gpu_texture_diagnostic.file=file;
+        memcpy(calls+2,gpu_texture_diagnostic_calls,sizeof(gpu_texture_diagnostic_calls));count=7;
     }
     // Fresh-table API rejects competing observers; never unbind audio capture.
     const char *error=pilot_io_device_diagnostic_calls_bind(calls,count,gpu_framebuffer_record);
