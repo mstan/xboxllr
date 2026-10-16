@@ -70,6 +70,7 @@ static void test_gpu_thread_av_lle(int mode_guard)
         CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==baseline_handles);
         CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));CHECK(!gpu_lle.error(gpu_lle.device));
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
+        CHECK(!pilot_io_device_bus_memory_bind(0xf0000000u,0x04000000u,NULL));
         CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }

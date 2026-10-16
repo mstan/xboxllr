@@ -261,6 +261,7 @@ static void test_gpu_lle_transport(void)
          * enabled interrupt. It does not claim general title teardown proof. */
         CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
+        CHECK(!pilot_io_device_bus_memory_bind(0xf0000000u,0x04000000u,NULL));
         CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));
         pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
@@ -439,6 +440,7 @@ static void test_gpu_lle_encoder_timing(void)
         }
         CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));
         gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
+        CHECK(!pilot_io_device_bus_memory_bind(0xf0000000u,0x04000000u,NULL));
         CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));pilot_io_device_port_bind(0,0,NULL);
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
     }

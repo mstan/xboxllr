@@ -202,6 +202,13 @@ const char *pilot_io_device_initialize(unsigned char *guest);
  * clears all mappings. Invalid admission leaves existing owners unchanged. */
 typedef const char *(*PilotIoMmio)(uint32_t address,unsigned size,int write,uint32_t *value);
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback);
+/* Separate memory-aperture owner, permitting1/2/4/8-byte bus transfers without
+ * widening device register contracts. Each access verifies the actual original
+ * PTE maps its entire virtual span to the same bus address. No RAM alias is
+ * cached; the callback validates allocation/protection on every transaction.
+ * Same idle binding, synchronous borrowing and exact removal rules as MMIO. */
+typedef const char *(*PilotIoBusMemory)(uint32_t address,unsigned size,int write,uint64_t *value);
+const char *pilot_io_device_bus_memory_bind(uint32_t first,uint32_t bytes,PilotIoBusMemory callback);
 /* Dispatch a sized compiled access to the exact existing registered owner.
  * Only the same-thread stopped original ISR/DPC continuation is admitted;
  * idle callers, raw CPU/clock/device work and nested bus callbacks reject.

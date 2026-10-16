@@ -74,6 +74,38 @@ bool Nv2a::ram_tiles_active() const {
     return false;
 }
 
+bool Nv2a::cpu_aperture(uint32_t offset,void* data,size_t bytes,bool write) {
+    if(draw_faulted_)return false; // preserve the first draw fault
+    if(!data || (bytes!=1 && bytes!=2 && bytes!=4 && bytes!=8) ||
+       uint64_t(offset)+bytes>0x04000000u) {
+        fault_("NV2A invalid CPU aperture transaction");return false;
+    }
+    if(renderer_) {
+        fault_("NV2A CPU aperture renderer residency is unqualified");return false;
+    }
+    // Do not infer a linear CPU view from the GPU's tiled-client translator.
+    // Inspect every client bank, including incomplete reconfiguration epochs.
+    for(const auto* config:{&pfb_tiles_,&pgraph_tiles_,&texture_tiles_})
+        for(const auto& tile:config->tiles) {
+            if(!(tile[0]&1))continue;
+            const uint32_t base=tile[0]&0x03ffc000u;
+            if(tile[1]<base || tile[1]>=0x04000000u) {
+                fault_("NV2A CPU aperture has an invalid active tile extent");return false;
+            }
+            if(offset<=tile[1] && uint64_t(offset)+bytes>base) {
+                fault_("NV2A CPU aperture overlaps unqualified tiled storage");return false;
+            }
+        }
+    // Retire only already-issued host draw work, as other CPU memory consumers
+    // do. This does not pull pending PFIFO commands or advance device time.
+    draw_queue_drain_all();
+    if(draw_faulted_)return false; // a delayed draw fault forbids the CPU transfer
+    const bool ok=write ? mem_write_ && mem_write_(offset,data,bytes)
+                        : mem_read_ && mem_read_(offset,data,bytes);
+    if(!ok)fault_("NV2A CPU aperture has no owned RAM extent");
+    return ok;
+}
+
 bool Nv2a::ram_tile_overlap(uint32_t address,size_t bytes) const {
     if(!bytes)return false;
     for(const auto& tile:pgraph_tiles_.tiles)

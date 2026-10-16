@@ -46,6 +46,28 @@ static void gpu_thread_cpu_ops(const uint32_t (*ops)[4],unsigned count,unsigned 
     MEM32(context+4)=table;MEM32(context+8)=count;MEM32(context+64)=GPU_THREAD_CPU;
     thread_cpu_create_join(GPU_THREAD_CPU,context,lifetime&1);CHECK(MEM32(context+12)==1);
 }
+static void gpu_thread_aperture(uint32_t base,unsigned lifetime)
+{
+    // Authored MOVUPS/MOVNTPS/SFENCE instructions execute on the original CPU.
+    // Unicorn splits the128-bit access into64-bit bus transfers. Verify both
+    // halves against ordinary owned RAM and then read back through the aperture.
+    const uint32_t entry=0x13e00,context=0x1b000;
+    const uint8_t code[]={0x56,0x57,0x8b,0x4c,0x24,0x0c, // ESI/EDI; ECX=context
+        0x8d,0x71,0x20,0x8b,0x79,4, // ESI=source; EDI=aperture
+        0x0f,0x10,0x06,0x0f,0x2b,0x07,0x0f,0xae,0xf8,
+        0x0f,0x10,0x0f,0x0f,0x11,0x4e,0x10,
+        0xc7,0x41,0x0c,1,0,0,0,0x5f,0x5e,0xc2,4,0};
+    memcpy(memory+entry,code,sizeof(code));memset(memory+context,0,96);
+    MEM32(context+4)=0xf0000000u+(base&0x03ffffffu)+0x100;
+    for(unsigned i=0;i<16;++i)MEM8(context+32+i)=(uint8_t)(0x10*lifetime+i);
+    MEM32(context+64)=entry;
+    thread_cpu_create_join(entry,context,lifetime&1);
+    CHECK(MEM32(context+12)==1);
+    CHECK(!memcmp(memory+base+0x100,memory+context+32,16));
+    CHECK(!memcmp(memory+context+48,memory+context+32,16));
+    CHECK(MEM8(base+0xff)==0x5a && MEM8(base+0x110)==0x5a);
+    memset(memory+base+0x100,0x5a,16);
+}
 static void test_gpu_thread_cpu_lle(void)
 {
     install_fault_handler();CHECK(!pilot_io_device_files(memory));
@@ -67,6 +89,7 @@ static void test_gpu_thread_cpu_lle(void)
         CHECK(base && !physical_find(base,1));gpu_cpu_pa=base&0x03ffffff;
         const uint32_t packet[]={0x40000,1,0x401a4,2,0x81d6c,4096,0x12345678};
         memset(memory+base,0x5a,8192);memcpy(memory+base,packet,sizeof(packet));MEM32(base+4096)=0xabcdef01;
+        gpu_thread_aperture(base,lifetime);
         uint32_t setup[][4]={
             {1,0x80000000,gpu_cpu_pa|1,0},{1,0xfd001804,4,0},{0,0xfd001804,0,0},{0,0xfd001800,0,0},
             {1,0xfd700008,1,0},{1,0xfd70000c,0x80010020,0},{1,0xfd700200,0x97,0},
@@ -95,12 +118,13 @@ static void test_gpu_thread_cpu_lle(void)
         CHECK(!pilot_io_device_work_unbind(gpu_lle_sample));
         CHECK(!gpu_lle.error(gpu_lle.device));gpu_lle.destroy(gpu_lle.device);gpu_lle.device=NULL;
         CHECK(!pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,NULL));pilot_io_device_port_bind(0,0,NULL);
+        CHECK(!pilot_io_device_bus_memory_bind(0xf0000000u,0x04000000u,NULL));
         CHECK(FreeLibrary(gpu_lle.library));gpu_lle.library=NULL;
         CHECK(!event_lle_call(256,&stats));
         CHECK(MEM32(stats+4)==baseline_threads && MEM32(stats+8)==baseline_handles);
     }
     CHECK(!pilot_io_device_clock_bind(NULL,NULL));
-    CHECK(thread_cpu_calls==15 && gpu_cpu_mmio_calls>=3*26);
+    CHECK(thread_cpu_calls==18 && gpu_cpu_mmio_calls>=3*26);
     fprintf(stderr,"PASS: three original CPU/GPU lifetimes, same PBUS/PFIFO owner and physical-zero jump, held/released actual semaphore DMA, whole RAM checks, scoped crosspage/RO/lease/CPU-reentry/binding guards and original cleanup\n");
 }
 #else

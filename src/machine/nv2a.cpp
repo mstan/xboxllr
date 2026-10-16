@@ -2477,6 +2477,7 @@ void Nv2a::fold_draw_job(DrawJob& job) {
         job.vsh_overlap.outcome = VshDrawOverlapOutcome::kFault;
     record_vsh_draw_overlap(job, VshDrawOverlapOutcome::kCpuWitnessed);
 #endif
+    if (out.failed) draw_faulted_ = true;
     if (out.failed) fault_(out.fault_message);
     if (!out.ok) ++draw_worker_failures_;
 }

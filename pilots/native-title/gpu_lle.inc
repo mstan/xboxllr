@@ -13,6 +13,7 @@ static struct {
     void (*bus)(void*,int(*)(uint32_t,void*,size_t),int(*)(uint32_t,const void*,size_t),void(*)(int,int));
     uint32_t (*read)(void*,uint32_t,int);
     void (*write)(void*,uint32_t,int,uint32_t);
+    int (*aperture)(void*,uint32_t,unsigned,int,uint64_t*);
     void (*frame)(void*,uint64_t);
     void (*clock)(void*,uint64_t,uint32_t);
     int (*board_start)(void*,uint64_t,uint64_t,uint64_t);
@@ -97,6 +98,18 @@ static const char *gpu_lle_kernel_mmio(uint32_t address,unsigned size,int write,
     if(write && gpu_context_observer.enabled)gpu_context_postwrite(address,error);
     return error;
 }
+static const char *gpu_lle_cpu_aperture(uint32_t address,unsigned size,int write,uint64_t *value)
+{
+    if(!gpu_lle.device)return "GPU memory aperture before initialization";
+    const char *error=gpu_lle_sample();if(error)return error;
+    if(address<0xf0000000u || (uint64_t)address+size>0xf4000000ull)
+        return "GPU CPU aperture outside retail UMA window";
+    if(!gpu_lle.aperture(gpu_lle.device,address-0xf0000000u,size,write,value)) {
+        error=gpu_lle.error(gpu_lle.device);
+        return error?error:"GPU CPU aperture transfer rejected";
+    }
+    return gpu_lle.error(gpu_lle.device);
+}
 static const char *gpu_lle_sample(void)
 {
     if(!gpu_lle.device)return "GPU device work without owned instance";
@@ -149,7 +162,7 @@ static void gpu_lle_open_profile_clock(uint32_t idle_phase,int external_clock_fi
     RemoveDllDirectory(dependency);
     if(!gpu_lle.library)stop("maintained NV2A reference DLL unavailable",GetLastError());
 #define GPU_LOAD(member) do {*(FARPROC*)&gpu_lle.member=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_" #member);if(!gpu_lle.member)stop("GPU DLL ABI missing: " #member,0);} while(0)
-    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(av_idle);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(board_start);GPU_LOAD(board_advance);GPU_LOAD(port);GPU_LOAD(field);GPU_LOAD(av_outputs);GPU_LOAD(encoder_clocks);GPU_LOAD(encoder_advance);GPU_LOAD(encoder_timing);GPU_LOAD(scanout);
+    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(av_idle);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(aperture);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(board_start);GPU_LOAD(board_advance);GPU_LOAD(port);GPU_LOAD(field);GPU_LOAD(av_outputs);GPU_LOAD(encoder_clocks);GPU_LOAD(encoder_advance);GPU_LOAD(encoder_timing);GPU_LOAD(scanout);
 #undef GPU_LOAD
     gpu_lle.device=gpu_lle.create();
     if(!gpu_lle.device)stop("NV2A reference allocation failed",0);
@@ -175,6 +188,10 @@ static void gpu_lle_open_profile_clock(uint32_t idle_phase,int external_clock_fi
     pilot_io_device_port_bind(0xc000,0xc00f,gpu_lle_port);
     error=pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,gpu_lle_kernel_mmio);
     if(error)stop(error,0xfd000000u);
+    // Original large-page mappings expose the retail64MiB UMA PCI aperture.
+    // Each access rechecks those mappings and borrows the actual RAM owner.
+    error=pilot_io_device_bus_memory_bind(0xf0000000u,0x04000000u,gpu_lle_cpu_aperture);
+    if(error)stop(error,0xf0000000u);
     error=pilot_io_device_work_bind(gpu_lle_sample);if(error)stop(error,0xfd000000u);
     fprintf(stderr,"[GPU LLE] original XDK renderer; maintained NV2A; shared original RAM/PIC/ISR\n");
 }

@@ -80,7 +80,7 @@ struct Reference {
     Reference() : field([this](const std::string& reason) { failure = reason; }),
         av_outputs([this](const std::string& reason) { failure = reason; }),
         pci([this](const std::string& reason) { failure = reason; }),
-        gpu([this](const std::string& reason) { failure = reason; }),
+        gpu([this](const std::string& reason) { if(failure.empty())failure = reason; }),
         smbus(0xc000, [this](const std::string& reason) { failure = reason; }) {
         auto control = std::make_unique<xlle::Cx25871Control>(
             [this](const std::string& reason) { failure = reason; });
@@ -165,6 +165,23 @@ EXPORT void xlle_nv2a_reference_bus(void* instance,
 EXPORT const char* xlle_nv2a_reference_error(void* instance) {
     auto& ref = *static_cast<Reference*>(instance);
     return ref.failure.empty() ? nullptr : ref.failure.c_str();
+}
+EXPORT int xlle_nv2a_reference_aperture(void* instance,uint32_t offset,unsigned size,int write,uint64_t* value) {
+    auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return 0;
+    if(!value || (size!=1 && size!=2 && size!=4 && size!=8) || (write!=0 && write!=1)) {
+        ref.failure="invalid NV2A aperture bridge transaction";return 0;
+    }
+    uint8_t bytes[8]{};
+    if(write)for(unsigned i=0;i<size;++i)bytes[i]=uint8_t(*value>>(8*i));
+    if(!ref.gpu.cpu_aperture(offset,bytes,size,write!=0))return 0;
+    if(!ref.failure.empty())return 0;
+    if(!write) {
+        uint64_t result=0;
+        for(unsigned i=0;i<size;++i)result|=uint64_t(bytes[i])<<(8*i);
+        *value=result;
+    }
+    return 1;
 }
 EXPORT uint32_t xlle_nv2a_reference_read(void* instance, uint32_t address, int size) {
     auto& ref = *static_cast<Reference*>(instance);

@@ -209,6 +209,11 @@ public:
         mem_direct_ = std::move(direct);
     }
 
+    // PCI framebuffer aperture offset, using the same owned UMA bytes as DMA.
+    // The qualified software route covers linear storage. CPU views of tiled
+    // storage and renderer-resident surfaces require their own bus contract.
+    bool cpu_aperture(uint32_t offset, void* data, size_t bytes, bool write);
+
     struct GenericBatchDebugInfo {
         uint64_t batch = 0;
         uint64_t fragments = 0;
@@ -3838,6 +3843,7 @@ private:
     std::array<uint64_t, kDrawDepthBuckets> draw_depth_hist_{};
     uint64_t draw_drain_wait_ticks_ = 0;
     uint64_t draw_worker_failures_ = 0;
+    bool draw_faulted_ = false; // terminal issued-job failure, including delayed folds
     uint64_t draw_epoch_ticks_ = 0;
 
     // ---------- stage (e2): the destination-span worker pool -----------------

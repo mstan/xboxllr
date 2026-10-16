@@ -50,6 +50,43 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;40 retained deferral IDs,39 scopes.
 
+## CPU UMA aperture and actual context production - 2026-10-15
+
+Original CPU texture stores now reach the owned retail UMA bytes through the
+F0000000..F3FFFFFF PCI framebuffer aperture. The separate memory callback
+preserves1/2/4/8-byte transactions; register callbacks retain their narrower
+contract. Every access checks the actual original identity mapping and borrows
+the existing allocation/protection/lifetime owner. No writable RAM alias or
+generic physical-address mask is installed. PCI relocation/readback is not
+inferred from this initialized profile. Pinned xemu482088490c2d5983 exposes
+BAR1 as an offset-zero shared-RAM alias; the retained original PDEs establish
+the reached bus mapping. Implementation is authored here.
+
+The software GPU retires already-issued host draw jobs before the CPU transfer,
+without pulling pending FIFO packets or advancing device time. Independent
+review caught two boundaries and both are fixed: a delayed draw fault must
+prevent the CPU transfer, and invalid active tile extents cannot be treated as
+linear. All three tile banks are checked; overlapping tiled storage and host
+renderer residency remain guarded. Existing texture conversion reuse compares
+the newly fetched complete source bytes. No HLE rendering path changed.
+
+The core aperture check passes in0.81s. Six affected original transport/AV/
+observer suites pass in3.22s, including actual MOVUPS/MOVNTPS/SFENCE instructions,
+both64-bit halves, shared ordinary RAM readback and cleanup across three real
+original-thread/GPU lifetimes. Existing whole-range/protection/retired-owner
+checks remain active. Evidence: build/blinx/display-clock-20261016/aperture-*.
+
+Changed Blinx crosses the texture-write boundary and now executes the actual
+13F26D producer through its real return13C08E. The passive records bind the
+original source hash and driver, channel0, instance111D, table110A and RAMFC
+711000. Its complete37F0-byte image has477 nonzero DWORDs and SHA256
+c900b436eddf545a418fb349e20f4147d997beee216a8b8650f6735707896021.
+The40s observation reached its supervisor ceiling with no device guard, no
+context-selector/load request and no pixels. It is not normal title completion.
+Evidence: build/blinx/gpu-lle-cpu-aperture-20261016/. The follow-up enables
+existing bounded PC/PIT/thread progress diagnostics to locate the post-producer
+wait; no new completion/state is supplied. G02-G05 remain open; still6/9.
+
 ## Initialized launch producer and reached CPU aperture - 2026-10-15
 
 The maintained GPU selection now runs original AV3 once before title threads,
