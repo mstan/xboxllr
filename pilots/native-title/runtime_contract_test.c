@@ -102,7 +102,14 @@ static void test_worker(void)
     }
 }
 
+#ifdef PILOT_GPU_AV_TEST_CALLBACKS
+recomp_func_t pilot_gpu_av_original_lookup(uint32_t va);
+#endif
 recomp_func_t recomp_lookup(uint32_t va) {
+#ifdef PILOT_GPU_AV_TEST_CALLBACKS
+    recomp_func_t original=pilot_gpu_av_original_lookup(va);
+    if(original)return original;
+#endif
     if(va==0x12640)return test_thread_fp_body;
     if(va==0x12680)return test_thread_lifetime_body;
 #ifdef PILOT_EVENT_TIMER_LLE
@@ -233,6 +240,7 @@ static int test_write_faults(uint32_t va)
 #include "gpu_thread_cpu_contract_test.inc"
 #include "gpu_first_context_contract_test.inc"
 #include "gpu_thread_av_contract_test.inc"
+#include "gpu_av_interrupt_contract_test.inc"
 #endif
 #include "memory_statistics_contract_test.inc"
 #ifdef PILOT_AUDIO_NATIVE
@@ -546,6 +554,16 @@ int main(int argc,char **argv)
     EXCEPTION_RECORD diagnostic={0};EXCEPTION_POINTERS pointers={&diagnostic,NULL};
     diagnostic.ExceptionCode=0x406d1388u;
     CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
+#ifdef PILOT_GPU_AV_TEST_CALLBACKS
+    if(argc>=2 && (!strcmp(argv[1],"gpu-av-interrupt-lle") || !strcmp(argv[1],"gpu-av-interrupt-thread-lle"))) {
+        CHECK(argc==3);
+        /* Use the production hash-checked loader, original code pages and
+         * import bindings before any authored harness scratch reservation. */
+        load_image(argv[2]);
+        test_gpu_av_interrupt_lle(0,!strcmp(argv[1],"gpu-av-interrupt-thread-lle"));
+        return 0;
+    }
+#endif
     memory=VirtualAlloc(NULL,(SIZE_T)0x100000000ull,MEM_RESERVE,PAGE_NOACCESS);
     CHECK(memory!=NULL);
     g_xbox_mem_offset=(ptrdiff_t)memory;

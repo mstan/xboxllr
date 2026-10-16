@@ -2,11 +2,13 @@
  * No instruction hook, block split, device read, admission or clock advance.
  * Missing observations and truncation are diagnostic gaps, never readiness. */
 static struct {
-    int selected;
+    int selected,poll_selected;
     unsigned events,sequence;
     struct {
         uint32_t id,thread,ordinal,sp,caller,args[6],seen[128];
         unsigned seen_count,block_gap;
+        uint64_t poll_reads,poll_high,poll_first,poll_next;
+        unsigned poll_started,poll_intervals,poll_events,poll_value,poll_done;
     } frames[32];
 } av_diagnostic;
 
@@ -14,6 +16,62 @@ static int av_diagnostic_word(uint32_t va,uint32_t *value)
 {
     uint32_t pa;
     return diagnostic_translation(va,&pa) && diagnostic_ram_read(pa,value,4);
+}
+/* Observe the byte already returned by the real MMIO owner. Another 3DA
+ * read would alter VGA attribute-index state. This observer performs none,
+ * advances no clock, and does not change CPU blocks or returned values. */
+static void av_diagnostic_status_read(uc_engine *engine,uint32_t value)
+{
+#ifdef PILOT_USB_LLE
+    if(!av_diagnostic.poll_selected || av_diagnostic.events>=4096)return;
+    uint32_t pc=0,thread=0;
+    if(uc_reg_read(engine,UC_X86_REG_EIP,&pc)!=UC_ERR_OK ||
+       (pc!=0x8003507bu && pc!=0x80035080u) ||
+       !av_diagnostic_word(0x8003da64,&thread))return;
+    for(unsigned i=0;i<32;++i) {
+        if(!av_diagnostic.frames[i].id || av_diagnostic.frames[i].ordinal!=3 ||
+           av_diagnostic.frames[i].thread!=thread || av_diagnostic.frames[i].poll_done)continue;
+        uint64_t ticks=0,next=0;
+        if(pilot_usb_pit_clock(&ticks,&next))return;
+        ++av_diagnostic.frames[i].poll_reads;
+        av_diagnostic.frames[i].poll_high+=(value&8u)!=0;
+        int first=!av_diagnostic.frames[i].poll_started;
+        int periodic=!first && ticks>=av_diagnostic.frames[i].poll_next;
+        int changed=!first && ((value^av_diagnostic.frames[i].poll_value)&8u);
+        if(!first && !periodic && !changed)return;
+        if(first) {
+            av_diagnostic.frames[i].poll_started=1;
+            av_diagnostic.frames[i].poll_first=ticks;
+            av_diagnostic.frames[i].poll_next=ticks+11250u;
+        }
+        if(periodic) {
+            ++av_diagnostic.frames[i].poll_intervals;
+            av_diagnostic.frames[i].poll_next=ticks+11250u;
+        }
+        av_diagnostic.frames[i].poll_value=value;
+        ++av_diagnostic.frames[i].poll_events;
+        av_diagnostic.frames[i].poll_done=av_diagnostic.frames[i].poll_intervals>=16 ||
+            av_diagnostic.frames[i].poll_events>=128;
+        uint32_t device=0,callback=0,frame=0,waiter=0,known=0,irql=0;
+        if(av_diagnostic_word(PILOT_IO_PCR_BASE+0x24u,&irql)) {known|=16;irql&=255u;}
+        if(av_diagnostic_word(0x00141b78u,&device) && device>=0x10000u && device<=0xffffda7cu) {
+            known|=1;
+            if(av_diagnostic_word(device+0x2550u,&callback))known|=2;
+            if(av_diagnostic_word(device+0x2580u,&frame))known|=4;
+            if(av_diagnostic_word(device+0x255cu,&waiter))known|=8;
+        }
+        ++av_diagnostic.events;
+        fprintf(stderr,"[AV POLL] id=%u pc=%08x thread=%08x irql=%u mode=%08x ticks=%llu elapsed=%llu value=%02x reads=%llu high=%llu intervals=%u bounded=%u known=%x device=%08x callback=%08x frame=%u waiter=%08x\n",
+            av_diagnostic.frames[i].id,pc,thread,irql,av_diagnostic.frames[i].args[2],
+            (unsigned long long)ticks,(unsigned long long)(ticks-av_diagnostic.frames[i].poll_first),value,
+            (unsigned long long)av_diagnostic.frames[i].poll_reads,
+            (unsigned long long)av_diagnostic.frames[i].poll_high,av_diagnostic.frames[i].poll_intervals,
+            av_diagnostic.frames[i].poll_done,known,device,callback,frame,waiter);
+        return;
+    }
+#else
+    (void)engine;(void)value;
+#endif
 }
 static void av_diagnostic_gap(const char *reason,uint32_t id)
 {
@@ -47,6 +105,8 @@ static void av_diagnostic_block(uc_engine *engine,uint32_t pc)
     if(!av_diagnostic.selected) {
         const char *value=getenv("XLLE_PILOT_AV_DIAGNOSTIC");
         av_diagnostic.selected=value && !strcmp(value,"1")?1:-1;
+        value=getenv("XLLE_PILOT_AV_POLL_DIAGNOSTIC");
+        av_diagnostic.poll_selected=av_diagnostic.selected>0 && value && !strcmp(value,"1");
     }
     if(av_diagnostic.selected<0 || av_diagnostic.events>4096)return;
     const unsigned ordinal=pc==0x80034667?2:pc==0x80034ba6?3:0;

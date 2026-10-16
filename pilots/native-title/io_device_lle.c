@@ -400,6 +400,7 @@ static const char *device_memory_translation(uint32_t address,unsigned size)
         return "device LLE memory aperture lacks matching original bus mapping";
     return failure;
 }
+static void av_diagnostic_status_read(uc_engine *engine,uint32_t value);
 static uint64_t device_mmio_read(uc_engine *engine,uint64_t offset,unsigned size,void *data)
 {
     struct DeviceMmio *owner=data;uint64_t value=0;
@@ -415,6 +416,8 @@ static uint64_t device_mmio_read(uc_engine *engine,uint64_t offset,unsigned size
     else {uint32_t word=0;error=owner->callback(owner->first+(uint32_t)offset,size,0,&word);value=word;}
     device_bus_borrow=0;device_bus_dma_lease=0;
     if(error)device_mmio_failure(engine,owner->first+(uint32_t)offset,size,0,0,error);
+    else if(owner->first+(uint32_t)offset==0xfd6013dau && size==1)
+        av_diagnostic_status_read(engine,(uint32_t)value);
     return value;
 }
 static void device_mmio_write(uc_engine *engine,uint64_t offset,unsigned size,uint64_t value,void *data)

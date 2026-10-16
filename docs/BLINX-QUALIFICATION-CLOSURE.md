@@ -190,6 +190,40 @@ The next short fixture will include the actual GPU ISR/DPC registrations omitted
 from the passing AV-only fixtures. No unchanged full-title rerun is planned.
 Receipt: `build/blinx/gpu-lle-diagnostic-clock-20261016/final-review.aot-private.json`.
 
+The short original-interrupt reproduction now passes both a direct AV3 caller
+and an original guest-thread caller. Each executes the unchanged generated
+13B210 ISR and13BBC0 DPC four times, returns from04010101 AV3, disconnects the
+interrupt and retires its owned objects; the threaded case also joins and
+retires its original thread and caller allocation. The production hash-checked
+image loader supplies actual code pages and imports. The88-body direct-call
+closure is copied unchanged by `tools/native_gpu_av_callbacks.py`; unknown
+indirect targets retain the existing guards. The first mixed-harness attempt
+failed its routing assertion because native scheduling bypassed the original
+DPC dispatcher; the final fixture requires the original callback target at
+compile time. It supplies an authored empty flip queue and NULL user callback,
+so it does not establish connected title or pixel acceptance.
+
+Both controls also pass with the new opt-in actual-read observer enabled in
+about11s. That observer records the byte already returned by FD6013DA, without
+an additional MMIO read, clock admission or altered CPU block. Counts stop at
+16 periodic observations or128 emitted transitions per invocation; truncation
+is explicit and a finite external ceiling remains necessary. Evidence:
+`build/blinx/av-interrupt-20261016/poll-preparation/`.
+Reproduction: prepare the private closure with `native_gpu_av_callbacks.py`
+(`--generated`, `--xbe`, `--output`), provide its C path through
+`PILOT_GPU_AV_TEST_CALLBACKS` and the matching image through
+`PILOT_GPU_AV_TEST_XBE`, build `pilot_callback_kernel_lle_test`, then select
+`pilot_gpu_av_interrupt_lle` and `pilot_gpu_av_interrupt_thread_lle` in CTest.
+
+The retained PRE-LOAD snapshot has a concrete additional consumer: the vblank
+event wait block belongs to priority9 threadD0009418, above the priority8
+polling thread. Its registered A04F0 DPC callback only updates RAM counters and
+reads the shared TSC; it adds no guest-time admission. Waking the separate
+priority9 waiter may change polling opportunities, but the snapshot alone
+does not prove its behavior during the later AV3 wait. The next bounded title
+diagnostic records actual polling values, times and event-list observations.
+Families remain7/9; no new precision or hardware requirement is introduced.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued
