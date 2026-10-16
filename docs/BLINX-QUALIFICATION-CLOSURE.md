@@ -52,6 +52,32 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Connected lifetime run and palette dependency correction - 2026-10-16
+
+The maintained run passes the former17F8 stopping point, records two completed
+loading pictures and483 paired original resource-destruction returns, then stops
+at an unknown palette dependency (raster word49). This is partial startup/content
+evidence, not attract exit/reentry or guest teardown. The passive observer is
+source-hashed, independently reviewed and uses only RAM reads and host files;
+the [connected acceptance sequence](BLINX-GRAPHICS-ACCEPTANCE.md) describes it.
+Private evidence and frozen component inputs are retained under
+`build/blinx/graphics-lifetime-connected-20261016/`.
+
+The generic renderer's supported direct-color/alpha, DXT and packed-YUV paths do
+not consume a palette. Loaded admission no longer demands that unrelated state;
+tiled direct-color fetches no longer require its stale carrier to equal zero.
+Shape, DMA, extent and compression guards remain. Referenced indexed0B is
+explicitly rejected, including the legacy single-stage linear fallback, rather
+than being interpreted as raw ARGB. No unknown state is initialized by this fix.
+
+Three affected suites pass in2.61 seconds, covering27 queued LOAD cases and actual
+tiled readback with a stale inaccessible palette. Independent review found no
+implementation blocker; its requested non-LOAD indexed linear regression also
+passes (the affected suite takes0.40 seconds). Evidence is under
+`build/blinx/direct-texture-palette-20261016/`. A connected rerun must still finish
+G05. The fast native HLE path,7/9 count and46 deferral IDs/45 scopes are unchanged.
+The owner's New Game/save crash remains outside this phase on `beads-xbox.1.101`.
+
 ## Reached shader clip-control storage implemented - 2026-10-16
 
 Method17F8 now stores and latches its sixteen texture-stage comparison-polarity

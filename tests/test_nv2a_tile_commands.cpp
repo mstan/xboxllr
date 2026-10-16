@@ -489,6 +489,9 @@ static void tiled_textures() {
         f.emit(0x210,f.target);f.emit(0x1b0c,0);f.emit(0x1e70,0);
         f.emit(0x0ac0,0x04200000);f.emit(0x0260,0x14200000);
         quad(64,16,32,16,0x7fe02040);
+        // A stale palette outside RAM cannot affect either direct-color
+        // format, including actual tiled reads of the newly written surface.
+        f.emit(0x1b20,0x03ffffc1);
         bind_texture();f.emit(0x17c8,1);
         f.put(report+12,0xffffffff);f.write(0x400720,0);
         quad(20,70,width,height,0xffffffff);f.emit(0x17d0,0x01000000|report);f.kick();

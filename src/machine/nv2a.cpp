@@ -11586,6 +11586,13 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         bool handled_linear_project2d = false;
         const uint32_t stage_format = raster_state[kRasterTextureFormat0 + stage];
         const uint32_t stage_color = (stage_format >> 8) & 255u;
+        if (stage_color == 0x0b) {
+            // The legacy single-stage linear fallback must not reinterpret
+            // palette indices as four-byte direct colors.
+            record_generic_skip_detail(GenericSkipReason::kUnsupportedTextureFormat,
+                                       stage_format);
+            return true;
+        }
         if (stage_mode == 3 && (stage_color == 4 || stage_color == 0xf)) {
             fault_("NV2A packed/DXT45 cubemap sampling is outside the finite 2D reference");
             return false;
@@ -11706,7 +11713,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
                         const uint32_t dma=format&3u;
                         if(shape!=0x00010028u || (dma!=1 && dma!=2) ||
                            (color_code!=0x12 && color_code!=0x1e) ||
-                           raster_state[kRasterTexturePalette0+stage] || tile<0 ||
+                           tile<0 ||
                            pgraph_tiles_.zcomp[unsigned(tile)] ||
                            uint64_t(address)+read_target->size()>
                                uint64_t(pgraph_tiles_.tiles[unsigned(tile)][1])+1) {

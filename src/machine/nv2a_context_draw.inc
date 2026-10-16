@@ -107,6 +107,8 @@ bool Nv2a::context_draw_ready(std::array<uint8_t,13>& observable) {
             if(!known(base+stage))return false;
         const uint32_t format=raster_state_[kRasterTextureFormat0+stage];
         const unsigned color=(format>>8)&255;
+        if(color==0xb)
+            return reject("NV2A loaded indexed texture sampling is unqualified");
         const bool normalized=color==4 || color==6 || color==7 || color==0x19 ||
             ((color==0xc || color==0xe || color==0xf) && ((format>>16)&15));
         if(mode==1 && !normalized &&
@@ -115,11 +117,10 @@ bool Nv2a::context_draw_ready(std::array<uint8_t,13>& observable) {
         if(((address&255)==4 || ((address>>8)&255)==4) &&
            !known(kRasterTextureBorderColor0+stage))return false;
         if((color==0x24 || color==0x25) && !known(kRasterControl0,1u<<28))return false;
-        // Direct normalized/DXT texels do not consume a palette, including
-        // when an unrelated RAM tile is active. The pitch-linear tiled path
-        // still checks its separately bounded palette/layout profile.
-        if(ram_tiles_active() && !normalized &&
-           !known(kRasterTexturePalette0+stage))return false;
+        // Supported generic textures carry direct color/alpha, compressed
+        // blocks or packed YUV. None consumes a palette, with or without RAM
+        // tiles. Indexed sampling remains guarded above; no unknown palette
+        // state is initialized or made known by this admission.
         // The real fetch helper validates the selected DMA and full extent.
         // No array/current-value knowledge is manufactured by this selection.
         observable[9+stage]=mode==3 ? 7 : mode==1 ? 11 : 3;

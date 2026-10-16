@@ -204,6 +204,48 @@ static void test_loaded_context_draws() {
         CHECK(f.failure.empty() && f.gpu.generic_combiner_executed_batches()==2);
         CHECK(get32(f.ram,0x1044)==0xff00ff00 && f.read(0x800048)==0x1234);
     }
+    // Direct pitch-linear colors never consume palette state: exercise an
+    // unknown palette, explicit zero and an inaccessible stale address, with
+    // no tile, an unrelated tile and an overlapping logical texture tile.
+    // The physical tile transfer itself is covered by tiled_textures().
+    for(unsigned color:{0x12u,0x1eu,0xbu})for(unsigned tile=0;tile<3;++tile)
+    for(unsigned palette=0;palette<3;++palette) {
+        LoadedDrawFixture f;f.ram.resize(0x8000,0xa5);f.write(0x700304,0x7fff);
+        if(tile) {
+            for(uint32_t base:{0x100240u,0x400900u}) {
+                f.write(base,0x4001);f.write(base+4,0x7fff);f.write(base+8,512);
+            }
+            for(const auto& setting:std::vector<std::pair<uint32_t,uint32_t>>{
+                    {0x10,0x4001},{0x30,0x7fff},{0x50,512}}) {
+                f.write(0x400750,0xea0000|setting.first);f.write(0x400754,setting.second);
+            }
+        }
+        f.state();f.shader();f.color();f.emit(0x1e9c,2);
+        f.emit(0xb00,0);f.emit(0xb04,0x0020081b);f.emit(0xb08,0x08000000);f.emit(0xb0c,0x0000f820);
+        f.emit(0xb10,0);f.emit(0xb14,0x0020121b);f.emit(0xb18,0x08000000);f.emit(0xb1c,0x0000f849);
+        const float uv[]={2.5f,.5f,0,1};
+        for(unsigned lane=0;lane<4;++lane)f.emit(0x1a90+lane*4,LoadedDrawFixture::bits(uv[lane]));
+        const uint32_t texture=tile==2?0x4000:0x3000;
+        f.emit(0x184,2);f.emit(0x1e70,1);f.emit(0x1b00,texture);
+        f.emit(0x1b04,0x00010029|(color<<8));f.emit(0x1b08,0x303);
+        f.emit(0x1b0c,0x40000000);f.emit(0x1b10,512u<<16);
+        f.emit(0x1b14,0x01010000);f.emit(0x1b1c,0x00040001);
+        if(palette)f.emit(0x1b20,palette==1?0:0x03ffffc1);
+        f.emit(0xac0,0x08200000);f.emit(0x260,0x18200000);
+        put32(f.ram,texture,0x120000ff);put32(f.ram,texture+4,0x3400ff00);
+        put32(f.ram,texture+8,0x56ff0000);put32(f.ram,texture+12,0x78ffffff);
+        f.triangle();f.kick();
+        if(color==0xb) {
+            CHECK(f.failure.find("indexed texture sampling is unqualified")!=std::string::npos);
+            CHECK(!f.read(0x800048) && get32(f.ram,0x1044)==0xa5a5a5a5);
+            CHECK(!f.gpu.generic_combiner_executed_batches());
+        } else {
+            if(!f.failure.empty())std::fprintf(stderr,"loaded linear texture: %s\n",f.failure.c_str());
+            CHECK(f.failure.empty() && f.read(0x800048)==0x1234);
+            CHECK(f.gpu.generic_combiner_executed_batches()==1);
+            CHECK(get32(f.ram,0x1044)==(color==0x12?0x56ff0000u:0xffff0000u));
+        }
+    }
     for(bool compiled:{false,true})for(unsigned mode:{0u,1u})for(bool write_q:{false,true})
     for(bool unrelated_tile:{false,true}) {
         LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);

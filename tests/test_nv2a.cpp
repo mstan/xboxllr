@@ -9078,6 +9078,21 @@ int main() {
             CHECK(gc_gpu.generic_combiner_batches() == indexed_batches);
             CHECK(std::equal(direct_pixels.begin(), direct_pixels.end(),
                              gc_ram.begin() + 0x10000));
+            // Supplying a valid linear rectangle must not let the legacy
+            // single-stage PROJECT2D fallback reinterpret indices as ARGB.
+            emit_gc(0x1B04, 0x00010B29);
+            emit_gc(0x1B10, 16u << 16);
+            emit_gc(0x1B1C, 0x00040004);
+            const uint64_t indexed_samples = gc_gpu.generic_combiner_texture_samples();
+            draw_h2();
+            CHECK(gc_fault.empty());
+            CHECK(gc_gpu.generic_skip_reason_batches(indexed_reason) == indexed_skips + 2);
+            CHECK(gc_gpu.generic_combiner_batches() == indexed_batches);
+            CHECK(gc_gpu.generic_combiner_texture_samples() == indexed_samples);
+            CHECK(std::equal(direct_pixels.begin(), direct_pixels.end(),
+                             gc_ram.begin() + 0x10000));
+            emit_gc(0x1B10, 0);
+            emit_gc(0x1B1C, 0);
             emit_gc(0x1B20, 0);
             emit_gc(0x1B04, 0x02200629);
             kick_gc();
