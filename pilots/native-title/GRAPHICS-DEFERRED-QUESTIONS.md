@@ -256,29 +256,29 @@ or removed by this clarification.
 
 ## GFX-D04 addendum: observed noise and filtering precision - 2026-10-16
 
-Physical original-profile off/on/on/off pixels now exist. Two authored batches
-separate texture-relative phase from screen position and compare the same low
-RGB through all four opaque BC1 palette roles. The candidate coordinate-bit
-equation transfers to every measured green/blue channel and the non-low-red
-samples; the shared low-range red result still requires supported arithmetic.
-That unresolved decoding behavior remains required G04 work. No enabled-noise
-runtime or family acceptance is claimed from these observations.
+Physical original-profile off/on/on/off pixels and three authored batches now
+separate texture-relative phase, palette roles and lower/upper RGB ranges. The
+shared coordinate/channel-step reconstruction is implemented in maintained
+commit c49789b:8192 actual PFIFO texture draws pass against authored physical
+expectations. All832 logical physical enabled samples fit within one byte unit,
+all208 conservative centers and all64 original samples are exact. Low/high range
+behavior is implemented; it is no longer the unresolved part of this question.
+Native comparison and connected original title/lifetime acceptance remain open.
 
-Three edge locations have a one-unit red residual beside higher-red neighbors;
-the residual disappears when those neighbors share the low color. This is
-compatible with filtering, but does not measure the filter weight or prove its
-internal order. Exact subtexel phase, fixed-point filter weights and rounding
+The combined data retains37 one-unit RGB residuals at left block boundaries.
+Nominal left-texel weights1/255 and1/256 each explain all832 OFF and ON values.
+Their nonuniqueness leaves exact filter weight/internal order unestablished. Exact subtexel phase, fixed-point filter weights and rounding
 remain in GFX-D04's existing precision scope after supported decoding exists.
 Reopen if a supported representative output exceeds its declared error bound,
 the residue changes coverage/ordering or a required consumer distinguishes it.
 Do not replace actual sampling with copied observed pixels, or use this scope
-to waive the unresolved color-range behavior or connected title run. The private
-evidence is the probe's `build/noise-low-red-pixels-review-20261016/` and
-`results/noise-physical-{fifo,controlled,low-red}-20261016/`.
+to waive color-range behavior or the connected title run. The private
+evidence is the probe's `build/noise-range-pixels-review-20261016/` and
+`results/noise-physical-{fifo,controlled,low-red,range}-20261016/`.
 
-The implementation boundary can remain replaceable: apply supported decoding
-to owned texture bytes before sampling, and include the selected noise/decode
-profile in any decoded-image cache identity. The existing LLE draw packets own
+The implementation boundary remains replaceable: decoding applies to owned
+texture bytes before sampling; DrawJob latches the selected noise bit and the
+decoded-image cache includes the conversion profile in its identity. The existing LLE draw packets own
 their texture snapshots; no worker should consult mutable live noise state.
 Native HLE currently preserves state159's boolean caller contract while using
 native compressed sampling. Its accepted appearance and fast path remain the
