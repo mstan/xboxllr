@@ -277,20 +277,20 @@ static void test_gpu_lle_av_mode_guard(uint32_t phase)
     gpu_lle_open_profile(phase);
     // Original AvSetDisplayMode observes the selected quiescent protocol and
     // starts its full mode sequence. DEBUG, serial tables and clock routing
-    // execute; the next unimplemented VGA control still stops the call.
+    // and VGA enable/misc execute; the remaining PRAMDAC table stops the call.
     uint32_t args[]={0xfd000000,0,0,0x12,2560,0},result=0xcccccccc;
     const char *error=pilot_io_device_lle(3,memory,args,&result);
     fprintf(stderr,"Original AV startup boundary: %s\n",error?error:"returned without guard");
-    CHECK(error && strstr(error,"unmodelled NV2A write at fd0c03c3"));
+    CHECK(error && strstr(error,"unmodelled NV2A write at fd680898"));
     // A later nominal FIELD callback cannot replace the original failure.
     gpu_lle.field(gpu_lle.device,0);
-    CHECK(strstr(gpu_lle.error(gpu_lle.device),"unmodelled NV2A write at fd0c03c3"));
+    CHECK(strstr(gpu_lle.error(gpu_lle.device),"unmodelled NV2A write at fd680898"));
     uint32_t known=0,high=0;
     // Original 80034EF7..80034F02 now also drives GPIO22/24 low.
     CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-2);
     CHECK(known==((1u<<19)|(1u<<22)|(1u<<24)) && high==(1u<<19));
     CHECK(result==0xcccccccc); // failed initialization cannot publish success
-    fprintf(stderr,"PASS: original mode setup crosses AV, DEBUG, encoder tables and clock routing; VGA guard preserves the caller\n");
+    fprintf(stderr,"PASS: original mode setup crosses encoder tables, clock routing and VGA enable/misc; remaining PRAMDAC guard preserves the caller\n");
 }
 
 #ifdef PILOT_GPU_FILES_WORKER

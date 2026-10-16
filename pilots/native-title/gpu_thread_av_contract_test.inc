@@ -22,12 +22,12 @@ static void test_gpu_thread_av_lle(int mode_guard)
             const char *error=pilot_io_device_lle(159,memory,join,&result);
             fprintf(stderr,"Original thread AV startup boundary: %s\n",error?error:"returned without guard");
             // Shared device work now uses the same published PIT timestamp.
-            // Both genuine calling routes reach the next VGA control write.
-            CHECK(error && strstr(error,"unmodelled NV2A write at fd0c03c3"));
+            // Both genuine routes reach the same remaining PRAMDAC table.
+            CHECK(error && strstr(error,"unmodelled NV2A write at fd680898"));
             CHECK(result==0xcccccccc && MEM32(context)==0xcccccccc && !MEM32(context+4));
             uint32_t known=0,high=0;CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-2);
             CHECK(known==((1u<<19)|(1u<<22)|(1u<<24)) && high==(1u<<19));
-            fprintf(stderr,"PASS: original-thread AV mode crosses encoder tables and clock routing; VGA guard preserves its caller\n");return;
+            fprintf(stderr,"PASS: original-thread AV mode crosses encoder tables, routing and VGA enable/misc; PRAMDAC guard preserves its caller\n");return;
         }
         /* Expectations independently established by the retained original AV
          * reference and shared-device checks; output DWORD canaries are owned. */

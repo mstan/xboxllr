@@ -50,6 +50,34 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;38 retained deferral IDs,37 scopes.
 
+## Original VGA setup batch - 2026-10-15
+
+The complete reached sequencer, graphics-controller and attribute tables now
+have bounded register owners. Indexed accesses retain independently written
+state; attribute writes alternate index/data and input-status reads restore
+index phase. Fresh reads and unsupported modes remain guarded. The explicit
+initialized AV3 profile supplies its required initial attribute index phase,
+not arbitrary register contents. Original AV3 starts with an index write and
+does not first read input status. This input is separate from clock routing
+and cannot reinitialize an already owned phase. Existing SR1 blanking still
+suppresses framebuffer fetches without stopping synchronization.
+
+Only the original idempotent VGA-enable command is admitted; its receipt does
+not invent VSE2 readback. Miscellaneous-output programming and the later tables
+retain the reached extended-color selection. Planar memory/text rendering and
+additional clock/reset modes are not enabled by register transport. Register
+facts come from [IBM VGA/XGA May1992 pp2-42..54 and2-78..96](https://bitsavers.trailing-edge.com/pdf/ibm/pc/cards/IBM_VGA_XGA_Technical_Reference_Manual_May92.pdf)
+and pinned envytools nv_vga.xml; implementation is authored here.
+
+Original direct/thread calls in both idle phases now reach the remaining
+PRAMDAC table, first FD680898=10000000 at80034F5D. The26-word table is retained
+as a batch, with11 controls beyond the existing FP timing/control owner. This
+is not a completed original mode return or output qualification. The later VGA
+tables pass component checks but are not yet reached by those original calls.
+GPU/register suites pass in0.82s; independent review reports no material issue
+in the bounded transport. Final evidence is under
+build/blinx/display-clock-20261016/vga-*.aot-private.log. Still6/9.
+
 ## Shared display-clock integration - 2026-10-15
 
 Original direct and genuine-thread AV3 calls in both idle phases now cross
@@ -1002,7 +1030,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: shared clock integration passes focused checks; direct/thread original AV3 reaches VGA setup; remaining setup and connected acceptance required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: shared clocks and VGA transport pass focused checks; direct/thread original AV3 reaches remaining PRAMDAC table; connected acceptance required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |

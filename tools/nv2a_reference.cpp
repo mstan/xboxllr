@@ -121,6 +121,9 @@ EXPORT int xlle_nv2a_reference_board_start(void* instance,uint64_t owner,uint64_
     if(!ref.failure.empty())return 0;
     if(ref.board_clock) {ref.failure="display board clock already owned";return 0;}
     if(!ref.gpu.establish_display_clock_routing(0x100a0000u))return 0;
+    // Original AV3's first attribute access is an index write. Preserve that
+    // initialized-caller precondition explicitly, apart from clock routing.
+    if(!ref.gpu.establish_vga_attribute_index_phase())return 0;
     ref.board_clock=std::make_unique<xlle::Nv2aEncoderClock>(*ref.encoder,
         [&ref](const std::string& why){if(ref.failure.empty())ref.failure=why;},
         [&ref](const xlle::Nv2aFpTiming::State& state,bool vblank) {

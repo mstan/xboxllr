@@ -9,6 +9,49 @@ using Registers=xlle::Nv2aFpRegisters;
 static uint32_t offset(unsigned i){return i<7?0x800+i*4:0x820+(i-7)*4;}
 int main() {
     {
+        // Independently retained original VGA tables, exercised through the
+        // NV mirrors. Later PRAMDAC/TV processing is not supplied by this test.
+        std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
+        CHECK(gpu.establish_display_clock_routing(0x100a0000));
+        CHECK(gpu.establish_vga_attribute_index_phase());
+        const auto write=[&](uint32_t address,uint32_t value){gpu.mmio_write(address,1,value);};
+        const auto read=[&](uint32_t address){return gpu.mmio_read(address,1);};
+        write(0xfd0c03c3,1);write(0xfd0c03c2,0xe3);
+        CHECK(read(0xfd0c03cc)==0xe3);
+        const uint8_t seq[]={3,0x21,15,0,6},gr[]={0,0,0,0,0,0x40,5,15,255};
+        for(unsigned i=0;i<5;++i){write(0xfd0c03c4,i);write(0xfd0c03c5,seq[i]);}
+        for(unsigned i=0;i<9;++i){write(0xfd0c03ce,i);write(0xfd0c03cf,gr[i]);}
+        for(unsigned i=0;i<5;++i){write(0xfd0c03c4,i);CHECK(read(0xfd0c03c5)==seq[i]);}
+        for(unsigned i=0;i<9;++i){write(0xfd0c03ce,i);CHECK(read(0xfd0c03cf)==gr[i]);}
+        const uint8_t attr[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,0x4a,15,0,0};
+        for(unsigned i=0;i<21;++i) {
+            write(0xfd6013c0,i);CHECK(read(0xfd6013c0)==i); // reads do not toggle
+            write(0xfd6013c0,attr[i]);CHECK(read(0xfd6013c1)==attr[i]);
+        }
+        write(0xfd6013c0,0x20);CHECK(read(0xfd6013c0)==0x20);
+        gpu.display_clock_signals(true,true,true,false);
+        CHECK(read(0xfd6013da)==9); // resets the flip-flop, not display time
+        write(0xfd6013c0,5);write(0xfd6013c0,42);CHECK(read(0xfd6013c1)==42);
+        CHECK(read(0xfd6013da)==9 && gpu.mmio_read(0xfd600100,4)==0);
+        CHECK(fault.empty());
+        // Unsupported reset/clock selections cannot mutate admitted state.
+        write(0xfd0c03c4,0);write(0xfd0c03c5,0);CHECK(!fault.empty());fault.clear();
+        CHECK(read(0xfd0c03c5)==3);
+        write(0xfd0c03c4,1);write(0xfd0c03c5,9);CHECK(!fault.empty());fault.clear();
+        CHECK(read(0xfd0c03c5)==0x21);
+        gpu.mmio_write(0xfd6013c0,2,0x0100);CHECK(!fault.empty());fault.clear();
+        write(0xfd6013c0,5);CHECK(read(0xfd6013c1)==42); // failed width preserved phase/data
+        read(0xfd0c03c3);CHECK(!fault.empty()); // command receipt is not VSE readback proof
+    }
+    {
+        xlle::Nv2aVgaRegisters fresh;uint32_t value=0x12345678;
+        CHECK(!fresh.read_vio(0x3c5,value) && value==0x12345678);
+        CHECK(!fresh.write_attribute(0)); // no assumed power-on flip-flop phase
+        fresh.input_status_read();CHECK(fresh.write_attribute(0));
+        CHECK(fresh.write_attribute(17));CHECK(fresh.read_attribute(0x3c1,value) && value==17);
+        CHECK(!fresh.establish_attribute_index_phase());
+    }
+    {
         std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
         CHECK(!gpu.establish_display_clock_routing(0));fault.clear();
         CHECK(gpu.establish_display_clock_routing(0x100a0000));

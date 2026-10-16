@@ -961,14 +961,18 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
             case 0x804: return 2;
             default: break;
         }
-    } else if (blk->off == 0x0c0000 && (bo==0x3c4 || bo==0x3c5)) {
-        if(size!=1) { fault_("NV2A sequencer read width is unqualified");return 0; }
-        if(bo==0x3c4)return sequencer_index_;
-        if(sequencer_index_!=1 || !sequencer_clock_programmed_) {
-            fault_("NV2A unprogrammed/unsupported sequencer read");return 0;
-        }
-        return sequencer_clock_;
+    } else if (blk->off == 0x0c0000 && Nv2aVgaRegisters::vio(bo)) {
+        if(size!=1) {fault_("NV2A VGA read width is unqualified");return 0;}
+        uint32_t value=0;
+        if(!vga_registers_.read_vio(bo,value))fault_(vga_registers_.error());
+        return value;
     } else if (blk->off == 0x601000) {  // PRMCIO (VGA CRTC/attribute mirror)
+        if(Nv2aVgaRegisters::attribute(bo)) {
+            if(size!=1) {fault_("NV2A attribute read width is unqualified");return 0;}
+            uint32_t value=0;
+            if(!vga_registers_.read_attribute(bo,value))fault_(vga_registers_.error());
+            return value;
+        }
         // Input status 1 (0x3DA): bit3 = vertical retrace in progress, bit0 = blanking.
         // Driven from the instruction-derived frame phase (last ~5% of each frame is the
         // vertical blank), so the kernel's poll-for-retrace loops see a real cadence.
@@ -977,8 +981,10 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
                 if(size!=1 || !display_signals_known_) {
                     fault_("NV2A input status requires established display clock/signals");return 0;
                 }
+                vga_registers_.input_status_read();
                 return (display_retrace_?8u:0u)|(display_blank_?1u:0u);
             }
+            vga_registers_.input_status_read();
             bool vblank = frame_phase_ >= 950;
             return vblank ? 0x09u : 0x00u;
         }
@@ -1327,21 +1333,17 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             fault_("NV2A unqualified scanout address latch mode");
         return;
     }
-    if (blk->off == 0x0c0000 && (bo==0x3c4 || bo==0x3c5)) {
-        // IBM VGA reference, Clocking Mode bit 5: blank picture generation,
-        // preserving synchronization. Other clock/serializer modes remain guarded.
-        if(size!=1) { fault_("NV2A sequencer write width is unqualified");return; }
-        if(bo==0x3c4) {
-            if(value!=1) { fault_("NV2A sequencer index is unqualified");return; }
-            sequencer_index_=1;return;
-        }
-        if(sequencer_index_!=1 || (value!=1 && value!=0x21)) {
-            fault_("NV2A sequencer clock/serializer mode is unqualified");return;
-        }
-        sequencer_clock_=static_cast<uint8_t>(value);
-        sequencer_clock_programmed_=true;return;
+    if (blk->off == 0x0c0000 && Nv2aVgaRegisters::vio(bo)) {
+        if(size!=1) {fault_("NV2A VGA write width is unqualified");return;}
+        if(!vga_registers_.write_vio(bo,value))fault_(vga_registers_.error());
+        return;
     }
     if (blk->off == 0x601000) {
+        if(bo==0x3c0) {
+            if(size!=1){fault_("NV2A attribute write width is unqualified");return;}
+            if(!vga_registers_.write_attribute(value))fault_(vga_registers_.error());
+            return;
+        }
         if (bo == 0x3D4) {
             crtc_index_ = static_cast<uint8_t>(value);
             return;
@@ -18511,7 +18513,7 @@ bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string
     }
     // Screen Off disables display fetches. It neither drains queued GPU work
     // nor reads/resolves the framebuffer. Digital sync/IRQ clocks still run.
-    if(sequencer_clock_&0x20) { source_size=0;return true; }
+    if(vga_registers_.screen_off()) { source_size=0;return true; }
     // Seam anchor 3 (F5): scanout reads the whole visible framebuffer out
     // of guest RAM. Guest-anchored gate point.
     seam_anchor(kSeamAnchorScanout, true);
@@ -18554,7 +18556,7 @@ const uint8_t* Nv2a::scanout_direct_bytes(ScanoutInfo& info, size_t& size,
     size = 0;
     uint64_t source_size = 0;
     if (!prepare_scanout(info, source_size, error)) return nullptr;
-    if(sequencer_clock_&0x20) {
+    if(vga_registers_.screen_off()) {
         error="NV2A blanked scanout requires converted capture, not framebuffer bytes";return nullptr;
     }
     if(ram_tiles_active()) {
@@ -18580,7 +18582,7 @@ bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
     perf_excl::Scope region(perf_excl::kNv2aScanout);
     uint64_t source_size = 0;
     if (!prepare_scanout(info, source_size, error)) return false;
-    if(sequencer_clock_&0x20) {
+    if(vga_registers_.screen_off()) {
         rgba.assign(static_cast<size_t>(info.width)*info.height*4,0);
         for(size_t i=3;i<rgba.size();i+=4)rgba[i]=255;
         error.clear();return true;

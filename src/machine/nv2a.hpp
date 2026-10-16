@@ -36,6 +36,7 @@
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a_renderer.hpp"
 #include "machine/nv2a_fp_registers.hpp"
+#include "machine/nv2a_vga_registers.hpp"
 #include "machine/nv2a_av_handshake.hpp"
 #include "machine/nv2a_generic_vertex_scratch.hpp"
 #include "machine/nv2a_texture_conversion_cache.hpp"
@@ -175,6 +176,10 @@ public:
             fault_("NV2A display routing input outside initialized profile");return false;
         }
         pramdac_pll_control_=value;clocked_display_=true;return true;
+    }
+    bool establish_vga_attribute_index_phase() {
+        if(vga_registers_.establish_attribute_index_phase())return true;
+        fault_(vga_registers_.error());return false;
     }
     Nv2aFpRegisters::Observation display_programming() const {return fp_registers_.observe();}
     bool display_slaved() const {return crtc28_programmed_ && (crtc_regs_[0x28]&0x80);}
@@ -3910,9 +3915,7 @@ private:
     // programs CRTC pitch/depth there, PRAMDAC display extents, then PCRTC_START.
     std::array<uint8_t, 256> crtc_regs_{};
     uint8_t crtc_index_ = 0;
-    uint8_t sequencer_index_ = 0;
-    uint8_t sequencer_clock_ = 1; // existing eight-dot digital scanout profile
-    bool sequencer_clock_programmed_ = false;
+    Nv2aVgaRegisters vga_registers_;
     uint32_t pcrtc_start_ = 0;
     uint32_t pramdac_general_control_ = 0;
     Nv2aFpRegisters fp_registers_;
