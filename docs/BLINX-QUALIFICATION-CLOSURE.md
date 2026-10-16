@@ -181,6 +181,14 @@ and `results/noise-put-owner-20261016/`.
 
 ## Original sampling capture integrated; physical startup still open - 2026-10-16
 
+The unchanged8x8 region also passes a source-bound usefulness review: the
+original shader places the four vertices at the640x480 screen corners, with
+one level-zero texel per screen pixel. The region is strictly interior and its
+four central BC1 blocks contain distinct endpoints and all four selectors.
+This rules out an empty-geometry or constant-input capture; it does not predict
+physical filtering, noise or final pixels. No profile or runtime changed.
+Evidence: `build/blinx/noise-original-roi-review-20261016/review.aot-private.json`.
+
 The separate probe can now build a private-input capture from the actual first
 draw's shader, four vertices, consumed constants and full eleven-level DXT1 mip
 chain. It preserves geometry/viewport/filtering and crops only an8x8 output

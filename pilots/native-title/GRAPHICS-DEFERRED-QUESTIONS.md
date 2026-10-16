@@ -201,6 +201,22 @@ software detach remains guarded. The exact silicon counter origin at this
 mode boundary remains a precision question under GFX-D16; actual original
 reentry, continued clocks/completion and connected pixels remain required.
 
+The original vblank handler also reads FIELD while AV3 is still programming
+the encoder, before the next input VSYNC and final timing reset. Manufacturer
+100381B1.3.4/6/22/31 separates the running output counter from input timing
+acquisition; continuity and the documented two-clock FIELD publication delay
+are required. Exact silicon phase during partial live H_CLKO/PLL updates,
+including the detached input-sync history, remains under this precision scope.
+The declared functional policy preserves raw output counters and applies a
+changed comparator at the next encoding edge; this is not a measured latch edge.
+The identified framebuffer-address consumer does not branch on FIELD for the
+retained progressive mode/flags. A supported consumer that distinguishes the
+transient parity, a changed interface, or an observed output/timing failure
+reopens exact phase work. Do not substitute a fixed FIELD value or promote
+unknown full-raster/scaler state merely to satisfy this interrupt read.
+Private attribution: `build/blinx/gpu-lle-diagnostic-boundary-20261016/`;
+the short original-mode trace is in `build/noise-irq-lle/`.
+
 ## Unreached configuration and submission readbacks - 2026-10-16
 
 | ID | Question | Evidence and reason it can wait | Reopen when |
