@@ -47,6 +47,29 @@ struct LoadedDrawFixture : LoadedContextFixture {
 };
 
 static void test_loaded_context_draws() {
+    // TX_SHADER_CULL_MODE carries compare polarity, not a clip enable. The
+    // source-defined low16 bits are inert for NONE/PROJECT2D/CUBEMAP, whereas
+    // CLIPPLANE remains unsupported even if no combiner references its color.
+    for(bool batching:{false,true})for(uint32_t polarity:{0u,0xa53cu,0xffffu}) {
+        LoadedDrawFixture f;f.gpu.set_pfifo_run_batching(batching);
+        f.state();f.emit(0x17f8,polarity);f.shader();f.color();f.triangle();f.kick();
+        CHECK(f.failure.empty() && f.read(0x800048)==0x1234);
+        CHECK(f.gpu.debug_raster_state_word(xlle::Nv2a::kRasterShaderClipPlaneMode)==polarity);
+        CHECK(get32(f.ram,0x1044)==0xff204060);
+        // An illegal high bit must stop before changing the stored word or
+        // publishing the following queued completion marker.
+        f.emit(0x17f8,0x10000u|polarity);f.emit(0x50,0x5678);f.kick();
+        CHECK(f.failure.find("clip-plane comparison encoding")!=std::string::npos);
+        CHECK(f.gpu.debug_raster_state_word(xlle::Nv2a::kRasterShaderClipPlaneMode)==polarity);
+        CHECK(f.read(0x800048)==0x1234 && get32(f.ram,0x1044)==0xff204060);
+    }
+    for(unsigned stage=0;stage<4;++stage)for(uint32_t polarity:{0u,0xffffu}) {
+        LoadedDrawFixture f;f.state();f.emit(0x17f8,polarity);
+        f.emit(0x1e70,5u<<(stage*5));f.shader();f.color();f.triangle();f.kick();
+        CHECK(f.failure.find("texture shader side effects are unqualified")!=std::string::npos);
+        CHECK(!f.read(0x800048) && !f.gpu.generic_combiner_executed_batches());
+        CHECK(get32(f.ram,0x1044)==0xa5a5a5a5);
+    }
     for(bool compiled:{false,true}) {
         LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);
         f.state();f.shader();f.color();f.triangle();f.kick();

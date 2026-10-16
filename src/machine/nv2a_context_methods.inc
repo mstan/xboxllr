@@ -11,8 +11,8 @@ bool Nv2a::pramin_range_initialized(uint32_t offset,size_t size) const {
 bool Nv2a::context_method_ready(const PushMethod& push) {
     auto reject=[&](const char* reason) {
         char why[224];
-        std::snprintf(why,sizeof(why),"NV2A loaded context ch%u/sub%u method %04x: %s",
-                      push.channel,push.subchannel,push.method,reason);
+        std::snprintf(why,sizeof(why),"NV2A loaded context ch%u/sub%u method %04x parameter %08x: %s",
+                      push.channel,push.subchannel,push.method,push.parameter,reason);
         fault_(why);return false;
     };
     if(pgraph_method_faulted_ || draw_faulted_)return reject("previous method failed");
@@ -149,6 +149,9 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
     }
     case kNv097M17CC:
         if(p>1)return reject("visibility enable must be boolean");
+        break;
+    case kNv097M17F8:
+        if(p&~0xffffu)return reject("shader clip-plane comparison encoding is unsupported");
         break;
     case kNv097M17D0:
         if(!known(kContextZpassCount) || !report_dma_bound_[sub])return reject("report input is unknown");

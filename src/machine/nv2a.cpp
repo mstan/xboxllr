@@ -16789,6 +16789,7 @@ enum Nv097Handler : uint8_t {
     kNv097M01A8, kNv097M17C8, kNv097M17CC, kNv097M17D0, kNv097M0110,
     kNv097M1D80,                // appended to preserve the prior handler IDs
     kNv097M029C, kNv097M02A0, kNv097M02A8, kNv097R09C0_09CC, // fog
+    kNv097M17F8,                // shader clip comparison polarity
 };
 
 constexpr uint32_t kNv097MethodLimit = 0x2000;
@@ -16873,6 +16874,7 @@ constexpr Nv097Arm kNv097Arms[] = {
     {0x03A0, 0x03A4, kNv097M03A0},
     {0x17BC, 0x17C0, kNv097M17BC},
     {0x17C0, 0x17C4, kNv097M17C0},
+    {0x17F8, 0x17FC, kNv097M17F8},
     {0x1D78, 0x1D7C, kNv097M1D78},
     {0x1E20, 0x1E24, kNv097M1E20},
     {0x1E24, 0x1E28, kNv097M1E24},
@@ -17578,6 +17580,19 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     case kNv097M1E70: {
         set_raster_word(kRasterShaderStageProgram, parameter);
+        break;
+    }
+    case kNv097M17F8: {
+        // Kelvin TX_SHADER_CULL_MODE: sixteen comparison-polarity bits,
+        // zero=GEQUAL and one=LESS. Zero does not disable clip operations.
+        // Preserve the actual setter in the latched raster state; both loaded
+        // and generic consumers still reject active CLIPPLANE stage mode5.
+        // No register/SAVE projection is inferred from the method encoding.
+        if (parameter & ~0xffffu) {
+            fault_("NV2A shader clip-plane comparison encoding is unsupported");
+        } else {
+            set_raster_word(kRasterShaderClipPlaneMode, parameter);
+        }
         break;
     }
     case kNv097M1E74: {

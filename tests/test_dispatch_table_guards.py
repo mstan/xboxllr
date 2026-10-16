@@ -90,7 +90,7 @@ ARMS = [
     (0x0374, 0x0378), (0x0378, 0x037C), (0x037C, 0x0380), (0x09FC, 0x0A00), (0x0384, 0x0388),
     (0x0388, 0x038C), (0x038C, 0x0390), (0x0390, 0x0394), (0x0394, 0x0398),
     (0x0398, 0x039C), (0x039C, 0x03A0), (0x03A0, 0x03A4), (0x17BC, 0x17C0),
-    (0x17C0, 0x17C4), (0x1D78, 0x1D7C), (0x1E20, 0x1E24), (0x1E24, 0x1E28),
+    (0x17C0, 0x17C4), (0x17F8, 0x17FC), (0x1D78, 0x1D7C), (0x1E20, 0x1E24), (0x1E24, 0x1E28),
     (0x1E40, 0x1E60), (0x1E60, 0x1E64), (0x1E6C, 0x1E70), (0x1E70, 0x1E74),
     (0x1E74, 0x1E78), (0x1E78, 0x1E7C), (0x1B00, 0x1C00), (0x0294, 0x0298),
     (0x0298, 0x029C), (0x029C, 0x02A0), (0x02A0, 0x02A4),
@@ -279,9 +279,9 @@ check("the documented overlap list matches the arms",
       sorted(computed_overlaps) == sorted(OVERLAPPING_ARMS),
       "undocumented overlapping arm pairs %s -- add them to OVERLAPPING_ARMS "
       "with the precedence argument" % computed_overlaps)
-check("the maintained arms accept 804 distinct methods",
-      len(owner) == 804,
-      "%d methods accepted; original 791 plus seven visibility/control and six fog methods" % len(owner))
+check("the maintained arms accept 805 distinct methods",
+      len(owner) == 805,
+      "%d methods accepted; original 791 plus seven visibility/control, six fog and one clip-polarity method" % len(owner))
 check("every accepted method is a multiple of four below 0x2000",
       all(m % 4 == 0 and m < 0x2000 for m in owner),
       "the table is indexed by method >> 2 over a 0x2000-byte method space")

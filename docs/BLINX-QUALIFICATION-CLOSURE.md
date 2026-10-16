@@ -52,6 +52,30 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Reached shader clip-control storage implemented - 2026-10-16
+
+Method17F8 now stores and latches its sixteen texture-stage comparison-polarity
+bits. Zero means GEQUAL, not disabled clipping. The independently published
+[Kelvin method check](https://github.com/envytools/envytools/blob/f102b82381f3f11cee113d16374c87091db039d9/hwtest/pgraph_class_kelvin.cc#L5163-L5187)
+and [register definition](https://github.com/envytools/envytools/blob/f102b82381f3f11cee113d16374c87091db039d9/rnndb/graph/nv20_3d.xml#L389-L405)
+support the low16-bit domain. Existing all-stage guards still reject active
+CLIPPLANE mode5 before pixels or completion; no clip precision or raw SAVE/RDI
+mapping is inferred. Unsupported high bits stop before state mutation.
+
+Three focused suites pass in2.33 seconds, including actual queued LOAD/draw
+storage, unchanged inactive-mode pixels, rejected high-bit writes and mode5
+rejection in each of four stages. Existing8192 physical-noise draws also pass.
+Independent review finds no blocker. A broader retained-input scan covers4331
+original draws and135 unique emitted methods without another dispatch-table gap;
+it does not prove every earlier setter or parameter admission. Captured API
+state42 and all five custom shader definitions contain zero. Zero-initialized
+method diagnostic entries alone are not treated as proof of submission.
+
+Private evidence is `build/blinx/shader-clip-storage-20261016/`; the maintained
+connected rerun is `build/blinx/graphics-connected-clip-20261016/`. G05 remains
+open pending its actual attract/exit/reentry and content-lifetime milestones.
+The three passed component gates and7/9 family count are unchanged.
+
 ## G02/G03/G04 component gates passed - 2026-10-16
 
 The maintained enabled-noise route now completes original title04010101 AV3,
@@ -2345,7 +2369,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | G02 | Passed: original startup/title AV3/FIELD and actual post-mode completed output | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Passed: owned LOAD/projections/transfer and maintained enabled-noise draw/completion with digital input | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Passed: independently observed enabled-noise reconstruction, actual PFIFO/original controls and bounded native GPU comparison | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
-| G05 | Open: loading output completes; reached method17F8 stops connected attract before required exit/reentry/lifetime acceptance | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
+| G05 | Open: loading output completes; method17F8 storage fixed, connected attract/exit/reentry/lifetime rerun in progress | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Complete: configured reset and three original drained retirement/reentry lifetimes compose with accepted A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |

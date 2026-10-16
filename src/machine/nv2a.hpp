@@ -2381,6 +2381,9 @@ public:
         kRasterFogParams0,
         kRasterFogParams1,
         kRasterFogParams2,
+        // Four comparison-polarity bits per texture shader stage. They are
+        // consumed only by CLIPPLANE (mode5), which remains guarded.
+        kRasterShaderClipPlaneMode,
         kRasterStateWords,
     };
     uint32_t debug_raster_state_word(RasterStateWord word) const {
