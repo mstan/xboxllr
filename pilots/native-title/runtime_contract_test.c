@@ -659,6 +659,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"gpu-thread-av-mode-startup")) {test_gpu_thread_av_lle(1);return 0;}
         if (!strcmp(argv[1],"gpu-thread-av-mode-phase1-startup")) {test_gpu_thread_av_lle(2);return 0;}
         if (!strcmp(argv[1],"gpu-lle-av-mode-startup")) { test_gpu_lle_av_mode_startup(0); return 0; }
+        if (!strcmp(argv[1],"gpu-lle-launch-profile")) { test_gpu_lle_launch_profile(); return 0; }
         if (!strcmp(argv[1],"gpu-lle-av-mode-phase1-startup")) { test_gpu_lle_av_mode_startup(1); return 0; }
 #ifdef PILOT_GPU_FILES_WORKER
         if (!strcmp(argv[1],"gpu-lle-encoder-timing")) { test_gpu_lle_encoder_timing(); return 0; }

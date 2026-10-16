@@ -265,6 +265,10 @@ int pilot_io_device_contiguous_resource_release(uint64_t reference);
  * page lasts for the console session, independent of GPU/ordinary allocation
  * lifetimes. Admission verifies current original PTE identity and writability. */
 const char *pilot_io_device_gpu_bootstrap(unsigned char *guest);
+/* Read the actual initialized kernel's AV globals while its CPU is idle.
+ * encoder address, current mode, saved display image, cached capabilities.
+ * This neither supplies encoder state nor runs an AV producer. */
+const char *pilot_io_device_av_state(uint32_t state[4]);
 int pilot_io_device_bootstrap_dma(uint32_t pa,void *buffer,uint32_t bytes,int write);
 /* Original Nt VM calls plus publication of the kernel's real allocated pages.
  * inputs: base,size,type,protect,zero_bits. Outputs: base,size,oldProtect for

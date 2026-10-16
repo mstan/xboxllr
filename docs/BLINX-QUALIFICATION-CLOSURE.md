@@ -50,6 +50,35 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;40 retained deferral IDs,39 scopes.
 
+## Initialized launch producer and reached CPU aperture - 2026-10-15
+
+The maintained GPU selection now runs original AV3 once before title threads,
+after selecting the shared runtime timeline. This is an explicit initialized
+NTSC launch input. Mode0 invokes the original API's0F010101 default, using
+format0x12/pitch2560 and a real original-kernel-owned1228800-byte framebuffer.
+Original page walks establish encoder8A/current-mode0/saved-image0 in the retained
+RAM. The initializer checks those actual globals, executes the original producer,
+then verifies its real mode update. No encoder bytes or ready state are supplied.
+The framebuffer is retained across title takeover; its eventual retirement and
+any required mode transition remain part of G05. Duplicate initialization and
+starting without the shared clock are rejected before another allocation.
+
+The focused fixture passes in0.66s, including the owned DMA view, post-return
+FIELD and actual early AV2 option11/parameter5 read/modify/write. Independent
+review corrected ordering so any selected audio/reference timeline owns both
+initialization and title execution. The current GPU-only selection is unaffected
+by that ordering correction; no live audio image was accessed.
+
+Actual Blinx now crosses the previous EN_REG_RD stop and runs original GPU
+ISR/DPC callbacks. The changed title stops after6.016s at its real MOVNTPS at
+0016AC1B, writing F344E000. The bridge currently rejects that physical bus address.
+The retained page table's F34000EB PDE maps the region to the same bus address;
+this is not an ordinary missing RAM PTE. Next: implement the supported NV2A CPU
+memory-aperture route with allocation/lifetime and device ordering, then collect
+the first real G03 context. No context record or connected pixels are claimed.
+Evidence: build/blinx/gpu-lle-launch-profile-20261016/ and
+build/blinx/display-clock-20261016/launch-profile.aot-private.log.
+
 ## Original AV3 startup returns - 2026-10-15
 
 Direct and genuine-thread original AV3 now return success in both initial AV
@@ -1062,7 +1091,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: direct/thread original AV3 returns in both phases, with shared-clock retraces and post-return FIELD; connected title startup still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: original pre-title AV producer passes; connected title crosses encoder guard and reaches CPU memory-aperture transport; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |

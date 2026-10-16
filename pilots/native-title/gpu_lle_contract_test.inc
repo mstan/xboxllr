@@ -304,6 +304,31 @@ static void test_gpu_lle_av_mode_startup(uint32_t phase)
 }
 
 #ifdef PILOT_GPU_FILES_WORKER
+static void test_gpu_lle_launch_profile(void)
+{
+    install_fault_handler();CHECK(!pilot_io_device_files(memory));gpu_lle_open_profile(0);
+    CHECK(gpu_lle_prepare_launch()); // no clock/producer/owned allocation yet
+    CHECK(!gpu_lle.launch_framebuffer && !gpu_lle.launch_ready);
+    CHECK(!pilot_io_device_clock_start());
+    const char *error=gpu_lle_prepare_launch();
+    fprintf(stderr,"Original launch profile: %s\n",error?error:"returned");CHECK(!error);
+    CHECK(gpu_lle.launch_ready && physical_find(gpu_lle.launch_framebuffer,640u*480u*4u));
+    uint32_t word=0xffffffffu;CHECK(gpu_lle_dma_read(gpu_lle.launch_framebuffer&0x03ffffffu,&word,4) && !word);
+    CHECK(gpu_lle.read(gpu_lle.device,0xfd600800,4)==(gpu_lle.launch_framebuffer&0x03ffffffu));
+    gpu_test_completed_av_mode(0);
+    // The actual early title option11/parameter5 reads C8 before writing the
+    // flicker-filter selection. Its state now comes from the original producer.
+    uint32_t args[]={0,11,5,0},result=0xccccccccu;
+    CHECK(!pilot_io_device_lle(2,memory,args,&result));
+    CHECK(gpu_lle_prepare_launch() && gpu_lle.launch_ready); // no duplicate init
+    gpu_test_completed_av_mode(0);
+    fprintf(stderr,"PASS: original pre-title AV producer, owned framebuffer, unchanged shared FIELD and early original encoder consumer; title takeover remains required\n");
+}
+#else
+static void test_gpu_lle_launch_profile(void){CHECK(0);}
+#endif
+
+#ifdef PILOT_GPU_FILES_WORKER
 static void gpu_test_timing_hal_write(uint8_t reg,uint8_t value)
 {
     // Clock events are controlled by this board fixture. Calling the original

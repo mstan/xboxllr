@@ -49,6 +49,10 @@ static void scheduling_lle_run(void)
     if(clock_error)stop(clock_error,0);
     fprintf(stderr,"[ORIGINAL AUDIO TIME] stopped reference input: %u observed blocks per 1ms PIT opportunity; shared original/compiled TSC, USB/input and GP/EP/ACI; no hardware CPU-cycle claim\n",PILOT_REFERENCE_BLOCKS_PER_MS);
 #endif
+#ifdef PILOT_GPU_LLE
+    // The selected timeline owns the initializer and title from the same epoch.
+    clock_error=gpu_lle_prepare_launch();if(clock_error)stop(clock_error,3);
+#endif
     clock_error=pilot_io_device_sections_start();
     if(clock_error)stop(clock_error,327);
 #if defined(PILOT_D3D_NATIVE) && !defined(PILOT_DISPLAY_LLE)

@@ -27,6 +27,8 @@ static struct {
     int (*first_context_snapshot)(void*,uint8_t*,uint32_t,uint32_t*);
     uint64_t origin;
     int external_clock_fixture;
+    uint32_t launch_framebuffer;
+    int launch_ready;
 } gpu_lle;
 static const char *gpu_lle_sample(void);
 #include "gpu_first_context_observer.inc"
@@ -178,3 +180,36 @@ static void gpu_lle_open_profile_clock(uint32_t idle_phase,int external_clock_fi
 }
 static void gpu_lle_open_profile(uint32_t phase){gpu_lle_open_profile_clock(phase,0);}
 static void gpu_lle_open(void){gpu_lle_open_profile(0);}
+
+/* Explicit initialized NTSC launch input, not reconstructed warm hardware.
+ * The retained kernel has encoder8A but no mode/saved image. Original title
+ * consumers read encoder controls before their first mode setup, so execute
+ * the actual AV producer once before creating any title thread. Mode0 is the
+ * original API's default0F010101; format12/pitch2560 select640x480x32 storage.
+ * This caller owns a real contiguous black framebuffer throughout title
+ * takeover. Never free it from an MMIO/device callback or infer retirement
+ * merely from a new PCRTC_START. G05 still requires connected lifetime proof. */
+static const char *gpu_lle_prepare_launch(void)
+{
+    if(!gpu_lle.device || gpu_lle.external_clock_fixture || !pilot_io_device_clock_bound())
+        return "GPU launch profile requires the shared original clock/device owner";
+    if(gpu_lle.launch_framebuffer || gpu_lle.launch_ready)
+        return "GPU launch profile already initialized or retained after failure";
+    uint32_t before[4],after[4];const char *error=pilot_io_device_av_state(before);
+    if(error)return error;
+    if(before[0]!=0x8a || before[1] || before[2])
+        return "GPU launch profile requires original8A with no current mode/saved image";
+    gpu_lle.launch_framebuffer=physical_allocate(640u*480u*4u,0,0x03ffffffu,4096,PAGE_READWRITE);
+    if(!gpu_lle.launch_framebuffer)return "GPU launch framebuffer allocation failed";
+    memset(memory+gpu_lle.launch_framebuffer,0,640u*480u*4u);
+    uint32_t args[]={0xfd000000u,0,0,0x12,2560,gpu_lle.launch_framebuffer&0x03ffffffu},result=0xccccccccu;
+    error=pilot_io_device_lle(3,memory,args,&result);if(error)return error;
+    if(result)return "Original AV launch setup returned an unfinished step";
+    error=pilot_io_device_av_state(after);if(error)return error;
+    if(after[0]!=0x8a || after[1]!=0x0f010101u || after[2] || after[3]!=before[3])
+        return "Original AV launch setup produced an unexpected kernel state";
+    gpu_lle.launch_ready=1;
+    fprintf(stderr,"[GPU LLE LAUNCH] original AV3 default NTSC mode=%08x framebuffer=%08x bytes=1228800; owned across title takeover\n",
+        after[1],gpu_lle.launch_framebuffer);
+    return NULL;
+}

@@ -2328,5 +2328,17 @@ int pilot_io_device_bootstrap_dma(uint32_t pa,void *buffer,uint32_t bytes,int wr
 done:
     if(acquired)ReleaseSRWLockExclusive(&lock);return valid;
 }
+const char *pilot_io_device_av_state(uint32_t state[4])
+{
+    AcquireSRWLockExclusive(&lock);
+    if(!failure && (!cpu || execution_depth || !gpu_bootstrap_published || !state))
+        failure="AV state observation requires idle initialized GPU owner";
+    if(!failure) {
+        uint32_t observed[]={kernel_word(0x8004ff8cu)&255u,kernel_word(0x8004ff90u),
+            kernel_word(0x8004ff94u),kernel_word(0x80043574u)};
+        if(!failure)memcpy(state,observed,sizeof(observed));
+    }
+    const char *error=failure;ReleaseSRWLockExclusive(&lock);return error;
+}
 #include "io_memory_lle.inc"
 #include "io_sections_lle.inc"
