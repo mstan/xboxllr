@@ -54,6 +54,19 @@ probe publication correction; a reached original consumer reopens that scope.
 
 ## Physical original-profile noise capture completed - 2026-10-16
 
+A subsequent bounded authored batch (`57822f3`) completes twelve captures in
+one GPU session: four endpoint/selector controls, each sampled off/on/on/off
+at three geometry/ROI phases. All repeats match. Full OFF pictures prove the
+one-pixel vertex translation was consumed and that translating the ROI restores
+the original texture correspondence. Both predeclared texture-relative checks
+match8/8 interior pixels; both screen-relative checks match0/8. This identifies
+texture-relative behavior for the observed pattern without fitting an image
+patch or assuming a general equation. Evidence is the probe's
+`results/noise-physical-controlled-20261016/root-review.aot-private.json`.
+The batch's three affected transport checks and three original-profile
+regression checks pass; its capture object matches the tested target object,
+and its bootstrap/SDK objects match the successful physical predecessor.
+
 The reviewed probe correction `c9b22ee` completes the actual hardware SDK
 bootstrap and all four original-profile off/on/on/off observations. Ten live
 FIFO enable-zero boundaries have complete next-owned-trap witnesses, including
