@@ -101,6 +101,20 @@ the exact witness needs source review; neither full transfer nor the bit4 meanin
 is qualified by this result. Private receipts: probe results/context-recovery-20261016/
 and context-transfer-configured-20261016/. Remaining required work is G02-G05.
 
+The next reviewed probe759d353 completes after a separate remote SMC recovery.
+Actual original-image LOAD and poisoned-RAM SAVE pass, followed by verified RAM,
+pointer and FIFO restoration. USER loads/saves11;3496 of3580 words replace their
+sentinels,3487 equal input, and84 sentinel-equal words form tail36A0..37EC.
+Nine written differences are retained, not normalized away. Critical time is
+76370/3375000 seconds, about22.628ms. This establishes the bounded physical
+transfer experiment, with raw save SHA256
+91d08c27b21ac5ac916b8cd1f36711a8909104a85c9ae2676b8a2559505e7f24.
+The consumed field-to-maintained-state map and connected draws remain required.
+Internal GPU state/configuration and VM/pins remain retained; PFIFO stays disabled.
+No recovery hold follows this successful experiment. Private evidence is probe
+results/context-transfer-observed-20261016/; seven compiled/host methods pass
+in15.475s, and independent review accepts the fixed sampling/stop boundary.
+
 Earlier dated milestones below retain their historical counts and open scopes.
 
 ## Bounded physical context transfer stops at load witness - 2026-10-16
@@ -1445,7 +1459,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: original pre-title AV producer passes; connected title crosses encoder/aperture setup and produces its real context; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: actual selector and complete image/table/RAMFC/queued draws captured; FD clear and pointer transport modeled; consumed saved-image mapping/load/save remain | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G03 | Open: actual image/table/RAMFC/queued draws captured; physical LOAD/poison/SAVE and restoration pass; consumed field mapping and maintained transfer/rendering remain | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
