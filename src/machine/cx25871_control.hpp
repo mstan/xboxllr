@@ -7,6 +7,7 @@
 #include "machine/smbus.hpp"
 #include "machine/cx25871_timing.hpp"
 #include <array>
+#include <cstdio>
 #include <numeric>
 
 namespace xlle {
@@ -83,7 +84,16 @@ public:
         value = registers_[reg]; return true;
     }
     bool write_byte(uint8_t reg, uint8_t value) override {
-        if (!supported(reg)) return reject("CX25871 control register outside qualified transport");
+        // 100381B table2-1 marks72 reserved; table2-5 mandates zero for
+        // normal operation and the programming examples explicitly write00.
+        // This establishes no readback latch, reset, clock or timing event.
+        if(reg==0x72 && value==0)return true;
+        if (!supported(reg)) {
+            char why[96];
+            std::snprintf(why,sizeof(why),
+                "CX25871 control register outside qualified transport: write %02x=%02x",reg,value);
+            return reject(why);
+        }
         // Documented ordinary latches used by the original AV setup. Their
         // readback is independent of the still-guarded analog pixel path.
         // Commands that change unmodelled power/monitor/output modes stop
@@ -214,7 +224,8 @@ private:
         // (3C/3E/40), luma/hue (5A/5C), disabled WSS/data/increment (60..6A),
         // master sync/data delay (6E/70/74), subcarrier phase offset (B6), coring/attenuation
         // (CA/CC), DAC mux (CE), output/blanking (D6) and chroma/bypass (D8).
-        // Reserved 72 and undocumented extension DA..FC remain unsupported.
+        // Reserved72 has only its specified zero-write policy above; readback
+        // and undocumented extension DA..FC remain unsupported.
         const bool standard = reg == 0x2e || reg == 0x30 || reg == 0x32 ||
             reg == 0x3c || reg == 0x3e || reg == 0x40 || reg == 0x5a || reg == 0x5c ||
             (reg >= 0x60 && reg <= 0x6a && !(reg & 1)) ||

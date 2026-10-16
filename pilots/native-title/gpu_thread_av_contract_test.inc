@@ -20,11 +20,12 @@ static void test_gpu_thread_av_lle(int mode_guard)
             uint32_t ref[]={handle,0,out+4};CHECK(!event_lle_call(246,ref));
             uint32_t join[]={MEM32(out+4),0,0,0,0},result=0xcccccccc;
             const char *error=pilot_io_device_lle(159,memory,join,&result);
-            CHECK(error && strstr(error,"unmodelled NV2A write at fd680880"));
+            fprintf(stderr,"Original thread AV startup boundary: %s\n",error?error:"returned without guard");
+            CHECK(error && strstr(error,"CX25871 control register outside qualified transport: write "));
             CHECK(result==0xcccccccc && MEM32(context)==0xcccccccc && !MEM32(context+4));
             uint32_t known=0,high=0;CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-1);
             CHECK(known==(1u<<19) && high==(1u<<19));
-            fprintf(stderr,"PASS: original-thread AV mode crosses quiescent AV and preserves its caller at FP_DEBUG activation guard\n");return;
+            fprintf(stderr,"PASS: original-thread AV mode crosses AV and DEBUG storage and preserves its caller at encoder transport guard\n");return;
         }
         /* Expectations independently established by the retained original AV
          * reference and shared-device checks; output DWORD canaries are owned. */

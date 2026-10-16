@@ -274,15 +274,17 @@ static void test_gpu_lle_av_mode_guard(uint32_t phase)
 #endif
     gpu_lle_open_profile(phase);
     // Original AvSetDisplayMode observes the selected quiescent protocol and
-    // starts its full mode sequence. FP_DEBUG activation remains unqualified.
+    // starts its full mode sequence. Measured DEBUG storage is admitted;
+    // original encoder initialization and active timing remain guarded.
     uint32_t args[]={0xfd000000,0,0,0x12,2560,0},result=0xcccccccc;
     const char *error=pilot_io_device_lle(3,memory,args,&result);
-    CHECK(error && strstr(error,"unmodelled NV2A write at fd680880"));
+    fprintf(stderr,"Original AV startup boundary: %s\n",error?error:"returned without guard");
+    CHECK(error && strstr(error,"CX25871 control register outside qualified transport: write "));
     uint32_t known=0,high=0;
     CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-1);
     CHECK(known==(1u<<19) && high==(1u<<19));
     CHECK(result==0xcccccccc); // failed initialization cannot publish success
-    fprintf(stderr,"PASS: original mode setup crosses quiescent AV, drives GPIO19 and guards FP_DEBUG activation without success\n");
+    fprintf(stderr,"PASS: original mode setup crosses AV and DEBUG storage, drives GPIO19 and stops at encoder transport without success\n");
 }
 
 #ifdef PILOT_GPU_FILES_WORKER

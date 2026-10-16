@@ -361,7 +361,11 @@ static void documented_encoder_controls() {
             fault.clear();
             CHECK(encoder.read_byte(entry[0],after) && after==prior);
         }
-        for (uint8_t reg:{0x00,0x31,0x72,0xda,0xfc}) {
+        CHECK(encoder.write_byte(0x72,0));
+        uint8_t reserved=0xa5;
+        CHECK(!encoder.read_byte(0x72,reserved) && reserved==0xa5);fault.clear();
+        CHECK(!encoder.write_byte(0x72,1) && !fault.empty());fault.clear();
+        for (uint8_t reg:{0x00,0x31,0xda,0xfc}) {
             uint8_t value=0xa5;
             CHECK(!encoder.write_byte(reg,0) && !fault.empty());fault.clear();
             CHECK(!encoder.read_byte(reg,value) && value==0xa5);fault.clear();
@@ -376,6 +380,8 @@ static void documented_encoder_controls() {
         CHECK(encoder.write_byte(0xba,0));CHECK(encoder.write_byte(0xc6,0x9c));
         CHECK(encoder.write_byte(0x6c,0xc6));CHECK(encoder.advance_timing(19));
         xlle::Cx25871Timing::State state;
+        CHECK(encoder.timing_state(state) && state.clocks==19);
+        CHECK(encoder.write_byte(0x72,0));
         CHECK(encoder.timing_state(state) && state.clocks==19);
         CHECK(!encoder.write_byte(0x32,0x80));fault.clear();
         CHECK(encoder.timing_state(state) && state.clocks==19);

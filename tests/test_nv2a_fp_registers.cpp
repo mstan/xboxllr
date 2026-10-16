@@ -8,6 +8,23 @@ static int failures;
 using Registers=xlle::Nv2aFpRegisters;
 static uint32_t offset(unsigned i){return i<7?0x800+i*4:0x820+(i-7)*4;}
 int main() {
+    // Actual whole-word readbacks from the physical differential sequence.
+    // DEBUG can precede FP_CONTROL in original AV3. It is configuration storage,
+    // not an invented ready/commit trigger or an assertion of reset defaults.
+    for(unsigned life=0;life<3;++life) {
+        Registers owner;uint32_t value=0xcccccccc;
+        CHECK(!owner.read(0x880,value) && value==0xcccccccc);
+        Registers::Words captured{};captured[10]=755;
+        CHECK(owner.capture_alternate(captured));
+        for(uint32_t word:{0x21121111u,0x21101100u}) {
+            CHECK(owner.write(0x880,word));CHECK(owner.read(0x880,value) && value==word);
+            CHECK(!owner.control_known());
+        }
+        CHECK(!owner.write(0x880,0));CHECK(owner.read(0x880,value) && value==0x21101100);
+        CHECK(owner.write(0x848,0x10000111));
+        CHECK(owner.read(0x82c,value) && value==755);
+        CHECK(owner.read(0x834,value) && value==0);
+    }
     // Both views are independently supplied and deliberately unequal. No
     // programmed word becomes an alternate word just because time/reads pass.
     for(unsigned life=0;life<3;++life) {
@@ -66,6 +83,20 @@ int main() {
         CHECK(fault=="NV2A FP alternate read view is unestablished");
         fault.clear();gpu.mmio_write(xlle::Nv2a::kBase+0x680820,1,1);
         CHECK(fault=="NV2A FP register write size/alignment");CHECK(gpu.scanout_info().width==640);
+    }
+    {
+        std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
+        CHECK(gpu.establish_av_idle_phase(0));gpu.mmio_write(0xfd6806a0,4,1);
+        gpu.mmio_write(0xfd680880,4,0x21121111);
+        CHECK(gpu.mmio_read(0xfd680880,4)==0x21121111 && fault.empty());
+        CHECK(gpu.mmio_read(0xfd6806a0,4)==1); // DEBUG cannot complete pending AV
+        gpu.mmio_write(0xfd680880,4,0x21101100);
+        CHECK(gpu.mmio_read(0xfd6806a0,4)==1);
+        gpu.mmio_write(0xfd680880,1,0x11);
+        CHECK(fault=="NV2A FP register write size/alignment");
+        CHECK(gpu.mmio_read(0xfd680880,4)==0x21101100);
+        fault.clear();gpu.mmio_read(0xfd680881,1);
+        CHECK(fault=="NV2A FP register read size/alignment");
     }
     std::printf("FP register banks, measured MMIO sequence, fresh owners and retained activation guards: %s\n",failures?"FAIL":"PASS");
     return failures?1:0;

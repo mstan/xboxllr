@@ -48,7 +48,100 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;36 retained deferral IDs,35 scopes.
+Current disposition: six of nine families;37 retained deferral IDs,36 scopes.
+
+## Measured DEBUG storage and original encoder continuation - 2026-10-15
+
+The maintained FP owner now admits the two independently observed whole DEBUG
+words as configuration storage, preserving opaque bits17/29. Fresh unknown
+reads, other words and unsupported widths remain guarded. Writes generate no
+activation, bank copy or AV completion. Independent source review found no
+defect; the FP/AV device suites pass in4.438s including the existing timer oracle.
+
+Actual original AV3 direct and thread calls in both initial AV phases cross
+that write and reach encoder programming. Their first new guard was reserved
+72=00. Conexant100381B table2-1 marks72 reserved, table2-5 requires zero for
+reserved fields and the manufacturer's examples explicitly write72=00. The
+encoder now accepts only that zero write without inventing readback, resetting
+timing or changing other state. Nonzero writes and reads remain guarded. Faults
+now report the offending register/value so another capture is not needed just
+to identify the stopped transaction.
+
+The final six original transport/AV checks pass in6.218s and the encoder suite
+passes in1.219s. Both original calling routes and both phases stop at the same
+next write, DA=0F, with caller result canaries intact. Original return and output
+remain unqualified. Private final validation is
+build/blinx/fp-debug-storage-20261015/reserved-zero/boundary-validation.aot-private.json.
+
+A single source audit extracted all85 common/mode encoder writes, with actual
+page walks and unchanged RAM identity. Apart from reserved72, all63 documented
+entries pass existing value guards. The remaining table entries are18 writes
+in DA..FC and three writes00=00. Their details are retained in
+build/blinx/encoder-table-audit-20261015/tables.aot-private.json,
+SHA256 dc4973631fd08fa1fdf9fa68690ee2ded360a89a9a3414cea8ab901be06e792c.
+DA..FC are absent from the retained public register map; Macrovision attribution
+is unproven. Register00 is read-only identity, not writable storage. The later
+original return helper also enables documented WSS fields at60 and writes62/64.
+Resolve these as a batch within G02; no separate family or acceptance matrix
+is added. Encoder clock/sync, real retrace and connected graphics stay required.
+
+The clock-source audit permits a declared initialized GPU routing profile as
+an input before first guest access, independently of any D4 encoder contents.
+It does not justify importing a warm encoder, claiming a reset default or
+generating ready/retrace events from profile selection. The reached CLKO rate,
+display-clock division/gating and status/sync mapping remain real implementation
+work. The old boot trace's PLL_CONTROL read0 was unmodelled and is not hardware
+baseline evidence. No PLL-routing profile is added by this storage change.
+
+## Physical FP sequence observation - 2026-10-15
+
+GFX-D16 records isolated DEBUG-bit naming/combinations and exact field-publication
+edge questions. Required scaling, configured clocks, retrace, original encoder
+startup and connected output remain G02/G05. The measured register-storage
+contract preserves both original DEBUG words without assigning unknown bits an
+activation, ready, completion or bank-copy effect. Device tests cover fresh
+unknown state, both observed words, invalid writes, unchanged captured banks,
+size/alignment and no AV completion from DEBUG writes.
+
+The prepared G02 differential sequence completed on the Xbox with all 20 planned
+writes and verified restoration. The sampled alternate HSYNC marker was 756
+before the AV request, after acknowledgment, after three retrace pairs and after
+the final DEBUG word plus three pairs. Both pending AV directions were observed.
+Final programmed/alternate HSYNC are 755, DEBUG21101100, CONTROL10100111 and
+AV11, matching the initial context. No unexpected readback or retry occurred.
+
+This establishes that AV acknowledgment was not required for this sampled HSYNC
+publication in the current mode. It does not establish whether DEBUG caused it,
+an active whole-bank copy, exact latch edges or the complete original AV3 route.
+The prior HVALID observation remains distinct. A matched HSYNC control with
+DEBUG/AV unchanged subsequently completed with 10 stores and restored all
+readbacks. Alternate HSYNC was 756 before and after three retrace pairs. This
+shows publication without fresh DEBUG/AV writes in the already exercised mode;
+it cannot exclude persistent effects from the earlier DEBUG sequence or prove
+cold-start behavior. No individual unknown DEBUG-bit meaning is inferred.
+
+Original AV3 submits its request at 80035052, writes CRTC28 at 8003506D, and
+waits for three real low-to-high retrace pairs at 8003507B..89. It does not poll
+the alternate timing bank or a post-submission acknowledgment. The next required
+work is the actual configured clock/timing/retrace producer and encoder route.
+Exact whole-bank publication timing is not a new gate without a supported
+consumer and forward-progress/output/lifetime consequence.
+
+Executed payload SHA256 is
+bd1b53be486b4cfef204cdf075c35400e516e8192d4407e2ad9a91df79ae256f;
+source SHA256 is
+addae831bec2315432fcb263bfcba4ac549c316639250d9ed447f34f63a43c4c,
+retained by companion commit c9b1947. Private replies and restoration summary
+are in the companion results/fp-debug-sequence-live-20261015/observation.
+The matched-control payload SHA256 is
+93cff1c22c3b0110fe662a1c8dbbeb22d25d26c87510c215d728514067c69f44;
+its receipt is in results/fp-sync-control-live-20261015/observation. Fourteen
+affected compiled-byte/host tests pass, including exact stores, ABI, each-read
+failure stops, deadlines and no retries. Independent review's prior-history
+limitation is incorporated. Both physical observations completed successfully.
+G02-G05 remain open; family disposition is still 6/9. The muted two-hour audio
+lifecycle capture continues separately; its initial capacity-closed DSP trace
+matches the already accepted trace exactly and needs no repeated analysis.
 
 ## Lifecycle capture limit and next graphics experiment - 2026-10-15
 
@@ -781,7 +874,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: quiescent protocol passes; original AV reaches FP_DEBUG in both phases; activation remains | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: AV and measured DEBUG storage pass; both original routes reach encoder DA=0F; clocks/activation remain | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
