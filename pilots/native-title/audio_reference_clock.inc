@@ -55,13 +55,14 @@ static void audio_reference_clock_start(void)
     if(!error)error=pilot_reference_clock_init(&audio_reference_clock,audio_reference_observe,audio_reference_drive,NULL);
 #ifdef PILOT_GPU_LLE
     if(!error)error=pilot_reference_clock_quantum(&audio_reference_clock,32);
+    if(!error)error=pilot_reference_clock_work(&audio_reference_clock,PILOT_REFERENCE_BLOCKS_PER_MS,0);
 #endif
     if(!error)error=pilot_io_device_clock_bind_step(pilot_reference_clock_observe,&audio_reference_clock,audio_reference_step);
     if(!error)error=pilot_io_device_tsc_bind(pilot_reference_clock_tsc,&audio_reference_clock);
     if(error)stop(error,0);
     fprintf(stderr,"[REFERENCE TIME] stopped input: %u observed blocks per 1ms PIT opportunity; caller-driven APU/input/nominal TSC; no hardware CPU-cycle claim\n",PILOT_REFERENCE_BLOCKS_PER_MS);
 #ifdef PILOT_GPU_LLE
-    fprintf(stderr,"[GPU REFERENCE TIME] input intervals split at 32 PIT ticks per CPU opportunity; common CPU/APU/USB/display epoch\n");
+    fprintf(stderr,"[GPU REFERENCE TIME] input intervals split at <=32 PIT ticks per observed-work opportunity; common CPU/APU/USB/display epoch\n");
 #endif
 }
 static void audio_reference_clock_open(void)

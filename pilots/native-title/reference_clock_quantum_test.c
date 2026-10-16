@@ -34,6 +34,7 @@ static const char *advance(void *context,uint32_t frames)
     ++in->advances;in->frames+=frames;
     if(in->check_busy) {
         CHECK(pilot_reference_clock_quantum(in->clock,7)!=NULL);
+        CHECK(pilot_reference_clock_work(in->clock,32000,0)!=NULL);
         CHECK(pilot_reference_clock_step(in->clock,123)!=NULL);
         CHECK(pilot_reference_clock_audio(in->clock,NULL,NULL)!=NULL);
     }
@@ -159,10 +160,60 @@ static void errors(void)
     CHECK(!step(&clock,2));CHECK(clock.ticks==UINT64_MAX && clock.frames==1);
     CHECK(in.drives==1 && in.frames==1);
 }
+static void work_budget(void)
+{
+    PilotReferenceClock clock;struct Input in;
+    setup(&clock,&in,0,32);
+    CHECK(!pilot_reference_clock_work(&clock,32000,10000));
+    CHECK(pilot_reference_clock_quantum(&clock,0)!=NULL);
+    in.next=1125;in.check_busy=1;
+    /* Repeated stopped entries cannot drain a proposed millisecond without
+     * new work. The old per-call policy spends all1125ticks in36 calls. */
+    for(unsigned i=0;i<36;++i)CHECK(!step(&clock,10000));
+    observed(&clock,0,0);CHECK(in.drives==1 && !in.advances);
+    CHECK(pilot_reference_clock_work(&clock,32000,10000)!=NULL);
+    /* Independently reduced9/256 ratio: one block per entry accumulates its
+     * fraction exactly; every256 blocks contributes9ticks,32000 makes1ms. */
+    for(unsigned i=1;i<=32000;++i) {
+        CHECK(!step(&clock,10000+i));
+        uint64_t expected=(uint64_t)i*9/256;
+        observed(&clock,expected,expected*16/375);
+    }
+    CHECK(in.frames==48 && in.drives==1 && clock.pending==clock.ticks);
+    CHECK(!pilot_reference_clock_work(&clock,0,42000));
+    CHECK(!pilot_reference_clock_quantum(&clock,0));in.next=2250;
+    CHECK(!step(&clock,42000));observed(&clock,2250,96);
+
+    /* Work when no input is proposed is consumed, not banked for a future
+     * zero-work import. A declared new baseline also resets the fraction. */
+    setup(&clock,&in,0,32);CHECK(!pilot_reference_clock_work(&clock,32000,10000));
+    CHECK(!step(&clock,42000));observed(&clock,0,0);
+    in.next=1125;CHECK(!step(&clock,42000));observed(&clock,0,0);
+    CHECK(!step(&clock,42256));observed(&clock,9,0);
+
+    /* Huge deltas saturate without overflow or whole credits; counter
+     * regression is rejected before driver, audio or publication effects. */
+    setup(&clock,&in,0,32);CHECK(!pilot_reference_clock_work(&clock,32000,0));
+    in.next=1125;CHECK(!step(&clock,UINT64_MAX));observed(&clock,32,1);
+    for(unsigned i=0;i<36;++i)CHECK(!step(&clock,UINT64_MAX));
+    observed(&clock,32,1);
+    unsigned drives=in.drives,reads=in.reads,advances=in.advances;
+    CHECK(step(&clock,UINT64_MAX-1)!=NULL);
+    CHECK(clock.ticks==32 && clock.frames==1);
+    CHECK(in.drives==drives && in.reads==reads && in.advances==advances);
+
+    setup(&clock,&in,0,0);CHECK(pilot_reference_clock_work(&clock,32000,0)!=NULL);
+    CHECK(!pilot_reference_clock_quantum(&clock,32));
+    CHECK(pilot_reference_clock_work(&clock,2000001,0)!=NULL);
+    CHECK(!pilot_reference_clock_work(&clock,32000,0));
+    in.next=1125;in.audio_failure=1;
+    CHECK(step(&clock,1000)!=NULL && clock.ticks==0 && clock.frames==0);
+    CHECK(clock.work_blocks==0 && clock.work_fraction==0);
+}
 int main(void)
 {
-    split_target();unlimited_and_lifecycle();errors();
+    split_target();unlimited_and_lifecycle();errors();work_budget();
     if(failures)return 1;
-    puts("PASS bounded reference admission: exact target/frames/TSC, pure reads, input debt, attach/detach, failures and overflow");
+    puts("PASS bounded reference admission: exact target/frames/TSC, work fractions and no zero-work debt drain, pure reads, attach/detach, failures and overflow");
     return 0;
 }

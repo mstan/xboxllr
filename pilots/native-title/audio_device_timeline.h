@@ -12,6 +12,8 @@ const char *pilot_audio_device_timeline_start(unsigned blocks_per_ms,
     PilotAudioDeviceInputTime input_time);
 /* Same stopped publication limit used by the reference audio composition. */
 const char *pilot_audio_device_timeline_quantum(uint32_t max_ticks);
+/* Add the selected input cadence's observed-work limit before GPU execution. */
+const char *pilot_audio_device_timeline_work(uint64_t initial_blocks);
 /* Pure shared nominal TSC, also bound to the sole original CPU's RDTSC. */
 const char *pilot_audio_device_timeline_counter(uint64_t *counter);
 #ifdef __cplusplus

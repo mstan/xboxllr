@@ -17,7 +17,20 @@ const char *pilot_reference_clock_quantum(PilotReferenceClock *clock,uint32_t ma
     if(!clock || !clock->initialized || clock->busy || clock->pending!=clock->ticks)
         return "reference clock quantum outside stopped drained owner";
     if(clock->failure)return clock->failure;
+    if(!max_ticks && clock->work_blocks_per_ms)
+        return "reference work limit requires a bounded quantum";
     clock->max_step=max_ticks;return NULL;
+}
+const char *pilot_reference_clock_work(PilotReferenceClock *clock,
+    uint32_t blocks_per_ms,uint64_t initial_blocks)
+{
+    if(!clock || !clock->initialized || clock->busy || clock->pending!=clock->ticks)
+        return "reference work configuration outside stopped drained owner";
+    if(clock->failure)return clock->failure;
+    if(blocks_per_ms>2000000 || (blocks_per_ms && !clock->max_step))
+        return "reference work limit requires bounded quantum and reviewed cadence";
+    clock->work_blocks_per_ms=blocks_per_ms;clock->work_blocks=initial_blocks;
+    clock->work_fraction=0;return NULL;
 }
 const char *pilot_reference_clock_audio(PilotReferenceClock *clock,
     PilotReferenceAudioAdvance advance,void *context)
@@ -55,14 +68,30 @@ const char *pilot_reference_clock_step(void *context,uint64_t block_entries)
     clock->busy=1;
     const char *error=NULL;
     uint64_t proposed=clock->pending,target=clock->frames;
-    if(proposed==clock->ticks) {
+    uint64_t allowance=clock->max_step;
+    uint32_t fraction=clock->work_fraction;
+    if(clock->work_blocks_per_ms) {
+        if(block_entries<clock->work_blocks)error="reference work counter went backwards";
+        else {
+            uint64_t delta=block_entries-clock->work_blocks;
+            uint64_t whole=delta/clock->work_blocks_per_ms;
+            uint64_t residual=(delta%clock->work_blocks_per_ms)*1125+fraction;
+            uint64_t partial=residual/clock->work_blocks_per_ms;
+            fraction=(uint32_t)(residual%clock->work_blocks_per_ms);
+            /* Saturate before multiplying: even UINT64_MAX observed blocks
+             * cannot overflow or bank time for later zero-work calls. */
+            allowance=whole>clock->max_step/1125?clock->max_step:whole*1125;
+            allowance=partial>clock->max_step-allowance?clock->max_step:allowance+partial;
+        }
+    }
+    if(!error && proposed==clock->ticks) {
         error=clock->drive(clock->input_context,block_entries);
         if(!error)error=clock->input(clock->input_context,&proposed);
         if(!error && proposed<clock->ticks)error="reference clock input went backwards";
         if(!error)clock->pending=proposed;
     }
-    if(!error && clock->max_step && proposed-clock->ticks>clock->max_step)
-        proposed=clock->ticks+clock->max_step;
+    if(!error && clock->max_step && proposed-clock->ticks>allowance)
+        proposed=clock->ticks+allowance;
     if(!error) {
         uint64_t elapsed=proposed-clock->origin,seconds=elapsed/1125000;
         if(seconds>(UINT64_MAX-47999)/48000)error="reference audio frame clock overflow";
@@ -74,7 +103,12 @@ const char *pilot_reference_clock_step(void *context,uint64_t block_entries)
         error=clock->audio(clock->audio_context,frames);
         if(!error)clock->audio_frame+=frames;
     }
-    if(!error) {clock->ticks=proposed;clock->frames=target;}
+    if(!error) {
+        clock->ticks=proposed;clock->frames=target;
+        if(clock->work_blocks_per_ms) {
+            clock->work_blocks=block_entries;clock->work_fraction=fraction;
+        }
+    }
     else clock->failure=error; /* Never publish a failed partial audio advance. */
     clock->busy=0;return error;
 }

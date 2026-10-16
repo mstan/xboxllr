@@ -241,6 +241,39 @@ source review: `retrace-slice-review/vblank-worker-review-v2.aot-private.json`
 under the earlier counter diagnostic. The private image still omits enabled
 noise and remains ineligible for graphics acceptance.
 
+The authored service counterexample now reproduces the missing overlap with
+actual original ISR/DPC delivery and a priority9 guest waiter performing13
+original kernel queries per wake. Its first longer run exposed missing fixture
+bootstrap: the captured pre-image launch worker was still runnable. Completing
+the production section/launch handoff before enabling IRQs resolves that guard;
+no runtime stack ownership guard or original worker behavior is bypassed.
+With this setup the prior clock admits AV3 return only at frame17, after all16
+waiter wakes have finished. A receipt written by the raw AV caller at its real
+return fails the required positive overlap assertion. This is an authored
+scheduling counterexample, not a substituted execution of the title's F9E80.
+
+The GPU reference composition now additionally limits each stopped admission
+to newly observed work at its declared1125/blocks-per-ms ratio, preserving the
+fraction and the32-tick ceiling. Zero-work boundaries cannot drain pending
+time. Whole credits are not banked; capped work is discarded, so arbitrary
+workload chunking is not claimed timestamp-identical or hardware CPU timing.
+The exact pending input target and shared CPU/audio/USB/display epoch remain.
+Both reference-audio and original-audio GPU compositions select this policy;
+the default HLE and existing non-GPU reference selections retain their policy.
+
+AV3 now returns at frame4 with3 actual waiter wakes, while that same waiter
+continues to16 wakes/208 queries and retires normally. Direct and threaded
+original ISR/DPC controls also pass. Twelve affected startup, shared-time,
+PCM/input/TSC and overlap checks pass in12.06s; the portable clock fixture
+passes with both MSVC and GCC. Original-audio timeline source also compiles
+with GCC; that compilation is not an original-audio GPU acceptance claim.
+Two initial runtime fixtures assumed repeated equal counters could drain time;
+their authored post-retirement input now supplies monotonically increasing work,
+while the actual original timer/wait and PCM expectations remain unchanged.
+Evidence: `build/blinx/av-interrupt-20261016/service-before-work-budget/`,
+`service-work-budget/` and `work-final/` under the same directory.
+Actual title passage remains to be checked; families remain7/9.
+
 ## Separate physical draw owner ready offline - 2026-10-16
 
 Probe861b995 now reaches the genuine SDK initialization return, with273 queued

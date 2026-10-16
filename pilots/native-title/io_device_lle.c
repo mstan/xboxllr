@@ -1114,7 +1114,11 @@ static void publish_idle_callback_stack(uint32_t sp,unsigned frame_bytes)
         return;
     }
     if(current!=idle_stack.object) {
-        if(!guest_page(sp&~4095u))failure="device LLE ISR stack has no published owner";
+        if(!guest_page(sp&~4095u)) {
+            fprintf(stderr,"[ORIGINAL ISR STACK GUARD] current=%08x idle=%08x stack=%08x..%08x frame=%08x bytes=%u depth=%u\n",
+                current,idle_stack.object,kernel_word(current+0x20),kernel_word(current+0x1c),sp,frame_bytes,execution_depth);
+            failure="device LLE ISR stack has no published owner";
+        }
         return;
     }
     if(failure || idle_stack.published)return;

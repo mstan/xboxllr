@@ -555,12 +555,14 @@ int main(int argc,char **argv)
     diagnostic.ExceptionCode=0x406d1388u;
     CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
 #ifdef PILOT_GPU_AV_TEST_CALLBACKS
-    if(argc>=2 && (!strcmp(argv[1],"gpu-av-interrupt-lle") || !strcmp(argv[1],"gpu-av-interrupt-thread-lle"))) {
+    if(argc>=2 && (!strcmp(argv[1],"gpu-av-interrupt-lle") || !strcmp(argv[1],"gpu-av-interrupt-thread-lle") ||
+                  !strcmp(argv[1],"gpu-av-service-counterexample-lle"))) {
         CHECK(argc==3);
         /* Use the production hash-checked loader, original code pages and
          * import bindings before any authored harness scratch reservation. */
         load_image(argv[2]);
-        test_gpu_av_interrupt_lle(0,!strcmp(argv[1],"gpu-av-interrupt-thread-lle"));
+        if(!strcmp(argv[1],"gpu-av-service-counterexample-lle"))test_gpu_av_service_counterexample_lle(0);
+        else test_gpu_av_interrupt_lle(0,!strcmp(argv[1],"gpu-av-interrupt-thread-lle"));
         return 0;
     }
 #endif

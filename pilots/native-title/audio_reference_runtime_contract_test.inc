@@ -2,12 +2,18 @@ static uint32_t reference_test_device,reference_test_buffer;
 static float *reference_test_pcm;
 static void reference_test_drain_input(void)
 {
-    /* The GPU profile subdivides an input interval. Drain the real pending
-     * interval through ordinary stopped opportunities, not a forced rebase. */
+    /* Authored clock input for the post-retirement/host-stall checks. The GPU
+     * profile requires fresh observed-work opportunities to drain a proposed
+     * interval; repeated equal counters intentionally cannot spend the debt. */
     unsigned opportunities=0;
+    uint64_t blocks=audio_reference_blocks;
+    if(audio_reference_clock.work_blocks_per_ms && blocks<audio_reference_clock.work_blocks)
+        blocks=audio_reference_clock.work_blocks;
     do {
         CHECK(++opportunities<=1125);
-        CHECK(!audio_reference_step(&audio_reference_clock,audio_reference_blocks+PILOT_REFERENCE_BLOCKS_PER_MS));
+        CHECK(blocks<=UINT64_MAX-PILOT_REFERENCE_BLOCKS_PER_MS);
+        blocks+=PILOT_REFERENCE_BLOCKS_PER_MS;
+        CHECK(!audio_reference_step(&audio_reference_clock,blocks));
     } while(audio_reference_clock.ticks<audio_reference_clock.pending);
 }
 static void reference_test_open(void)
