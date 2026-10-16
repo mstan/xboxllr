@@ -980,6 +980,10 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         if (bo == 0x3D5) return crtc_regs_[crtc_index_];
     } else if (blk->off == 0x680000) {  // PRAMDAC
         const uint32_t reg = bo & ~3u;
+        if(reg==0x6a0 && av_handshake_.known()) {
+            if(size!=4 || (bo&3)){fault_("NV2A AV read size/alignment");return 0;}
+            return av_handshake_.read();
+        }
         if (reg == 0x500 || reg == 0x504 || reg == 0x508) {
             if ((size != 1 && size != 2 && size != 4) || (bo & (size - 1))) {
                 fault_("NV2A unqualified PLL read size/alignment"); return 0;
@@ -1338,6 +1342,11 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         }
     }
     if (blk->off == 0x680000) {
+        if((bo&~3u)==0x6a0 && av_handshake_.known()) {
+            if(size!=4 || (bo&3)){fault_("NV2A AV write size/alignment");return;}
+            if(!av_handshake_.write(value))fault_(av_handshake_.error());
+            return;
+        }
         if(Nv2aFpRegisters::handles(bo&~3u)) {
             if(size!=4 || (bo&3)){fault_("NV2A FP register write size/alignment");return;}
             if(!fp_registers_.write(bo,value))fault_(fp_registers_.error());
@@ -18625,6 +18634,9 @@ void Nv2a::set_timer_clock(uint64_t core_cycles) {
     if (core_cycles < ptimer_source_) { fault_("NV2A PTIMER source clock reversed"); return; }
     const uint64_t elapsed = core_cycles - ptimer_source_;
     ptimer_source_ = core_cycles;
+    // AV service is clocked by the GPU source, independent of the programmable
+    // PTIMER ratio. Neither status reads nor host frame callbacks service it.
+    av_handshake_.advance(elapsed);
     // Reset/unconfigured ratio has no qualified oscillator. Once configured,
     // multiplier zero stops counting; preserve accumulated whole ticks.
     if (!ptimer_div_ || !ptimer_mul_) return;

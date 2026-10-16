@@ -17,7 +17,19 @@ continued output through that transition.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies | Audio A05 normal Stop/reuse and continued output; representative connected output passes, A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 35 retained IDs; 34 contain deferred scope, including nominal interpolation precision, additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+| Input, display, memory, files, scheduling, movies | Audio A05 normal Stop/reuse and continued output; representative connected output passes, A03 drained reset/reentry and isolated A04 components complete; GPU/graphics G02-G05 | 36 retained IDs; 35 contain deferred scope, including AV service-edge precision, nominal interpolation precision, additional boot profiles and exhaustive reset/failure combinations. GFX-D06 is required; GFX-D04 splits required behavior from precision. |
+
+Latest graphics checkpoint: the maintained quiescent AV protocol now services
+pending requests from actual GPU clock work; reads cannot complete them and
+acknowledgment cannot activate an FP bank. Both original direct and guest-thread
+AV calls pass their initial handshake in both idle phases and preserve caller
+canaries at the next FP_DEBUG guard. Eight focused checks pass. Source review
+identifies original AV3 as the producer of retained8A encoder initialization,
+removing the need to guess its initial readback bytes. FP_DEBUG, active timing,
+the actual initializer return and connected rendering remain required. The one
+existing muted audio lifecycle run continues while the authorized Sol6.1 worker
+reviews its evidence. This is component progress; families remain6/9. See the
+[current milestone](BLINX-QUALIFICATION-CLOSURE.md#quiescent-av-protocol-and-original-initializer---2026-10-15).
 
 Latest checkpoint: the GP/EP chronology fix `4f92b9b` passes 54 affected checks
 and the changed title's 4,334 comparable input groups are all consecutive.
@@ -34,8 +46,8 @@ Stop/reuse and continued output. The first Start only
 opens a menu, and final Release is not required for this retained-buffer path.
 `c3e0127` publishes a completed stage prefix while a future title run continues,
 allowing early diagnosis without repeated startup. One Sol6.1 worker completed
-independent waveform, lifecycle and G02 reviews; the essential graphics startup
-hardware fact remains deferred to the final phase. See the current closing
+independent waveform, lifecycle and G02 reviews; remaining graphics activation
+questions retain their final-phase hardware boundary. See the current closing
 checklist for evidence and limits. No family closes in this checkpoint.
 
 Earlier feedback milestone: the real hotplug/Start capture finishes without a

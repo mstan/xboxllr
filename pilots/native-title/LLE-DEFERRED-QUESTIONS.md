@@ -6,15 +6,15 @@ evidence and reopening trigger; preserve resolved questions and their outcomes.
 Deferral does not count as qualification. Missing service routing, clocks,
 ownership or required processing stages remain implementation work.
 
-The existing 14 graphics questions and their replay evidence remain in the
+The existing 15 graphics questions and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
 Current reconciliation, 2026-10-15: the twenty-one entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues, 35 IDs
-are retained; 34 still contain deferred scope. AUDIO-D09 records the sample
+behavior from its remaining precision question. Across both queues, 36 IDs
+are retained; 35 still contain deferred scope. AUDIO-D09 records the sample
 counter's remaining sub-sample phase question; AUDIO-D10 records AC-link
 control-transaction phase and bus latency. AUDIO-D11 retains unreached output
 configuration encodings and trap behavior. AUDIO-D12 retains the nontrapped
@@ -22,7 +22,9 @@ FE reason field's raw values and timing, not required interrupt/queue behavior.
 The owner's bounded-goal update adds LLE-D06 and AUDIO-D13/D14 for broader
 profiles and exhaustive lifecycle/fault coverage; normal required execution
 remains in the closing checklist. AUDIO-D15 makes the existing nominal-rate
-contract's exact silicon interpolation question explicit. See the
+contract's exact silicon interpolation question explicit. GFX-D15 separately
+records AV service-edge/raw-phase precision, preserving required active timing.
+See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
 

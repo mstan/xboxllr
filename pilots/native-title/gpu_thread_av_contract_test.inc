@@ -9,7 +9,7 @@ static void test_gpu_thread_av_lle(int mode_guard)
     uint32_t stats=0x19700;MEM32(stats)=12;CHECK(!event_lle_call(256,&stats));
     uint32_t baseline_threads=MEM32(stats+4),baseline_handles=MEM32(stats+8);
     for(unsigned life=0;life<(mode_guard?1u:3u);++life) {
-        gpu_lle_open();
+        gpu_lle_open_profile(mode_guard==2?1:0);
         if(mode_guard) {
             const uint32_t context=0x1b000,args[]={0xfd000000,0,0,0x12,2560,0};
             memset(memory+context,0,96);MEM32(context)=0xcccccccc;
@@ -20,11 +20,11 @@ static void test_gpu_thread_av_lle(int mode_guard)
             uint32_t ref[]={handle,0,out+4};CHECK(!event_lle_call(246,ref));
             uint32_t join[]={MEM32(out+4),0,0,0,0},result=0xcccccccc;
             const char *error=pilot_io_device_lle(159,memory,join,&result);
-            CHECK(error && strstr(error,"unmodelled NV2A read at fd6806a0"));
+            CHECK(error && strstr(error,"unmodelled NV2A write at fd680880"));
             CHECK(result==0xcccccccc && MEM32(context)==0xcccccccc && !MEM32(context+4));
             uint32_t known=0,high=0;CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-1);
             CHECK(known==(1u<<19) && high==(1u<<19));
-            fprintf(stderr,"PASS: original-thread six-argument AV mode preserves its caller at the real cold-handshake guard\n");return;
+            fprintf(stderr,"PASS: original-thread AV mode crosses quiescent AV and preserves its caller at FP_DEBUG activation guard\n");return;
         }
         /* Expectations independently established by the retained original AV
          * reference and shared-device checks; output DWORD canaries are owned. */

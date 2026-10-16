@@ -48,7 +48,54 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;35 retained deferral IDs,34 scopes.
+Current disposition: six of nine families;36 retained deferral IDs,35 scopes.
+
+## Quiescent AV protocol and original initializer - 2026-10-15
+
+G02 now has a clock-owned FD6806A0 protocol in the maintained NV2A, selected by
+the initialized-kernel graphics route before its first guest access. Physical
+evidence supplies idle00/11, pending01/10 and completion in both directions.
+Original AV3 tests only bit0/bit4 equality at80034CE3 and later emits the saved
+phase's complement at80035052. Exchanging both phase bits preserves its work.
+Canonical idle0 therefore represents this explicit quiescent startup profile;
+it is not a measured reset default. Initialization is once per owner, with the
+before-first-access requirement satisfied by the native creation call site.
+
+Pending acknowledgment is serviced by actual NV2A source-clock advancement at
+a declared nominal next edge. Reads, frozen time, host frame callbacks and
+PTIMER ratio changes do not complete a request. This does not copy FP banks or
+activate video. GFX-D15 retains the precise service edge/latency and raw reset
+phase, with a supported-consumer reopening trigger. FP_DEBUG, active timing,
+encoder programming and genuine retrace remain required functionality.
+
+Both original AV3 call routes (direct service and genuine original thread) now
+cross the initial handshake read in both idle phases and stop at the actual
+FD680880 write of21121111. All four preserve caller result canaries and the
+actual GPIO19 output. They do not reach the later original request submission.
+The maintained MMIO tests separately cover both request directions, passive
+pending reads, clock service, retained distinct FP banks and rejected writes;
+the existing PTIMER oracle is reused. Two device suites pass in0.62s and six
+original transport/AV cases pass in1.33s. Private receipts:
+`build/blinx/av-quiescent-20261015/validation.aot-private.json` and
+`original-validation.aot-private.json`. One Sol6.1 worker reviewed source and
+ownership independently; root reviewed its findings and ran these checks.
+
+The source audit also identifies a genuine producer for the retained8A encoder:
+original AV3 writes BA80,BA3F,6C46, executes its original delay, writes6CC6 and
+programs its configuration table before its first later8A read. Execute this
+exported initializer on the same CPU/GPU/SMBus owners before early title AV
+queries once its remaining device semantics work. The private INIT wrapper is
+not an alternative: its driver-global pointer is zero in the pinned capture.
+Do not fabricate that driver structure, substitute D4 state, seed the saved-mode
+global or call this literal cold-boot continuation. The retained AV disassembly
+SHA256 is15c06de72c227d275087fc787da724e66d95abcb58087fdacd13ec4aa834e324;
+the RAM identity and original instruction/table evidence remain unchanged.
+
+The existing muted audio capture continues in
+`build/blinx/audio-retained-lifecycle-20261015/capture`; it is not replaced by
+these graphics checks. Its published stage prefix is available for early review.
+The worker prepared a final journal/PCM lifecycle review, explicitly retaining
+the need to validate actual post-restart output. Families remain6/9.
 
 ## Corrected title ordering checkpoint - 2026-10-15
 
@@ -127,13 +174,11 @@ journal leaves its report unchanged and correctly produces no lifecycle trigger.
 This is an observation stopping rule, not a substitute for reviewing the output
 and lifetime evidence. The old private Release-based checkpoint is superseded.
 
-The independent worker also reviewed G02: the essential missing startup fact is
-the FD6806A0 request/acknowledgement behavior for one coherent original AV
-profile, including its service event and activation/retrace dependency. The
-original display initializer polls it before the encoder programming. Existing
-already-active D4 observations do not establish retained 8A startup semantics.
-Repeating resolved source searches or copying legacy register snapshots cannot
-close this gap. G03-G05 remain downstream; hardware stays in the final phase.
+That checkpoint's G02 startup question is refined by the quiescent-protocol
+milestone above. Original initialization still requires FP_DEBUG and real
+activation/retrace; existing already-active D4 observations cannot substitute
+for the retained8A producer. G03-G05 remain downstream, and hardware stays in
+the final phase.
 
 ## GP/EP ordering and original startup branch - 2026-10-15
 
@@ -689,7 +734,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: live D4 selection differs from retained 8A; startup state unresolved | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: quiescent protocol passes; original AV reaches FP_DEBUG in both phases; activation remains | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |

@@ -8,6 +8,7 @@ static struct {
     void *device;
     void *(*create)(void);
     void (*destroy)(void*);
+    int (*av_idle)(void*,uint32_t);
     const char *(*error)(void*);
     void (*bus)(void*,int(*)(uint32_t,void*,size_t),int(*)(uint32_t,const void*,size_t),void(*)(int,int));
     uint32_t (*read)(void*,uint32_t,int);
@@ -113,7 +114,7 @@ static void gpu_lle_tick(void)
     if(!gpu_lle.device)return;
     const char *error=gpu_lle_sample();if(error)stop(error,0xfd000000u);
 }
-static void gpu_lle_open(void)
+static void gpu_lle_open_profile(uint32_t idle_phase)
 {
     if(gpu_lle.device)stop("GPU device already owned",0);
     if(!InitOnceExecuteOnce(&usb_once,usb_start,NULL,NULL))stop("shared GPU machine bus initialization failed",0);
@@ -142,10 +143,15 @@ static void gpu_lle_open(void)
     RemoveDllDirectory(dependency);
     if(!gpu_lle.library)stop("maintained NV2A reference DLL unavailable",GetLastError());
 #define GPU_LOAD(member) do {*(FARPROC*)&gpu_lle.member=GetProcAddress(gpu_lle.library,"xlle_nv2a_reference_" #member);if(!gpu_lle.member)stop("GPU DLL ABI missing: " #member,0);} while(0)
-    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(port);GPU_LOAD(field);GPU_LOAD(av_outputs);GPU_LOAD(encoder_clocks);GPU_LOAD(encoder_advance);GPU_LOAD(encoder_timing);GPU_LOAD(scanout);
+    GPU_LOAD(create);GPU_LOAD(destroy);GPU_LOAD(av_idle);GPU_LOAD(error);GPU_LOAD(bus);GPU_LOAD(read);GPU_LOAD(write);GPU_LOAD(frame);GPU_LOAD(clock);GPU_LOAD(port);GPU_LOAD(field);GPU_LOAD(av_outputs);GPU_LOAD(encoder_clocks);GPU_LOAD(encoder_advance);GPU_LOAD(encoder_timing);GPU_LOAD(scanout);
 #undef GPU_LOAD
     gpu_lle.device=gpu_lle.create();
     if(!gpu_lle.device)stop("NV2A reference allocation failed",0);
+    /* The retained initialized-kernel profile starts with no outstanding AV
+     * request. Original AV3 observes only phase equality, then its complement;
+     * canonical phase0 represents both quiescent phases. This does not seed
+     * the encoder, active timing banks, retrace or an already-completed mode. */
+    if(!gpu_lle.av_idle(gpu_lle.device,idle_phase))stop("NV2A quiescent AV profile failed",0);
     gpu_lle.bus(gpu_lle.device,gpu_lle_dma_read,gpu_lle_dma_write,pilot_usb_pic_raise);
     const char *error=gpu_lle.error(gpu_lle.device);
     if(error)stop(error,0xfd000000u);
@@ -163,3 +169,4 @@ static void gpu_lle_open(void)
     error=pilot_io_device_work_bind(gpu_lle_sample);if(error)stop(error,0xfd000000u);
     fprintf(stderr,"[GPU LLE] original XDK renderer; maintained NV2A; shared original RAM/PIC/ISR\n");
 }
+static void gpu_lle_open(void){gpu_lle_open_profile(0);}

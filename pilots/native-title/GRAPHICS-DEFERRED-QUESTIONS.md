@@ -28,11 +28,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other twelve graphics entries retain their deferred scopes and reopening
+- The other thirteen graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-one entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **35 retained question IDs: 34 with deferred scope, and one fully
+there are **36 retained question IDs: 35 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -40,6 +40,9 @@ connected output check. Earlier entries and their evidence remain unchanged. Ear
 calling all 27 then-recorded questions "precision deferrals" were imprecise;
 they are historical counts, not 27 currently waived closing requirements.
 The current family count is **6/9**; this reconciliation qualifies no new work.
+
+GFX-D15, added 2026-10-15, isolates AV request service-edge precision from the
+still-required FP_DEBUG, active timing and original initialization behavior.
 
 ## Foundation work before broader correctness claims
 
@@ -96,6 +99,7 @@ required and deferred portions.
 
 | ID | Question | Evidence retained / why it can wait | Reopen when |
 | --- | --- | --- | --- |
+| GFX-D15 | What exact clock edge/latency services FD6806A0, and which raw quiescent phase occurs on physical reset? | Physical observations establish both idle phases, both pending directions and eventual acknowledgment; the first direction completes within a 7.111us instrumented upper bracket. Original AV3 observes phase equality and then requests its complement, so exchanging both phase bits preserves its work. The explicit initialized-kernel profile selects a fresh quiescent owner with canonical phase0; actual NV2A source-clock advancement services its pending request at a declared nominal next edge. Reads, PTIMER configuration and frame callbacks do not supply completion. The isolated protocol neither copies an FP bank nor activates display timing. This is not a physical reset default or literal cold-boot claim. | A supported original consumer distinguishes the nominal service ordering or raw phase, another boot profile is admitted, or an independent edge measurement changes the contract. Replay both phase directions, frozen-clock/read controls and actual original AV calls. Required FP_DEBUG behavior, active timing/retrace, encoder programming and connected title rendering remain open; none is waived here. |
 | GFX-D01 | What additional clipping, culling, coverage and depth cases need qualification? | The generic consumed-color-before-clipping fix stays installed. Authored clipping/reference tests and original inputs/replay tooling are retained. Preserved original state/pixels pass through draw 2162 in their pinned qualification generation. Clipping/raster changes remain local to the reference and renderer implementation. | A visible regression or representative family failure implicates these equations, a new supported input domain requires them, or full qualification resumes. |
 | GFX-D02 | How do remaining ARGB/stencil/alpha/combiner and texture-format profiles compose? | The remaining-input census covers 2,192 draws in 79 state groups /191 state-and-vertex batches. The ARGB/stencil scan covers 2163-2458; 2261 is the first surviving clip geometry, not a proved write. The 2163 empty-profile proposal passes 105 controls but has no original replay qualification. Existing component-format tests remain usable. | A new supported behavior consumes an unqualified state/format, a regression identifies that family, or full qualification resumes. |
 | GFX-D03 | Does the independently expected producer chain qualify the whole frame and native composition? | Original prefix 2162, independent producer snapshots and five qualified postprocess consumers are preserved. Full-frame producer error propagation/native composition remains open. HLE appearance already passes the owner's corrected-run review. | A producer/consumer dependency changes, an appearance or state/lifetime regression occurs, or whole-frame numerical qualification is resumed. |

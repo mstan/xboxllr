@@ -266,23 +266,23 @@ static void test_gpu_lle_transport(void)
     fprintf(stderr,"PASS: original GPU reservation and physical-zero translation; real shared bootstrap jump/cache publication; compiled MMIO, owned DMA, held/released semaphore, protection/release rejection, three transport lifetimes\n");
 }
 
-static void test_gpu_lle_av_mode_guard(void)
+static void test_gpu_lle_av_mode_guard(uint32_t phase)
 {
     install_fault_handler();
 #ifdef PILOT_GPU_FILES_WORKER
     CHECK(!pilot_io_device_files(memory));
 #endif
-    gpu_lle_open();
-    // Original AvSetDisplayMode starts the real cold-mode sequence. Do not
-    // replace its callees or manufacture the next hardware handshake result.
+    gpu_lle_open_profile(phase);
+    // Original AvSetDisplayMode observes the selected quiescent protocol and
+    // starts its full mode sequence. FP_DEBUG activation remains unqualified.
     uint32_t args[]={0xfd000000,0,0,0x12,2560,0},result=0xcccccccc;
     const char *error=pilot_io_device_lle(3,memory,args,&result);
-    CHECK(error && strstr(error,"unmodelled NV2A read at fd6806a0"));
+    CHECK(error && strstr(error,"unmodelled NV2A write at fd680880"));
     uint32_t known=0,high=0;
     CHECK(gpu_lle.av_outputs(gpu_lle.device,&known,&high)==-1);
     CHECK(known==(1u<<19) && high==(1u<<19));
     CHECK(result==0xcccccccc); // failed initialization cannot publish success
-    fprintf(stderr,"PASS: original mode setup drives GPIO19, then rejects unqualified PRAMDAC handshake\n");
+    fprintf(stderr,"PASS: original mode setup crosses quiescent AV, drives GPIO19 and guards FP_DEBUG activation without success\n");
 }
 
 #ifdef PILOT_GPU_FILES_WORKER

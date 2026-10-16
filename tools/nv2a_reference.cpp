@@ -105,6 +105,10 @@ EXPORT void* xlle_nv2a_reference_create() {
 EXPORT void xlle_nv2a_reference_destroy(void* instance) {
     delete static_cast<Reference*>(instance);
 }
+EXPORT int xlle_nv2a_reference_av_idle(void* instance, uint32_t phase) {
+    auto& ref = *static_cast<Reference*>(instance);
+    return ref.failure.empty() && ref.gpu.establish_av_idle_phase(phase);
+}
 EXPORT void xlle_nv2a_reference_memory(void* instance, uint8_t* ram, uint32_t bytes) {
     auto& ref = *static_cast<Reference*>(instance);
     ref.gpu.set_mem_access(
