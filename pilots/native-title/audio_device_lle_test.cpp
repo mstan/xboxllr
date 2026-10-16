@@ -331,7 +331,9 @@ int main(int argc,char **argv) {
         CHECK(s.gp_phase==3 && s.ep_phase==2 && !s.gp_quanta && !s.ep_events);
         access(0xfe802000,4,15);ticks=78037;
         CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);
-        CHECK(s.gp_quanta==24 && s.ep_events==3 && s.gp_phase==3 && s.ep_phase==2 && !s.pcm_words);
+        // GP24 has completed, but its eight-chunk group is published at the
+        // following admission boundary; codec absolute phase does not force EP.
+        CHECK(s.gp_quanta==24 && s.ep_events==2 && s.gp_phase==3 && s.ep_phase==2 && !s.pcm_words);
         const auto gp_cycles=s.gp_cycles,ep_cycles=s.ep_cycles;
         const auto dma_writes=s.dma_writes;
         access(0xfe820804,4,0);access(0xfe820808,4,sg_pa+0x4000);
@@ -339,12 +341,12 @@ int main(int argc,char **argv) {
         CHECK(word(sg_va)==sg_pa+0x4000 && word(sg_va+8)==sg_pa+0x5000);
         for(unsigned i=0;i<0x8000;++i)if(i>=4 && (i<8 || i>=12))CHECK(guest[sg_va+i]==0xa5);
         CHECK(!pilot_audio_device_lle_sample());pilot_audio_device_lle_state(&s);
-        CHECK(s.gp_cycles==gp_cycles && s.ep_cycles==ep_cycles && s.gp_quanta==24 && s.ep_events==3);
+        CHECK(s.gp_cycles==gp_cycles && s.ep_cycles==ep_cycles && s.gp_quanta==24 && s.ep_events==2);
         CHECK(s.dma_writes==dma_writes+2 && !s.pcm_words);
         access(0xfe802000,4,7);ticks+=6000;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
-        pilot_audio_device_lle_state(&s);CHECK(s.gp_quanta==24 && s.ep_events==3 && s.gp_phase==3 && s.ep_phase==2);
+        pilot_audio_device_lle_state(&s);CHECK(s.gp_quanta==24 && s.ep_events==2 && s.gp_phase==3 && s.ep_phase==2);
         CHECK(pilot_audio_device_lle_close());pilot_audio_device_lle_state(&s);CHECK(s.owned && s.work_binding);
-        puts("PASS native shared clock:24 GP frames,3 EP events, actual runtime SGE publication, inert repeated time and retained active-reset ownership");return 0;
+        puts("PASS native shared clock:24 GP frames,2 EP events, actual runtime SGE publication, inert repeated time and retained active-reset ownership");return 0;
     }
     if(!strcmp(mode,"host-controls")) {
         auto read=[](uint32_t address){uint32_t value=0;CHECK(!pilot_audio_device_lle_access(address,4,0,&value));return value;};

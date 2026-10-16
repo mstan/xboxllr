@@ -148,7 +148,8 @@ public:
         // Do not preserve a fabricated permanent zero across elapsed time.
         if(ticks>previous)ep_host_status_known_=false;
     }
-    // Advance to an absolute 5.333 ms APU-frame number.
+    // Advance the setup-frame ordinal. The owning clock supplies cadence;
+    // it must preserve the original GP/EP producer/consumer phase.
     void set_frame(uint64_t frame) {
         frame_clock_primed_=true;
         while (frame_ < frame) {
@@ -1609,7 +1610,7 @@ private:
                 set_reg32(kVoiceCurrent[list], voice);
             }
         }
-        // The existing absolute setup-engine clock owns EP event production.
+        // The setup-engine clock owns EP event production.
         // Hardware produces102 at 256/48000s with GP held and empty voices.
         // C4 requests the next event; delayed C5 acknowledgement clears the
         // previous flag independently while retaining background bit8.

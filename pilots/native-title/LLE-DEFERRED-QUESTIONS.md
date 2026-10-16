@@ -121,6 +121,26 @@ needs such ordering, exposes a stale token or premature release, or supports wid
 recovery. Connected A05 output/timing/lifecycle remains mandatory; the34 retained
 IDs/33 deferred scopes and overall6/9 family count are unchanged.
 
+AUDIO-D07/D13 follow-up,2026-10-15: a real chronological GP/EP ring defect was
+identified and is required work, not a deferred phase detail. The nominal clock
+now admits EP only after eight completed producer slots, preserves groups across
+SE pause and starts fresh after paired bootstrap. Exact silicon sub-frame phase
+remains replaceable; original programs and independent chronological read checks
+establish functional grouping. An individual live-ring engine restart cannot
+realign the other cursor and remains guarded. Reopen that extension only for a
+supported original caller requiring it. Connected title output/timing/lifecycle
+still determine A05 acceptance; this note does not close that gate.
+
+LLE-D06 additional-profile clarification,2026-10-15: the selected original-audio
+profile starts disconnected and hotplugs at9 seconds. Original insertion-edge
+handling deliberately skips the intro; first Start opens the title menu without
+stopping music. Controller-connected-at-entry USB/audio calibration and original
+audio synchronization through the unskipped opening are excluded startup coverage,
+not unexplained failures of this selected path. Reopen when that startup is added
+to the supported profile or evidence contradicts the original skip route. Correct
+output, timing and actual normal lifecycle of the selected attract path remain
+mandatory. Existing input/movie qualification is not broadened by this exclusion.
+
 Initial FP values no longer need a console query. Original/native callback state
 transport and the scheduling idle/compute clock path were required integration
 work, not deferrals. They are now covered by completed Q01-Q03 in the closing

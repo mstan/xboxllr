@@ -50,6 +50,65 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;34 retained deferral IDs,33 scopes.
 
+## GP/EP ordering and original startup branch - 2026-10-15
+
+The changed `audio-title-stage-transition-20261015` capture finalized cleanly at
+14.518 guest seconds:1,765 completed calls,245 successful original input reads,
+53 actual Start reads, six Play calls and no Stop. Both output streams contain
+1,748,992 PCM bytes. It is a bounded observation, not normal guest retirement.
+The stage journal stopped at its64MiB capacity, retaining complete records over
+about2.1 seconds; the prepared four-second description was an upper bound, not
+the duration actually retained. Its immutable trace SHA256 is
+`203ee4f9a024a43e21ff0f3beb66a6464c60ab95c6b52a7405b77d4eb6077b69`.
+
+This trace binds the current title source to88,200 independent FFmpeg ADX frames
+at correlation0.999985/0.999989, with no source cursor discontinuity. All3,161
+observed send-to-MIX banks and18,966 main GP writes match their preceding stage.
+However, every one of4,323 comparable EP ring reads mixes producer quanta: the
+first chunk is16 quanta newer than the following chunk. The earlier trace shows
+the same defect in3,069 reads. Equality to current RAM hid this chronological
+error. This is a required output/ownership defect, not a precision deferral.
+The old zero-state EP arithmetic oracle cannot certify this later-starting
+window without its missing initial context; its independent component proof
+remains reusable. No program mismatch is inferred from that prefix limitation.
+
+A short fixture running original GP/EP setup reproduces the first read as
+`[1,0,0,0,0,0,0,0]` and later reads as `[57,42,43,44,45,46,47,48]`.
+The device clock now waits for eight completed32-sample producer slots before
+admitting the256-sample consumer, while GP fills the opposite ring half. Codec
+cadence is unchanged. SE pause retains partial groups; normal paired bootstrap
+starts a fresh group. A missing EP request and unpaired live ring restart retain
+explicit guards. Idle-voice FE trapping preserves the completed unread half.
+This is a nominal coherent phase, not a measurement of silicon sub-frame phase.
+No samples, DSP completion or guest time are synthesized, and default HLE is
+unchanged. Private evidence is in `audio-order-fixture-20261015/`; the original
+three-configuration, two-generation timeout/reentry fixture and chronological
+read checks replace full title startups during this fix's feedback loop.
+All54 affected device/adapter checks pass; the adapter's old absolute-phase
+expectation was updated after its first run exposed that stale assertion.
+The original three-configuration fixture verifies328 complete consecutive EP
+reads over two reset/reentry generations and original free. Baseline traces are
+rejected by the same chronology checker. The final component receipt is
+`audio-order-fixture-20261015/qualified-component.aot-private.json`, SHA256
+`5593f83dce284ffd6ef03f8d80861e52d59aafb294a5783adc90a92418bec669`.
+
+One authorized Sol6.1 worker independently traced the startup/lifecycle source;
+root checked the source hashes and relevant original instructions. Neutral
+controller insertion sets the edge consumed by intro predicate18110. Dispatcher
+188A0 then cleans up the intro and selects title phase1. Thus hotplug legitimately
+skips the opening movies. The first Start opens the title menu and need not stop
+music. The normal title-exit route reaches wrapper102890, which calls original
+Stop/status polling and retains the buffer. Actual Stop followed by Play and
+correct continued output is the required lifecycle; final Release is unnecessary
+for this path given the accepted destruction/reset components. Within attract,
+the source-proven transition uses the title timeout of0x5A0 updates; do not keep
+repeating Start-only captures expecting Stop.
+
+Initial-connected USB/audio calibration and opening-movie original-audio A/V
+coverage remain excluded additional startup coverage under the one-profile rule.
+The delayed-hotplug profile still needs corrected connected output, timing and
+actual normal Stop/reuse evidence. These findings close no family:6/9 remains.
+
 ## Reuse saved observations and stop on events - 2026-10-15
 
 Reviewing the saved646.203s capture requires no new title execution. Its92 video

@@ -82,7 +82,7 @@ struct Fixture {
 
 static void clocked_fence() {
     Fixture f;f.configure();f.reg(0x1100,0x100f);f.reg(0x1510,0);f.reg(0x2000,15);
-    // Admit a real GP/EP frame. The fence orders completed FE/VP accesses,
+    // Admit real GP work. The fence orders completed FE/VP accesses,
     // not the unrelated DSP computations on their own scratch/MIX owners.
     CHECK(f.clock->advance(66000) && f.apu.gp_frame_outstanding());
     const auto ep_events=f.apu.ep_frame_events(),mix=f.apu.voice_mix_quanta();
@@ -124,11 +124,11 @@ static void partitioned_active_output() {
         while(f.clock->ticks()<end)CHECK(f.clock->advance(std::min(end,f.clock->ticks()+step)));
         CHECK(f.stamps.size()==3 && f.pcm.size()==3072 && f.aci.completed_descriptors()==3);
         for(unsigned i=0;i<3;++i) {
-            const std::array<uint64_t,4> stamp={66000+i*6000,11+i,(i+1)*8,i+1};
+            const std::array<uint64_t,4> stamp={66000+i*6000,11+i,(i+1)*8,i};
             CHECK(f.stamps[i]==stamp);
         }
         CHECK(f.pcm==std::vector<uint8_t>(f.ram.begin()+0x8000,f.ram.begin()+0x8c00));
-        CHECK(f.apu.voice_mix_quanta()==24 && f.apu.ep_frame_events()==3);
+        CHECK(f.apu.voice_mix_quanta()==24 && f.apu.ep_frame_events()==2);
         CHECK(f.gp->phase()==xlle::ApuGpPhase::Yielded && !f.apu.gp_frame_outstanding());
         CHECK(f.ep->phase()==xlle::ApuGpPhase::Running && f.error.empty());
         if(step==1) {
@@ -147,7 +147,8 @@ static void partitioned_active_output() {
 
 static void admission_and_failure() {
     Fixture ep_only;ep_only.configure(Fixture::event_program(),false);ep_only.reg(0x2000,15);
-    CHECK(ep_only.clock->advance(66037) && ep_only.apu.ep_frame_events()==1);
+    CHECK(ep_only.clock->advance(66037) && !ep_only.apu.ep_frame_events());
+    CHECK(ep_only.clock->advance(66750) && ep_only.apu.ep_frame_events()==1);
     CHECK(ep_only.gp->phase()==xlle::ApuGpPhase::Held && !ep_only.apu.voice_mix_quanta());
     CHECK(ep_only.error.empty());
     // A stopped or unfinished CPU must not become an invented GP completion.
@@ -177,13 +178,13 @@ static void runtime_input_sge() {
     auto expected=before;const uint32_t page=0x20000;
     std::memcpy(expected.data()+0x10000+17*8,&page,4);
     CHECK(f.ram==expected && f.gp->phase()==xlle::ApuGpPhase::Yielded && f.ep->phase()==xlle::ApuGpPhase::Running);
-    CHECK(f.clock->advance(66037) && f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    CHECK(f.clock->advance(66787) && f.apu.voice_mix_quanta()==9 && f.apu.ep_frame_events()==1);
     CHECK(f.error.empty());
 }
 
 static void drained_control() {
     Fixture f;f.configure();f.reg(0x1100,0x100f);f.reg(0x2000,15);
-    CHECK(f.clock->advance(66037) && f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    CHECK(f.clock->advance(66787) && f.apu.voice_mix_quanta()==9 && f.apu.ep_frame_events()==1);
     f.reg(0x2000,7);CHECK(f.clock->advance(67000));
     const auto gp=f.clock->retired(false),ep=f.clock->retired(true),tick=f.clock->ticks();
     const auto reads=f.reads,writes=f.writes;
@@ -193,14 +194,14 @@ static void drained_control() {
     CHECK(f.apu.mmio_read(f.apu.kBase+0x1510,4)==1);
     f.reg(0x1510,0);CHECK(f.apu.mmio_read(f.apu.kBase+0x1510,4)==0 && f.error.empty());
     CHECK(f.clock->ticks()==tick && f.clock->retired(false)==gp && f.clock->retired(true)==ep);
-    CHECK(f.reads==reads && f.writes==writes && f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    CHECK(f.reads==reads && f.writes==writes && f.apu.voice_mix_quanta()==9 && f.apu.ep_frame_events()==1);
     // Stopping admission at a boundary leaves a real GP frame outstanding.
     // The physical status encoding is not a drained-work acknowledgement.
     // Its read must preserve pending work; the actual reset guards own drain.
     for(bool release_gp:{false,true}) {
         Fixture pending;pending.configure(Fixture::event_program(),release_gp);
         pending.reg(0x1100,0x100f);pending.reg(0x2000,15);
-        CHECK(pending.clock->advance(66000) && pending.apu.gp_frame_outstanding()==release_gp);
+        CHECK(pending.clock->advance(66750) && pending.apu.gp_frame_outstanding()==release_gp);
         CHECK(pending.apu.ep_frame_events()==1);
         pending.reg(0x2000,7);const auto before=pending.ram;
         CHECK(pending.apu.mmio_read(pending.apu.kBase+0x1100,4)==0x7100f);
@@ -214,7 +215,7 @@ static void retirement_timeout() {
     Fixture f;f.reg(0x1510,0);f.reg(0x115c,0x8000);
     f.ram[0x800f]=0x80;f.configure(Fixture::counter_event_program(),true,Fixture::counter_event_program());
     f.reg(0x1100,0x100f);f.reg(0x2000,15);
-    CHECK(f.clock->advance(66000) && f.apu.gp_frame_outstanding());
+    CHECK(f.clock->advance(66750) && f.apu.gp_frame_outstanding());
     CHECK(f.apu.mmio_read(f.apu.kBase+0x1100,4)==0x7900f && f.error.empty());
     const auto before=f.ram;const auto gp=f.clock->retired(false),ep=f.clock->retired(true);
     f.reg(0x2010c,0);
@@ -224,8 +225,8 @@ static void retirement_timeout() {
     CHECK(f.apu.retirement_notifications()==1 && f.ram==before && !f.writes);
     CHECK(f.clock->retired(false)==gp && f.clock->retired(true)==ep);
     CHECK(f.apu.mmio_read(f.apu.kBase+0x20010,4)==0x80);
-    CHECK(f.clock->advance(66751) && !f.apu.gp_frame_outstanding());
-    CHECK(f.apu.voice_mix_quanta()==8 && f.apu.ep_frame_events()==1);
+    CHECK(f.clock->advance(67501) && !f.apu.gp_frame_outstanding());
+    CHECK(f.apu.voice_mix_quanta()==9 && f.apu.ep_frame_events()==1);
     CHECK(f.ram==before && !f.writes && f.apu.retirement_notification_pending());
     CHECK(f.clock->retired(false)>gp && f.clock->retired(true)>ep);
     f.reg(0x3fffc,0);f.reg(0x5fffc,1);
@@ -258,7 +259,7 @@ static void retirement_timeout() {
     {
         Fixture busy;busy.reg(0x1510,0);busy.reg(0x115c,0x8000);busy.ram[0x800f]=0x80;
         busy.configure(Fixture::counter_event_program(),true,Fixture::counter_event_program());
-        busy.reg(0x1100,0x100f);busy.reg(0x2000,15);CHECK(busy.clock->advance(66000));
+        busy.reg(0x1100,0x100f);busy.reg(0x2000,15);CHECK(busy.clock->advance(66750));
         busy.reg(0x2010c,0);busy.reg(0x20104,2);CHECK(busy.error.empty());
         const auto ram=busy.ram;const auto reads=busy.reads;
         busy.reg(0x3fffc,0);
@@ -267,7 +268,72 @@ static void retirement_timeout() {
         CHECK(busy.gp->phase()==xlle::ApuGpPhase::Failed && busy.ram==ram && busy.reads==reads && !busy.writes);
     }
 }
+static void producer_groups() {
+    // Startup immediately before an absolute codec edge used to publish EP
+    // after only one GP chunk. Start phase must not change group integrity.
+    for(uint64_t epoch:{0ull,60037ull,65700ull})for(bool release_gp:{false,true}) {
+        Fixture f(epoch);f.configure(Fixture::event_program(),release_gp);
+        const uint64_t first=(f.clock->ticks()/750+1)*750;
+        f.reg(0x2000,15);
+        CHECK(f.clock->advance(first+8*750-1) && !f.apu.ep_frame_events());
+        CHECK(f.apu.voice_mix_quanta()==(release_gp?8:0));
+        CHECK(f.clock->advance(first+8*750) && f.apu.ep_frame_events()==1);
+        CHECK(f.clock->advance(first+16*750) && f.apu.ep_frame_events()==2);
+        CHECK(f.clock->advance(first+16*750+20) && f.error.empty());
+    }
+    // A pause preserves three existing chunks; actual rebootstrap starts a
+    // new ring generation. Neither case replays the stopped absolute frames.
+    for(bool reset:{false,true}) {
+        Fixture f;f.configure(Fixture::counter_event_program(),true,Fixture::counter_event_program());
+        f.reg(0x2000,15);CHECK(f.clock->advance(62260));
+        CHECK(f.apu.voice_mix_quanta()==3 && !f.apu.ep_frame_events());
+        f.reg(0x2000,7);CHECK(f.clock->advance(81037));
+        if(reset) {
+            f.reg(0x3fffc,0);f.reg(0x5fffc,1);
+            f.reg(0x3fffc,3);f.reg(0x5fffc,3);
+            CHECK(f.clock->advance(81237) && f.error.empty());
+            CHECK(f.gp->bootstraps()==2 && f.ep->bootstraps()==2);
+        }
+        const uint64_t first=(f.clock->ticks()/750+1)*750;
+        const uint64_t event=first+(reset?8:5)*750;
+        f.reg(0x2000,15);
+        CHECK(f.clock->advance(event-1) && !f.apu.ep_frame_events());
+        CHECK(f.clock->advance(event) && f.apu.ep_frame_events()==1);
+        CHECK(f.clock->advance(event+20) && f.error.empty());
+    }
+    // One cursor cannot inherit the other engine's partially consumed ring.
+    Fixture unpaired;
+    unpaired.configure(Fixture::counter_event_program(),true,Fixture::counter_event_program());
+    unpaired.reg(0x2000,15);CHECK(unpaired.clock->advance(62260));
+    unpaired.reg(0x2000,7);unpaired.reg(0x3fffc,0);unpaired.reg(0x3fffc,3);
+    CHECK(unpaired.clock->advance(62500) && unpaired.error.empty());
+    unpaired.reg(0x2000,15);
+    CHECK(!unpaired.clock->advance(63000));
+    CHECK(unpaired.error.find("unpaired GP/EP ring restart")!=std::string::npos);
+    CHECK(unpaired.apu.voice_mix_quanta()==3 && !unpaired.apu.ep_frame_events());
+    {
+        Fixture trapped;trapped.configure();trapped.reg(0x2000,15);
+        CHECK(trapped.clock->advance(66020) && trapped.apu.voice_mix_quanta()==8);
+        trapped.reg(0x202c,0x8000);trapped.word(0x8054,0);trapped.word(0x807c,0xffff);
+        trapped.reg(0x1504,1u<<15);trapped.reg(0x2054,0);
+        CHECK(trapped.clock->advance(66750) && trapped.apu.idle_voice_traps()==1);
+        CHECK(!trapped.apu.ep_frame_events() && trapped.apu.voice_mix_quanta()==8);
+        CHECK(trapped.clock->advance(78037) && trapped.apu.voice_mix_quanta()==8);
+        trapped.reg(0x2054,0xffff);trapped.reg(0x1100,0x100f);
+        CHECK(trapped.clock->advance(78750) && trapped.apu.ep_frame_events()==1);
+        CHECK(trapped.apu.voice_mix_quanta()==9 && trapped.clock->advance(78770));
+    }
+    {
+        const std::vector<uint32_t> no_rearm={0x08f485,0xfff,0x08f484,1,
+            0x0a8581,4,0x08f485,2,0x0af080,8};
+        Fixture late;late.configure(Fixture::event_program(),true,no_rearm);late.reg(0x2000,15);
+        CHECK(!late.clock->advance(72750));
+        CHECK(late.error.find("EP missed completed GP group")!=std::string::npos);
+        CHECK(late.apu.voice_mix_quanta()==16 && late.apu.ep_frame_events()==1);
+    }
+}
 int main() {
     stopped_epoch();clocked_fence();partitioned_active_output();admission_and_failure();runtime_input_sge();drained_control();retirement_timeout();
+    producer_groups();
     puts("PASS authored shared audio timeline: epoch, actual GP/EP events, partition-independent PCM bytes/stamps and failure retention");
 }

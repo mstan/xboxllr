@@ -42,6 +42,30 @@ def active_result(reply):
     return dict(zip(keys,map(int,fields[1:])))
 
 
+def check_order_trace(path):
+    """Actual producer identities, including initialized-zero ring contents."""
+    reads = 0
+    ages = []
+    for line in path.read_text().splitlines():
+        if not line.startswith('ORDER EP '):
+            continue
+        fields = line.split()
+        assert len(fields) == 13, 'partial EP order observation'
+        current = int(fields[3])
+        group = list(map(int, fields[5:]))
+        assert group[0] > 0 and group == list(range(group[0], group[0]+8)), (
+            'EP read an incomplete or nonconsecutive GP group', line)
+        age = current-group[-1]
+        assert 0 <= age <= 8, ('EP input is outside the completed opposite half', line)
+        ages.append(age)
+        reads += 1
+    assert reads, 'missing actual EP group observations'
+    return dict(reads=reads, complete_consecutive_groups=reads,
+                newest_chunk_age_quanta=[min(ages), max(ages)],
+                log_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                limits='Logical ring chronology; no physical bus phase or independent output arithmetic claim.')
+
+
 class Startup(OriginalStartup):
     transport = None
     stall = None
@@ -126,6 +150,7 @@ def check(args):
                     driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     guest_time_advanced=args.execute_stall, dsp_execution=args.execute_stall,
                     active_clock_requested=args.execute_active,
+                    order_trace_requested=args.trace_order,
                     drained_reset_reentry_requested=args.execute_reset_reentry,
                     timeout_retirement_requested=args.execute_timeout_retirement,
                     ep_y_lookup_sha256=EP_Y_LOOKUP_SHA256 if args.execute_active else None)
@@ -140,6 +165,9 @@ def check(args):
         with (output/f'process-{life}.aot-private.log').open('w') as log:
             observer_args = [str(args.observer.resolve())]
             if args.execute_active:observer_args += ['--active',str(args.ep_y_lookup.resolve())]
+            if args.trace_order:
+                assert args.execute_active, '--trace-order requires --execute-active'
+                observer_args += ['--trace-order']
             process = subprocess.Popen(observer_args, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1)
             try:
@@ -241,10 +269,11 @@ def check(args):
                     report['current_original_entry'] = 0x17bc9e; save()
                     original.call(0x17bc9e,(1,),original.owner)
                     assert rows[-1]['operation'] == 'W' and rows[-1]['address'] == 0xfe802000 and rows[-1]['value'] == 15
-                    # The absolute clock's first event is a partial interval;
-                    # advance across eight EP boundaries, not eight fabricated
-                    # complete periods beginning at this CPU helper's return.
-                    target = (start['ticks']//6000+8)*6000
+                    # Original GP starts at the first half of its ring. Eight
+                    # complete32-sample slots precede each EP256-sample read;
+                    # event8 coincides with admission of GP slot65. Keep all
+                    # original instructions and elapsed clocks in that span.
+                    target = (start['ticks']//750+65)*750
                     boot_report['active_target_ticks'] = target; save()
                     run_reply = command(f'T {target}')
                     run = clock_result(run_reply)
@@ -364,6 +393,8 @@ def check(args):
                 report['observer_exit'] = process.wait(timeout=10)
                 save()
         assert report['observer_exit'] == 0
+        if args.trace_order:
+            report['gp_ep_order'] = check_order_trace(output/f'process-{life}.aot-private.log')
         # Device owners have been retired before original caller resources are
         # destroyed. This is not an original active stop/reset qualification.
         original.transport = lambda op,address,size,value: (_ for _ in ()).throw(AssertionError('unexpected cleanup MMIO'))
@@ -385,6 +416,7 @@ if __name__ == '__main__':
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--execute-stall',action='store_true',help='Execute the unchanged enclosing setup and its real10000us wait')
     parser.add_argument('--execute-active',action='store_true',help='Also execute original SE start/stop and eight active EP events; implies --execute-stall')
+    parser.add_argument('--trace-order',action='store_true',help='Require bounded actual EP reads of complete consecutive GP groups; requires --execute-active')
     parser.add_argument('--execute-reset-reentry',action='store_true',help='Original retirement after drained work, warm setup, processing and original free on the same device owners; implies --execute-active')
     parser.add_argument('--execute-timeout-retirement',action='store_true',help='Enter original retirement with outstanding work and execute its bounded pending-notification timeout; implies --execute-reset-reentry')
     parser.add_argument('--ep-y-lookup',type=Path,help='Required verified private EP Y0800 image for --execute-active')

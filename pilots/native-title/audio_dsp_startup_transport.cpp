@@ -30,7 +30,8 @@ static bool decode(const std::string& line,uint8_t* bytes,size_t n) {
     return true;
 }
 int main(int argc,char** argv) {
-    const bool active=argc==3 && std::string(argv[1])=="--active";
+    const bool trace_order=argc==4 && std::string(argv[3])=="--trace-order";
+    const bool active=(argc==3 || trace_order) && std::string(argv[1])=="--active";
     if(argc!=1 && !active)return 2;
     std::string error;uint64_t reads=0,writes=0;
     auto fault=[&](const std::string& s){
@@ -68,6 +69,33 @@ int main(int argc,char** argv) {
     auto ticks=[&]{return active?active_clock->ticks():stopped_clock->ticks();};
     auto retired=[&](bool ep){return active?active_clock->retired(ep):stopped_clock->retired(ep);};
     auto last=[&](bool ep)->const xlle::ApuGpRun& {return active?active_clock->last(ep):stopped_clock->last(ep);};
+    // Diagnostic only: identify the actual producer quantum at each consumer
+    // read. Equal bytes alone cannot detect old/new halves of a silent ring.
+    // No data, device clock, request, or completion is changed by this observer.
+    std::array<uint64_t,96> producer{};
+    unsigned order_records=0;
+    if(trace_order)apu.set_observer([&](const xlle::ApuObservation& event) {
+        if(!event.metadata_words)return;
+        const auto address=event.metadata[0];
+        if(event.kind==xlle::ApuObservationKind::GpOutput && event.bytes==128 &&
+           address>=0x8000 && address<0xb000 && !(address&127)) {
+            producer[(address-0x8000)/128]=apu.voice_mix_quanta();
+            if(order_records++<4096)
+                std::fprintf(stderr,"ORDER GP %llu %llu %x\n",
+                    static_cast<unsigned long long>(ticks()),
+                    static_cast<unsigned long long>(apu.voice_mix_quanta()),address);
+        } else if(event.kind==xlle::ApuObservationKind::EpInput && event.bytes==1024 &&
+                  address>=0x10000 && address<=0x12c00 && !(address&1023)) {
+            if(order_records++>=4096)return;
+            std::fprintf(stderr,"ORDER EP %llu %llu %x",
+                static_cast<unsigned long long>(ticks()),
+                static_cast<unsigned long long>(apu.voice_mix_quanta()),address);
+            const unsigned first=(address-0x10000)/128;
+            for(unsigned i=0;i<8;++i)
+                std::fprintf(stderr," %llu",static_cast<unsigned long long>(producer[first+i]));
+            std::fputc('\n',stderr);
+        }
+    });
     auto read_memory=[&](uint32_t a,void* data,size_t n) {
         if(!n || n>4096 || uint64_t(a)+n>0x4000000)return false;
         ++reads;std::printf("MEMR %08x %zu\n",a,n);std::fflush(stdout);
