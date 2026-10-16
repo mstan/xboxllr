@@ -82,6 +82,27 @@ attempt, preserving the failed observation and all current transfer guards.
 Audio's sole muted mixed-output capture continues independently. Still6/9;
 43 retained deferral IDs/42 scopes.
 
+The follow-up also finds retained DEBUG1=0, disabling instance/context processing.
+Original13FE80 and pinned pbkit set118700. A changed closed probe variant now
+adds the three checked preparation writes: DEBUG1=118700, context
+DEVICE_ENABLED10000000, then DEBUG1 cache invalidate with stable readback.
+Primary register definitions distinguish dynamic CTX_CONTROL bits and the
+cache-invalidate strobe. A legal mismatching CTX_USER is preserved in RET with
+no following hardware access. The host selects this variant only; old compiled
+bytes remain unchanged for the failed evidence. Six compiled/host methods pass
+in11.590s plus the raw-return host check in1.442s; independent delta review has
+no blocker. No revised physical operation occurs while recovery is pending.
+This pure context-transfer preparation does not claim geometry/tiles/rendering
+initialization or prove the cause of the first failed observation.
+
+Root separately reviews the prepared audio lifecycle/mixed-output finalizer and
+verifies all nine helper/control pins. It reconstructs concurrent sends through
+Mix/GP/continuous EP, with one initial state seed and a unique pre-Play transport
+anchor fixed before the unchanged scored windows. Upstream missing history is
+not inferred; unchanged qualified contracts are reused. Preparation review
+has no blocking finding, but actual finalized output remains required. Private
+receipt: audio-postrestart-window-20261016/worker-review/root-prepared-review.aot-private.json.
+
 ## Instance comparison and restarted audio observability - 2026-10-16
 
 Follow-up hardware progress: probe18bb56b compares eleven reversed-block
