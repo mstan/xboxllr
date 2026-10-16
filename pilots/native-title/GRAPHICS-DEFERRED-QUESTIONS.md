@@ -28,11 +28,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other fourteen graphics entries retain their deferred scopes and reopening
+- The other fifteen graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-one entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **37 retained question IDs: 36 with deferred scope, and one fully
+there are **38 retained question IDs: 37 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -45,6 +45,8 @@ GFX-D15, added 2026-10-15, isolates AV request service-edge precision from the
 still-required FP_DEBUG, active timing and original initialization behavior.
 GFX-D16 retains isolated DEBUG-bit interpretation and exact field-publication
 questions without adding a separate research gate to that functional path.
+GFX-D17 retains unidentified encoder command effects separately from documented
+serial acceptance and clock/reset/sync contracts; connected output remains required.
 
 ## Foundation work before broader correctness claims
 
@@ -101,6 +103,7 @@ required and deferred portions.
 
 | ID | Question | Evidence retained / why it can wait | Reopen when |
 | --- | --- | --- | --- |
+| GFX-D17 | What functions and readbacks belong to the reached Conexant DA..FC commands? | The exact18 writes are retained in the source-bound85-entry table and a separate command receipt. Manufacturer100381B3.8.1 establishes serial ACK; its public register map endsD8. No inspected primary source attributes these bytes to Macrovision or demonstrates an effect on the documented1.3.6 clock equation or digital FIELD. Interpretations can wait while the independently specified clock/reset/sync contracts operate. No opaque hardware latch, ready event or analog-only/inertness claim is supplied. | A supported extension read, changed command/output profile, or independent clock/scaling/pixel evidence distinguishes required behavior. Required connected clock, reset/sync and representative output checks remain G02/G05; any demonstrated consequence becomes implementation work. The receipt survives timing reset/autoconfiguration and ends only at documented full serial reset. |
 | GFX-D16 | What are the isolated meanings of DEBUG bits17/29 and exact FP field-publication edges beyond the required supported startup behavior? | Both original whole DEBUG words have verified physical readback. The differential HSYNC sequence and matched control publish the sampled marker before a new AV request; both restore their state. The control runs in an already exercised mode and cannot exclude persistent effects. Original AV3 neither reads the alternate bank nor polls a post-request acknowledgment; its three retrace pairs precede clearing bit17. Preserve raw words and distinct bank observations. Individual bit names, exhaustive combinations and exact publication-edge research can wait; no inertness or whole-bank-copy behavior is inferred. | A supported caller/output depends on an isolated bit or bank observation, a changed startup profile consumes it, or an observed functional failure implicates it. Real scaling, configured clocks, retrace, encoder startup and connected output remain required G02/G05; this entry waives none of them. |
 | GFX-D15 | What exact clock edge/latency services FD6806A0, and which raw quiescent phase occurs on physical reset? | Physical observations establish both idle phases, both pending directions and eventual acknowledgment; the first direction completes within a 7.111us instrumented upper bracket. Original AV3 observes phase equality and then requests its complement, so exchanging both phase bits preserves its work. The explicit initialized-kernel profile selects a fresh quiescent owner with canonical phase0; actual NV2A source-clock advancement services its pending request at a declared nominal next edge. Reads, PTIMER configuration and frame callbacks do not supply completion. The isolated protocol neither copies an FP bank nor activates display timing. This is not a physical reset default or literal cold-boot claim. | A supported original consumer distinguishes the nominal service ordering or raw phase, another boot profile is admitted, or an independent edge measurement changes the contract. Replay both phase directions, frozen-clock/read controls and actual original AV calls. Required FP_DEBUG behavior, active timing/retrace, encoder programming and connected title rendering remain open; none is waived here. |
 | GFX-D01 | What additional clipping, culling, coverage and depth cases need qualification? | The generic consumed-color-before-clipping fix stays installed. Authored clipping/reference tests and original inputs/replay tooling are retained. Preserved original state/pixels pass through draw 2162 in their pinned qualification generation. Clipping/raster changes remain local to the reference and renderer implementation. | A visible regression or representative family failure implicates these equations, a new supported input domain requires them, or full qualification resumes. |

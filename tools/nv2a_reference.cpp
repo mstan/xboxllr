@@ -291,6 +291,7 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
 }
 EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
     auto& ref=*static_cast<Reference*>(instance);
+    if(!ref.failure.empty())return;
     if(ref.encoder->timing_selected()) {
         ref.failure="CX25871 programmed timing requires board clocks/sync, not nominal field injection";return;
     }

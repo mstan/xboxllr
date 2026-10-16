@@ -365,7 +365,7 @@ static void documented_encoder_controls() {
         uint8_t reserved=0xa5;
         CHECK(!encoder.read_byte(0x72,reserved) && reserved==0xa5);fault.clear();
         CHECK(!encoder.write_byte(0x72,1) && !fault.empty());fault.clear();
-        for (uint8_t reg:{0x00,0x31,0xda,0xfc}) {
+        for (uint8_t reg:{0x01,0x03,0x05,0x31,0xdb,0xfe}) {
             uint8_t value=0xa5;
             CHECK(!encoder.write_byte(reg,0) && !fault.empty());fault.clear();
             CHECK(!encoder.read_byte(reg,value) && value==0xa5);fault.clear();
@@ -407,6 +407,60 @@ static void documented_encoder_controls() {
     }
 }
 
+static void encoder_serial_acceptance() {
+    // Original AV3's entire extension table, retained as received bytes only.
+    // ACK is specified by 100381B 3.8.1; extension functions are not specified.
+    const uint8_t commands[][2]={
+        {0xda,0x0f},{0xdc,0xfc},{0xde,0x20},{0xe0,0xd0},{0xe2,0x6f},{0xe4,0x0f},
+        {0xe6,0x00},{0xe8,0x00},{0xea,0x0c},{0xec,0xf3},{0xee,0x09},{0xf0,0xbd},
+        {0xf2,0x66},{0xf4,0xb5},{0xf6,0x90},{0xf8,0xb2},{0xfa,0x7d},{0xfc,0x00}};
+    std::string fault;
+    xlle::Cx25871Control encoder([&](const std::string& why){fault=why;});
+    for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        CHECK(encoder.write_byte(0xba,0x80));CHECK(!encoder.extension_commands().received);
+        CHECK(encoder.write_byte(0xba,0));CHECK(encoder.write_byte(0xc6,0x9c));
+        CHECK(encoder.write_byte(0x6c,0x46));CHECK(encoder.write_byte(0xc4,1));
+        CHECK(encoder.write_byte(0x6c,0xc6));CHECK(encoder.advance_timing(19));
+        for(uint8_t reg:{0x00,0x02,0x04,0x06}) {
+            for(uint8_t value:{0x00,0xff})CHECK(encoder.write_byte(reg,value));
+            uint8_t value=0xa5;
+            CHECK(!encoder.read_byte(reg,value) && value==0xa5);fault.clear();
+        }
+        xlle::Cx25871Timing::State state;
+        xlle::Cx25871Control::Clocks clocks;
+        CHECK(encoder.timing_state(state) && state.clocks==19);
+        CHECK(encoder.clocks(clocks) && clocks.clko_driven);
+        CHECK(encoder.field_signal()==0 && !encoder.extension_commands().received);
+        for(const auto& command:commands) {
+            CHECK(encoder.write_byte(command[0],command[1]) && fault.empty());
+            uint8_t value=0xa5;
+            CHECK(!encoder.read_byte(command[0],value) && value==0xa5);fault.clear();
+        }
+        CHECK(encoder.extension_commands().received==0x3ffff);
+        for(unsigned i=0;i<18;++i)CHECK(encoder.extension_commands().bytes[i]==commands[i][1]);
+        // Section1.3.6's documented clock equation and explicit reset/sync
+        // still use their real inputs. These checks do not establish missing
+        // extension functions or qualify connected video output.
+        CHECK(encoder.timing_state(state) && state.clocks==19);
+        CHECK(encoder.field_signal()==0 && encoder.clocks(clocks) && clocks.clko_driven);
+        CHECK(clocks.encoder.numerator==57744984375ull && clocks.encoder.denominator==2048);
+        CHECK(encoder.advance_timing(1));
+        CHECK(encoder.write_byte(0x6c,0xc6));
+        CHECK(encoder.timing_state(state) && state.clocks==0);
+        CHECK(encoder.extension_commands().received==0x3ffff); // timing reset keeps command history
+        CHECK(encoder.write_byte(0xb8,0)); // autoconfig only owns documented timing registers
+        CHECK(encoder.clocks(clocks) && clocks.clko_driven);
+        CHECK(encoder.extension_commands().received==0x3ffff);
+        CHECK(encoder.write_byte(0xda,0xa5));
+        CHECK(encoder.extension_commands().received==0x3ffff && encoder.extension_commands().bytes[0]==0xa5);
+        CHECK(encoder.write_byte(0xba,0x80)); // full serial reset, not guessed extension defaults
+        CHECK(!encoder.extension_commands().received && encoder.clocks(clocks) && !clocks.clko_driven);
+        uint8_t value=0xa5;CHECK(encoder.write_byte(0x6c,0x46));
+        CHECK(!encoder.read_byte(0xda,value) && value==0xa5);fault.clear();
+        CHECK(fault.empty());
+    }
+}
+
 int main() {
     encoder_timing();
     encoder_slave_phase();
@@ -415,6 +469,7 @@ int main() {
     retail_fw_enable();
     reset_and_configuration();
     documented_encoder_controls();
+    encoder_serial_acceptance();
     for (unsigned lifetime=0; lifetime<3; ++lifetime) {
         std::string fault;
         std::vector<bool> edges;
@@ -441,6 +496,19 @@ int main() {
         bus.io_write(0xc000,1,4);CHECK(bus.io_read(0xc000,1)==0 && edges.size()==2 && !edges.back());
         write(0xc8,0x9b);CHECK(fault.empty());
         bus.io_write(0xc000,1,0x10);
+        // Three original ID-write attempts and extension commands complete
+        // through the actual controller, including its normal status/IRQ path.
+        // No direct register seeding or fabricated successful guest return.
+        for(const auto& command:std::vector<std::pair<uint8_t,uint8_t>>{
+                {0,0},{0,0},{0,0},{0xda,0x0f},{0xfc,0}}) {
+            const size_t before=edges.size();
+            write(command.first,command.second);
+            CHECK(fault.empty() && bus.io_read(0xc000,1)==0x10);
+            CHECK(edges.size()==before+1 && edges.back());
+            bus.io_write(0xc000,1,0x10);
+            CHECK(bus.io_read(0xc000,1)==0 && edges.size()==before+2 && !edges.back());
+        }
+        bus.io_write(0xc008,1,0xc8);
         bus.io_write(0xc004,1,0x8b);bus.io_write(0xc006,1,0xa5);bus.io_write(0xc002,1,0x1a);
         CHECK(bus.io_read(0xc006,1)==0x9b && bus.io_read(0xc000,1)==0x10);
         bus.io_write(0xc000,1,0x10);

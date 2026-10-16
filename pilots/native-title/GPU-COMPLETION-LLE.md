@@ -16,6 +16,33 @@ available; no unobserved behavior is waived or counted as qualified.
 Earlier dated sections retain their historical family counts; the current
 [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) governs acceptance.
 
+## Encoder command transport and next clock boundary - 2026-10-15
+
+Conexant 100381B sections 2.4/3.8.1 establish acknowledgment of received data
+independently of register effects. Writes to read-only00..06 now acknowledge
+without supplying ID/status data. Original DA..FC writes are recorded as command
+receipts, never exposed as hardware latches. The independently specified
+clock/reset/sync contracts keep their real inputs; unidentified bytes alone
+do not make their equations unknowable. GFX-D17 retains the unknown effects and
+reopens on a required consumer/output consequence. No Macrovision attribution
+or unconditional harmless-output claim is made. Section1.3.4's full reset ends
+the command epoch; timing reset/autoconfiguration do not. The source pass and
+exact85-entry table are retained privately under
+build/blinx/encoder-table-audit-20261015.
+
+Both original AV3 direct cases now reach PC80034F09, the FD68050C PLL_CONTROL
+read. The genuine thread cases execute the same encoder table and subsequent
+GPIO outputs, then shared device work rejects nominal FIELD injection before
+the PLL access. The reached GPIO22/24 writes are now asserted from the original
+instructions, alongside highGPIO19 and unchanged caller result canaries.
+First-fault preservation prevents later FIELD callbacks from hiding a failure.
+
+One encoder suite and eight original transport/AV/encoder cases pass. Required
+configured clocks, actual retrace and connected
+output remain open. This is progress through original initialization, not G02
+acceptance or a changed default HLE image. See the current closing checklist for
+test receipts and the next shared-owner integration work.
+
 ## Executed floor
 
 `tools/native_gpu_completion_reference.py` binds original NTSC XDK execution

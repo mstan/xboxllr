@@ -25,6 +25,15 @@ public:
         Rate encoder, input, clko;
         bool clko_driven=false;
     };
+    // Received command bytes, NOT hardware register readback. The public
+    // register map does not specify DA..FC effects. Keep their provenance
+    // separate from the documented controls; it does not qualify their unknown
+    // effects. Clocks/sync still follow their independently specified inputs.
+    struct ExtensionCommands {
+        std::array<uint8_t,18> bytes{};
+        uint32_t received=0;
+    };
+    const ExtensionCommands& extension_commands() const { return extensions_; }
     // PAL is an explicit board strap, not inferred from the game's region.
     // Construction still represents unknown warm state, not a reset event.
     explicit Cx25871Control(FaultFn fault, bool pal_pin=false, bool slave_pin=false)
@@ -84,6 +93,22 @@ public:
         value = registers_[reg]; return true;
     }
     bool write_byte(uint8_t reg, uint8_t value) override {
+        // 100381B sections 2.4 and 3.8.1: 00..06 are read-only, while
+        // received data bytes are acknowledged. An attempted write cannot
+        // establish an ID/status value or turn an unknown read into a latch.
+        if(reg<=0x06 && !(reg&1))return true;
+        // The same serial ACK rule applies to the original driver's DA..FC
+        // commands. Accept transport and retain its bytes without inventing
+        // register readback, clock, ready or activation effects. The documented
+        // clock/reset/sync contracts remain independent; interpreting extensions
+        // is deferred, with connected output qualification still required.
+        if(reg>=0xda && reg<=0xfc && !(reg&1)) {
+            const unsigned index=(reg-0xda)/2;
+            extensions_.bytes[index]=value;
+            extensions_.received|=uint32_t(1)<<index;
+            programmed_=true;
+            return true;
+        }
         // 100381B table2-1 marks72 reserved; table2-5 mandates zero for
         // normal operation and the programming examples explicitly write00.
         // This establishes no readback latch, reset, clock or timing event.
@@ -225,7 +250,7 @@ private:
         // master sync/data delay (6E/70/74), subcarrier phase offset (B6), coring/attenuation
         // (CA/CC), DAC mux (CE), output/blanking (D6) and chroma/bypass (D8).
         // Reserved72 has only its specified zero-write policy above; readback
-        // and undocumented extension DA..FC remain unsupported.
+        // and undocumented extension DA..FC readbacks remain unsupported.
         const bool standard = reg == 0x2e || reg == 0x30 || reg == 0x32 ||
             reg == 0x3c || reg == 0x3e || reg == 0x40 || reg == 0x5a || reg == 0x5c ||
             (reg >= 0x60 && reg <= 0x6a && !(reg & 1)) ||
@@ -261,6 +286,9 @@ private:
         // Invalidating all old knowledge is essential: a warm-state byte
         // cannot survive reset merely because its default is unqualified.
         registers_.fill(0); known_.fill(0);
+        // Section 1.3.4 resets all serial-interface registers. The receipt is
+        // scoped to commands since that reset; no extension default is exposed.
+        extensions_={};
         for (uint8_t reg : {0x34,0x36,0x3a,0xc8}) known_[reg] = 0xff;
         // Table 2-5 says EACTIVE defaults to 1; section 2.1 says to enable it.
         // Likewise CHECK_STAT's auto-clear description conflicts with its
@@ -278,6 +306,7 @@ private:
     Cx25871Timing timing_;
     std::array<uint8_t, 256> registers_{};
     std::array<uint8_t, 256> known_{};
+    ExtensionCommands extensions_{};
     bool pal_pin_ = false;
     bool slave_pin_ = false;
     bool programmed_ = false;

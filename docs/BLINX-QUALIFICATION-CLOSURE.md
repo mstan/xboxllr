@@ -48,7 +48,75 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: six of nine families;37 retained deferral IDs,36 scopes.
+Current disposition: six of nine families;38 retained deferral IDs,37 scopes.
+
+## Retained audio Stop reaches synchronous callback gap - 2026-10-15
+
+The two-hour-ceiling capture is now terminal after4029.016 host seconds, with
+returncode2. It reached the normal title transition and actual retained-buffer
+Stop entry10751 at45,331,875 device ticks, then stopped at callback ordinal153.
+The original audio DPC17838E ->1782F2 calls KeSynchronizeExecution through
+18A000, using KINTERRUPT17DE78, callback177ECC and its actual driver context.
+The retained kernel export8001E1D0 raises the interrupt's synchronization IRQL,
+calls the one-argument routine, restores IRQL and returns through RET12.
+The compiled callback bridge lacks this original service/callback transport;
+the guard is not evidence of a waveform or DSP arithmetic defect.
+
+One earlier Stop10712/GetStatus10713 pair succeeded for a different object.
+It does not satisfy the retained playing object's stop/restart condition.
+There is no lifecycle checkpoint or post-restart waveform acceptance. Both
+partial output files and the final API journal were preserved. Do not restart
+this unchanged capture. Implement and exercise the real synchronous callback
+through short original-kernel fixtures before another connected title run.
+Private terminal report: build/blinx/audio-retained-lifecycle-2h-20261015/capture/
+run.aot-private.json; source audit in its sibling worker-review directory.
+
+## Encoder serial acceptance reaches clock integration - 2026-10-15
+
+Manufacturer 100381B sections 2.4/3.8.1 distinguish serial acknowledgment from
+register effects: data bytes are acknowledged, while 00..06 remain read-only.
+Attempted writes now leave their unknown ID/status values untouched. The actual
+DA..FC command bytes are retained separately as received commands, not hardware
+latches or readback. Independent review removed an initially proposed blanket
+clock/FIELD guard: section1.3.6's documented clock equation and explicit
+reset/sync contracts have their own known inputs. No inspected source ties
+these extensions to a required digital clock consumer. Those contracts continue
+to operate; command receipt itself generates no reset, clock or ready event.
+This is not an unconditional inert/analog-only finding. GFX-D17 retains the
+unknown interpretation and reopens on a supported read, changed profile or
+observed required output consequence. Connected clock/scaling/output checks
+remain mandatory. Full software reset clears the command epoch under section
+1.3.4; timing reset/autoconfiguration do not erase the unresolved commands.
+
+Original AV3 now executes its whole common/mode encoder table and the subsequent
+GPIO22/24 writes. Direct calls in both AV phases stop at the actual PLL_CONTROL
+read FD68050C, PC80034F09. Genuine thread calls reach the same instruction, but
+shared device work first rejects the old nominal FIELD injection after encoder
+programming. These are distinct real clock-integration boundaries; neither call
+returns fabricated success. GPIO19 is high,22/24 low, as the original code
+specifies. A later FIELD callback now preserves an already recorded first fault.
+
+The affected checks cover normal SMBus status/IRQ retirement, read-only-write
+preservation, all18 extension receipts and independently specified clock/reset
+behavior. Eight original transport/AV/encoder cases cover both call routes.
+These tests pass in0.438s for the encoder suite and1.094s for the eight original
+cases. They
+establish the advanced execution boundary and existing component behavior, not
+completed mode initialization. Private final evidence is
+build/blinx/encoder-serial-20261015/even-final/validation.aot-private.json.
+No hardware operation or live audio disk access was needed.
+
+Next: replace the selected route's nominal FIELD/frame phase with actual board
+clock/sync ownership, retaining the independent encoder and GPU timing models.
+Unknown extension effects have the explicit consumer-based disposition above;
+they are not a new independent research gate. G02-G05 remain open.
+
+The portable rational source-clock accumulator is also prepared: explicit owner,
+absolute timestamp/frequency, exact fractional output-edge carry and old-rate
+advancement before a rate change. Independent rational, chunking and rejection
+checks pass under strict GCC and MSVC C++17 builds; root reviewed its arithmetic
+and state-preservation contracts. It does not yet select a display source or
+connect FP counters/encoder sync. That integration remains the next G02 work.
 
 ## Measured DEBUG storage and original encoder continuation - 2026-10-15
 
@@ -874,7 +942,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q02 | Complete: short checkpoint | `.123` | Relative original execution and device cadence | Source consumption, movie PTS, PIT/audio/controller clocks remain coherent in a short checkpoint; explicit input schedule is not asserted to be hardware CPU cycles |
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
-| G02 | Open: AV and measured DEBUG storage pass; both original routes reach encoder DA=0F; clocks/activation remain | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
+| G02 | Open: original encoder table transport executes; direct route reaches PLL_CONTROL, thread route rejects nominal FIELD; clocks/activation remain | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Open: capture integrated; internal packing sourced; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
@@ -882,7 +950,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Component complete: configured reset adopted; three original drained retirement/reentry lifetimes pass. Connected active retirement still requires A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |
 | A04 | Component complete: all3 original timeout retirement/reentry configurations and actual queued DPC/FEMEM completion pass; connected acceptance remains A05 | `.115` complete | FE fence/control ordering | Required work precedes real FEMEM publication and the original DPC completes; retirement preserves output/ownership through supported completion or its actual bounded timeout. Representative pending/failure checks prevent false success, without an exhaustive fault matrix |
-| A05 | Analog cyclic hardware/model and original codec lifecycle pass; captured source prefix meets tolerances; live selector2 PCM and state match exactly across281 blocks; complete connected output/timing/retirement remain | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
+| A05 | Processing/output prefix passes; normal retained Stop reached, but its original KeSynchronizeExecution callback transport is missing; connected reuse/output acceptance remains | `.113`, `.113.9`, `.113.34`; codec group `.113.33` complete | Build-selected original audio device integration and output | Unchanged original DirectSound routes to maintained APU/GP/EP/AC97 owners on the shared bus/clock; actual title output, stop/reuse and movie-relative timing match declared independent contracts |
 
 Dependencies: Q01 -> Q02 -> Q03 closes movies/scheduling. G01 and source audits
 can run beside Q work; G02/G03/G04 -> G05 closes GPU/graphics. A01 -> A02 and
