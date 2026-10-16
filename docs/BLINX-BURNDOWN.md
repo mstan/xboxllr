@@ -12,7 +12,7 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: connected original startup/rendering, reached enabled-noise draw and lifecycle | 45 retained IDs / 44 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
+| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G02-G05: connected original startup/rendering, reached enabled-noise draw and lifecycle | 46 retained IDs / 45 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
 Current implementation checkpoint: the newly reached full DAC gamma upload now
 has a real digital scanout consumer. Four affected checks pass0.63s, and two

@@ -48,7 +48,9 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: seven of nine families;45 retained deferral IDs,44 scopes.
+Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
+GFX-D24 retains general CFG0/old USER readback questions beyond the required
+probe publication correction; a reached original consumer reopens that scope.
 
 ## Original DAC upload and digital gamma consumer - 2026-10-16
 

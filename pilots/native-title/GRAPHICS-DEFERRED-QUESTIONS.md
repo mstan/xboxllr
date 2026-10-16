@@ -28,11 +28,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - **GFX-D04 is split.** Supporting the reached enabled-noise primitive is
   required G04 work. Further sampling/rounding precision can remain deferred
   after that behavior exists; disabling noise does not satisfy G04.
-- The other twenty-one graphics entries retain their deferred scopes and reopening
+- The other twenty-two graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **45 retained question IDs:44 with deferred scope, and one fully
+there are **46 retained question IDs:45 with deferred scope, and one fully
 promoted to required work**. GFX-D04 also has the required portion above.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -200,3 +200,14 @@ remains necessary to establish encoder phase. A clock interruption without
 software detach remains guarded. The exact silicon counter origin at this
 mode boundary remains a precision question under GFX-D16; actual original
 reentry, continued clocks/completion and connected pixels remain required.
+
+## Unreached configuration and submission readbacks - 2026-10-16
+
+| ID | Question | Evidence and reason it can wait | Reopen when |
+| --- | --- | --- | --- |
+| GFX-D24 | What are the general CFG0 mirror readback bits and behavior of reads from the old write-only USER PUT aperture? | The physical SDK startup writes PGRAPH CFG0 with PFB's03070003 and reads00000003. The probe now checks only that exact input/result pair, without inferring a general mask. The next physical attempt reads zero from USER PUT; pinned envytools nv4_pfifo.xml marks that older aperture write-only, while active CACHE1 PUT is readable. Probe5302c64 uses the owned readable cursor and retains real submission/GET checks. Existing emulated configuration words and generic USER storage are not evidence for physical readback semantics. No reached original-title consumer requiring these readbacks has been identified; full bit scans and additional invalid-access observations add no present closing requirement. | A supported original caller reads these locations, an accepted output depends on unresolved configuration bits, or a new profile needs a different input/result. Correct the required read semantics before accepting that consumer. Physical command publication, actual GET progress, enabled noise pixels and connected rendering remain required; this entry waives none of them. |
+
+Private evidence remains in probe `results/noise-physical-runout-20261016/`,
+`results/noise-physical-cfg0-20261016/`, `results/noise-cfg0-profile-20261016/`
+and `results/noise-put-owner-20261016/`. The physical zero USER read does not
+establish that all reads of the write-only aperture always return zero.
