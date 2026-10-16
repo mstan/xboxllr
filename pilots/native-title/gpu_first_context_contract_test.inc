@@ -124,15 +124,17 @@ static unsigned char *observer_guard_before;
 static uint32_t observer_guard_before_bytes;
 static void observer_guard_verify(const char *error)
 {
-    CHECK(error && strstr(error,"unmodelled NV2A write at fd400784"));
-    CHECK(gpu_lle.error(gpu_lle.device) && !gpu_context_observer.selector_accepted &&
-          gpu_context_observer.selector_observed && !gpu_context_observer.load_observed &&
+    CHECK(error && strstr(error,"NV2A PGRAPH context load is not implemented"));
+    CHECK(gpu_lle.error(gpu_lle.device) && gpu_context_observer.selector_accepted &&
+          gpu_context_observer.selector_observed && gpu_context_observer.load_observed &&
           !gpu_context_observer.returned && !gpu_context_observer.source_bound &&
-          gpu_context_observer.source_copied && !gpu_context_observer.failed && gpu_context_observer.records==2);
+          gpu_context_observer.source_copied && !gpu_context_observer.failed && gpu_context_observer.records==3);
+    // GFC1/v1 contains queue/channel/PRAMIN state, not the newly programmed
+    // pointer. None of that execution/storage state may change on rejection.
     unsigned char *after=malloc(observer_guard_before_bytes);uint32_t needed=0;
     CHECK(after && gpu_lle.first_context_snapshot(gpu_lle.device,after,observer_guard_before_bytes,&needed));
     CHECK(needed==observer_guard_before_bytes && !memcmp(after,observer_guard_before,needed));free(after);
-    fprintf(stderr,"PASS: actual raw-MMIO guard preserved, full paused queue/canonical bytes captured, changed source rejected, load/return absent\n");
+    fprintf(stderr,"PASS: actual raw-MMIO guard preserved at load, selector accepted, paused queue/canonical bytes unchanged, changed source rejected, return absent\n");
     ExitProcess(0); // Intentional terminal original guard; no fabricated join/cleanup.
 }
 static void test_gpu_first_context_capture_guard(const char *directory)
@@ -171,7 +173,9 @@ static void test_gpu_first_context_capture_guard(const char *directory)
     child_word(p,0x1e400-(0x1e800+p->size+4));
     OBSERVER_BYTES(p,0xb8);child_word(p,0x300);OBSERVER_BYTES(p,0xbb);child_word(p,0x1b000);
     OBSERVER_BYTES(p,0xbe);child_word(p,0xfd000000);
-    OBSERVER_BYTES(p,0x89,0x86,0x84,0x07,0x40,0x00,0x5f,0x5e,0x5d,0x5b,0xc2,4,0);
+    OBSERVER_BYTES(p,0x89,0x86,0x84,0x07,0x40,0x00);
+    OBSERVER_BYTES(p,0xc7,0x86,0x88,0x07,0x40,0x00,0x01,0,0,0);
+    OBSERVER_BYTES(p,0x5f,0x5e,0x5d,0x5b,0xc2,4,0);
     memcpy(memory+0x1e800,p->bytes,p->size);
     memset(&gpu_context_observer,0,sizeof(gpu_context_observer));
     strcpy_s(gpu_context_observer.directory,sizeof(gpu_context_observer.directory),directory);
@@ -214,7 +218,8 @@ static void gpu_compiled_check(void)
     CHECK(gpu_test_read(0x400750)==0x3d003c);
     gpu_test_write(0x400750,0x3d0000);
     for(unsigned i=0;i<15;++i)CHECK(gpu_test_read(0x400754)==0);
-    CHECK(gpu_compiled_observations==observations+33);
+    gpu_test_write(0x400784,0x111d);CHECK(gpu_test_read(0x400784)==0x111d);
+    CHECK(gpu_compiled_observations==observations+35);
     CHECK(!pilot_usb_pit_clock(&after,&next) && after==before);
 }
 static void test_gpu_compiled_context_prepare(void)

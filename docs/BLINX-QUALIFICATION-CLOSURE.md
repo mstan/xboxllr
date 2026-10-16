@@ -50,6 +50,42 @@ coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
 Current disposition: six of nine families;42 retained deferral IDs,41 scopes.
 
+## Actual first selector and bounded pending draw batch - 2026-10-15
+
+The extended observation terminates at a real device guard after290.140s,
+before its480s ceiling: original context switching requests pointer111D at
+FD400784. The stopped original callback scope retains the actual compiled
+registers and driver1446E0 separately from its suspended raw PC. Channel0,
+table110A and RAMFC711000 agree with that same producer/driver owner. Its
+complete14320-byte image remains byte-identical to the actual producer result,
+SHA256 c900b436eddf545a418fb349e20f4147d997beee216a8b8650f6735707896021.
+The earlier180s ceiling was an incomplete observation, not a diagnosed deadlock.
+
+Passive decoding retains256 prefetched parameters and1477 unread packet words.
+All1733 captured words reconcile into1392 method parameters without a missing
+branch or partial packet. Captured RAMHT/object bytes resolve the four bindings
+to classes39,9F,62 and97. There are eight complete BEGIN/draw/END submissions;
+their programmed state and upload history are retained for the required field
+audit. These are pending commands, not executed draws or pixels. Evidence is
+build/blinx/gpu-lle-first-transfer-20261016/request-review.aot-private.json,
+pending-methods.aot-private.json and draw-context-dependencies.aot-private.json.
+
+The independently documented16-bit context pointer now latches and reads back
+without changing channel validity, PRAMIN or FIFO execution. High bits reject
+without altering the old pointer; reset invalidates initialization knowledge.
+Load1 and save2 remain explicit faults because their consumed saved-image map
+is incomplete. No successful transfer or completion is inferred from pointer
+acceptance. The original raw-CPU fixture now accepts the selector and reaches
+the load guard while preserving its paused queue/channel/PRAMIN snapshot. The
+compiled callback fixture exercises pointer readback on the same owned bus.
+
+The NV2A suite passes in0.27s and five affected original GPU integration checks
+pass in1.09s. Independent worker review found no additional issue. No new full
+title run is needed merely to encounter the already source-bound next load
+instruction; the next work is the consumed saved-state mapping and real transfer,
+then reached output/noise behavior. The audio acceptance run remains separate.
+Families remain6/9 and deferred scopes42 IDs/41 scopes; no hardware operation.
+
 ## Inactive FD preparation and compiled GPU bus ownership - 2026-10-15
 
 The maintained RDI3D bank now supports the reached fifteen-word inactive clear.
@@ -1208,7 +1244,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | Q03 | Complete: full 600 GP seconds, numeric/scene/ownership accepted | `.73`, `.112` | Reference movie and integrated scheduling | Two natural opening lifetimes reach final source picture2263, actual Stop/Destroy and title transition; a subsequent real Start/release interrupts a movie and reaches fresh demo gameplay; original thread/IRQ/FP ownership and captured A/V timing pass |
 | G01 | Complete | `.116.5` | Original CPU Reset/Release with live original physical resource and queued work | Three real lifetimes retain backing through reset/binding use, wait through original scheduling for actual completion, release then allow original free, with exact bytes and cleanup |
 | G02 | Open: original pre-title AV producer passes; connected title crosses encoder/aperture setup and produces its real context; actual title mode/takeover still required | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
-| G03 | Open: complete actual producer image/table/RAMFC captured; inactive FD clear modeled; scoped connected route awaits first transfer; saved-image mapping unresolved | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
+| G03 | Open: actual selector and complete image/table/RAMFC/queued draws captured; FD clear and pointer transport modeled; consumed saved-image mapping/load/save remain | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Open: needs reached primitive | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
 | G05 | Open: needs G02-G04 | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |

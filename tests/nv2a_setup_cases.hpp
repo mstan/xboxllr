@@ -35,6 +35,21 @@ static void test_pgraph_setup() {
     for(uint32_t r=0x40014c;r<=0x400158;r+=4){write(r,0);CHECK(read(r)==0);}
     write(0x400144,0x10000100);write(0x400148,0x03000000);write(0x400764,0x08000000);
     CHECK(read(0x400144)==0x10000100 && read(0x400148)==0x03000000);
+    read(0x400784);CHECK(failure=="NV2A context pointer has not been programmed");failure.clear();
+    for(uint32_t instance:{0u,0x111du,0xffffu}) {
+        write(0x400784,instance);CHECK(read(0x400784)==instance && failure.empty());
+    }
+    write(0x400784,0x10000);CHECK(failure=="NV2A unsupported context pointer bits");failure.clear();
+    CHECK(read(0x400784)==0xffff);
+    for(uint32_t command:{1u,2u,0u,3u}) {
+        write(0x400788,command);
+        CHECK(failure==(command==1?"NV2A PGRAPH context load is not implemented":
+                        command==2?"NV2A PGRAPH context save is not implemented":
+                                   "NV2A unsupported PGRAPH context transfer command"));
+        failure.clear();
+        CHECK(read(0x400784)==0xffff && read(0x400144)==0x10000100 &&
+              read(0x400148)==0x03000000 && read(0x400700)==0 && !gpu.push_methods());
+    }
     write(0x400080,0x70000);CHECK(read(0x400080)==0x70000);write(0x400080,0);
     // Independent bank map: fifteen FD words at3D:00..38. The reached
     // original context-switch clear must neither execute queued methods nor
@@ -66,6 +81,7 @@ static void test_pgraph_setup() {
     }
     write(0x7110a0,0x12345678);write(0x200,0xffffefff);
     CHECK(read(0x400084)==0 && read(0x400144)==0 && read(0x400750)==0);
+    read(0x400784);CHECK(failure=="NV2A context pointer has not been programmed");failure.clear();
     CHECK(read(0x400904)==0 && read(0x100244)==0x1000 && read(0x7110a0)==0x12345678);
     write(0x400750,0x3d0000);read(0x400754);
     CHECK(failure=="NV2A FD state read has no initialized word");failure.clear();

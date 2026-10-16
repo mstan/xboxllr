@@ -213,6 +213,7 @@ void Nv2a::pgraph_reset_setup() {
     pgraph_context_managed_=false;
     pgraph_executing_=false;
     pgraph_context_control_=pgraph_context_user_=pgraph_ffintfc_=pgraph_rdi_index_=0;
+    pgraph_context_pointer_=0;pgraph_context_pointer_initialized_=false;
     pgraph_fd_state_.fill(0);pgraph_fd_initialized_=0;
     dxt1_noise_control_.fill(0);
     pgraph_tiles_=RamTileConfig{};texture_tiles_=RamTileConfig{};
@@ -255,6 +256,11 @@ bool Nv2a::pgraph_setup_read(uint32_t offset,uint32_t& value) {
         value=*word;pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);return true;
     }
     case 0x764:value=pgraph_ffintfc_;return true;
+    case 0x784:
+        if(!pgraph_context_pointer_initialized_) {
+            fault_("NV2A context pointer has not been programmed");value=0;return true;
+        }
+        value=pgraph_context_pointer_;return true;
     default:return false;
     }
 }
@@ -305,6 +311,20 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
     case 0x148:
         if(value&~0x1f000000u){fault_("NV2A unsupported context-user mode");return true;}
         pgraph_context_user_=value;return true;
+    case 0x784:
+        // nxdk outer.h CHANNEL_CTX_POINTER_INST: sixteen-bit PRAMIN
+        // instance, with byte address instance<<4. Programming the pointer
+        // neither transfers context nor grants the pending channel access.
+        if(value&~0xffffu){fault_("NV2A unsupported context pointer bits");return true;}
+        pgraph_context_pointer_=value;pgraph_context_pointer_initialized_=true;return true;
+    case 0x788:
+        // Commands are independently documented; the consumed saved-image
+        // map is still incomplete. Do not acknowledge a load/save, change
+        // channel validity, retire FIFO work or manufacture completion.
+        if(value==1)fault_("NV2A PGRAPH context load is not implemented");
+        else if(value==2)fault_("NV2A PGRAPH context save is not implemented");
+        else fault_("NV2A unsupported PGRAPH context transfer command");
+        return true;
     case 0x750:
         if(value&~0x01ff1ffcu){fault_("NV2A invalid RDI index");return true;}
         pgraph_rdi_index_=value;return true;
