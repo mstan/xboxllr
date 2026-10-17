@@ -75,6 +75,17 @@ graphics replay worktree. Re-export only when captured inputs or fetch semantics
 change; rebuild the small helper for admission changes. Neither operation needs
 another title startup.
 
+## Host framebuffer-request boundary
+
+`pilot_gpu_framebuffer_request_test` compiles the production request reader in
+isolation from the title, GPU, audio and writable guest image. Actual Windows
+rename/delete-access handles reproduce rejection by the old reader. Sharing
+READ|DELETE fixes the complete-marker case while content writers, malformed
+bytes, invalid record numbers and inaccessible paths still reject. The fixed
+control passes0.047s and CTest0.05s; private old/fixed inputs and executable
+receipts are under build/blinx/framebuffer-request-20261017. This is host
+observation reliability evidence and adds no scene or G05 qualification claim.
+
 ## Remaining integrated check
 
 The instrumented4000-block diagnostic stopped earlier, at opening-marker
