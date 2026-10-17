@@ -77,6 +77,13 @@ another title startup.
 
 ## Remaining integrated check
 
+The 071e9f8 replacement reached visible title after a genuine opening skip, then
+exited with host code0x20474343 at2147.344s before attract. Its229 inputs are sealed.
+The [closing checklist](BLINX-QUALIFICATION-CLOSURE.md) records this distinct
+failure and the new fast C ABI/host exception controls. Do not infer a shader,
+compression or memory-pressure cause from the status alone. Diagnose that failure
+before claiming the new depth writer has passed the original gameplay route.
+
 The previously suspended title was checked and resumed under fresh supervision.
 It reached initialized attract132, then exited2 after369.95 resumed seconds at
 the required compressed depth/stencil ZROP-writer guard (`beads-xbox.1.127`).

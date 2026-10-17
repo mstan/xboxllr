@@ -412,6 +412,11 @@ if(XLLE_RENDERER STREQUAL "LLE")
   # implementation; it is neither installed nor part of the shipping pilot.
   add_library(xlle_nv2a_reference SHARED EXCLUDE_FROM_ALL tools/nv2a_reference.cpp)
   target_link_libraries(xlle_nv2a_reference PRIVATE xlle_machine xlle_host)
+  add_executable(test_nv2a_reference_exceptions tests/test_nv2a_reference_exceptions.cpp)
+  target_link_libraries(test_nv2a_reference_exceptions PRIVATE ${CMAKE_DL_LIBS})
+  add_dependencies(test_nv2a_reference_exceptions xlle_nv2a_reference)
+  add_test(NAME nv2a_reference_exceptions COMMAND test_nv2a_reference_exceptions
+    $<TARGET_FILE:xlle_nv2a_reference>)
 endif()
 if(XLLE_RENDERER STREQUAL "HLE")
   add_executable(test_nv2a_hle_renderer tests/test_nv2a_hle_renderer.cpp)

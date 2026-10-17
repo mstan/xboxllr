@@ -19,6 +19,44 @@ the append-only queues. Required routing, startup, ownership, clocks and process
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
 
+## Host exception after visible title - 2026-10-17
+
+The 071e9f8 connected run is sealed at2147.344s. Its genuine generation1
+opening Start/release delivered all three controller rows at0/20/220ms and
+returned through original cleanup to a correct visible Press START title.
+Four completed FBD1/GPD1 prefix captures remain. The last observation was
+initialized title129 with480 neutral updates; the process then exited
+0x20474343 without a PILOT STOP, FAULT or capture-error line. That code matches
+the [GNU/LLVM SEH language-throw status](https://llvm.googlesource.com/libunwind/+/9defb52f575beff21b646e60e63f72ad1ac7cf54/src/Unwind-seh.cpp).
+The throwing component, type and trigger are not established by the exit code.
+All229 input pins are unchanged; DLL79103d01 is archived with the run. The
+in-progress prefix census has770 paired original destruction returns and no
+open/mismatched calls. It does not establish gameplay-content retirement.
+
+beads-xbox.1.128 owns this new host failure. The private NV2A processing C ABI
+now contains C++ exceptions and reports a sticky operation/type/message using
+fixed error storage, including allocation failures. Further processing stops;
+failed work never becomes successful completion. Pure framebuffer/digital/context
+observers keep their separate local-failure contract. The same authored test
+finds seven escapes in the preserved DLL and none in the repaired DLL, including
+real PFIFO-fetch failure through the void MMIO-write export. The CMake test
+passes0.04s. Existing retained-method and passive-framebuffer controls pass;
+the no-RTTI diagnostic-label fallback also compiles.
+
+Bounded first-chance host diagnostics now retain language-exception module/RVA
+stacks without consuming exceptions or invoking emulated services. MSVC dispatch
+controls pass0.03s: caught language exceptions, access faults, thread names and
+the final unhandled filter retain their owners. These changes improve failure
+containment and diagnosis; they do not yet prove that the connected crash is
+fixed. No new long run has been started while the short controls were developed.
+
+The owner HLE package is separately prepared under
+build/blinx/owner-hle-playtest-20261017, with normal interactive audio and
+isolated save/cache state. Its muted startup smoke passes13.765s and captures a
+real640x480 present. Its renderer is unchanged; this smoke is not new movie,
+gameplay, audio or lifecycle qualification. Total remains7/9. Actual moving
+gameplay, scored exit/content retirement and neutral reentry remain required G05.
+
 ## Reached compressed draw writer: queued checks passed - 2026-10-17
 
 The initialized-attract ZROP guard from the preserved run is now implemented

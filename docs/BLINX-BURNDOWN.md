@@ -14,7 +14,20 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 47 retained IDs / 46 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current execution checkpoint: the exact preserved `beaa366` title process resumed
+Current execution checkpoint: the 071e9f8 replacement reached a correct visible
+title after genuine opening Start/release and original cleanup. It then exited
+0x20474343 at2147.344s, without an emulator guard; the last sampled title
+counter was480. All229 inputs were sealed unchanged and DLL79103d01 archived.
+beads-xbox.1.128 owns the unknown host-exception cause. Short controls reproduce
+seven C++ escapes in the preserved bridge and zero in its repaired C ABI; the
+host now records bounded exception module/RVA diagnostics. Actual connected
+resolution remains unproven. No gameplay/scored exit/reentry has been accepted.
+
+The owner HLE playtest package is prepared with normal audio and isolated state;
+its muted13.765s startup smoke produces a real640x480 frame without guards.
+See the latest closing-checklist section. This adds no family qualification.
+
+Earlier execution checkpoint: the exact preserved `beaa366` title process resumed
 under fresh supervision after the owner pause, retaining its frozen `523057db`
 executable and `574ceb74` GPU library. It crossed the neutral title timeout,
 produced a completed loading picture and reached initialized attract. At369.95

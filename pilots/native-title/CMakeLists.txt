@@ -609,3 +609,8 @@ endif()
 
 # Apply shared-image exclusions after all backend-specific test registration.
 pilot_lock_writable_hdd_tests()
+
+if(MSVC AND WIN32)
+  add_executable(pilot_native_exception_diagnostic_test native_exception_diagnostic_test.c)
+  add_test(NAME pilot_native_exception_diagnostic COMMAND pilot_native_exception_diagnostic_test)
+endif()

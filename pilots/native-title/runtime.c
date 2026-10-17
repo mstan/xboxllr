@@ -954,6 +954,8 @@ recomp_func_t recomp_lookup_kernel(uint32_t va)
     return NULL;
 }
 
+#include "native_exception_diagnostic.inc"
+
 static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
 {
     DWORD code = exception->ExceptionRecord->ExceptionCode;
@@ -1015,6 +1017,7 @@ static void install_fault_handler(void)
 #else
     AddVectoredExceptionHandler(1,fault_handler);
 #endif
+    install_native_language_exception_observer();
 }
 
 static void load_image(const char *path)

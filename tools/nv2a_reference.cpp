@@ -12,6 +12,8 @@
 #include <array>
 #include <new>
 #include <string>
+#include <exception>
+#include <typeinfo>
 
 #ifdef _WIN32
 #define EXPORT extern "C" __declspec(dllexport)
@@ -21,6 +23,19 @@
 namespace {
 struct Reference {
     std::string failure;
+    // Reporting bad_alloc must not allocate again. A processing exception is
+    // sticky failure, never permission to resume partially completed work.
+    std::array<char,384> bridge_failure{};
+    bool failed() const noexcept { return !failure.empty() || bridge_failure[0]; }
+    const char* error_text() const noexcept {
+        if(bridge_failure[0])return bridge_failure.data();
+        return failure.empty()?nullptr:failure.c_str();
+    }
+    void record_exception(const char* operation,const char* kind,const char* message) noexcept {
+        if(failed())return;
+        std::snprintf(bridge_failure.data(),bridge_failure.size(),
+                      "NV2A reference %s exception %s: %s",operation,kind,message?message:"");
+    }
     bool irq = false;
     xlle::McpxFieldInput field;
     xlle::McpxAvOutputs av_outputs;
@@ -31,7 +46,7 @@ struct Reference {
     xlle::Cx25871Control* encoder = nullptr;
     std::unique_ptr<xlle::Nv2aEncoderClock> board_clock;
     void refresh_board_clock() {
-        if(!board_clock || !failure.empty())return;
+        if(!board_clock || failed())return;
         board_clock->refresh(gpu.display_programming(),gpu.display_slaved(),gpu.display_clock_routing());
         if(!board_clock->active())gpu.display_clock_signals(false,false,false,false);
     }
@@ -42,7 +57,7 @@ struct Reference {
     std::array<uint32_t, 0x2000 / 4> observed_methods{};
     uint64_t observed_method_count = 0;
     void observe_method(const xlle::Nv2a::PushMethod& item) {
-        if (!failure.empty()) return;
+        if (failed()) return;
         if (item.seq != observed_method_count) {
             failure = "NV2A reference method observation sequence gap";
             return;
@@ -94,35 +109,56 @@ struct Reference {
     }
 };
 }
+// Keep C++ unwinding inside this DLL, including callbacks. A foreign C/MSVC
+// caller receives the existing failure status and operation/message instead.
+// Pure snapshot observers retain their separate local-failure contract below.
+#if defined(__cpp_rtti)
+#define REFERENCE_EXCEPTION_KIND(error) typeid(error).name()
+#else
+#define REFERENCE_EXCEPTION_KIND(error) "std::exception"
+#endif
+#define REFERENCE_CATCH(result) \
+    catch(const std::exception& error) { \
+        static_cast<Reference*>(instance)->record_exception( \
+            __func__,REFERENCE_EXCEPTION_KIND(error),error.what()); \
+        return result; \
+    } catch(...) { \
+        static_cast<Reference*>(instance)->record_exception( \
+            __func__,"non-standard C++","no std::exception message"); \
+        return result; \
+    }
 EXPORT void* xlle_nv2a_reference_create() {
     try { return new Reference; } catch (...) { return nullptr; }
 }
 EXPORT void xlle_nv2a_reference_destroy(void* instance) {
     delete static_cast<Reference*>(instance);
 }
-EXPORT int xlle_nv2a_reference_av_idle(void* instance, uint32_t phase) {
+EXPORT int xlle_nv2a_reference_av_idle(void* instance, uint32_t phase) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& ref = *static_cast<Reference*>(instance);
-    return ref.failure.empty() && ref.gpu.establish_av_idle_phase(phase);
-}
-EXPORT int xlle_nv2a_reference_board_start(void* instance,uint64_t owner,uint64_t ticks,uint64_t frequency) {
+    return !ref.failed() && ref.gpu.establish_av_idle_phase(phase);
+} REFERENCE_CATCH(0)
+EXPORT int xlle_nv2a_reference_board_start(void* instance,uint64_t owner,uint64_t ticks,uint64_t frequency) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& ref=*static_cast<Reference*>(instance);
-    if(!ref.failure.empty())return 0;
+    if(ref.failed())return 0;
     if(ref.board_clock) {ref.failure="display board clock already owned";return 0;}
     if(!ref.gpu.establish_display_clock_routing(0x100a0000u))return 0;
     // Original AV3's first attribute access is an index write. Preserve that
     // initialized-caller precondition explicitly, apart from clock routing.
     if(!ref.gpu.establish_vga_attribute_index_phase())return 0;
     ref.board_clock=std::make_unique<xlle::Nv2aEncoderClock>(*ref.encoder,
-        [&ref](const std::string& why){if(ref.failure.empty())ref.failure=why;},
+        [&ref](const std::string& why){if(!ref.failed())ref.failure=why;},
         [&ref](const xlle::Nv2aFpTiming::State& state,bool vblank) {
             ref.gpu.display_clock_signals(true,state.vsync_active,!state.display_active,vblank);
             if(ref.board_clock->encoder_live())ref.sample_encoder_field();
         });
     return ref.board_clock->bind({owner,ticks,frequency});
-}
-EXPORT int xlle_nv2a_reference_board_advance(void* instance,uint64_t owner,uint64_t ticks,uint64_t frequency) {
+} REFERENCE_CATCH(0)
+EXPORT int xlle_nv2a_reference_board_advance(void* instance,uint64_t owner,uint64_t ticks,uint64_t frequency) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& ref=*static_cast<Reference*>(instance);
-    if(!ref.failure.empty())return 0;
+    if(ref.failed())return 0;
     if(!ref.board_clock) {ref.failure="display board clock has no owner";return 0;}
     const uint64_t prior=ref.encoder->field_transitions();
     if(!ref.board_clock->advance({owner,ticks,frequency}))return 0;
@@ -136,8 +172,9 @@ EXPORT int xlle_nv2a_reference_board_advance(void* instance,uint64_t owner,uint6
         }
     }
     return 1;
-}
-EXPORT void xlle_nv2a_reference_memory(void* instance, uint8_t* ram, uint32_t bytes) {
+} REFERENCE_CATCH(0)
+EXPORT void xlle_nv2a_reference_memory(void* instance, uint8_t* ram, uint32_t bytes) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return ;
     auto& ref = *static_cast<Reference*>(instance);
     ref.gpu.set_mem_access(
         [ram, bytes](uint32_t address, void* output, size_t size) {
@@ -148,10 +185,11 @@ EXPORT void xlle_nv2a_reference_memory(void* instance, uint8_t* ram, uint32_t by
             if (uint64_t(address) + size > bytes) return false;
             std::memcpy(ram + address, input, size); return true;
         });
-}
+} REFERENCE_CATCH()
 EXPORT void xlle_nv2a_reference_bus(void* instance,
         int (*read)(uint32_t, void*, size_t),
-        int (*write)(uint32_t, const void*, size_t), void (*irq)(int, int)) {
+        int (*write)(uint32_t, const void*, size_t), void (*irq)(int, int)) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return ;
     auto& ref = *static_cast<Reference*>(instance);
     if (!read || !write || !irq || ref.irq) {
         ref.failure = "invalid NV2A reference bus binding"; return;
@@ -160,48 +198,52 @@ EXPORT void xlle_nv2a_reference_bus(void* instance,
     ref.gpu.set_mem_access(
         [read](uint32_t address, void* output, size_t size) { return read(address, output, size) != 0; },
         [write](uint32_t address, const void* input, size_t size) { return write(address, input, size) != 0; });
-}
+} REFERENCE_CATCH()
 EXPORT const char* xlle_nv2a_reference_error(void* instance) {
     auto& ref = *static_cast<Reference*>(instance);
-    return ref.failure.empty() ? nullptr : ref.failure.c_str();
+    return ref.error_text();
 }
-EXPORT int xlle_nv2a_reference_aperture(void* instance,uint32_t offset,unsigned size,int write,uint64_t* value) {
+EXPORT int xlle_nv2a_reference_aperture(void* instance,uint32_t offset,unsigned size,int write,uint64_t* value) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& ref=*static_cast<Reference*>(instance);
-    if(!ref.failure.empty())return 0;
+    if(ref.failed())return 0;
     if(!value || (size!=1 && size!=2 && size!=4 && size!=8) || (write!=0 && write!=1)) {
         ref.failure="invalid NV2A aperture bridge transaction";return 0;
     }
     uint8_t bytes[8]{};
     if(write)for(unsigned i=0;i<size;++i)bytes[i]=uint8_t(*value>>(8*i));
     if(!ref.gpu.cpu_aperture(offset,bytes,size,write!=0))return 0;
-    if(!ref.failure.empty())return 0;
+    if(ref.failed())return 0;
     if(!write) {
         uint64_t result=0;
         for(unsigned i=0;i<size;++i)result|=uint64_t(bytes[i])<<(8*i);
         *value=result;
     }
     return 1;
-}
-EXPORT uint32_t xlle_nv2a_reference_read(void* instance, uint32_t address, int size) {
+} REFERENCE_CATCH(0)
+EXPORT uint32_t xlle_nv2a_reference_read(void* instance, uint32_t address, int size) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& ref = *static_cast<Reference*>(instance);
-    if (!ref.failure.empty()) return 0;
+    if (ref.failed()) return 0;
     return ref.gpu.mmio_read(address, size);
-}
-EXPORT void xlle_nv2a_reference_write(void* instance, uint32_t address, int size, uint32_t value) {
+} REFERENCE_CATCH(0)
+EXPORT void xlle_nv2a_reference_write(void* instance, uint32_t address, int size, uint32_t value) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return ;
     auto& ref = *static_cast<Reference*>(instance);
-    if (ref.failure.empty()) {
+    if (!ref.failed()) {
         ref.gpu.mmio_write(address, size, value);
         ref.refresh_board_clock();
     }
-}
-EXPORT void xlle_nv2a_reference_frame(void* instance, uint64_t frame) {
+} REFERENCE_CATCH()
+EXPORT void xlle_nv2a_reference_frame(void* instance, uint64_t frame) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return ;
     auto& ref = *static_cast<Reference*>(instance);
-    if(ref.failure.empty() && ref.board_clock) {ref.failure="NV2A manual frame injection conflicts with board clock owner";return;}
-    if (ref.failure.empty()) ref.gpu.set_frame(frame);
-}
+    if(!ref.failed() && ref.board_clock) {ref.failure="NV2A manual frame injection conflicts with board clock owner";return;}
+    if (!ref.failed()) ref.gpu.set_frame(frame);
+} REFERENCE_CATCH()
 // Qualification-only observation of the maintained transform output. No
 // shader/fetch implementation is substituted, and this bridge is not shipped.
-EXPORT void xlle_nv2a_reference_vertex(void* instance, float* output) {
+EXPORT void xlle_nv2a_reference_vertex(void* instance, float* output) noexcept try {
     auto& ref = *static_cast<Reference*>(instance);
     const auto position = ref.gpu.last_transformed_position();
     const auto diffuse = ref.gpu.last_transformed_diffuse();
@@ -209,12 +251,12 @@ EXPORT void xlle_nv2a_reference_vertex(void* instance, float* output) {
     std::memcpy(output, position.data(), 16);
     std::memcpy(output + 4, diffuse.data(), 16);
     std::memcpy(output + 8, specular.data(), 16);
-}
+} REFERENCE_CATCH()
 // Seven vec4s per actually transformed vertex: raster position, diffuse,
 // specular and four texture coordinates. Positions include NV2A raster rounding.
-EXPORT uint32_t xlle_nv2a_reference_vertices(void* instance, float* output, uint32_t capacity) {
+EXPORT uint32_t xlle_nv2a_reference_vertices(void* instance, float* output, uint32_t capacity) noexcept try {
     auto& ref = *static_cast<Reference*>(instance);
-    if (!ref.failure.empty()) return 0;
+    if (ref.failed()) return 0;
     const auto& vertices = ref.gpu.last_transformed_batch();
     if (!output && !capacity) return static_cast<uint32_t>(vertices.size());
     if (!output || capacity < vertices.size()) {
@@ -228,53 +270,54 @@ EXPORT uint32_t xlle_nv2a_reference_vertices(void* instance, float* output, uint
         output += 28;
     }
     return static_cast<uint32_t>(vertices.size());
-}
+} REFERENCE_CATCH(0)
 // Separate scalar observation preserves the existing seven-vec4 diagnostic ABI.
-EXPORT uint32_t xlle_nv2a_reference_fog(void* instance, float* output, uint32_t capacity) {
+EXPORT uint32_t xlle_nv2a_reference_fog(void* instance, float* output, uint32_t capacity) noexcept try {
     const auto& ref = *static_cast<Reference*>(instance);
-    if (!ref.failure.empty()) return 0;
+    if (ref.failed()) return 0;
     const auto& vertices = ref.gpu.last_transformed_batch();
     if (!output || !capacity) return static_cast<uint32_t>(vertices.size());
     if (capacity < vertices.size()) return 0;
     for (size_t i = 0; i < vertices.size(); ++i) output[i] = vertices[i].fog;
     return static_cast<uint32_t>(vertices.size());
-}
+} REFERENCE_CATCH(0)
 // Diagnostic census prevents a guarded/omitted draw from being called qualified.
 // Index 0..2 observes attempts, executions and actual color writes; later indices
 // observe named generic skip reasons without changing device behavior.
-EXPORT uint64_t xlle_nv2a_reference_draw_count(void* instance, uint32_t index) {
+EXPORT uint64_t xlle_nv2a_reference_draw_count(void* instance, uint32_t index) noexcept try {
     const auto& gpu = static_cast<Reference*>(instance)->gpu;
     if (index == 0) return gpu.generic_combiner_attempted_batches();
     if (index == 1) return gpu.generic_combiner_executed_batches();
     if (index == 2) return gpu.generic_combiner_writes();
     return gpu.generic_skip_reason_batches(index - 3);
-}
+} REFERENCE_CATCH(0)
 EXPORT const char* xlle_nv2a_reference_draw_count_name(uint32_t index) {
     if (index == 0) return "attempts";
     if (index == 1) return "executions";
     if (index == 2) return "color-writes";
     return xlle::Nv2a::generic_skip_reason_name(index - 3);
 }
-EXPORT uint32_t xlle_nv2a_reference_method_value(void* instance, uint32_t method) {
+EXPORT uint32_t xlle_nv2a_reference_method_value(void* instance, uint32_t method) noexcept try {
     auto& ref = *static_cast<Reference*>(instance);
-    if (!ref.failure.empty() || (method & 3) || method >= 0x2000) return 0;
+    if (ref.failed() || (method & 3) || method >= 0x2000) return 0;
     return ref.observed_methods[method / 4];
-}
-EXPORT void xlle_nv2a_reference_clock(void* instance, uint64_t core_cycles, uint32_t phase) {
+} REFERENCE_CATCH(0)
+EXPORT void xlle_nv2a_reference_clock(void* instance, uint64_t core_cycles, uint32_t phase) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return ;
     auto& ref = *static_cast<Reference*>(instance);
     if (phase >= 1000) { ref.failure = "NV2A clock phase outside display interval"; return; }
-    if (ref.failure.empty()) {
+    if (!ref.failed()) {
         ref.gpu.set_timer_clock(core_cycles);
         ref.gpu.set_frame_phase(phase);
     }
-}
-EXPORT int xlle_nv2a_reference_irq(void* instance) {
+} REFERENCE_CATCH()
+EXPORT int xlle_nv2a_reference_irq(void* instance) noexcept try {
     return static_cast<Reference*>(instance)->irq;
-}
+} REFERENCE_CATCH(0)
 EXPORT int xlle_nv2a_reference_scanout(void* instance, uint8_t* output, uint32_t capacity,
-                                      uint32_t* width, uint32_t* height) {
+                                      uint32_t* width, uint32_t* height) noexcept try {
     auto& ref = *static_cast<Reference*>(instance);
-    if (!ref.failure.empty()) return 0;
+    if (ref.failed()) return 0;
     // Raw GPU fixtures observe the digital scanout before the encoder. Once
     // AV programming occurs, do not present that as an encoded video result.
     if (ref.encoder->programmed()) {
@@ -289,8 +332,9 @@ EXPORT int xlle_nv2a_reference_scanout(void* instance, uint8_t* output, uint32_t
     }
     std::memcpy(output, rgba.data(), rgba.size());
     *width = info.width; *height = info.height; return 1;
-}
-EXPORT void xlle_nv2a_reference_pic(void* instance, uint16_t mask, uint16_t level) {
+} REFERENCE_CATCH(0)
+EXPORT void xlle_nv2a_reference_pic(void* instance, uint16_t mask, uint16_t level) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return ;
     auto& pic = static_cast<Reference*>(instance)->pic;
     // The same original Xbox PIC bootstrap used by the maintained USB floor.
     pic.io_write(0x20,1,0x11); pic.io_write(0xa0,1,0x11);
@@ -299,7 +343,7 @@ EXPORT void xlle_nv2a_reference_pic(void* instance, uint16_t mask, uint16_t leve
     pic.io_write(0x21,1,1); pic.io_write(0xa1,1,1);
     pic.io_write(0x4d0,1,level&255); pic.io_write(0x4d1,1,level>>8);
     pic.io_write(0x21,1,mask&255); pic.io_write(0xa1,1,mask>>8);
-}
+} REFERENCE_CATCH()
 
 // FBD1/version1: 32 LE DWORDs, 11 display-command DWORDs, 8x4 tile DWORDs,
 // 768 DAC bytes, 256 encoder values + 256 known-bit masks, extension mask +
@@ -323,7 +367,7 @@ EXPORT int xlle_nv2a_reference_framebuffer_snapshot(void* instance,
         *required=header+maximum;
         if(!output || capacity<*required)return 0; // no RAM copy on capacity query
         std::vector<uint8_t> pixels;
-        std::string error=ref.failure;
+        std::string error=ref.error_text()?ref.error_text():"";
         bool copied=false;
         if(error.empty()) {
             if(!read)error="framebuffer diagnostic has no copy-only RAM reader";
@@ -370,7 +414,7 @@ EXPORT int xlle_nv2a_reference_digital_snapshot(void* instance,
         if(!output || capacity<*required)return 0;
         const auto& ref=*static_cast<const Reference*>(instance);
         const auto state=ref.gpu.framebuffer_diagnostic_state();
-        std::string error=ref.failure;
+        std::string error=ref.error_text()?ref.error_text():"";
         std::vector<xlle::Sd601Pixel::Ddr12> pins;
         std::vector<uint8_t> rgba;
         xlle::Sd601Pixel::YCrCb sample{};
@@ -406,9 +450,10 @@ EXPORT int xlle_nv2a_reference_digital_snapshot(void* instance,
         *required=header+uint32_t(pins.size()*4+rgba.size());return 1;
     } catch(...) {return 0;}
 }
-EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size, int write, uint32_t value) {
+EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size, int write, uint32_t value) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& ref = *static_cast<Reference*>(instance);
-    if (!ref.failure.empty()) return 0;
+    if (ref.failed()) return 0;
     if (ref.pic.owns(port) && size == 1) {
         if (write) ref.pic.io_write(port,size,value);
         else return ref.pic.io_read(port,size);
@@ -445,22 +490,24 @@ EXPORT uint32_t xlle_nv2a_reference_port(void* instance, uint16_t port, int size
         else return ref.smbus.io_read(port, size);
     } else ref.failure = "unmodelled display reference port";
     return 0;
-}
-EXPORT void xlle_nv2a_reference_field(void* instance, int level) {
+} REFERENCE_CATCH(0)
+EXPORT void xlle_nv2a_reference_field(void* instance, int level) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return ;
     auto& ref=*static_cast<Reference*>(instance);
-    if(!ref.failure.empty())return;
+    if(ref.failed())return;
     if(ref.board_clock) {ref.failure="CX25871 manual FIELD injection conflicts with board clock owner";return;}
     if(ref.encoder->timing_selected()) {
         ref.failure="CX25871 programmed timing requires board clocks/sync, not nominal field injection";return;
     }
     ref.field.set_level(level != 0);
-}
+} REFERENCE_CATCH()
 // Real board clock/sync events for the bounded synchronous profile. sync=0:
 // clocks only; 1: leading HSYNC; 2: coincident leading HSYNC/VSYNC;
 // 3: leading VSYNC before its associated HSYNC.
-EXPORT int xlle_nv2a_reference_encoder_advance(void* instance,uint64_t clocks,unsigned sync) {
+EXPORT int xlle_nv2a_reference_encoder_advance(void* instance,uint64_t clocks,unsigned sync) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& ref=*static_cast<Reference*>(instance);
-    if(!ref.failure.empty())return 0;
+    if(ref.failed())return 0;
     if(ref.board_clock) {ref.failure="CX25871 manual clocks/sync conflict with board clock owner";return 0;}
     if(sync>3) { ref.failure="invalid encoder sync event";return 0; }
     xlle::Cx25871Timing::State before;
@@ -468,10 +515,10 @@ EXPORT int xlle_nv2a_reference_encoder_advance(void* instance,uint64_t clocks,un
     if(!ref.encoder->advance_timing(clocks))return 0;
     if(sync==3 ? !ref.encoder->input_vsync() : sync && !ref.encoder->input_sync(sync==2))return 0;
     ref.sample_encoder_field(known?&before:nullptr);return 1;
-}
-EXPORT int xlle_nv2a_reference_encoder_timing(void* instance,uint64_t* values,int* signal) {
+} REFERENCE_CATCH(0)
+EXPORT int xlle_nv2a_reference_encoder_timing(void* instance,uint64_t* values,int* signal) noexcept try {
     auto& ref=*static_cast<Reference*>(instance);
-    if(!ref.failure.empty())return 0;
+    if(ref.failed())return 0;
     xlle::Cx25871Timing::State state;
     if(!values || !signal || !ref.encoder->timing_state(state)) {
         ref.failure="encoder timing observation lacks established state/destination";return 0;
@@ -482,32 +529,33 @@ EXPORT int xlle_nv2a_reference_encoder_timing(void* instance,uint64_t* values,in
     values[0]=state.clocks;values[1]=state.input_x;values[2]=state.input_y;
     values[3]=state.output_x;values[4]=state.output_y;values[5]=state.subcarrier_phase;
     values[6]=state.field_transitions;*signal=ref.encoder->field_signal();return 1;
-}
+} REFERENCE_CATCH(0)
 // Settled clock rates at the encoder boundary, not a PLL-lock assertion or
 // generated sync/pixels. Six integers: encoder, input, CLKO numerator/denominator.
-EXPORT int xlle_nv2a_reference_encoder_clocks(void* instance,uint64_t* rates,uint32_t* driven) {
+EXPORT int xlle_nv2a_reference_encoder_clocks(void* instance,uint64_t* rates,uint32_t* driven) noexcept try {
     auto& ref=*static_cast<Reference*>(instance);
     if(!rates || !driven) { ref.failure="encoder clock observation has no destination";return 0; }
-    if(!ref.failure.empty())return 0;
+    if(ref.failed())return 0;
     xlle::Cx25871Control::Clocks clocks;
     if(!ref.encoder->clocks(clocks))return 0;
     rates[0]=clocks.encoder.numerator;rates[1]=clocks.encoder.denominator;
     rates[2]=clocks.input.numerator;rates[3]=clocks.input.denominator;
     rates[4]=clocks.clko.numerator;rates[5]=clocks.clko.denominator;
     *driven=clocks.clko_driven?1:0;return 1;
-}
+} REFERENCE_CATCH(0)
 // Pin-level observation for AV integration. These are physical pin masks,
 // not guest register values. Undefined/unknown SCART states stay distinguishable.
-EXPORT int xlle_nv2a_reference_av_outputs(void* instance, uint32_t* known, uint32_t* high) {
+EXPORT int xlle_nv2a_reference_av_outputs(void* instance, uint32_t* known, uint32_t* high) noexcept try {
     auto& ref=*static_cast<Reference*>(instance);
     if(!known || !high) { ref.failure="AV GPIO output observation has no destination";return -1; }
     *known=ref.av_outputs.known();*high=ref.av_outputs.levels();
     return static_cast<int>(ref.av_outputs.scart_status());
-}
-EXPORT int xlle_nv2a_reference_vector(void* instance, int acknowledge) {
+} REFERENCE_CATCH(0)
+EXPORT int xlle_nv2a_reference_vector(void* instance, int acknowledge) noexcept try {
+    if(static_cast<Reference*>(instance)->failed())return 0;
     auto& pic = static_cast<Reference*>(instance)->pic;
     return acknowledge ? pic.acknowledge() : pic.peek();
-}
+} REFERENCE_CATCH(0)
 
 // Passive host diagnostic wire GFC1/version1, explicit little-endian DWORDs.
 // Caller owns the stopped CPU/Nv2a throughout. Retained guards are untouched.
