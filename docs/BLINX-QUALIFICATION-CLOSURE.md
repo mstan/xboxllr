@@ -56,8 +56,8 @@ probe publication correction; a reached original consumer reopens that scope.
 
 | Remaining step | Closing evidence / current state |
 | --- | --- |
-| Correct the initialized startup profile | Startup component complete: the reviewed pre-FE service snapshot has 1597 more free pages and completed original disk I/O. The rebuilt GPU pilot passes all five selected startup checks and actual original image handoff. Connected execution must still pass the earlier texture-422 allocation failure. |
-| Reach actual attract gameplay through the original graphics route | Saved-display retirement and the passive method observer pass. Two completed loading pictures are established; actual gameplay remains pending. |
+| Correct the initialized startup profile | Startup component complete: the reviewed pre-FE service snapshot has 1597 more free pages and completed original disk I/O. The rebuilt GPU pilot passes all five selected startup checks and actual original image handoff. Connected execution now passes the same texture-422 allocation and renders the startup Xbox logo; actual gameplay remains pending. |
+| Reach actual attract gameplay through the original graphics route | Saved-display retirement and the passive method observer pass. Two completed loading pictures and a subsequent startup Xbox logo are established; actual gameplay remains pending. |
 | Complete G05 gameplay output and content lifetime | Two completed gameplay pictures with actual Swap/completion and ownership evidence; reuse G01-G04. |
 | Exit with real Start and reenter with neutral input | Delivered input, visible title return, content retirement, fresh submissions and two completed reentry gameplay pictures. |
 | Close GPU and graphics together | Review/seal the connected sequence and update both family rows; total becomes9/9 bounded. |
@@ -139,7 +139,20 @@ required; component checks do not qualify GPU/graphics. Evidence is under
 `build/blinx/graphics-boot-entry-20261016/pre-fe-control/`, with independent
 review SHA256 `c688a31265d60b336ff4265fae2242e3336b1b1e305e0f8eefc64c98a86d0ecb`.
 The selected build is under `build/blinx/graphics-startup-profile-20261016/`.
-Total remains 7/9, with 46 retained deferral IDs / 45 scopes.
+
+The new connected run passes the exact earlier boundary: CreateTexture2 return
+422 has the same 512x512/format6 arguments and source hash but now returns a real
+nonzero object; all first422 returns succeed. `texture422-passed.aot-private.json`
+binds that comparison to the old closed event stream and new component. Completed
+pictures1/2 show loading progress; picture3 shows the startup Xbox logo at actual
+completed74/submitted75/Swap-return75. Neither is classified as gameplay. The run
+remains live, muted and four-core/BelowNormal while the owner plays Marvel.
+Implementation `db88dfa`, startup-validation documentation `3abcf4d`; the GPU DLL
+is unchanged. The independent prospective G05 mapping is ready under this build's
+`independent-review/`; it reuses G01-G04 and keeps selected native input delivery
+separate from byte-level original USB evidence. Actual gameplay/exit/reentry and
+relevant content retirement remain required. Total remains7/9, with46 retained
+deferral IDs /45 scopes.
 
 ## Later loading allocation and exact boot-entry capture - 2026-10-16
 

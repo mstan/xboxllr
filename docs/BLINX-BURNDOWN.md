@@ -36,8 +36,10 @@ pages than the old seed. Independent review permits this initialized-service
 profile, retaining its small boot objects and private lock. The rebuilt GPU pilot
 passes all five selected startup checks, including the actual original image
 handoff and twelve complete section lifetimes. The section check takes 73.391s
-under gaming priority; its initial 45s timeout is retained. The connected run
-remains required. No allocation is freed by inference. The remaining
+under gaming priority; its initial 45s timeout is retained. Connected execution
+now passes the same texture-422 allocation and renders the startup Xbox logo
+after its loading pictures. Gameplay and lifecycle remain required. No
+allocation is freed by inference. The remaining
 sequence must establish moving attract output, a genuine Start/release,
 visible title return, relevant content retirement and fresh attract reentry.
 No additional hardware observation is currently required for that sequence.
