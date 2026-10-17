@@ -58,11 +58,14 @@ static void input_test_trigger_failure(uint64_t now,uint32_t expected)
     uint8_t pad[18];memset(pad,0xcc,sizeof(pad));
     const ULONGLONG start=input_replay_start;const int clock=input_replay_clock_started,reported=input_replay_reported;
     const struct InputReplayTrigger before=input_replay_trigger;
+    const struct InputReplayTrigger before2=input_replay_trigger_2;
+    const unsigned generation=input_replay_generation;
     CHECK(input_test_trigger_poll(now,pad)==expected);
     for(unsigned i=0;i<18;++i)CHECK(pad[i]==0xcc);
     CHECK(input_replay_start==start && input_replay_clock_started==clock && input_replay_reported==reported);
     CHECK(input_replay_trigger.enabled==before.enabled && input_replay_trigger.consumed==before.consumed &&
           !strcmp(input_replay_trigger.path,before.path));
+    CHECK(!memcmp(&input_replay_trigger_2,&before2,sizeof(before2)) && input_replay_generation==generation);
 }
 static void test_input_replay_trigger(void)
 {
@@ -125,6 +128,86 @@ static void test_input_replay_trigger(void)
     input_replay_count=0;
     puts("input replay trigger: neutral wait, selected-clock epoch, ordered press/release, sticky consumption and nonmutating invalid/stale/inaccessible failures passed");
 }
+static void input_test_load_start_replay(void)
+{
+    FILE *file=tmpfile();CHECK(file);
+    CHECK(fputs("0 000000000000000000000000000000000000\n20 100000000000000000000000000000000000\n220 000000000000000000000000000000000000\n",file)>=0);
+    rewind(file);CHECK(input_replay_load(file) && !fclose(file));
+}
+static void test_input_replay_two_triggers(void)
+{
+    input_host_is_keyboard();input_host_keyboard=0;input_test_load_start_replay();
+    char directory[MAX_PATH],first[MAX_PATH],second[MAX_PATH],alias[MAX_PATH];
+    DWORD length=GetTempPathA(sizeof(directory),directory);CHECK(length && length<sizeof(directory));
+    CHECK(GetTempFileNameA(directory,"ir1",0,first) && DeleteFileA(first));
+    CHECK(GetTempFileNameA(directory,"ir2",0,second) && DeleteFileA(second));
+    CHECK(input_replay_triggers_configure(NULL,second)==ERROR_INVALID_PARAMETER);
+    CHECK(input_replay_triggers_configure(first,"relative-second")==ERROR_INVALID_PARAMETER);
+    CHECK(input_replay_triggers_configure(first,first)==ERROR_INVALID_PARAMETER);
+    strcpy_s(alias,sizeof(alias),first);
+    for(char *at=alias;*at;++at) {
+        if(*at=='\\')*at='/';
+        else if(*at>='a' && *at<='z')*at-=('a'-'A');
+    }
+    CHECK(input_replay_triggers_configure(first,alias)==ERROR_INVALID_PARAMETER);
+    CHECK(!input_replay_trigger.enabled && !input_replay_trigger_2.enabled);
+    CHECK(!input_replay_trigger_configure(first));
+    input_test_trigger_file(second,"start-v1\n",9);
+    CHECK(input_replay_triggers_configure(first,second)==ERROR_ALREADY_EXISTS);
+    CHECK(input_replay_trigger.enabled && !input_replay_trigger_2.enabled && !input_replay_clock_started);
+    CHECK(DeleteFileA(second));
+    /* A replay with a final held button or disconnect cannot arm a second run. */
+    for(unsigned kind=0;kind<2;++kind) {
+        FILE *file=tmpfile();CHECK(file);
+        CHECK(fputs(kind?"0 000000000000000000000000000000000000\n20 disconnected\n":
+            "0 000000000000000000000000000000000000\n20 100000000000000000000000000000000000\n",file)>=0);
+        rewind(file);CHECK(input_replay_load(file) && !fclose(file));
+        CHECK(input_replay_triggers_configure(first,second)==ERROR_INVALID_PARAMETER);
+        CHECK(!input_replay_trigger.enabled && !input_replay_trigger_2.enabled);
+    }
+    input_test_load_start_replay();CHECK(!input_replay_triggers_configure(first,second));
+    uint64_t base=1000;
+#ifdef PILOT_INPUT_REFERENCE_CLOCK
+    base+=input_host_reference_ms;
+#endif
+    uint8_t pad[18];CHECK(!input_test_trigger_poll(base,pad) && !pad[0]);
+    CHECK(!input_replay_clock_started && !input_replay_generation);
+    input_test_trigger_file(first,"start-v1\n",9);
+    CHECK(!input_test_trigger_poll(base+10,pad) && !pad[0] && input_replay_generation==1);
+    input_test_trigger_file(second,"invalid",7);
+    CHECK(!input_test_trigger_poll(base+30,pad) && pad[0]==0x10);
+    CHECK(!input_test_trigger_poll(base+229,pad) && pad[0]==0x10);
+    CHECK(!input_replay_trigger_2.consumed);
+    CHECK(!input_test_trigger_poll(base+230,pad) && !pad[0] && input_replay_reported==2);
+    CHECK(!input_replay_trigger_2.consumed); /* release returned before any probe */
+    input_test_trigger_failure(base+231,ERROR_INVALID_DATA);CHECK(DeleteFileA(second));
+    HANDLE locked=CreateFileA(second,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(locked!=INVALID_HANDLE_VALUE);input_test_trigger_failure(base+232,ERROR_SHARING_VIOLATION);
+    CHECK(CloseHandle(locked) && DeleteFileA(second));
+    CHECK(!input_test_trigger_poll(base+500,pad) && !pad[0] && input_replay_generation==1);
+    CHECK(input_replay_reported==2 && input_replay_start==base+10);
+    CHECK(DeleteFileA(first));input_test_trigger_file(first,"invalid",7);
+    input_test_trigger_file(second,"start-v1\n",9);
+    CHECK(!input_test_trigger_poll(base+3000,pad) && !pad[0] && input_replay_generation==2);
+    CHECK(input_replay_start==base+3000 && input_replay_reported==0);
+    CHECK(!input_test_trigger_poll(base+3020,pad) && pad[0]==0x10);
+    CHECK(!input_test_trigger_poll(base+3220,pad) && !pad[0] && input_replay_reported==2);
+    CHECK(DeleteFileA(second));input_test_trigger_file(second,"invalid",7);
+    CHECK(!input_test_trigger_poll(base+4000,pad) && !pad[0] && input_replay_generation==2);
+    CHECK(input_replay_start==base+3000 && input_replay_trigger.consumed && input_replay_trigger_2.consumed);
+    CHECK(DeleteFileA(first) && DeleteFileA(second));
+    /* An early valid second marker still cannot conceal the first release. */
+    input_test_load_start_replay();CHECK(!input_replay_triggers_configure(first,second));
+    input_test_trigger_file(first,"start-v1\n",9);input_test_trigger_file(second,"start-v1\n",9);
+    CHECK(!input_test_trigger_poll(base+5000,pad) && !pad[0] && input_replay_generation==1);
+    CHECK(!input_test_trigger_poll(base+5020,pad) && pad[0]==0x10);
+    CHECK(!input_test_trigger_poll(base+5220,pad) && !pad[0] && input_replay_generation==1);
+    CHECK(!input_test_trigger_poll(base+5221,pad) && !pad[0] && input_replay_generation==2);
+    CHECK(!input_test_trigger_poll(base+5241,pad) && pad[0]==0x10);
+    CHECK(!input_test_trigger_poll(base+5441,pad) && !pad[0]);
+    CHECK(DeleteFileA(first) && DeleteFileA(second));input_replay_count=0;
+    puts("input replay two triggers: distinct atomic configuration, two real press/releases, neutral gap, deferred early marker, errors and sticky generations passed");
+}
 #ifdef PILOT_INPUT_REFERENCE_CLOCK
 static void test_input_reference_clock(void)
 {
@@ -152,9 +235,11 @@ static void test_input_reference_clock(void)
     CHECK(!pilot_input_host_state(0,pad) && !pad[0]);
     CHECK(pilot_input_host_state(1,pad)==ERROR_DEVICE_NOT_CONNECTED);
     test_input_replay_trigger();
+    test_input_replay_two_triggers();
     fprintf(stderr,"PASS reference input: Start20ms/release220ms/hotplug300/400ms on external time; 80ms host stalls and100 observer polls preserve state; backwards publication rejects before mutation\n");
 }
 #endif
+#ifndef PILOT_INPUT_REPLAY_TEST_ONLY
 static void input_test_error(void)
 {
     input_test_last_error=MEM32(g_esp+4); g_esp+=8;
@@ -223,6 +308,7 @@ static void input_test_setup(void)
 static void test_input(void)
 {
     test_input_replay_trigger();
+    test_input_replay_two_triggers();
     input_test_setup();
     uint32_t type=PILOT_INPUT_g_DeviceType_Gamepad,out=0x1a020;
     CHECK(input_test_call(PILOT_INPUT_XGetDevices,type,0,0,0)==1);
@@ -336,3 +422,4 @@ static void test_input_failure(const char *kind)
     }
     ExitProcess(0); /* WILL_FAIL tests require the intended terminal stop. */
 }
+#endif

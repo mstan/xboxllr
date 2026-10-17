@@ -1,0 +1,11 @@
+# Standalone host-input controls; no generated title or installed HDD is used.
+foreach(clock host reference)
+  add_executable(pilot_input_replay_${clock}_test "${CMAKE_CURRENT_LIST_DIR}/input_replay_contract_test.c")
+  target_compile_definitions(pilot_input_replay_${clock}_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  if(clock STREQUAL "reference")
+    target_compile_definitions(pilot_input_replay_${clock}_test PRIVATE PILOT_INPUT_REFERENCE_CLOCK)
+  endif()
+  target_link_libraries(pilot_input_replay_${clock}_test PRIVATE user32)
+  pilot_add_test(NAME pilot_input_replay_${clock} COMMAND pilot_input_replay_${clock}_test)
+  set_tests_properties(pilot_input_replay_${clock} PROPERTIES TIMEOUT 10)
+endforeach()

@@ -10,6 +10,8 @@ static ULONGLONG input_replay_start;
 static int input_replay_clock_started;
 static int input_replay_reported=-1;
 static struct InputReplayTrigger {char path[4096];int enabled,consumed;} input_replay_trigger;
+static struct InputReplayTrigger input_replay_trigger_2;
+static unsigned input_replay_generation;
 static int input_replay_absolute_path(const char *path)
 {
     size_t length=strlen(path);
@@ -25,7 +27,7 @@ static int input_replay_absolute_path(const char *path)
 /* Configuration is committed only after the loaded source and absent marker
  * have been checked. The marker is an elective host-input action, never a
  * guest-memory write or a replacement clock/publication opportunity. */
-static uint32_t input_replay_trigger_configure(const char *path)
+static uint32_t input_replay_trigger_validate(const char *path,struct InputReplayTrigger *result)
 {
     struct InputReplayTrigger next={0};
     if(path && *path) {
@@ -39,22 +41,54 @@ static uint32_t input_replay_trigger_configure(const char *path)
         if(error!=ERROR_FILE_NOT_FOUND)return error?error:ERROR_ACCESS_DENIED;
         memcpy(next.path,path,strlen(path)+1);next.enabled=1;
     }
-    input_replay_trigger=next;return ERROR_SUCCESS;
+    *result=next;return ERROR_SUCCESS;
+}
+static int input_replay_row_neutral(const struct InputReplayRow *row)
+{
+    if(!row->connected)return 0;
+    for(unsigned i=0;i<18;++i)if(row->pad[i])return 0;
+    return 1;
+}
+static uint32_t input_replay_triggers_configure(const char *first,const char *second)
+{
+    struct InputReplayTrigger next={0},next2={0};
+    uint32_t error=input_replay_trigger_validate(first,&next);
+    if(error)return error;
+    if(second && *second) {
+        if(!next.enabled || input_replay_count<2 ||
+           !input_replay_row_neutral(input_replay_rows+input_replay_count-1))return ERROR_INVALID_PARAMETER;
+        error=input_replay_trigger_validate(second,&next2);if(error)return error;
+        /* Compare normalized absolute names, including case/slash/dot aliases.
+         * Both markers must be absent, so no existing file identity is needed. */
+        char names[2][4096];
+        for(unsigned i=0;i<2;++i) {
+            DWORD length=GetFullPathNameA(i?second:first,sizeof(names[i]),names[i],NULL);
+            if(!length || length>=sizeof(names[i]))return ERROR_INVALID_PARAMETER;
+            for(char *at=names[i];*at;++at)if(*at=='/')*at='\\';
+        }
+        if(!_stricmp(names[0],names[1]))return ERROR_INVALID_PARAMETER;
+    }
+    input_replay_trigger=next;input_replay_trigger_2=next2;input_replay_generation=0;
+    return ERROR_SUCCESS;
+}
+static uint32_t input_replay_trigger_configure(const char *path)
+{
+    return input_replay_triggers_configure(path,NULL);
 }
 /* Read an immutable, complete marker without changing replay state. Missing
  * means wait; a missing parent, sharing violation, directory or bad contents
  * is an explicit error. Publish the marker by creating it privately, closing
  * it, then renaming into this absent path to avoid a partial writer race. */
-static uint32_t input_replay_trigger_probe(int *found)
+static uint32_t input_replay_trigger_probe(const struct InputReplayTrigger *trigger,int *found)
 {
-    DWORD attributes=GetFileAttributesA(input_replay_trigger.path);
+    DWORD attributes=GetFileAttributesA(trigger->path);
     if(attributes==INVALID_FILE_ATTRIBUTES) {
         DWORD error=GetLastError();
         if(error==ERROR_FILE_NOT_FOUND){*found=0;return ERROR_SUCCESS;}
         return error?error:ERROR_ACCESS_DENIED;
     }
     if(attributes&FILE_ATTRIBUTE_DIRECTORY)return ERROR_ACCESS_DENIED;
-    HANDLE file=CreateFileA(input_replay_trigger.path,GENERIC_READ,FILE_SHARE_READ,NULL,
+    HANDLE file=CreateFileA(trigger->path,GENERIC_READ,FILE_SHARE_READ,NULL,
                            OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) {
         DWORD error=GetLastError();
@@ -94,16 +128,18 @@ static int input_replay_load(FILE *file)
     }
     if(!count || ferror(file))return 0;
     input_replay_count=count;input_replay_clock_started=0;input_replay_reported=-1;
-    memset(&input_replay_trigger,0,sizeof(input_replay_trigger));return 1;
+    memset(&input_replay_trigger,0,sizeof(input_replay_trigger));
+    memset(&input_replay_trigger_2,0,sizeof(input_replay_trigger_2));input_replay_generation=0;return 1;
 }
 static uint32_t input_replay_sample(uint64_t elapsed,uint8_t pad[18])
 {
     unsigned row=0;
     while(row+1<input_replay_count && input_replay_rows[row+1].at<=elapsed)++row;
     if(input_replay_reported!=(int)row) {
-        fprintf(stderr,"[INPUT REPLAY DELIVERED] row=%u scheduled_ms=%llu elapsed_ms=%llu digital=%02x%02x connected=%d\n",
+        fprintf(stderr,"[INPUT REPLAY DELIVERED] row=%u scheduled_ms=%llu elapsed_ms=%llu digital=%02x%02x connected=%d generation=%u start_ms=%llu\n",
             row,(unsigned long long)input_replay_rows[row].at,(unsigned long long)elapsed,
-            input_replay_rows[row].pad[1],input_replay_rows[row].pad[0],input_replay_rows[row].connected);
+            input_replay_rows[row].pad[1],input_replay_rows[row].pad[0],input_replay_rows[row].connected,
+            input_replay_generation,(unsigned long long)input_replay_start);
         input_replay_reported=(int)row;
     }
     if(!input_replay_rows[row].connected)return ERROR_DEVICE_NOT_CONNECTED;
@@ -111,13 +147,24 @@ static uint32_t input_replay_sample(uint64_t elapsed,uint8_t pad[18])
 }
 static uint32_t input_replay_poll(uint64_t now,uint8_t pad[18])
 {
+    if(input_replay_clock_started && now<input_replay_start)return ERROR_INVALID_PARAMETER;
+    struct InputReplayTrigger *trigger=NULL;unsigned generation=0;
     if(input_replay_trigger.enabled && !input_replay_trigger.consumed) {
-        int found=0;uint32_t error=input_replay_trigger_probe(&found);
+        trigger=&input_replay_trigger;generation=1;
+    } else if(input_replay_generation==1 && input_replay_trigger_2.enabled &&
+              !input_replay_trigger_2.consumed && input_replay_reported==(int)input_replay_count-1) {
+        /* A separate poll must already have returned the final neutral row.
+         * Never hide that release by consuming generation2 on the same poll. */
+        trigger=&input_replay_trigger_2;generation=2;
+    }
+    if(trigger) {
+        int found=0;uint32_t error=input_replay_trigger_probe(trigger,&found);
         if(error)return error;
         if(!found){memset(pad,0,18);return ERROR_SUCCESS;}
-        input_replay_trigger.consumed=1;
+        trigger->consumed=1;input_replay_generation=generation;input_replay_reported=-1;
         input_replay_start=now;input_replay_clock_started=1;
-        fprintf(stderr,"[INPUT REPLAY TRIGGER] consumed start_ms=%llu\n",(unsigned long long)now);
+        fprintf(stderr,"[INPUT REPLAY TRIGGER] consumed start_ms=%llu generation=%u path=\"%s\"\n",
+            (unsigned long long)now,generation,trigger->path);
     }
     if(!input_replay_clock_started){input_replay_start=now;input_replay_clock_started=1;}
     if(now<input_replay_start)return ERROR_INVALID_PARAMETER;

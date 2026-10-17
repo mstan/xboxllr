@@ -43,9 +43,11 @@ static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID
         const char *path=getenv("XLLE_PILOT_INPUT_REPLAY");FILE *file=path?fopen(path,"r"):NULL;
         int ok=file && input_replay_load(file);if(file && fclose(file))ok=0;
         if(!ok){fprintf(stderr,"[PILOT INPUT STOP] invalid/missing input replay\n");ExitProcess(2);}
-        uint32_t error=input_replay_trigger_configure(getenv("XLLE_PILOT_INPUT_REPLAY_TRIGGER"));
+        uint32_t error=input_replay_triggers_configure(getenv("XLLE_PILOT_INPUT_REPLAY_TRIGGER"),
+            getenv("XLLE_PILOT_INPUT_REPLAY_TRIGGER_2"));
         if(error){fprintf(stderr,"[PILOT INPUT STOP] invalid replay trigger configuration error=%u\n",error);ExitProcess(2);}
         if(input_replay_trigger.enabled)fprintf(stderr,"[INPUT REPLAY TRIGGER] neutral connected until marker: %s\n",input_replay_trigger.path);
+        if(input_replay_trigger_2.enabled)fprintf(stderr,"[INPUT REPLAY TRIGGER] generation=2 waits for first final neutral delivery, then marker: %s\n",input_replay_trigger_2.path);
         fprintf(stderr,"[INPUT REPLAY] %u real controller-state transitions; port 0\n",input_replay_count);
     }
     return TRUE;

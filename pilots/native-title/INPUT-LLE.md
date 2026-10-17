@@ -477,6 +477,28 @@ The earlier captured production runs supply visual attract and hotplug evidence;
 these separate API probes add caller-boundary evidence, not new visual or
 endurance claims.
 
+## Elective host replay controls
+
+The elective host replay control also accepts
+`XLLE_PILOT_INPUT_REPLAY_TRIGGER_2` alongside the first
+`XLLE_PILOT_INPUT_REPLAY_TRIGGER`. Both must name distinct absolute absent
+markers, and the loaded replay must start and end connected and neutral. Each
+marker contains exactly `start-v1\n`; publish it by closing a private file and
+renaming it into the absent configured path. After the first replay's final
+neutral row is actually returned, a later poll can consume the second marker
+and replay the same immutable rows on the same selected clock. Missing markers
+wait neutral; malformed or inaccessible markers fail explicitly. Deleting or
+replacing consumed markers cannot rearm either generation.
+
+This permits a genuine Start/release to skip an already-qualified opening,
+then an independently armed Start/release after observed gameplay. Trigger logs
+retain generation/path/clock epoch, and delivered-row logs retain generation
+and epoch. A marker or log alone does not prove a rendered scene or lifecycle
+transition. With the second variable absent, the first-only/default source
+behavior remains unchanged. Standalone `pilot_input_replay_host` and
+`pilot_input_replay_reference` tests reuse the maintained replay cases without
+title execution or storage initialization.
+
 ## Next serial family
 
 Proceed to display clock/vblank using the existing PCRTC/IRQ floor and original

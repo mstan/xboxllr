@@ -65,7 +65,7 @@ classification. Decode the existing FBD1/GPD1 records using their maintained
 tools. Their digital endpoint and precision boundaries remain those in
 [NV2A-DIGITAL-INPUT](NV2A-DIGITAL-INPUT.md).
 
-## Start replay only after actual gameplay
+## Scored Start replay after actual gameplay
 
 Use `XLLE_PILOT_INPUT=replay` and an ordinary fixed replay file containing:
 
@@ -85,6 +85,24 @@ Preserve the consumed-trigger timestamp and delivered press/release rows.
 Verify those rows reached the original input consumer; a scheduled row that was
 never delivered cannot prove a button transition. Marker removal does not rewind
 or retrigger replay. Stale, inaccessible or malformed markers are errors.
+
+An optional first Start/release may skip the already-qualified opening movie
+through its original input and cleanup path. For that sequence, set the first
+trigger to a distinct `movie_skip.trigger` path and
+`XLLE_PILOT_INPUT_REPLAY_TRIGGER_2` to the scored `start.trigger` path in the same
+ordinary private directory. Both markers must be absent at launch. Arm the first
+only after observing the opening movie; retain its generation1 delivery and
+normal cleanup/title return. The second generation cannot start until a prior
+poll returned the first generation's final neutral row. Keep it unarmed until
+the two actual moving gameplay pictures required by step2, then retain its own
+generation2 press/release and the complete step3/4 exit/reentry evidence.
+
+This prefix replaces only the earlier one-trigger workflow's prohibition on
+pregame input. It does not replace the scored gameplay exit, neutral attract
+entries, rendered pictures or content-lifetime observations. Reuse unchanged
+movie/audio qualification; do not decode the full opening again solely to reach
+the graphics milestones. Neither trigger advances guest clocks or bypasses an
+original service, completion or wait.
 
 These are elective host observation/input controls. They neither seed game state
 nor classify phases, and they do not change default HLE execution. Xbox recovery
