@@ -24,6 +24,15 @@ six loading/logo/publisher-animation pictures and657 paired destruction returns,
 with no guards or consumed Start. Its controlled replacement stop is not guest
 retirement. The32.5x focused DMA-loop result is not a measured title speedup.
 
+The same changed run has since passed both publisher logos and reached the
+opening movie. Five completed capture bundles are retained, with no consumed
+Start or gameplay acceptance yet. An independently reviewed read-only owner
+reader supplies a startup baseline of409 active texture slots and will help
+associate relevant gameplay content with normal original destruction if
+Swap-time bindings are cleared. It changes no guest behavior and requires no
+restart. The seven accepted families were also independently reconciled with
+their retained receipts; no new closing requirement emerged. G05 remains open.
+
 Prior startup implementation checkpoint: G01 original lifetime and G02-G04 startup,
 owned context/drawing, enabled-noise reconstruction and bounded native comparison
 have passed. The maintained GPU-LLE title produces completed loading pictures and

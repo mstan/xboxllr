@@ -113,6 +113,26 @@ establish retirement. Seal the files after process exit. These observations and
 the unchanged G01 evidence support the normal content transition, not exhaustive
 allocation or cancellation coverage.
 
+When Swap-time bindings are empty or expose only persistent UI, the existing
+original asset-owner tables can supplement this association without restarting
+the title. The reviewed passive reader and source map are retained under
+`build/blinx/graphics-dma-query-cache-20261016/`. They identify the live process
+and guest reservation, verify ten original code spans, and use only host query
+and memory-read rights. Fixed texture slots link filename/group ownership to
+resource pointers; the current material-list records supply the source-mapped
+SetTexture consumer association. Selected headers and all dependent table/list
+bytes are read twice, with separate driver counters before and after.
+
+Equal copies are stable observations, not an atomic snapshot or proof of pixel
+sampling. Null, unreadable or changing material state remains unavailable
+evidence. Inactive entries may retain stale names/pointers. Relate a reviewed
+live content owner to actual gameplay and its matched original destruction
+during exit; exclude intervening recreation before treating pointer equality
+as one lifetime. Preserve G01's shared-backing limits. The startup-movie read
+with409 active slots and a null material pointer is only a baseline, not G05
+acceptance. No process writes, suspension, guest calls or new title run are
+introduced by this supplemental observation.
+
 ## Optional startup texture-error diagnosis
 
 With the same private capture directory, `XLLE_PILOT_GPU_TEXTURE_DIAGNOSTIC=1`
