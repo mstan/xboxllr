@@ -203,6 +203,20 @@ const char *pilot_io_device_initialize(unsigned char *guest);
  * clears all mappings. Invalid admission leaves existing owners unchanged. */
 typedef const char *(*PilotIoMmio)(uint32_t address,unsigned size,int write,uint32_t *value);
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback);
+/* SYNC-only admission for a reviewed callback that leaves all queried guest-
+ * backing host mappings/protections immutable until return. Unrelated host
+ * container allocation is allowed; original CPU/services/guest allocation and
+ * native guest-worker reentry remain forbidden. Only contiguous DMA's host
+ * State/Protect queries may be reused within this one callback; all original
+ * PTE/PFN/owner/pin/range checks still run. Other registrations stay uncached. */
+const char *pilot_io_device_mmio_bind_immutable_guest(uint32_t first,uint32_t bytes,PilotIoMmio callback);
+#ifdef PILOT_IO_DMA_QUERY_TEST
+int pilot_io_device_dma_query_test_enable(unsigned enabled);
+void pilot_io_device_dma_query_test_stats(uint64_t out[4]);
+int pilot_io_device_dma_query_test_host_page(const void *address,int write);
+unsigned pilot_io_device_dma_query_test_lease(uint32_t pa);
+#endif
+
 /* Separate memory-aperture owner, permitting1/2/4/8-byte bus transfers without
  * widening device register contracts. Each access verifies the actual original
  * PTE maps its entire virtual span to the same bus address. No RAM alias is

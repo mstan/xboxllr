@@ -117,13 +117,14 @@ static int pending_dpc;
 static uint32_t dpc_stack_top;
 static struct {uint32_t object,base,top;int published;} idle_stack;
 static struct {uint16_t first,last;PilotIoPort callback;} device_ports[8];
-struct DeviceMmio {uint32_t first,bytes,dma_lease;PilotIoMmio callback;PilotIoBusMemory memory;};
+struct DeviceMmio {uint32_t first,bytes,dma_lease,immutable_guest_mapping;PilotIoMmio callback;PilotIoBusMemory memory;};
 static struct DeviceMmio device_mmio[8];
 static struct {PilotIoDeviceWork callback;unsigned dma_lease;} device_work[8];
 /* The outer CPU owner keeps its nonrecursive lock throughout device work.
  * Only this same thread can borrow it for synchronous validated RAM transfers.
  * Other host threads still acquire the lock normally. */
 static __declspec(thread) unsigned device_bus_borrow,device_bus_dma_lease;
+#include "io_dma_host_query_lle.inc"
 /* Only the stopped original ISR/DPC dispatcher grants this same-thread scope.
  * A nested original entry suspends it before CPU/clock/device work starts. */
 struct CompiledMmioScope {uc_context *saved_cpu;unsigned depth;};
@@ -412,9 +413,10 @@ static uint64_t device_mmio_read(uc_engine *engine,uint64_t offset,unsigned size
     const char *error=owner->memory?device_memory_translation(owner->first+(uint32_t)offset,size):NULL;
     if(error){device_mmio_failure(engine,owner->first+(uint32_t)offset,size,0,0,error);return 0;}
     device_bus_borrow=1;device_bus_dma_lease=owner->dma_lease;
+    dma_host_query_begin(owner->immutable_guest_mapping);
     if(owner->memory)error=owner->memory(owner->first+(uint32_t)offset,size,0,&value);
     else {uint32_t word=0;error=owner->callback(owner->first+(uint32_t)offset,size,0,&word);value=word;}
-    device_bus_borrow=0;device_bus_dma_lease=0;
+    dma_host_query_end();device_bus_borrow=0;device_bus_dma_lease=0;
     if(error)device_mmio_failure(engine,owner->first+(uint32_t)offset,size,0,0,error);
     else if(owner->first+(uint32_t)offset==0xfd6013dau && size==1)
         av_diagnostic_status_read(engine,(uint32_t)value);
@@ -439,9 +441,10 @@ static void device_mmio_write(uc_engine *engine,uint64_t offset,unsigned size,ui
         }
     }
     device_bus_borrow=1;device_bus_dma_lease=owner->dma_lease;
+    dma_host_query_begin(owner->immutable_guest_mapping);
     if(owner->memory)error=owner->memory(owner->first+(uint32_t)offset,size,1,&value);
     else error=owner->callback(owner->first+(uint32_t)offset,size,1,&word);
-    device_bus_borrow=0;device_bus_dma_lease=0;
+    dma_host_query_end();device_bus_borrow=0;device_bus_dma_lease=0;
     if(error)device_mmio_failure(engine,owner->first+(uint32_t)offset,size,1,value,error);
 }
 #ifdef PILOT_FILES_LLE
@@ -1791,7 +1794,7 @@ void pilot_io_device_port_bind(uint16_t first,uint16_t last,PilotIoPort callback
 done:
     ReleaseSRWLockExclusive(&lock);
 }
-static const char *device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback,PilotIoBusMemory memory_callback,unsigned dma_lease)
+static const char *device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback,PilotIoBusMemory memory_callback,unsigned dma_lease,unsigned immutable_guest_mapping)
 {
     if(device_bus_borrow)return "device LLE MMIO binding during device work";
     AcquireSRWLockExclusive(&lock);
@@ -1814,7 +1817,7 @@ static const char *device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio ca
         if(!error && slot==8)error="device LLE MMIO binding capacity";
         if(!error) {
             struct DeviceMmio *owner=device_mmio+slot;
-            owner->first=first;owner->bytes=bytes;owner->callback=callback;owner->memory=memory_callback;owner->dma_lease=dma_lease;
+            owner->first=first;owner->bytes=bytes;owner->callback=callback;owner->memory=memory_callback;owner->dma_lease=dma_lease;owner->immutable_guest_mapping=immutable_guest_mapping;
             uc_err result=uc_mmio_map(cpu,first,bytes,device_mmio_read,owner,device_mmio_write,owner);
             if(result){memset(owner,0,sizeof(*owner));error=failure=uc_strerror(result);}
         }
@@ -1834,9 +1837,11 @@ static const char *device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio ca
     ReleaseSRWLockExclusive(&lock);return error;
 }
 const char *pilot_io_device_mmio_bind_dma(uint32_t first,uint32_t bytes,PilotIoMmio callback,unsigned dma_lease)
-{return device_mmio_bind(first,bytes,callback,NULL,dma_lease);}
+{return device_mmio_bind(first,bytes,callback,NULL,dma_lease,0);}
 const char *pilot_io_device_bus_memory_bind(uint32_t first,uint32_t bytes,PilotIoBusMemory callback)
-{return device_mmio_bind(first,bytes,NULL,callback,PILOT_IO_DMA_SYNC);}
+{return device_mmio_bind(first,bytes,NULL,callback,PILOT_IO_DMA_SYNC,0);}
+const char *pilot_io_device_mmio_bind_immutable_guest(uint32_t first,uint32_t bytes,PilotIoMmio callback)
+{return device_mmio_bind(first,bytes,callback,NULL,PILOT_IO_DMA_SYNC,1);}
 const char *pilot_io_device_mmio_bind(uint32_t first,uint32_t bytes,PilotIoMmio callback)
 {return pilot_io_device_mmio_bind_dma(first,bytes,callback,PILOT_IO_DMA_SYNC);}
 int pilot_io_device_compiled_mmio_active(void)
@@ -1865,9 +1870,10 @@ const char *pilot_io_device_compiled_mmio(uint32_t address,unsigned size,int wri
         if(owner->memory)error=device_memory_translation(address,size);
         if(!error) {
             device_bus_borrow=1;device_bus_dma_lease=owner->dma_lease;
+            dma_host_query_begin(owner->immutable_guest_mapping);
             if(owner->memory){error=owner->memory(address,size,write,&wide);word=(uint32_t)wide;}
             else error=owner->callback(address,size,write,&word);
-            device_bus_borrow=0;device_bus_dma_lease=0;
+            dma_host_query_end();device_bus_borrow=0;device_bus_dma_lease=0;
             if(!error && !failure)*value=word;
         }
     }
@@ -2265,7 +2271,7 @@ int pilot_io_device_contiguous_dma(uint32_t pa,void *buffer,uint32_t bytes,int w
         uint32_t va=published[index-1].va+offset;
         if(va!=(uint64_t)base+at-pa || !physical(va,&actual) || actual!=at)goto done;
         MEMORY_BASIC_INFORMATION info;
-        if(!VirtualQuery(guest_memory+va,&info,sizeof(info)) || info.State!=MEM_COMMIT ||
+        if(!dma_host_page_query(guest_memory+va,&info) || info.State!=MEM_COMMIT ||
            (info.Protect&(PAGE_GUARD|PAGE_NOACCESS)) || (write && info.Protect!=PAGE_READWRITE))goto done;
         if(pass) {
             if(write)memcpy(guest_memory+va,(unsigned char*)buffer+at-pa,span);
@@ -2380,3 +2386,16 @@ const char *pilot_io_device_av_state(uint32_t state[4])
 }
 #include "io_memory_lle.inc"
 #include "io_sections_lle.inc"
+
+#ifdef PILOT_IO_DMA_QUERY_TEST
+unsigned pilot_io_device_dma_query_test_lease(uint32_t pa)
+{
+    unsigned value=~0u;AcquireSRWLockExclusive(&lock);
+    if(pa<RAM_BYTES && publication_by_pa[pa/4096]) {
+        unsigned i=publication_by_pa[pa/4096]-1;
+        unsigned owner=contiguous_owner(published[i].va+(pa&4095),1);
+        if(owner!=owner_count)value=owners[owner].dma_leases;
+    }
+    ReleaseSRWLockExclusive(&lock);return value;
+}
+#endif

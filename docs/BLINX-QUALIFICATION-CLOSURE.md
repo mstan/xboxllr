@@ -91,6 +91,43 @@ compares ordinary/bulk and held/resumed queues, including exact notifications,
 metadata, GET and unchanged RAM. The source-bound rerun is under
 `build/blinx/graphics-method-observer-20261016/`; G05 remains open and total 7/9.
 
+## Scoped host-query reuse for the connected test - 2026-10-16
+
+The owner requested faster test loops. The selected GPU route already has no
+host frame cap or desktop-vsync wait. A narrow host optimization now reuses only
+VirtualQuery State/Protect within one explicitly admitted synchronous NV2A MMIO
+callback. It keys64 bounded thread-local slots by the full host virtual page,
+clears them at eligible entry and deactivates them before every exit/error.
+The callback must preserve queried guest-backing mappings/protections. Unrelated
+host container allocation is permitted. Original CPU/service reentry remains
+forbidden; guest clocks, rendering and completion behavior are unchanged.
+
+Only contiguous DMA uses this cache. Its original two-pass validation/copy,
+PTE/PFN, publication, allocation and lease checks remain. Pinned/bootstrap DMA
+and ordinary registrations, work, ports, apertures and observations stay
+uncached; they do not incur bulk cache clears. Benchmark counters, toggles and
+query probes are excluded from production. Default HLE rendering is unchanged.
+
+Root reviewed the source and maintained fixtures. Five instrumented and four
+plain cases pass, including read-only/reused pages, atomic cross-page rejection,
+actual original free/reallocation, separate host aliases, callback errors and
+existing nested/wrong-thread guards. The measured65536x16-byte contiguous-read
+loop makes131072 host queries without reuse and one with reuse. Maintained
+median elapsed time is61.7472ms versus1.89955ms; this32.5x microbenchmark ratio
+is not a title-speedup claim. The selected production I/O archive and title
+build pass in20.001s, with a separate executable output preserving the baseline.
+Evidence, source/object/binary pins and root review are retained under
+`build/blinx/graphics-dma-query-cache-20261016/`.
+
+The unchanged baseline closed after2726.188s with six completed pictures:
+loading, the Xbox logo and a subsequent publisher animation. Its final capture
+is original Swap383, completed382/submitted383. There is no simulation guard,
+capture failure or consumed Start trigger. The controlled replacement stop is
+not guest retirement. The changed selection is prepared for the same connected
+G05 attract/exit/reentry sequence, reusing G01-G04 and unaffected HLE evidence.
+This removes test overhead; it adds no LLE performance qualification gate,
+hardware operation or deferral. GPU/graphics remain open; total7/9.
+
 ## Quiescent storage and earlier service profile - 2026-10-16
 
 The animation-entry seed cannot be used with reset storage: it retains an

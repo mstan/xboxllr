@@ -44,8 +44,20 @@ static DWORD WINAPI wrong_thread(void*) {
     CHECK(pilot_io_device_compiled_mmio(0xfe80200c,4,0,&value) && value==0xabcdef12);
     ++wrong_thread_checks;return 0;
 }
+#ifdef PILOT_IO_DMA_QUERY_TEST
+static uint32_t compiled_load(uint32_t address);
+#include "dma_query_cache_contract.inc"
+#endif
 static const char *dma_register(uint32_t address,unsigned size,int write,uint32_t *value) {
-    if(address==0xfe100ffc)return "registered compiled callback failure";
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    if(query_action){CHECK((address==0xfe100000 || address==0xfe101000) && size==4 && !write);return query_operation(value);}
+#endif
+    if(address==0xfe100ffc) {
+#ifdef PILOT_IO_DMA_QUERY_TEST
+        unsigned char bytes[16];CHECK(pilot_io_device_contiguous_dma(physical_address,bytes,16,0,PILOT_IO_DMA_SYNC));
+#endif
+        return "registered compiled callback failure";
+    }
     CHECK(address==0xfe100000 && size==4 && !write);++dma_calls;
     uint32_t nested=0x12345678;
     CHECK(pilot_io_device_compiled_mmio(0xfe80200c,4,0,&nested) && nested==0x12345678);++nested_checks;
@@ -63,7 +75,11 @@ static LONG CALLBACK fault(EXCEPTION_POINTERS *exception) {
     const char *error=nullptr;
     int result=pilot_mmio_fault_range(exception,guest,0xfe800000,0xfe87ffff,pilot_io_device_compiled_mmio,&error);
     if(!result)result=pilot_mmio_fault_range(exception,guest,0xfec00000,0xfec00fff,pilot_io_device_compiled_mmio,&error);
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    if(!result)result=pilot_mmio_fault_range(exception,guest,0xfe100000,0xfe101fff,pilot_io_device_compiled_mmio,&error);
+#else
     if(!result)result=pilot_mmio_fault_range(exception,guest,0xfe100000,0xfe100fff,pilot_io_device_compiled_mmio,&error);
+#endif
     CHECK(result==1 && !error);++faults;
     return EXCEPTION_CONTINUE_EXECUTION;
 }
@@ -96,6 +112,9 @@ static const char *continuation(uint32_t entry,uint32_t regs[8],bool dpc) {
     }
     CHECK(entry==(dpc?0x12560u:0x12520u));
     if(dpc)++dpcs;else {++callbacks;pilot_usb_pic_raise(3,0);}
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    if(private_control_action){CHECK(!dpc);query_once(private_control_action,private_control_address);regs[0]=1;regs[4]+=12;return nullptr;}
+#endif
     uint64_t before=0,deadline=0;CHECK(!pilot_usb_pit_clock(&before,&deadline));
     if(!strcmp(mode,"unknown")) {
         first_error=decoded_rejection(0xfe83fffc,1,11); // Abort remains outside reset0/1/3.
@@ -119,6 +138,9 @@ static const char *continuation(uint32_t entry,uint32_t regs[8],bool dpc) {
     CHECK(WaitForSingleObject(thread,1000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
     CHECK(compiled_load(0xfe100000)==0x31415926);
     CHECK(work_calls==work_before); // neither compiled read pumps device work
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    if(!dpc)query_suite();
+#endif
     unsigned sampled=work_calls;
     if(!dpc)pilot_usb_pic_raise(1,1); // higher original IRQL; real nested dispatcher
     uint32_t value=0;CHECK(!pilot_io_device_lle(125,guest,nullptr,&value));
@@ -146,7 +168,12 @@ int main(int argc,char **argv) {
     control=15;CHECK(!pilot_audio_device_lle_access(0xfe802000,4,1,&control));
     ticks+=1125;CHECK(!pilot_usb_pit_time(ticks));CHECK(!pilot_audio_device_lle_sample());
     control=7;CHECK(!pilot_audio_device_lle_access(0xfe802000,4,1,&control));
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    CHECK(!pilot_io_device_mmio_bind_immutable_guest(0xfe100000,4096,dma_register));
+    CHECK(!pilot_io_device_mmio_bind(0xfe101000,4096,dma_register));
+#else
     CHECK(!pilot_io_device_mmio_bind(0xfe100000,4096,dma_register));
+#endif
     CHECK(!pilot_io_device_work_bind(work));CHECK(!pilot_io_device_clock_bind(clock_input,nullptr));
     uint32_t allocate[]={4096,0,0x03ffffff,4096,PAGE_READWRITE};allocation=call(166,allocate);CHECK(allocation);
     physical_address=call(173,&allocation);word(allocation)=0x31415926;
@@ -160,23 +187,44 @@ int main(int argc,char **argv) {
     uint32_t queue[]={0x1c300,0x12560,0x10203040};call(107,queue);
     pilot_io_device_isr_bind(isr);pilot_io_device_dpc_bind(dpc);
     PVOID handler=AddVectoredExceptionHandler(1,fault);CHECK(handler);
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    if(!strcmp(mode,"query-controls")) {
+        query_controls_main();CHECK(callbacks==5 && faults==5 && dpcs==0);
+        CHECK(!pilot_io_device_work_unbind(work));CHECK(!pilot_io_device_clock_bind(nullptr,nullptr));
+        CHECK(!pilot_io_device_mmio_bind(0xfe100000,4096,nullptr));CHECK(!pilot_io_device_mmio_bind(0xfe101000,4096,nullptr));
+        CHECK(!pilot_audio_device_lle_close());call(171,&allocation);
+        CHECK(RemoveVectoredExceptionHandler(handler));puts("PASS top-level original protection/retirement with actual isolated IRQ DMA scopes");return 0;
+    }
+#endif
     pilot_usb_pic_raise(3,1);int delivered=0;
     const char *error=pilot_io_device_irq(guest,&delivered);
     CHECK(callbacks==1);
     PilotAudioDeviceState state{};pilot_audio_device_lle_state(&state);
     CHECK(state.owned && state.gp_held && state.ep_held && !state.pcm_words && !state.descriptors);
     if(first_error) {
+#ifdef PILOT_IO_DMA_QUERY_TEST
+        uint64_t counters[4];query_counters(counters);
+#endif
         CHECK(error==first_error);CHECK(pilot_audio_device_lle_close());
         pilot_audio_device_lle_state(&state);CHECK(state.owned && state.apu_mapping && state.aci_mapping && state.work_binding);
         CHECK(RemoveVectoredExceptionHandler(handler));
         puts("PASS terminal compiled rejection preserves first error, host context and registered lifetime");return 0;
     }
     if(error)fprintf(stderr,"IRQ: %s\n",error);
-    CHECK(!error && delivered && faults==11 && dpcs==1 && nested_isrs==1 &&
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    CHECK(faults==21); // Original11 plus10 explicit cache observations.
+#else
+    CHECK(faults==11);
+#endif
+    CHECK(!error && delivered && dpcs==1 && nested_isrs==1 &&
         dma_calls==2 && nested_checks==2 && wrong_thread_checks==2);
     outside=0x12345678;CHECK(pilot_io_device_compiled_mmio(0xfe80200c,4,0,&outside) && outside==0x12345678);
     CHECK(!pilot_io_device_work_unbind(work));CHECK(!pilot_io_device_clock_bind(nullptr,nullptr));
-    CHECK(!pilot_io_device_mmio_bind(0xfe100000,4096,nullptr));CHECK(!pilot_audio_device_lle_close());
+    CHECK(!pilot_io_device_mmio_bind(0xfe100000,4096,nullptr));
+#ifdef PILOT_IO_DMA_QUERY_TEST
+    CHECK(!pilot_io_device_mmio_bind(0xfe101000,4096,nullptr));
+#endif
+    CHECK(!pilot_audio_device_lle_close());
     call(171,&allocation);CHECK(RemoveVectoredExceptionHandler(handler));
     puts("PASS real original ISR+DPC, native MOV faults, sole APU, owned DMA, wrong-thread/nested-work guards and scope retirement");
     return 0;

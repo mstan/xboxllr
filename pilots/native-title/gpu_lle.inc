@@ -195,7 +195,10 @@ static void gpu_lle_open_profile_clock(uint32_t idle_phase,int external_clock_fi
     pilot_io_device_port_bind(0x80d6,0x80d6,gpu_lle_port);
     pilot_io_device_port_bind(0x80d8,0x80d8,gpu_lle_port);
     pilot_io_device_port_bind(0xc000,0xc00f,gpu_lle_port);
-    error=pilot_io_device_mmio_bind(0xfd000000u,0x1000000u,gpu_lle_kernel_mmio);
+    /* This synchronous NV2A callback can allocate ordinary host containers, but
+     * cannot change the queried guest-backing host mappings/protections or
+     * reenter the original CPU. Keep ports, work and aperture owners uncached. */
+    error=pilot_io_device_mmio_bind_immutable_guest(0xfd000000u,0x1000000u,gpu_lle_kernel_mmio);
     if(error)stop(error,0xfd000000u);
     // Original large-page mappings expose the retail64MiB UMA PCI aperture.
     // Each access rechecks those mappings and borrows the actual RAM owner.
