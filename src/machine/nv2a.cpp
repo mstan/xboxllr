@@ -197,10 +197,12 @@ public:
 
     PagedRasterSurface(uint32_t address, size_t size,
                        const ReadFn& read, const WriteFn& write,
-                       const DirectFn& direct = DirectFn{})
+                       const DirectFn& direct = DirectFn{},
+                       size_t page_size = kPageSize)
         : address_(address), size_(size), read_(read), write_(write),
           direct_(direct), direct_base_(direct_ ? direct_(address, size) : nullptr),
-          pages_(direct_base_ ? 0 : (size + kPageSize - 1) / kPageSize) {
+          page_size_(page_size),
+          pages_(direct_base_ ? 0 : (size + page_size - 1) / page_size) {
         perf::record_paged_surface(size_);
         if (direct_base_) perf::record_paged_surface_direct(size_);
     }
@@ -247,7 +249,7 @@ public:
         for (size_t page_index = 0; page_index < pages_.size(); ++page_index) {
             Page& page = pages_[page_index];
             if (!page.dirty) continue;
-            const size_t page_offset = page_index * kPageSize;
+            const size_t page_offset = page_index * page_size_;
             if (!write_(address_ + static_cast<uint32_t>(page_offset),
                         page.bytes.data(), page.bytes.size())) {
                 return false;
@@ -286,12 +288,12 @@ private:
             }
             return true;
         }
-        const size_t page_index = offset / kPageSize;
-        const size_t in_page = offset % kPageSize;
+        const size_t page_index = offset / page_size_;
+        const size_t in_page = offset % page_size_;
         Page& page = pages_[page_index];
         if (page.bytes.empty()) {
-            const size_t page_offset = page_index * kPageSize;
-            const size_t page_size = std::min(kPageSize, size_ - page_offset);
+            const size_t page_offset = page_index * page_size_;
+            const size_t page_size = std::min(page_size_, size_ - page_offset);
             page.bytes.resize(page_size);
             if (!read_ ||
                 !read_(address_ + static_cast<uint32_t>(page_offset),
@@ -318,6 +320,7 @@ private:
     const WriteFn& write_;
     const DirectFn& direct_;
     uint8_t* direct_base_ = nullptr;
+    size_t page_size_;
     std::vector<Page> pages_;
     size_t resident_bytes_ = 0;
     size_t written_begin_ = 0;
@@ -11277,6 +11280,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         // Invalid bound storage never silently disables an enabled comparison.
         depth_bytes64 = 0;
     }
+    bool compressed_depth=false;
     if (uses_depth) {
         const uint64_t color_end = static_cast<uint64_t>(color_address) + color_bytes64;
         const uint64_t depth_end = static_cast<uint64_t>(depth_address) + depth_bytes64;
@@ -11288,18 +11292,17 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
             (raster_state[kRasterStencilOpFail]!=0x1e00 ||
              raster_state[kRasterStencilOpZFail]!=0x1e00 ||
              raster_state[kRasterStencilOpZPass]!=0x1e00);
-        if(pgraph_loaded_context_ && (depth_write_enabled || stencil_may_write)) {
-            for(unsigned tile_index=0;tile_index<pgraph_tiles_.tiles.size();++tile_index) {
-                const auto& tile=pgraph_tiles_.tiles[tile_index];
-                if((tile[0]&1) && (pgraph_tiles_.zcomp[tile_index]&0x80000000u) &&
-                   depth_address<=tile[1] && (tile[0]&0x03ffc000u)<depth_end) {
-                    // Ordinary memory writes expand compressed blocks. A ZROP
-                    // writer must own1D80 and encoding before using that path.
-                    // Reject before color/texture/target effects, not at flush.
-                    fault_("NV2A loaded compressed depth/stencil writes require a qualified ZROP writer");
-                    return false;
-                }
-            }
+        for(unsigned tile_index=0;tile_index<pgraph_tiles_.tiles.size();++tile_index) {
+            const auto& tile=pgraph_tiles_.tiles[tile_index];
+            if((tile[0]&1) && (pgraph_tiles_.zcomp[tile_index]&0x80000000u) &&
+               depth_address<=tile[1] && (tile[0]&0x03ffc000u)<depth_end)
+                compressed_depth=true;
+        }
+        // Reject an unknown consumed selector before color/texture effects.
+        // A read-only comparison needs initialized tags, not1D80 provenance.
+        if(compressed_depth && pgraph_loaded_context_ &&
+           (depth_write_enabled || stencil_may_write) && !(context_known_&kContextCompression)) {
+            fault_("NV2A loaded compressed draw selector is unknown");return false;
         }
     }
     uint32_t effective_xmin = clip_x;
@@ -14598,8 +14601,18 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     PagedRasterSurface color_surface(
         color_address, static_cast<size_t>(color_bytes64), mem_read_, mem_write_,
         mem_direct_);
+    const std::function<bool(uint32_t,const void*,size_t)> zrop_write=
+        [this](uint32_t address,const void* data,size_t bytes) {
+            return ram_tile_transfer(address,const_cast<void*>(data),bytes,true,
+                                     RamWriteClient::kZrop);
+        };
+    // Compressed storage has per-block initialized tags. Fetch and flush only
+    // actual D24S8 pixels: a4KiB read could consume unknown padding, and a full
+    // dirty-page write could re-encode untouched blocks under a new selector.
     PagedRasterSurface depth_surface(
-        depth_address, static_cast<size_t>(depth_bytes64), mem_read_, mem_write_);
+        depth_address, static_cast<size_t>(depth_bytes64), mem_read_,
+        tiled_memory ? zrop_write : mem_write_, PagedRasterSurface::DirectFn{},
+        compressed_depth ? sizeof(uint32_t) : 4096);
     // Track the written byte span so the post-flush resident refresh can
     // region-upload exactly the covered rows instead of dropping residency.
     color_surface.reset_written_span();

@@ -156,7 +156,8 @@ int Nv2a::ram_tile_at(uint32_t address) const {
     return -1;
 }
 
-bool Nv2a::ram_tile_transfer(uint32_t address,void* data,size_t bytes,bool write) {
+bool Nv2a::ram_tile_transfer(uint32_t address,void* data,size_t bytes,bool write,
+                             RamWriteClient client) {
     if(!bytes)return true;
     if(uint64_t(address)+bytes>0x04000000u)return false;
     const int selected=ram_tile_at(address);
@@ -172,6 +173,11 @@ bool Nv2a::ram_tile_transfer(uint32_t address,void* data,size_t bytes,bool write
     const auto& tile=pgraph_tiles_.tiles[unsigned(selected)];
     const uint32_t base=tile[0]&0x03ffc000u;
     if(uint64_t(address)+bytes>uint64_t(tile[1])+1)return false;
+    const bool zrop=write && client==RamWriteClient::kZrop;
+    if(zrop && (pgraph_tiles_.zcomp[unsigned(selected)]&0x80000000u) &&
+       pgraph_loaded_context_ && !(context_known_&kContextCompression)) {
+        fault_("NV2A loaded compressed draw selector is unknown");return false;
+    }
     Nv2aTileLayout layout;
     if(!layout.configure(tile[2],(tile[0]>>1)&1))return false;
     // Physical storage stays unchanged. Translate each naturally contiguous
@@ -188,9 +194,10 @@ bool Nv2a::ram_tile_transfer(uint32_t address,void* data,size_t bytes,bool write
             auto* buffer=static_cast<uint8_t*>(data)+offset;
             if(write) {
                 std::memcpy(pixel_bytes+in_block,buffer,span);
-                // Ordinary memory/2D writes expand the block and clear its
-                // tag. ZROP compression is selected separately below.
-                if(!ram_zeta_write(block,pixels,false))return false;
+                // Ordinary memory/2D writes expand the block. ZROP owns the
+                // actual1D80 selector and publishes encoding/tag state only
+                // after the backing write succeeds. Both preserve neighbors.
+                if(!ram_zeta_write(block,pixels,zrop && compress_zbuffer_))return false;
             } else std::memcpy(buffer,pixel_bytes+in_block,span);
             offset+=span;continue;
         }

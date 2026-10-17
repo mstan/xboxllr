@@ -253,7 +253,7 @@ static void test_loaded_context_draws() {
         }
         f.state();f.shader();f.color();f.emit(0x198,2);f.emit(0x214,0x4000);
         f.emit(0x20c,0x02000040);f.emit(0x35c,1);f.triangle();f.kick();
-        CHECK(f.failure.find("qualified ZROP writer")!=std::string::npos && !f.read(0x800048));
+        CHECK(f.failure.find("compressed draw selector is unknown")!=std::string::npos && !f.read(0x800048));
         CHECK(get32(f.ram,0x1044)==0xa5a5a5a5 && get32(f.ram,0x4000)==0xa5a5a5a5);
     }
     // Actual alias c56 is consumed by the shader. A partial alias write keeps

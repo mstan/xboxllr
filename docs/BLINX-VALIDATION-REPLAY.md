@@ -77,11 +77,15 @@ another title startup.
 
 ## Remaining integrated check
 
-The previously suspended title can continue under a fresh supervisor after its
-exact process identity and frozen executable/library are checked. Do not resume
-old supervisors whose wall-time ceilings expired during the owner pause. Keep
-the pause/takeover receipts with the run and retain its actual guest-clock,
-completion and ownership observations. Host termination is not guest teardown.
+The previously suspended title was checked and resumed under fresh supervision.
+It reached initialized attract132, then exited2 after369.95 resumed seconds at
+the required compressed depth/stencil ZROP-writer guard (`beads-xbox.1.127`).
+All216 prior inputs were sealed unchanged before implementation edits; obsolete
+supervisors were retired after the guest's terminal exit. That process cannot
+resume. Keep the pause/takeover/seal receipts with its guest-clock, completion
+and ownership observations. Host termination is not guest teardown.
+
+After the bounded writer passes queued tests, start a fresh connected check.
 
 Use original state hints only to request pictures; classify actual pictures
 before counting gameplay or arming the scored Start marker. The bounded G05

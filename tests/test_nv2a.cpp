@@ -1008,6 +1008,7 @@ static void test_vsh_compile_toggle_rebuilds_cached_parse() {
 #include "nv2a_setup_cases.hpp"
 #include "nv2a_context_method_cases.hpp"
 #include "nv2a_context_draw_cases.hpp"
+#include "nv2a_zrop_draw_cases.hpp"
 #include "nv2a_context_initializer_cases.hpp"
 
 // GFX-F02 representative actual generic draws. The rejected cases must have
@@ -1208,6 +1209,7 @@ int main() {
     test_pgraph_context_transfer();
     test_loaded_context_methods();
     test_loaded_context_draws();
+    test_loaded_zrop_draws();
     test_loaded_context_initializers();
     test_ptimer_reference();
     {

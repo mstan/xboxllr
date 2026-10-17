@@ -2812,7 +2812,9 @@ private:
     const char* ram_tile_configuration_error() const;
     bool ram_tile_configuration();
     int ram_tile_at(uint32_t address) const;
-    bool ram_tile_transfer(uint32_t address, void* data, size_t bytes, bool write);
+    enum class RamWriteClient { kOrdinary, kZrop };
+    bool ram_tile_transfer(uint32_t address, void* data, size_t bytes, bool write,
+                           RamWriteClient client=RamWriteClient::kOrdinary);
     bool pgraph_setup_read(uint32_t offset, uint32_t& value);
     bool pgraph_setup_write(uint32_t offset, uint32_t value);
     bool pgraph_load_context();

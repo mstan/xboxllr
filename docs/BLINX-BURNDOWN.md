@@ -23,6 +23,15 @@ guard. `beads-xbox.1.127` owns that reached gap. Five prefix/loading captures
 remain; moving gameplay, scored Start/retirement and neutral reentry are pending.
 Host process exit is not guest teardown or G05 acceptance.
 
+The required ZROP writer now passes queued real-LOAD depth/stencil checks and
+existing tile/codec regressions in1.28s combined. It owns actual compression
+selection and successful tagged storage publication, preserves masked/neighbor
+pixels, and stops failed writes before draw completion. Compressed depth uses
+pixel-sized cache units so unknown padding and untouched blocks stay untouched.
+The unchanged independent codec evidence is reused. See the closing checklist
+and `build/blinx/zrop-draw-writer-20261017/`. Original gameplay/exit/reentry still
+need a fresh connected check. Native HLE graphics code is unchanged.
+
 The owner selected [validation separation](BLINX-VALIDATION-REPLAY.md) first.
 The reusable captured admission replay passes20 programs/284 vertices and
 missing-input controls in0.35s; the retained516 indexed draws pass in6.09s.

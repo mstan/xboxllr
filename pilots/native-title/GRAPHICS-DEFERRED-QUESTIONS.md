@@ -318,3 +318,21 @@ slots, now have direct physical LOAD evidence. The earlier unconsumed-fog review
 remains historical; it no longer justifies treating the initial bank as unknown.
 Exact fog/arithmetic edge behavior and newly reached consumers retain their
 existing reopening conditions. GFX-D25 is a separate unresolved SAVE question.
+
+## GFX-D01/D05 addendum: reached compressed draw writes - 2026-10-17
+
+The preserved original route reached loaded compressed depth/stencil writes at
+initialized attract132. The D01 addendum's reopening trigger fired: this writer
+is required implementation, tracked in `beads-xbox.1.127`. It now has queued
+real-LOAD depth/stencil, compression-selector, neighbor-preservation and failed
+publication checks using the existing independently checked NV20 codec. Actual
+connected gameplay/exit/reentry remains required G05.
+
+GFX-D05 retains the exact silicon choice of8/16/64-byte representation and
+compression/cache timing beyond the declared logical storage contract. The
+authored encoder is not a hardware compressor oracle. Reopen this precision
+scope if a supported raw compressed-storage/tag consumer, aliasing transition,
+ordering observation or rendered result distinguishes the representation.
+Required logical depth/stencil, actual1D80 ownership, initialized tags and
+success-only publication are not deferred. This clarifies existing D01/D05
+scope; it adds no question ID or waived closing requirement.

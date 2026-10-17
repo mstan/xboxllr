@@ -19,6 +19,30 @@ the append-only queues. Required routing, startup, ownership, clocks and process
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
 
+## Reached compressed draw writer: queued checks passed - 2026-10-17
+
+The initialized-attract ZROP guard from the preserved run is now implemented
+in the maintained generic LLE path (`beads-xbox.1.127`). Depth/stencil writes
+use the actual1D80 compression selector and the existing owned block codec/tag
+publication. Ordinary memory/2D writes retain their separate expansion policy.
+Unknown loaded selectors reject before target effects. Compressed depth caching
+fetches/flushes actual DWORD pixels, avoiding speculative reads of uninitialized
+padding and re-encoding of untouched blocks. Partial/masked updates preserve
+neighbors; failed backing publication cannot attach a valid tag or complete the draw.
+
+Queued real-LOAD tests cover both PFIFO batching modes, compression on/off after
+opposite clear settings, logical depth pixels, SFAIL/ZFAIL/ZPASS, stencil masks,
+uninitialized tags, untouched physical storage and first/partial write failures.
+The complete queued NV2A, tile-command and codec tests pass in0.891/0.359/0.031s.
+The unchanged codec executable retains its earlier independent donor evidence:
+20,130 decoded blocks and4,096 encoded planes, including8/16-byte representations.
+Private receipts: `build/blinx/zrop-draw-writer-20261017/`.
+
+Exact silicon compressor representation choices remain within GFX-D05; this does
+not defer required logical values, selector ownership or completion. Native HLE
+graphics code is unchanged. The original route still needs a fresh connected
+check; these fixtures do not prove moving gameplay or close G05. Total remains7/9.
+
 ## Validation separation and preserved run - 2026-10-17
 
 The owner renewed the goal with captured, replayable contracts first, short

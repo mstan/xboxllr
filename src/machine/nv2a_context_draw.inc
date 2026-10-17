@@ -45,8 +45,8 @@ bool Nv2a::context_draw_ready(std::array<uint8_t,13>& observable) {
         if(!zeta_dma_bound_ || !pramin_range_initialized(zeta_dma_,12))
             return reject("NV2A loaded draw zeta DMA descriptor is unknown");
         // The ordinary surface resolver checks layout/extent/aliasing; tiled
-        // reads require initialized tags. Loaded compressed ZROP writes remain
-        // guarded there until their writer owns the compression selector.
+        // reads require initialized tags. Compressed writes additionally need
+        // the actual1D80 selector before any target effects.
     }
     if(raster_state_[kRasterShadeMode]==0x1d00 && !known(kRasterProvokingVertex))return false;
     if((enables&4) && (!known(kRasterCullFace) || !known(kRasterFrontFace)))return false;
