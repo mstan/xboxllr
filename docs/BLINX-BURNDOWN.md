@@ -14,24 +14,27 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 46 retained IDs / 45 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current execution checkpoint: the reviewed scoped contiguous-DMA host-query
-cache is integrated in `a3c25af`. Five instrumented and four plain affected
-cases pass; the selected production title builds in a separate output. One
-changed, muted connected G05 run began at2026-10-17T00:55:33UTC under
-`build/blinx/graphics-dma-query-cache-20261016/`. Its guest clocks, GPU model and
-closing requirements are unchanged. The prior run is sealed after2726.188s:
-six loading/logo/publisher-animation pictures and657 paired destruction returns,
-with no guards or consumed Start. Its controlled replacement stop is not guest
-retirement. The32.5x focused DMA-loop result is not a measured title speedup.
+Current execution checkpoint: `bdcef73` adds an elective second host-input
+trigger so a genuine Start/release can skip the already-qualified opening movie,
+while a separate scored Start remains reserved for actual gameplay exit.
+Root review and the two focused host/reference-clock tests pass (0.20s total);
+the selected production title builds in45.047s. All93 prior component pins are
+unchanged. The muted replacement began at2026-10-17T01:49:27UTC under
+`build/blinx/graphics-two-trigger-20261016/`. Guest clocks, GPU model, completion
+and G05 requirements are unchanged; no host frame cap exists to remove.
 
-The same changed run has since passed both publisher logos and reached the
-opening movie. Five completed capture bundles are retained, with no consumed
-Start or gameplay acceptance yet. An independently reviewed read-only owner
-reader supplies a startup baseline of409 active texture slots and will help
-associate relevant gameplay content with normal original destruction if
-Swap-time bindings are cleared. It changes no guest behavior and requires no
-restart. The seven accepted families were also independently reconciled with
-their retained receipts; no new closing requirement emerged. G05 remains open.
+The preceding scoped-DMA-cache run is sealed after3213.171s with five reviewed
+loading/logo/opening pictures and661 paired destruction returns, no unmatched
+entries, guards or consumed Start. It did not reach gameplay. Its controlled
+replacement stop is not guest retirement. The cache in `a3c25af` retains five
+instrumented and four plain passing checks; its32.5x focused DMA-loop result is
+not a measured title speedup. The new opening-skip procedure also needs actual
+execution before claiming an end-to-end saving.
+
+The independently reviewed passive owner reader remains available for relevant
+gameplay-content/destruction association. Its409-active-slot startup observation
+is only a baseline. The seven accepted families have been reconciled with their
+retained receipts; no new closing requirement emerged. G05 remains open.
 
 Prior startup implementation checkpoint: G01 original lifetime and G02-G04 startup,
 owned context/drawing, enabled-noise reconstruction and bounded native comparison

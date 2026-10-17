@@ -128,6 +128,32 @@ G05 attract/exit/reentry sequence, reusing G01-G04 and unaffected HLE evidence.
 This removes test overhead; it adds no LLE performance qualification gate,
 hardware operation or deferral. GPU/graphics remain open; total7/9.
 
+## Genuine opening skip for shorter graphics retries - 2026-10-16
+
+Commit `bdcef73` adds an elective second one-shot host replay trigger. The first
+may supply a real opening-movie Start/release; the second remains unarmed until
+two moving gameplay pictures and supplies the scored exit. It uses the same
+immutable replay rows and selected reference clock. Generation2 requires an
+earlier poll to have returned generation1's final connected-neutral row; neither
+marker can rearm. Root reviewed the source and all18 handoff pins. Both focused
+host/reference tests pass in0.20s, and the selected production title builds in
+45.047s. Default and first-only behavior remain unchanged.
+
+The prior scoped-cache run is sealed at3213.171s with five startup-only captures,
+661 paired normal destruction returns, no unmatched entries/guards and no Start
+or gameplay. Its host stop is not guest teardown. All93 prior component pins
+remain unchanged in the replacement's128-pin component. The replacement started
+at2026-10-17T01:49:27UTC under
+`build/blinx/graphics-two-trigger-20261016/`, hidden/muted on CPU12-15 Normal.
+
+The [acceptance sequence](BLINX-GRAPHICS-ACCEPTANCE.md) explicitly permits this
+prefix instead of the earlier one-trigger workflow's no-pregame-input condition.
+It preserves original cleanup/title return and every scored gameplay, lifetime,
+exit and neutral-reentry requirement. Reuse unchanged movie/audio evidence;
+there is no clock acceleration, frame dropping or fabricated completion.
+Actual end-to-end savings remain unmeasured. Total7/9 and existing deferrals
+are unchanged; G05 remains open.
+
 ## Quiescent storage and earlier service profile - 2026-10-16
 
 The animation-entry seed cannot be used with reset storage: it retains an
