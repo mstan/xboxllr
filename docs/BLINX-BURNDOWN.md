@@ -33,9 +33,11 @@ pictures are loading screens, not gameplay. The old startup snapshot retains an
 unfinished boot-APU allocation of 1548 pages. An exact later entry before boot-APU
 control setup has completed disk I/O, a Ready launch worker and 1597 more free
 pages than the old seed. Independent review permits this initialized-service
-profile, retaining its small boot objects and private lock. The GPU pilot is being
-rebuilt with its exact hash; startup/handoff checks and the connected run remain
-required. No allocation is freed by inference. The remaining
+profile, retaining its small boot objects and private lock. The rebuilt GPU pilot
+passes all five selected startup checks, including the actual original image
+handoff and twelve complete section lifetimes. The section check takes 73.391s
+under gaming priority; its initial 45s timeout is retained. The connected run
+remains required. No allocation is freed by inference. The remaining
 sequence must establish moving attract output, a genuine Start/release,
 visible title return, relevant content retirement and fresh attract reentry.
 No additional hardware observation is currently required for that sequence.

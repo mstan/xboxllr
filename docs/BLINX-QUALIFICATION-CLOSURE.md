@@ -56,7 +56,7 @@ probe publication correction; a reached original consumer reopens that scope.
 
 | Remaining step | Closing evidence / current state |
 | --- | --- |
-| Correct the initialized startup profile | Current blocker: the observer-fixed run fails texture creation 422 with 243 available pages for a 256-page texture. The reviewed pre-FE service snapshot has 1597 more free pages and completed original disk I/O; the selected GPU pilot is rebuilding before startup/handoff checks and connected acceptance. |
+| Correct the initialized startup profile | Startup component complete: the reviewed pre-FE service snapshot has 1597 more free pages and completed original disk I/O. The rebuilt GPU pilot passes all five selected startup checks and actual original image handoff. Connected execution must still pass the earlier texture-422 allocation failure. |
 | Reach actual attract gameplay through the original graphics route | Saved-display retirement and the passive method observer pass. Two completed loading pictures are established; actual gameplay remains pending. |
 | Complete G05 gameplay output and content lifetime | Two completed gameplay pictures with actual Swap/completion and ownership evidence; reuse G01-G04. |
 | Exit with real Start and reenter with neutral input | Delivered input, visible title return, content retirement, fresh submissions and two completed reentry gameplay pictures. |
@@ -127,9 +127,15 @@ reopening trigger.
 
 The exact hash is admitted alongside the unchanged older profile in
 `io_device.cmake`, and the GPU pilot is configured to select it. The actual
-Ready-worker guard and original first-image boundary remain unchanged. Focused
-allocator/storage/startup/handoff checks and the connected G05 sequence are still
-required; selecting a capture does not qualify GPU/graphics. Evidence is under
+Ready-worker guard and original first-image boundary remain unchanged. All five
+selected allocator/storage/startup/handoff checks pass. The section-lifecycle
+check first reaches its CTest 45s host timeout without a failed assertion; the
+unchanged executable then completes in 73.391s, including twelve whole lifetimes,
+adjacent-section coexistence and exact CPU/FP/memory/thread/handle baselines. Both
+receipts are retained. The renderer-specific graphics-resource fixture is not
+registered in this GPU selection and is not counted. Actual original 800333E5
+handoff uses launch worker D0008BF8; no guard is relaxed. Connected G05 remains
+required; component checks do not qualify GPU/graphics. Evidence is under
 `build/blinx/graphics-boot-entry-20261016/pre-fe-control/`, with independent
 review SHA256 `c688a31265d60b336ff4265fae2242e3336b1b1e305e0f8eefc64c98a86d0ecb`.
 The selected build is under `build/blinx/graphics-startup-profile-20261016/`.
