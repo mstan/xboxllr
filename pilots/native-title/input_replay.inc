@@ -86,7 +86,10 @@ static uint32_t input_replay_trigger_failure(const struct InputReplayTrigger *tr
 /* Read an immutable, complete marker without changing replay state. Missing
  * means wait; a missing parent, sharing violation, directory or bad contents
  * is an explicit error. Publish the marker by creating it privately, closing
- * it, then renaming into this absent path to avoid a partial writer race. */
+ * it, then renaming into this absent path to avoid a partial writer race.
+ * The new name can be visible before the renamer closes its DELETE handle.
+ * Share that namespace access; content writers remain excluded for the whole
+ * size/read verification on our pinned handle. */
 static uint32_t input_replay_trigger_probe(const struct InputReplayTrigger *trigger,int *found)
 {
     DWORD attributes=GetFileAttributesA(trigger->path);
@@ -96,7 +99,7 @@ static uint32_t input_replay_trigger_probe(const struct InputReplayTrigger *trig
         return input_replay_trigger_failure(trigger,"GetFileAttributesA",error);
     }
     if(attributes&FILE_ATTRIBUTE_DIRECTORY)return input_replay_trigger_failure(trigger,"directory",ERROR_ACCESS_DENIED);
-    HANDLE file=CreateFileA(trigger->path,GENERIC_READ,FILE_SHARE_READ,NULL,
+    HANDLE file=CreateFileA(trigger->path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,NULL,
                            OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) {
         DWORD error=GetLastError();

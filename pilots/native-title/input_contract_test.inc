@@ -138,8 +138,26 @@ static void test_input_replay_trigger(void)
     CHECK(input_replay_trigger_configure(path)==ERROR_ALREADY_EXISTS);
     CHECK(input_replay_trigger.enabled && !input_replay_trigger.consumed &&
           !input_replay_clock_started && input_replay_start==old_start && input_replay_reported==-1);
+    /* A completed marker may still have a rename handle open. Namespace access
+     * cannot modify its bytes; a content writer must still reject unchanged. */
+    HANDLE writer=CreateFileA(path,GENERIC_WRITE,
+        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(writer!=INVALID_HANDLE_VALUE);
+    input_test_trigger_failure(base+7500,ERROR_SHARING_VIOLATION);
+    CHECK(CloseHandle(writer));
+    char staged[MAX_PATH];
+    CHECK(GetTempFileNameA(directory,"ipb",0,staged) && DeleteFileA(staged));
+    CHECK(MoveFileExA(path,staged,0));
+    HANDLE publisher=CreateFileA(staged,DELETE,
+        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(publisher!=INVALID_HANDLE_VALUE && MoveFileExA(staged,path,0));
+    HANDLE old_reader=CreateFileA(path,GENERIC_READ,FILE_SHARE_READ,NULL,
+                                OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(old_reader==INVALID_HANDLE_VALUE && GetLastError()==ERROR_SHARING_VIOLATION);
+    if(old_reader!=INVALID_HANDLE_VALUE)CHECK(CloseHandle(old_reader));
     CHECK(!input_test_trigger_poll(base+8000,pad) && !pad[0]);
     CHECK(input_replay_trigger.consumed && input_replay_clock_started && input_replay_start==base+8000 && input_replay_reported==0);
+    CHECK(CloseHandle(publisher));
     CHECK(DeleteFileA(path)); // consumption is sticky, not the file's lifetime
     CHECK(!input_test_trigger_poll(base+8019,pad) && !pad[0]);
     CHECK(!input_test_trigger_poll(base+8020,pad) && pad[0]==0x10 && input_replay_reported==1);

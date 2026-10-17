@@ -77,6 +77,16 @@ another title startup.
 
 ## Remaining integrated check
 
+The instrumented4000-block diagnostic stopped earlier, at opening-marker
+publication, on a logged CreateFileA sharing violation32. Its changed cadence
+does not supply G05 acceptance. The missing rename-access sharing contract is
+now reproduced and fixed in the standalone host/reference input controls:
+old readers reject the actual open-DELETE-handle publication; repaired readers
+pass while content writers and malformed markers still reject unchanged.
+Use those subsecond controls for this host boundary. Do not repeat title startup
+to develop or verify the sharing rule. The normal32000-block title is rebuilt
+for the remaining connected sequence and original silent-exit diagnosis.
+
 The 071e9f8 replacement reached visible title after a genuine opening skip, then
 exited with host code0x20474343 at2147.344s before attract. Its229 inputs are sealed.
 The [closing checklist](BLINX-QUALIFICATION-CLOSURE.md) records this distinct

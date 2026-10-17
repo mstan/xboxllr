@@ -14,7 +14,17 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 47 retained IDs / 46 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current execution checkpoint: the 071e9f8 replacement reached a correct visible
+Current execution checkpoint: the bounded 4000-block diagnostic reached original
+opening130, then stopped at751.828s on host CreateFileA sharing violation32.
+Its precreated, closed marker had just been renamed; no language exception was
+reported and the earlier silent exit was not reached. An actual Windows rename
+with a retained DELETE-access handle reproduces rejection in both old clock
+selections. Sharing namespace access fixes both controls in0.015/0.125s while
+content writers, malformed markers and API failures still reject without replay
+mutation. CTest passes2/2 in0.19s. The normal32000-block executable is rebuilt;
+the changed diagnostic cadence supplies no qualification claim. G05 stays open.
+
+Earlier execution checkpoint: the 071e9f8 replacement reached a correct visible
 title after genuine opening Start/release and original cleanup. It then exited
 0x20474343 at2147.344s, without an emulator guard; the last sampled title
 counter was480. All229 inputs were sealed unchanged and DLL79103d01 archived.

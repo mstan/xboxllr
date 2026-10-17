@@ -19,6 +19,31 @@ the append-only queues. Required routing, startup, ownership, clocks and process
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
 
+## Host replay publication race isolated - 2026-10-17
+
+The instrumented 4da619f diagnostic uses the existing explicit4000-block clock
+setting solely for diagnosis. It reached initialized opening130 and two completed
+captures, then exited2 at751.828s: CreateFileA returned sharing violation32
+immediately after publication of the closed opening marker. No language exception
+was reported. This terminal run cannot resume and does not establish that the
+earlier0x20474343 exit is fixed. No gameplay or scored generation2 was reached.
+
+An actual Windows atomic rename with a retained DELETE-access handle reproduces
+the reader failure in both host/reference-clock selections. The old controls
+exit1. The production reader now shares READ|DELETE while continuing to exclude
+content writers throughout verification of its pinned handle. Both repaired
+controls pass0.015/0.125s; CTest passes2/2 in0.19s. Malformed/inaccessible markers,
+real content-writer conflicts and failed size/read/close calls still reject
+without consuming input or changing its epoch. No retry or error suppression is
+added. [Microsoft documents the visible-name/open-rename-handle window](https://devblogs.microsoft.com/oldnewthing/20211022-00/?p=105822).
+The failed run did not retain its conflicting handle's owner; the short test
+establishes the concrete missing sharing contract, not that owner's identity.
+
+beads-xbox.1.124 records this automation fix. Private failing/passing controls:
+build/blinx/replay-rename-sharing-20261017. The canonical executable is rebuilt
+at the unchanged32000-block setting with host-exception diagnostics and this
+reader fix. Total remains7/9; actual G05 gameplay/exit/retirement/reentry remains.
+
 ## Host exception after visible title - 2026-10-17
 
 The 071e9f8 connected run is sealed at2147.344s. Its genuine generation1
