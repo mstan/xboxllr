@@ -14,7 +14,34 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 46 retained IDs / 45 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current execution checkpoint: `bdcef73` adds an elective second host-input
+Latest checkpoint: the `c3823f8` shader-dependency repair passes its focused
+checks, but the connected replacement under `graphics-vsh-context-20261016`
+stops after2972.437s during attract initialization on an unproduced `c122`
+constant dependency. Its genuine opening skip, normal cleanup and visible title
+return passed; four captures and1293 paired destruction returns are sealed.
+There is no completed gameplay picture or scored exit/reentry.
+
+Independent source/corpus review ties c122 to consumed secondary RGB in16
+programs/4181 retained draws. The original packed-color setter skips an equal
+CPU cache value; initialization can therefore skip its zero upload. CPU-cache
+zeros do not prove GPU initialization. Initial context-bank transfer is now a
+reached requirement. The existing192-slot saved/live mapping remained unproven;
+one bounded hardware batch was prepared with offline failure controls. After
+remote recovery, the first prepare rejected disabled PGRAPH before allocation
+or GPU writes; the existing guarded enable then matched its expected readback.
+The actual batch passed prepare/input delivery but stopped at constant DATA
+readback (`DE400039`). No result read or failure cleanup followed. Separate
+qualified remote recovery was requested, and the write/read sequence is under
+source review. No constant mapping or model relaxation is claimed.
+
+The same shader helper also passes the remaining516 indexed draws/3700
+vertices offline: combined with the earlier four inputs, all520 indexed draws/
+3726 vertices are covered. This took4.60s extraction,0.53s compile and0.10s
+execution. Captured constants were supplied as available, so this anticipatory
+check does not establish actual runtime LOAD provenance. Evidence is under
+`vsh-indexed-corpus-followup-20261016` and `vsh-c122-corpus-20261016`.
+
+Earlier execution checkpoint: `bdcef73` adds an elective second host-input
 trigger so a genuine Start/release can skip the already-qualified opening movie,
 while a separate scored Start remains reserved for actual gameplay exit.
 Root review and the two focused host/reference-clock tests pass (0.20s total);
@@ -91,7 +118,8 @@ after its loading pictures. Gameplay and lifecycle remain required. No
 allocation is freed by inference. The remaining
 sequence must establish moving attract output, a genuine Start/release,
 visible title return, relevant content retirement and fresh attract reentry.
-No additional hardware observation is currently required for that sequence.
+At that checkpoint no additional hardware observation was required; the later
+reached c122 dependency above now requires resolving initial constant ownership.
 See the [current closing checklist](BLINX-QUALIFICATION-CLOSURE.md) and
 [connected acceptance sequence](BLINX-GRAPHICS-ACCEPTANCE.md). The New Game/save
 crash remains deferred on `.101`; campaign progression is outside this phase.

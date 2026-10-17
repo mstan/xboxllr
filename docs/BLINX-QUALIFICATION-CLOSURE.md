@@ -52,7 +52,59 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
-## Current shader admission repair - 2026-10-16
+## Reached inherited shader constant during attract initialization - 2026-10-16
+
+The replacement using `c3823f8` ends after2972.437s with
+`NV2A loaded shader constant c122 needs components f`. Its real opening
+generation1 Start/release, normal cleanup and visible title return are retained.
+The original1440-update neutral title timeout queues attract and reaches state4,
+but request5 has no completed picture. Four prefix captures and1293 paired
+original destruction returns have no unmatched entries. The scored Start marker
+is absent. All39 frozen input hashes were checked before sealing the failed run
+under `build/blinx/graphics-vsh-context-20261016/`; a guard stop is not retirement.
+
+An independent source/corpus audit finds c122 in16 programs/4181 draws, always
+feeding secondary color. Their pixel profiles consume secondary RGB through the
+final R0+secondary sum; none consumes secondary alpha. That does not identify
+the exact failed live shader, and dropping the entire dependency is unjustified.
+Original2AD90 compares cached packed color at8D41C0 and skips an equal value;
+otherwise it calls the real constant setter before updating the cache. The
+state-initialization helper2E360 requests zero without invalidating that cache,
+which lies in preloaded data's zero-fill tail. Neither CPU zero-fill nor captured
+zero vectors establishes GPU state. The current loader intentionally marks
+unmapped constant state unknown, and the ordinary upload handler marks written
+lanes. Initial constant ownership is therefore the next concrete investigation.
+
+The earlier transform-bank audit established producer region[231C,2F1C), live
+RDI selector17 and raw W,Z,Y,X lane order, but explicitly left arbitrary saved
+slot/live-bank correspondence unproven. This reached consumer makes that boundary
+relevant. A single192-slot marker/SAVE/clear/inverse-LOAD batch was prepared
+using the established borrowed-RAM context protocol. Root reviewed the source,
+host checks,16 new compiled failure cases, permuted768-word success and13 pinned
+inputs; all five previous payloads remain byte-identical. Remote recovery
+returned through a distinct dashboard startup and fresh probe INFO. The first
+prepare rejected disabled PGRAPH (`DE400002`) before allocation or GPU writes.
+A fixed read confirmed `PMC_ENABLE=01110000`; the unchanged guarded enable then
+returned the required `01111000`. The corrected attempt passed prepare and
+every input write/readback, but execute returned `DE400039`: a constant DATA
+write/readback mismatch. It supplies neither the failed word index nor raw value.
+No result read, restoration, free or repeat experiment followed. A separate
+qualified SMC recovery was requested. The hardware's RDI write/read sequence
+is under offline source review; no constant mapping or model relaxation follows
+from this result. Private probe evidence: `results/context-constants-enabled-observed-20261017/`.
+
+Separately, the unchanged helper passes all remaining516 indexed draws/3700
+vertices from retained inputs, inheriting the earlier four first draws/26
+vertices under the identical helper hash. All520 indexed draws/3726 vertices
+are covered; the new pass exercises14416 ARLs/86496 relative fetches with zero
+rejections and resolved indices0..102. Root reviewed extraction and runner,
+verified17 pins and the unique input/result identities. Captured constants are
+supplied as known: this is anticipatory dependency/range checking, not actual
+LOAD production, shader numerical execution, pixel proof or an extra gate.
+Evidence: `build/blinx/vsh-indexed-corpus-followup-20261016/` and
+`build/blinx/vsh-c122-corpus-20261016/`. Total7/9 and existing deferrals remain.
+
+## Shader admission repair preceding the inherited-constant guard - 2026-10-16
 
 The two-trigger connected run is terminal after2900.906 host seconds. Its
 optional opening skip and visible title return passed, but first attract
