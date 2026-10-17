@@ -1,6 +1,7 @@
 // Authored queued draws through the real LOAD, decoder, vertex engine and CPU
 // rasterizer. No original title bytes or direct private-state mutation.
 struct LoadedDrawFixture : LoadedContextFixture {
+    using LoadedContextFixture::LoadedContextFixture;
     static uint32_t bits(float v){uint32_t w;std::memcpy(&w,&v,4);return w;}
     void state(int omit=-1) {
         emit(0,1);emit(0x194,2);
@@ -20,12 +21,12 @@ struct LoadedDrawFixture : LoadedContextFixture {
         for(const auto& w:words)if(int(w[0])!=omit)emit(w[0],w[1]);
         for(unsigned stage=0;stage<4;++stage)emit(0x1b0c+64*stage,0);
     }
-    void shader(int missing_word=-1,bool missing_color=false,bool constant_color=false) {
+    void shader(int missing_word=-1,bool missing_color=false,bool constant_color=false,unsigned constant_index=56) {
         emit(0x1e9c,0);
         // MOV oPos,v0; MOV oD0,v3 (or c56); MOV oD1,v4,FINAL.
         // Exact encoding follows the maintained Kelvin token decoder.
         const uint32_t program[]={0,0x0020001b,0x08000000,0x0000f800,
-            0,constant_color?0x0027001bu:0x0020061bu,
+            0,constant_color?(0x0020001bu|(constant_index<<13)):0x0020061bu,
             constant_color?0x0c000000u:0x08000000u,0x0000f818,
             0,0x0020081b,0x08000000,0x0000f821};
         for(unsigned i=0;i<12;++i)if(int(i)!=missing_word && !(missing_color && i>=4 && i<8))
@@ -39,8 +40,8 @@ struct LoadedDrawFixture : LoadedContextFixture {
         emit(0x1e9c,0);
         // Optional ARL a0,v5.w; MOV oPos,v0;
         // DP3 oD0,c56[+a0],c56[+a0]; MOV oD1,v4,FINAL.
-        // Dot(1,0,0) with itself gives RGBA=1. The unread constant W and
-        // primary input v3 deliberately have no producer in these cases.
+        // Dot(1,0,0) with itself gives RGBA=1. The unread constant W comes
+        // from LOAD; primary input v3 deliberately has no producer here.
         const uint32_t program[]={0,0x01a00aff,0x08000000,0,
             0,0x0020001b,0x08000000,0x0000f800,
             0,0x00a7001b,0x0c361800,indexed?0x0000f81au:0x0000f818u,
@@ -63,12 +64,51 @@ struct LoadedDrawFixture : LoadedContextFixture {
 };
 
 static void test_loaded_context_draws() {
+    // Distinguishable loaded constants, including both bank ends and c122.
+    // Actual queued shaders/pixels check raw WZYX to logical RGBA conversion,
+    // producer knowledge and retained live ownership after PRAMIN is changed.
+    std::array<std::array<uint32_t,4>,192> loaded{};
+    const float values[]={0.f,.25f,.5f,1.f};
+    const uint32_t colors[]={0,64,128,255};
+    for(unsigned slot=0;slot<192;++slot)for(unsigned lane=0;lane<4;++lane)
+        loaded[slot][lane]=LoadedDrawFixture::bits(values[(slot>>(2*lane))&3]);
+    auto expected_pixel=[&](unsigned slot) {
+        return (colors[(slot>>6)&3]<<24)|(colors[slot&3]<<16)|
+               (colors[(slot>>2)&3]<<8)|colors[(slot>>4)&3];
+    };
+    for(bool compiled:{false,true})for(bool batching:{false,true})for(unsigned group=0;group<12;++group) {
+        LoadedDrawFixture f(batching,&loaded);f.gpu.set_vsh_compile_enabled(compiled);
+        for(unsigned i=0;i<768;++i)f.write(0x718000+0x231c+i*4,0);
+        f.state();f.color(false,true);
+        for(unsigned slot=group*16;slot<(group+1)*16;++slot) {
+            f.shader(-1,false,true,slot);f.triangle();f.kick();
+            CHECK(f.failure.empty() && f.read(0x800048)==0x1234);
+            CHECK(get32(f.ram,0x1044)==expected_pixel(slot));
+        }
+        CHECK(f.gpu.transform_constant_words()==0);
+        if(group==7) {
+            // Ordinary partial uploads replace X/Y only. Z/W retain LOAD,
+            // and the original source is not reconstructed from CPU memory.
+            f.emit(0x1ea4,122);f.emit(0xb80,LoadedDrawFixture::bits(.75f));
+            f.emit(0xb84,LoadedDrawFixture::bits(.5f));
+            f.shader(-1,false,true,122);f.triangle();f.kick();
+            CHECK(f.failure.empty() && f.gpu.transform_constant_words()==2);
+            CHECK(get32(f.ram,0x1044)==((expected_pixel(122)&0xff0000ffu)|0x00bf8000u));
+        }
+    }
+    for(bool compiled:{false,true}) {
+        // The original c122 source is zero: an equal CPU color-cache request
+        // can skip its upload, while the loaded GPU value remains produced.
+        LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);
+        f.state();f.shader(-1,false,true,122);f.color(false,true);f.triangle();f.kick();
+        CHECK(f.failure.empty() && get32(f.ram,0x1044)==0 && !f.gpu.transform_constant_words());
+    }
     for(bool compiled:{false,true})for(bool complete:{false,true}) {
         LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);
         f.state();f.dependency_shader(false);f.color(false,true);
         f.xyz_constant(56,complete?3:2);f.triangle();f.kick();
-        if(complete)CHECK(f.failure.empty() && get32(f.ram,0x1044)==0xffffffff && f.read(0x800048)==0x1234);
-        else CHECK(f.failure.find("c56")!=std::string::npos && get32(f.ram,0x1044)==0xa5a5a5a5 && !f.read(0x800048));
+        // The unuploaded Z in the partial case is a known zero from LOAD.
+        CHECK(f.failure.empty() && get32(f.ram,0x1044)==0xffffffff && f.read(0x800048)==0x1234);
     }
     for(bool compiled:{false,true})for(unsigned scenario=0;scenario<5;++scenario) {
         LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);
@@ -77,8 +117,8 @@ static void test_loaded_context_draws() {
         if(scenario!=1)f.emit(0x1a5c,LoadedDrawFixture::bits(scenario==3?136.f:0.9995f));
         if(scenario!=4)f.triangle();
         else {
-            // The third vertex selects c58, which has no producer. A prior
-            // vertex's dependency result must not let this draw through.
+            // The third vertex selects untouched c58, whose zero value comes
+            // from LOAD. Its actual different color must survive interpolation.
             f.emit(0x17fc,5);unsigned i=0;
             for(const auto& xy:{std::pair{0.f,0.f},std::pair{8.f,0.f},std::pair{0.f,8.f}}) {
                 if(i++==2)f.emit(0x1a5c,LoadedDrawFixture::bits(1.9995f));
@@ -88,8 +128,10 @@ static void test_loaded_context_draws() {
             f.emit(0x17fc,0);f.emit(0x50,0x1234);
         }
         f.kick();
-        if(!scenario) {
-            CHECK(f.failure.empty() && get32(f.ram,0x1044)==0xffffffff && f.read(0x800048)==0x1234);
+        if(scenario==0 || scenario==2 || scenario==4) {
+            CHECK(f.failure.empty() && f.read(0x800048)==0x1234);
+            if(scenario!=4)CHECK(get32(f.ram,0x1044)==0xffffffff);
+            else CHECK(get32(f.ram,0x1044)==0xcfcfcfcf);
             CHECK(f.gpu.generic_combiner_executed_batches()==1);
         } else {
             const char* expected[]={"","ARL source lane","c57","relative context index","c58"};
@@ -214,15 +256,14 @@ static void test_loaded_context_draws() {
         CHECK(f.failure.find("qualified ZROP writer")!=std::string::npos && !f.read(0x800048));
         CHECK(get32(f.ram,0x1044)==0xa5a5a5a5 && get32(f.ram,0x4000)==0xa5a5a5a5);
     }
-    // Actual alias c56 is consumed by the shader. Missing one consumed lane
-    // must stop; the unrelated c57/c137 banks never satisfy it.
+    // Actual alias c56 is consumed by the shader. A partial alias write keeps
+    // LOAD's W=0; unrelated c57/c137 writes must not supply that alpha lane.
     for(bool complete:{false,true}) {
         LoadedDrawFixture f;f.state();f.shader(-1,false,true);f.color(false,true);
         for(unsigned lane=0;lane<(complete?4u:3u);++lane)f.emit(0xa50+lane*4,LoadedDrawFixture::bits(1));
         for(unsigned lane=0;lane<4;++lane)f.emit(0x9d0+lane*4,LoadedDrawFixture::bits(1));
         f.triangle();f.kick();
-        if(complete)CHECK(f.failure.empty() && get32(f.ram,0x1044)==0xffffffff && f.read(0x800048)==0x1234);
-        else CHECK(f.failure.find("c56")!=std::string::npos && get32(f.ram,0x1044)==0xa5a5a5a5 && !f.read(0x800048));
+        CHECK(f.failure.empty() && get32(f.ram,0x1044)==(complete?0xffffffffu:0x00ffffffu) && f.read(0x800048)==0x1234);
     }
     for(bool use_inline:{false,true}) {
         LoadedDrawFixture f;f.state();f.shader();f.color(false,true);

@@ -19,6 +19,38 @@ the append-only queues. Required routing, startup, ownership, clocks and process
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
 
+## Initial constant LOAD established - 2026-10-17
+
+The reached c122 producer gap is resolved by direct physical transfer evidence.
+The fixed original image's region[231C,2F1C) loads all192 raw WZYX vectors into
+RDI bank17. All768 original words match, including c122=(0,0,0,0). A second
+LOAD after changing only those source words produces all768 distinct markers;
+every marker differs from its original word. No RDI DATA store or SAVE occurs.
+The bounded batch completes in21.199ms, with unchanged input/tail/canaries and
+success-only RAM/selector/pointer/FIFO restoration. Root independently checks
+all1536 live words, actual tagged source, source/code hashes and canaries.
+
+Private physical evidence: probe results/context-constant-load-observed-20261017,
+result-buffer SHA256 a1c84f6231b0c743ee29ed4a2d387319b265b2665e3fc686509552984ae6650c.
+The4056-byte payload is372a2dcf498b77e2e75dbfcb54add1e4eb0191b549955018ee8f10fee13505f9;
+its four offline methods pass10.822s, including failed/ignored LOAD and failure
+stop controls. Earlier eight payload byte identities remain unchanged.
+
+Production first-LOAD now copies those raw bits into the existing192 logical
+constant vectors and sets their lane provenance. It preserves source ownership,
+atomic admission and all unrelated state guards, without method replay or HLE
+per-draw overhead. The affected build passes34.5s; the queued NV2A suite passes
+0.40s with774 new actual rendered checks spanning every slot, interpreted and
+compiled execution, batching on/off, source mutation, partial writes and c122's
+original zero value. Authored image checks cover all768 raw/logical words and
+failed-load atomicity. Evidence: build/blinx/constant-context-load-20261017/.
+
+The prior SAVE-only observation has760 exact markers and eight values equal to
+original OR marker. Its mechanism remains unknown under new GFX-D25; it is not
+a LOAD rule or a closing requirement absent a supported consumer. Replacement
+context/SAVE remain guarded. No connected gameplay, exit or reentry is claimed
+by these checks. Total remains7/9; G05 still closes GPU and graphics together.
+
 ## Owner goal and stopping rule - 2026-10-15
 
 The active goal is 9/9 qualified families for this bounded Blinx attract profile.
@@ -48,7 +80,7 @@ HLE appearance evidence when dependencies are unchanged. Do not expand the run
 matrix or requalify completed families for bookkeeping. Additional precision and
 coverage findings go to the append-only queues unless the consumer test above
 demonstrates a blocker. These rules do not close a currently incomplete route.
-Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
+Current disposition: seven of nine families;47 retained deferral IDs,46 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 

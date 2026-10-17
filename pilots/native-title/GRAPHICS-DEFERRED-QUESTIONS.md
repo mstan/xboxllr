@@ -29,11 +29,11 @@ supersedes the original deferral status where a reopening trigger has fired:
   2026-10-16 with maintained reconstruction, independent physical observations
   and a bounded native GPU comparison. Further sampling/rounding precision
   remains deferred; acceptance did not disable or omit noise.
-- The other twenty-two graphics entries retain their deferred scopes and reopening
+- The other twenty-three graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
 Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **46 retained question IDs:45 with deferred scope, and one fully
+there are **47 retained question IDs:46 with deferred scope, and one fully
 promoted to required work**. GFX-D04's required portion is now complete.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
@@ -306,3 +306,15 @@ combiner input justifies skipping its discard effect. The source references,
 corpus-presence limitations and focused queued-draw tests are recorded under
 `build/blinx/shader-clip-storage-20261016/` and the governing closure checklist.
 No new question ID or closing requirement is introduced.
+
+## Constant SAVE after direct RDI writes - 2026-10-17
+
+| ID | Question | Evidence and reason it can wait | Reopen when |
+| --- | --- | --- | --- |
+| GFX-D25 | Why do eight saved constant words retain original bits after verified direct RDI tagging? | The SAVE-only physical batch writes/reads all768 distinct words exactly, then serializes760 exact markers and eight values equal to original OR marker at the same candidate offsets. The mechanism is unknown; no OR rule is implemented. A separate direct-source experiment verifies all768 original constants after LOAD, then all768 distinct replacements after source-only edits and another LOAD, with no DATA writes or SAVE. The required initial LOAD mapping therefore has independent evidence. Production SAVE/replacement-context guards remain; no reached attract consumer currently requires SAVE after direct RDI constant edits. Private receipts: probe results/context-constant-snapshot-observed-20261017 and context-constant-load-observed-20261017. | The supported title reaches SAVE/replacement-context preservation, direct constant RDI edits become observable through SAVE, or initial LOAD/rendering disagrees with the established source mapping. Promote the needed behavior before accepting that reached route. |
+
+GFX-D21 addendum: the original initial c137 bits, along with all192 constant
+slots, now have direct physical LOAD evidence. The earlier unconsumed-fog review
+remains historical; it no longer justifies treating the initial bank as unknown.
+Exact fog/arithmetic edge behavior and newly reached consumers retain their
+existing reopening conditions. GFX-D25 is a separate unresolved SAVE question.

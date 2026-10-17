@@ -10,7 +10,7 @@ struct LoadedContextFixture {
         put32(ram,put,0x40000|method);put32(ram,put+4,value);put+=8;
     }
     void kick(){write(0x800040,put);}
-    LoadedContextFixture(bool batching=true) {
+    LoadedContextFixture(bool batching=true,const std::array<std::array<uint32_t,4>,192>* constants=nullptr) {
         gpu.set_pfifo_run_batching(batching);
         gpu.set_mem_access(
             [this](uint32_t a,void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(p,ram.data()+a,n);return true;},
@@ -36,6 +36,8 @@ struct LoadedContextFixture {
         put32(image,0xe0,0x1300);put32(image,0xe4,0x1200);
         put32(image,0x110,64);put32(image,0x114,64);
         put32(image,0x118,64);put32(image,0x11c,64);
+        if(constants)for(unsigned slot=0;slot<192;++slot)for(unsigned lane=0;lane<4;++lane)
+            put32(image,0x231c+slot*16+(3-lane)*4,(*constants)[slot][lane]);
         for(uint32_t i=0;i<image.size();i+=4)write(0x718000+i,get32(image,i));
         write(0x400788,1);
         write(0x400148,0x11);write(0x400144,0x10010100);write(0x400764,0x08000000);

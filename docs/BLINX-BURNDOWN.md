@@ -12,7 +12,7 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 46 retained IDs / 45 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
+| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 47 retained IDs / 46 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
 Latest checkpoint: the `c3823f8` shader-dependency repair passes its focused
 checks, but the connected replacement under `graphics-vsh-context-20261016`
@@ -25,14 +25,20 @@ Independent source/corpus review ties c122 to consumed secondary RGB in16
 programs/4181 retained draws. The original packed-color setter skips an equal
 CPU cache value; initialization can therefore skip its zero upload. CPU-cache
 zeros do not prove GPU initialization. Initial context-bank transfer is now a
-reached requirement. The existing192-slot saved/live mapping remained unproven;
-one bounded hardware batch was prepared with offline failure controls. After
-remote recovery, the first prepare rejected disabled PGRAPH before allocation
-or GPU writes; the existing guarded enable then matched its expected readback.
-The actual batch passed prepare/input delivery but stopped at constant DATA
-readback (`DE400039`). No result read or failure cleanup followed. Separate
-qualified remote recovery was requested, and the write/read sequence is under
-source review. No constant mapping or model relaxation is claimed.
+reached requirement. That mapping is now established: the physical direct-source
+batch verifies all768 original constant words after LOAD and all768 distinct
+replacement words after source-only edits and another LOAD. It performs no
+constant DATA writes or SAVE and completes in21.199ms. c122 is genuinely loaded
+as zero; it is not inferred from the CPU cache.
+
+The maintained loader now restores all192 constants with raw WZYX-to-XYZW
+conversion and marks their actual loaded lanes produced. HLE hot paths are
+unchanged. The queued NV2A suite passes in0.40s, including774 added rendered
+checks across interpreted/compiled shaders, batched/unbatched queues, all192
+slots, source mutation and partial uploads. The affected build took34.5s.
+The separate SAVE-only experiment's eight OR-like words are retained as
+GFX-D25; its unknown mechanism is not assigned to LOAD. GPU/graphics remain
+7/9 pending the connected G05 attract/exit/reentry run.
 
 The same shader helper also passes the remaining516 indexed draws/3700
 vertices offline: combined with the earlier four inputs, all520 indexed draws/

@@ -11,11 +11,13 @@ namespace xlle {
 // a 0x36a0 prefix; that does not establish a general hardware LOAD read extent.
 // Retain the entire producer allocation, including its opaque tail. Only fields
 // with independently established consumers may be projected into live state.
-// See BLINX-QUALIFICATION-CLOSURE.md, 2026-10-16 surface mapping/slot review.
+// See BLINX-QUALIFICATION-CLOSURE.md, surface and constant LOAD observations.
 class Nv2aContextImage {
 public:
     static constexpr size_t kSourceBytes = 0x37f0;
     static constexpr size_t kMeasuredSavePrefixBytes = 0x36a0;
+    static constexpr size_t kConstantOffset = 0x231c;
+    static constexpr size_t kConstantSlots = 192;
 
     // Decode into a staged owner. Failure leaves this object unchanged. There
     // is no guessed default for the rest of the context and no method replay.
@@ -64,6 +66,14 @@ public:
     // 23 image words at E0..138. BASE/LIMIT do NOT identify a DMA object.
     uint32_t surface_word(size_t index) const { return surfaces_.at(index); }
     bool surface_known(size_t index) const { return index<23 && (surfaces_known_&(1u<<index)); }
+    // Original and distinctly tagged source LOADs both establish all192 slots.
+    // Source DWORD order is W,Z,Y,X; caller lanes use logical X,Y,Z,W. Preserve
+    // raw binary32 bits, including zero, without numeric conversion or uploads.
+    uint32_t constant_word(size_t slot,size_t lane) const {
+        const size_t offset=kConstantOffset+slot*16+(3-lane)*4;
+        return uint32_t(source_.at(offset)) | (uint32_t(source_.at(offset+1))<<8) |
+               (uint32_t(source_.at(offset+2))<<16) | (uint32_t(source_.at(offset+3))<<24);
+    }
     // A later method changes live storage, never the retained LOAD source.
     // Unmapped side effects invalidate readback instead of returning stale data.
     void set_surface_word(size_t index,uint32_t value) {

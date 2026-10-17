@@ -284,6 +284,11 @@ bool Nv2a::pgraph_load_context() {
     raster_state_[kRasterSurfaceColorOffset]=surface_color_offset_;
     raster_state_[kRasterSurfaceZetaOffset]=surface_zeta_offset_;
     raster_state_[kRasterSurfacePitch]=surface_pitch_;
+    for(size_t slot=0;slot<Nv2aContextImage::kConstantSlots;++slot)
+        for(size_t lane=0;lane<4;++lane) {
+            const uint32_t bits=staged->constant_word(slot,lane);
+            std::memcpy(&transform_constants_[slot][lane],&bits,sizeof(bits));
+        }
     // Do not infer PRAMIN object identities/bound flags from resolved BASE/LIMIT.
     // The rest of the live frontend is unknown after LOAD, not reset-to-zero.
     // Its method/read consumers remain guarded until explicit provenance exists.
@@ -296,7 +301,7 @@ bool Nv2a::pgraph_load_context() {
     context_raster_known_[kRasterSurfaceColorOffset]=0xffffffffu;
     context_raster_known_[kRasterSurfaceZetaOffset]=0xffffffffu;
     context_raster_known_[kRasterSurfacePitch]=0xffffffffu;
-    context_program_known_.fill(0);context_constants_known_.fill(0);
+    context_program_known_.fill(0);context_constants_known_.fill(0xf);
     context_vertex_format_known_=context_vertex_offset_known_=0;
     context_vertex_current_known_.fill(0);
     context_immediate_known_.clear();context_inline_known_.clear();

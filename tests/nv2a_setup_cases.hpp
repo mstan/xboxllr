@@ -187,12 +187,15 @@ static void test_pgraph_context_transfer() {
     std::fill(image.begin(),image.end(),0xde);
     CHECK(std::equal(original.begin(),original.end(),decoded.source().begin()));
     for(size_t i=0;i<23;++i)CHECK(decoded.surface_word(i)==(surface[i]|(i>=17?0x3fu:0u)));
+    for(size_t slot=0;slot<192;++slot)for(size_t lane=0;lane<4;++lane)
+        CHECK(decoded.constant_word(slot,lane)==get32(original,0x231c+uint32_t(slot)*16+uint32_t(3-lane)*4));
     for(const auto& bad:std::vector<std::pair<uint32_t,uint32_t>>{
             {0,0},{0,0x01000001},{0xe0,1},{0x10c,0x40000000},
             {0x110,0x20},{0x120,0x10000},{0x124,1},{0x138,0x4000003f}}) {
         image=original;put32(image,bad.first,bad.second);
         CHECK(!decoded.load(image.data(),image.size(),error) && error);
         CHECK(std::equal(original.begin(),original.end(),decoded.source().begin()));
+        CHECK(decoded.constant_word(191,0)==get32(original,0x2f18));
     }
     CHECK(!decoded.load(original.data(),Image::kMeasuredSavePrefixBytes,error));
     CHECK(!decoded.load(nullptr,Image::kSourceBytes,error));
