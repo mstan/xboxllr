@@ -14,7 +14,17 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 46 retained IDs / 45 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current implementation checkpoint: G01 original lifetime and G02-G04 startup,
+Current execution checkpoint: the reviewed scoped contiguous-DMA host-query
+cache is integrated in `a3c25af`. Five instrumented and four plain affected
+cases pass; the selected production title builds in a separate output. One
+changed, muted connected G05 run began at2026-10-17T00:55:33UTC under
+`build/blinx/graphics-dma-query-cache-20261016/`. Its guest clocks, GPU model and
+closing requirements are unchanged. The prior run is sealed after2726.188s:
+six loading/logo/publisher-animation pictures and657 paired destruction returns,
+with no guards or consumed Start. Its controlled replacement stop is not guest
+retirement. The32.5x focused DMA-loop result is not a measured title speedup.
+
+Prior startup implementation checkpoint: G01 original lifetime and G02-G04 startup,
 owned context/drawing, enabled-noise reconstruction and bounded native comparison
 have passed. The maintained GPU-LLE title produces completed loading pictures and
 processed digital input. Its passive observer records 483 paired original
