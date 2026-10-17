@@ -23,6 +23,15 @@ unchanged. The muted replacement began at2026-10-17T01:49:27UTC under
 `build/blinx/graphics-two-trigger-20261016/`. Guest clocks, GPU model, completion
 and G05 requirements are unchanged; no host frame cap exists to remove.
 
+The replacement has now completed the optional opening skip. Capture2 shows
+the opening countdown; generation1 delivered neutral/Start/neutral at0/20/220ms
+on its actual reference-clock epoch. Original cleanup reaches initialized title,
+and capture4 visibly shows the Blinx logo and Press START prompt at completed1384/
+submitted1385. Capture3 is retained as a plain transition, not title acceptance.
+Input is neutral and the title idle counter advances; the scored gameplay-exit
+trigger remains unarmed. `opening-skip-title.aot-private.json` retains this
+milestone. Actual moving gameplay and the scored exit/reentry remain pending.
+
 The preceding scoped-DMA-cache run is sealed after3213.171s with five reviewed
 loading/logo/opening pictures and661 paired destruction returns, no unmatched
 entries, guards or consumed Start. It did not reach gameplay. Its controlled

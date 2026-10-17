@@ -154,6 +154,21 @@ there is no clock acceleration, frame dropping or fabricated completion.
 Actual end-to-end savings remain unmeasured. Total7/9 and existing deferrals
 are unchanged; G05 remains open.
 
+The live replacement has since passed this optional prefix. Capture2 is the
+actual opening countdown. Generation1 was consumed at reference27342ms and
+delivered neutral/Start/neutral at elapsed0/20/220ms. The original path reaches
+state1 after cleanup, with normal resource destruction observed; initialized
+title follows. Capture4 visibly shows the Blinx logo and Press START prompt at
+completed1384/submitted1385. Capture3 only shows a plain transition and supplies
+no visible-title claim. The prefix receipt is
+`graphics-two-trigger-20261016/opening-skip-title.aot-private.json`.
+
+The title idle counter is advancing with input neutral, and generation2 remains
+unarmed. The prefix does not establish gameplay or scored content retirement.
+The same live run continues toward two moving gameplay pictures, separately
+scored Start/exit/title and relevant content retirement, then neutral reentry
+and two more moving pictures. No family disposition or deferral has changed.
+
 ## Quiescent storage and earlier service profile - 2026-10-16
 
 The animation-entry seed cannot be used with reset storage: it retains an
