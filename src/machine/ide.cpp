@@ -1429,4 +1429,58 @@ void IdeController::io_write(uint16_t port, int size, uint32_t value) {
     }
 }
 
+bool IdeController::write_observation(std::FILE* output) const {
+    if (!output) return false;
+    std::fprintf(output,
+        "{\"schema\":1,\"resumable\":false,\"unit\":%d,\"bus_command\":%u,"
+        "\"bm_base\":%u,\"bm_command\":%u,\"bm_status\":%u,\"bm_address\":%u,"
+        "\"irq_asserted\":%s,\"irq_line\":%d,\"irq_pulses\":%llu,"
+        "\"sectors_read\":%llu,\"sectors_written\":%llu,\"writeback\":%s,\"drives\":[",
+        unit_,bus_cmd_,bm_base_,bm_cmd_,bm_status_,bm_addr_,irq_asserted_?"true":"false",
+        irq_num_,static_cast<unsigned long long>(irq_pulses_),
+        static_cast<unsigned long long>(sectors_read_),
+        static_cast<unsigned long long>(sectors_written_),hdd_writeback_?"true":"false");
+    for (unsigned i=0;i<2;++i) {
+        const auto& d=drives_[i];
+        std::fprintf(output,
+            "%s{\"kind\":%u,\"present\":%s,\"feature\":%u,\"error\":%u,\"nsector\":%u,"
+            "\"sector\":%u,\"lcyl\":%u,\"hcyl\":%u,\"select\":%u,\"status\":%u,"
+            "\"hob\":[%u,%u,%u,%u,%u],\"nb_sectors\":%llu,"
+            "\"geometry\":[%d,%d,%d,%d,%d],\"mult_sectors\":%d,\"lba48\":%s,"
+            "\"locked\":%s,\"security_frozen\":%s,\"security_attempts\":%u,"
+            "\"identify_set\":%s,\"data_ptr\":%llu,\"data_end\":%llu,"
+            "\"end_transfer\":%u,\"req_nb_sectors\":%d,\"dma_command\":%u,"
+            "\"sense_key\":%u,\"asc\":%u,\"atapi_dma\":%s,"
+            "\"packet_reply_size\":%d,\"packet_reply_offset\":%llu,\"packet_byte_limit\":%u,"
+            "\"tray_open\":%s,\"tray_locked\":%s}",
+            i?",":"",static_cast<unsigned>(d.kind),d.present()?"true":"false",
+            d.feature,d.error,d.nsector,d.sector,d.lcyl,d.hcyl,d.select,d.status,
+            d.hob_feature,d.hob_nsector,d.hob_sector,d.hob_lcyl,d.hob_hcyl,
+            static_cast<unsigned long long>(d.nb_sectors),d.cylinders,d.heads,d.sectors,
+            d.drive_heads,d.drive_sectors,d.mult_sectors,d.lba48?"true":"false",
+            d.locked?"true":"false",d.security_frozen?"true":"false",d.security_attempts,
+            d.identify_set?"true":"false",static_cast<unsigned long long>(d.data_ptr),
+            static_cast<unsigned long long>(d.data_end),static_cast<unsigned>(d.end_transfer),
+            d.req_nb_sectors,static_cast<unsigned>(d.dma_cmd),d.sense_key,d.asc,
+            d.atapi_dma?"true":"false",d.packet_reply_size,
+            static_cast<unsigned long long>(d.packet_reply_offset),d.packet_byte_limit,
+            d.tray_open?"true":"false",d.tray_locked?"true":"false");
+    }
+    std::fprintf(output,"],\"overlay\":[");
+    std::vector<uint64_t> sectors;
+    sectors.reserve(overlay_.size());
+    for (const auto& sector:overlay_) sectors.push_back(sector.first);
+    std::sort(sectors.begin(),sectors.end());
+    bool first=true;
+    for (uint64_t sector:sectors) {
+        std::fprintf(output,"%s{\"lba\":%llu,\"hex\":\"",first?"":",",
+            static_cast<unsigned long long>(sector));
+        first=false;
+        for (uint8_t byte:overlay_.at(sector)) std::fprintf(output,"%02x",byte);
+        std::fprintf(output,"\"}");
+    }
+    std::fprintf(output,"]}");
+    return std::ferror(output)==0;
+}
+
 }  // namespace xlle

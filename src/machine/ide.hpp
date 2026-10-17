@@ -166,6 +166,10 @@ public:
     uint64_t irq_pulses() const { return irq_pulses_; }
     uint64_t sectors_read() const { return sectors_read_; }
     uint64_t sectors_written() const { return sectors_written_; }
+    // Passive diagnostic JSON, including COW sector bytes. This is deliberately
+    // not a resumable device snapshot: PIO payloads and security keys are omitted.
+    // Never reads a port (regular ATA status reads would acknowledge IRQ14).
+    bool write_observation(std::FILE* output) const;
 
 private:
     static constexpr size_t kIoBufferSize = 256 * 512 + 4;  // max transfer (nsector==0 -> 256)

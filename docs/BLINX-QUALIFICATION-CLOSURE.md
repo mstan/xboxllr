@@ -56,7 +56,7 @@ probe publication correction; a reached original consumer reopens that scope.
 
 | Remaining step | Closing evidence / current state |
 | --- | --- |
-| Correct the initialized startup profile | Current blocker: the observer-fixed run fails texture creation 422 with 243 available pages for a 256-page texture. The old seed retains an unfinished 1548-page boot allocation; an exact pre-animation capture is under review. |
+| Correct the initialized startup profile | Current blocker: the observer-fixed run fails texture creation 422 with 243 available pages for a 256-page texture. The reviewed pre-FE service snapshot has 1597 more free pages and completed original disk I/O; the selected GPU pilot is rebuilding before startup/handoff checks and connected acceptance. |
 | Reach actual attract gameplay through the original graphics route | Saved-display retirement and the passive method observer pass. Two completed loading pictures are established; actual gameplay remains pending. |
 | Complete G05 gameplay output and content lifetime | Two completed gameplay pictures with actual Swap/completion and ownership evidence; reuse G01-G04. |
 | Exit with real Start and reenter with neutral input | Delivered input, visible title return, content retirement, fresh submissions and two completed reentry gameplay pictures. |
@@ -73,7 +73,7 @@ the closed run are frozen under `build/blinx/graphics-saved-display-connected-20
 Offline ownership analysis accounts for the initial1805 contiguous pages. Of
 these,1548 belong to an unpublished boot-APU allocation. Its descriptor remains
 zero and its original zeroing-loop interrupt frame belongs to captured current
-threadD0008A98, distinct from the suspended image-launch workerD0008BF8. The
+threadD0008A98, distinct from the suspended image-launch worker D0008BF8. The
 retained interrupt frame is historical, not proof of the current instruction;
 the original allocation is not established as disposable. No pages are freed by
 inference. The source-pinned census is under
@@ -90,6 +90,50 @@ passes a submission of over 6000 methods in 0.14 seconds. The native fixture
 compares ordinary/bulk and held/resumed queues, including exact notifications,
 metadata, GET and unchanged RAM. The source-bound rerun is under
 `build/blinx/graphics-method-observer-20261016/`; G05 remains open and total 7/9.
+
+## Quiescent storage and earlier service profile - 2026-10-16
+
+The animation-entry seed cannot be used with reset storage: it retains an
+outstanding original file wait. Trying to capture after storage initialization
+returns instead stops at the existing FE1510 boot-audio guard, before that
+return. Neither guard was bypassed. Passive IDE/PIC observation now accompanies
+exact-entry RAM captures, without port reads, IRQ acknowledgements or guest
+mutation. Independent source review passes. The existing IDE DMA-write test now
+observes twice before acknowledgement, verifies unchanged transfer/IRQ counts,
+and subsequently reads all actual bytes through PIO; it passes in 0.38 seconds.
+The observation explicitly is not a resumable device snapshot.
+
+A capture at original 80063E61, before the guarded FE operation, establishes a
+smaller valid service-profile candidate. RAM SHA256 is
+`df1430148d428d266e47fcfb7091d5bca8d6c6101a5bcd316b11a258a2d359fd`.
+Actual disk completion has already signaled the file event, written IOSB success
+with 512 bytes, retired the IRP and readied launch worker D0008BF8. Both IDE drives
+have no armed transfer; BM command/status and IRQ are clear. Both PICs have zero
+IRR/ISR/edge history and their masks/ELCR match the retained kernel. No pending
+completion is imported, replayed or manufactured. The exact capture takes 6.938s
+under reduced gaming priority; its input/output pins are retained.
+
+Current caller D0008A98 is Running at IRQL0; the VM allocator lock is unheld.
+The original counters show 16147 available pages and 208 contiguous pages: 1597
+more free pages than old18m, without freeing or enlarging guest RAM. Boot APU
+contiguous accounting is zero; 3784 bytes of real boot pool ownership remain.
+Its incomplete constructor retains the same private recursion 2 critical section
+and caller ownership as old18m. KernelApcDisable is zero. Independent review
+finds no supported kernel-service consumer of that private lock, and all 16
+reviewed code spans retain their earlier hashes. This is initialized kernel
+service execution; the dormant boot APU constructor is not resumed or claimed
+complete. Its objects and lock are preserved. LLE-D06 records the limitation and
+reopening trigger.
+
+The exact hash is admitted alongside the unchanged older profile in
+`io_device.cmake`, and the GPU pilot is configured to select it. The actual
+Ready-worker guard and original first-image boundary remain unchanged. Focused
+allocator/storage/startup/handoff checks and the connected G05 sequence are still
+required; selecting a capture does not qualify GPU/graphics. Evidence is under
+`build/blinx/graphics-boot-entry-20261016/pre-fe-control/`, with independent
+review SHA256 `c688a31265d60b336ff4265fae2242e3336b1b1e305e0f8eefc64c98a86d0ecb`.
+The selected build is under `build/blinx/graphics-startup-profile-20261016/`.
+Total remains 7/9, with 46 retained deferral IDs / 45 scopes.
 
 ## Later loading allocation and exact boot-entry capture - 2026-10-16
 
@@ -140,7 +184,7 @@ boot-rendering qualification is required by this candidate. Total remains 7/9;
 The bounded status capture confirms original D3DX returns `8007000E` at caller
 2E710. Its parser and format checks pass, but original CreateTexture2 returns zero
 for32x64 DXT1. The original kernel reports zero available pages; its usage classes
-account for all16384 physical pages. This is allocation exhaustion, not damaged
+account for all 16384 physical pages. This is allocation exhaustion, not damaged
 DDS data. The diagnostic stops at error entry after678.016 seconds and preserves
 the full64MiB physical RAM before the error loop overwrites stack evidence.
 
@@ -557,7 +601,7 @@ original kernel queries per wake. Its first longer run exposed missing fixture
 bootstrap: the captured pre-image launch worker was still runnable. Completing
 the production section/launch handoff before enabling IRQs resolves that guard;
 no runtime stack ownership guard or original worker behavior is bypassed.
-With this setup the prior clock admits AV3 return only at frame17, after all16
+With this setup the prior clock admits AV3 return only at frame17, after all 16
 waiter wakes have finished. A receipt written by the raw AV caller at its real
 return fails the required positive overlap assertion. This is an authored
 scheduling counterexample, not a substituted execution of the title's F9E80.
@@ -1105,7 +1149,7 @@ Evidence: probe results/context-surfaces-observed-20261016/ (saved image SHA256
 511216e436dcea8d4286cf57ef14cbba84de8a08becc37607cd49e46c69ba6c4), and title
 build/blinx/transform-bank-audit-20261016/review.aot-private.json (SHA256
 d0765b96657936500cb5b18230b713cd6ae84e23cc68a2532006bd9791f1e102).
-Root verified all16 transform-review input identities; no title recapture was needed.
+Root verified all 16 transform-review input identities; no title recapture was needed.
 
 ## Audio family qualified; GPU transfer investigation continues - 2026-10-16
 

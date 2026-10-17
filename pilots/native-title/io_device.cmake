@@ -9,9 +9,17 @@ if(PILOT_IO_DEVICE STREQUAL "LLE")
   if(NOT EXISTS "${PILOT_IO_DEVICE_SNAPSHOT}")
     message(FATAL_ERROR "Device LLE requires the owned initialized RAM capture")
   endif()
-  set(io_snapshot_sha "31ede2a0e799243b3d39033a0127147b7631950087c05306e64b4203e6ea9ed1")
   file(SHA256 "${PILOT_IO_DEVICE_SNAPSHOT}" actual_sha)
-  if(NOT actual_sha STREQUAL io_snapshot_sha)
+  # Initialized kernel-service profiles, not resumable boot continuations.
+  # The earlier exact entry preserves original completed disk I/O and the same
+  # ready launch worker, without the later unfinished boot-APU allocation.
+  # Small boot objects/private lock ownership remain intact in both captures.
+  # See BLINX-QUALIFICATION-CLOSURE.md; no allocation is freed by this selection.
+  if(actual_sha STREQUAL "31ede2a0e799243b3d39033a0127147b7631950087c05306e64b4203e6ea9ed1")
+    set(io_snapshot_sha "31ede2a0e799243b3d39033a0127147b7631950087c05306e64b4203e6ea9ed1")
+  elseif(actual_sha STREQUAL "df1430148d428d266e47fcfb7091d5bca8d6c6101a5bcd316b11a258a2d359fd")
+    set(io_snapshot_sha "df1430148d428d266e47fcfb7091d5bca8d6c6101a5bcd316b11a258a2d359fd")
+  else()
     message(FATAL_ERROR "Unreviewed device LLE capture")
   endif()
   file(TO_CMAKE_PATH "${PILOT_IO_DEVICE_SNAPSHOT}" io_snapshot_path)

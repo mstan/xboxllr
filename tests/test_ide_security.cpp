@@ -34,6 +34,17 @@ struct Drive {
     }
     void cmd(uint8_t c) { ide.io_write(0x1f7, 1, c); }
     void ack() { (void)ide.io_read(0x1f7, 1); }
+    std::string observation() {
+        std::FILE* file=std::tmpfile();
+        require(file!=nullptr,"temporary observation file");
+        require(ide.write_observation(file),"passive IDE observation");
+        require(std::fflush(file)==0 && std::fseek(file,0,SEEK_SET)==0,"rewind observation");
+        std::string result;char bytes[1024];size_t count;
+        while((count=std::fread(bytes,1,sizeof(bytes),file)))result.append(bytes,count);
+        require(!std::ferror(file),"read observation");
+        require(std::fclose(file)==0,"close observation");
+        return result;
+    }
     void srst() { ide.io_write(0x3f6, 1, 4); ide.io_write(0x3f6, 1, 0); }
     void aborted() {
         require((ide.io_read(0x3f6, 1) & 0x89) == 1, "ABRT without BSY/DRQ");
@@ -181,6 +192,14 @@ int main() {
         } else {
             require(d.irq && d.ide.sectors_written()==2 && d.ide.overlay_sectors()==2 && d.faults.empty(),
                     "write completion follows actual two-sector storage");
+            const auto pulses=d.ide.irq_pulses();
+            const auto observed=d.observation();
+            require(observed==d.observation(),"passive observations are stable");
+            require(d.irq && d.ide.irq_pulses()==pulses && chunks==2 && d.ide.sectors_written()==2,
+                    "observation cannot acknowledge, replay DMA or create another completion");
+            require(observed.find("\"resumable\":false")!=std::string::npos &&
+                    observed.find("\"lba\":2")!=std::string::npos && observed.find("\"lba\":3")!=std::string::npos,
+                    "observation retains actual written sectors without claiming resumability");
             d.ack();d.ide.io_write(0xff60,1,0);
             d.lba0();d.ide.io_write(0x1f2,1,2);d.ide.io_write(0x1f3,1,2);d.cmd(0x20);
             for(unsigned i=0;i<512;++i)

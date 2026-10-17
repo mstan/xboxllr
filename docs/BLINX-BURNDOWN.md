@@ -30,9 +30,12 @@ with a bounded per-dispatch observer; three affected suites and the large-submis
 ABI check pass. The rerun passes that boundary but fails its 422nd texture creation:
 a 512x512 format 6 texture needs 256 pages while only 243 remain. Its two completed
 pictures are loading screens, not gameplay. The old startup snapshot retains an
-unfinished boot-APU allocation of 1548 pages. A new exact original animation-entry
-capture succeeds before those allocations; startup preconditions are under review
-before any profile replacement. No allocation is freed by inference. The remaining
+unfinished boot-APU allocation of 1548 pages. An exact later entry before boot-APU
+control setup has completed disk I/O, a Ready launch worker and 1597 more free
+pages than the old seed. Independent review permits this initialized-service
+profile, retaining its small boot objects and private lock. The GPU pilot is being
+rebuilt with its exact hash; startup/handoff checks and the connected run remain
+required. No allocation is freed by inference. The remaining
 sequence must establish moving attract output, a genuine Start/release,
 visible title return, relevant content retirement and fresh attract reentry.
 No additional hardware observation is currently required for that sequence.

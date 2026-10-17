@@ -169,3 +169,18 @@ Audio source evidence and active stage/owner dependencies are recorded in
 [AUDIO-LLE.md](AUDIO-LLE.md). The private source handoff retains the pinned
 register/source hashes. No new audio playback or console writes are required
 merely to append this queue.
+
+LLE-D06 initialized-service ownership clarification, 2026-10-16: the reviewed
+pre-FE snapshot starts at an exact original entry with completed disk I/O, a Ready
+launch worker, IRQL0 and no boot-APU contiguous allocation. It retains 3784 bytes
+of small boot pool ownership and the incomplete constructor's private recursive
+lock, identical to old18m. Those objects are not freed, the published partial
+singleton is not treated as initialized, and boot/APU continuation is unsupported.
+The bridge adopts the captured current thread as its kernel-service caller;
+it does not restore that original boot continuation. No supported service
+consumer of the private lock is demonstrated, and KernelApcDisable is zero.
+Reopen if full boot/APU continuation is supported, a selected original consumer
+enters that private constructor/lock path, or captured ownership contradicts
+normal title execution. Actual original allocator, disk, image handoff and G05
+output/lifecycle still must pass. This extends the existing startup-profile scope;
+it adds no family waiver or new deferral ID.

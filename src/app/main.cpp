@@ -3013,6 +3013,31 @@ int main(int argc, char** argv) {
                         regs.esi,regs.edi,regs.eip,regs.eflags);
                     const bool register_closed = std::fclose(file)==0;
                     if (count<0 || !register_closed) {mach.cpu().request_stop("RAM entry capture register write failed"); return;}
+                    file = create_capture_file((path+".devices.aot-private.json").c_str());
+                    if (!file) {mach.cpu().request_stop("RAM entry capture device create failed"); return;}
+                    std::fprintf(file,"{\"schema\":1,\"resumable\":false,\"ide\":");
+                    const bool ide_written=mach.ide() && mach.ide()->write_observation(file);
+                    std::fprintf(file,",\"pic\":[");
+                    auto* pic=mach.pic_dbg();
+                    if (pic) {
+                        const Pic8259* chips[]={&pic->master(),&pic->slave()};
+                        for (unsigned i=0;i<2;++i) {
+                            const auto& p=*chips[i];
+                            std::fprintf(file,
+                                "%s{\"irr\":%u,\"imr\":%u,\"isr\":%u,\"priority_add\":%u,"
+                                "\"irq_base\":%u,\"last_irr\":%u,\"elcr\":%u,\"init_state\":%u,"
+                                "\"read_reg_select\":%u,\"init4\":%s,\"single_mode\":%s,\"auto_eoi\":%s,"
+                                "\"poll\":%s,\"special_mask\":%s,\"special_fully_nested\":%s}",
+                                i?",":"",p.irr,p.imr,p.isr,p.priority_add,p.irq_base,p.last_irr,p.elcr,
+                                p.init_state,p.read_reg_select,p.init4?"true":"false",p.single_mode?"true":"false",
+                                p.auto_eoi?"true":"false",p.poll?"true":"false",p.special_mask?"true":"false",
+                                p.special_fully_nested?"true":"false");
+                        }
+                    }
+                    std::fprintf(file,"]}\n");
+                    const bool devices_written=ide_written && pic && std::ferror(file)==0;
+                    const bool devices_closed=std::fclose(file)==0;
+                    if (!devices_written || !devices_closed) {mach.cpu().request_stop("RAM entry capture device write failed"); return;}
                     std::printf("[det] RAM entry capture completed at %08x: %s\n",address,path.c_str());
                     std::fflush(stdout);
                     mach.cpu().request_stop("RAM entry capture completed; no resumed guest execution");
