@@ -309,6 +309,12 @@ target_include_directories(test_vsh_dependencies PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_vsh_dependencies PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
 add_test(NAME vsh_dependencies COMMAND test_vsh_dependencies)
 
+# Private retained inputs replay the same admission helper without title boot.
+# No captured game data is built into this executable or registered with CTest.
+add_executable(xlle_vsh_dependency_replay tools/native_vsh_dependency_replay.cpp)
+target_include_directories(xlle_vsh_dependency_replay PRIVATE ${XLLE_INCLUDES})
+target_link_libraries(xlle_vsh_dependency_replay PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)
+
 add_executable(test_vsh_capture tests/test_vsh_capture.cpp)
 target_include_directories(test_vsh_capture PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_vsh_capture PRIVATE nv2a_vsh_emulator nv2a_vsh_cpu)

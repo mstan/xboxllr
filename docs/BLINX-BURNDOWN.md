@@ -7,14 +7,29 @@ now governs remaining work and family acceptance. Exhaustive scene numerical
 proof stays deferred; working LLE routing/processing and connected title evidence
 remain required. Existing blocked-fence/full64-slot evidence is reused.
 
-**Current status, 2026-10-16: 7/9 bounded families qualified.** Input, display,
+**Current status, 2026-10-17: 7/9 bounded families qualified.** Input, display,
 memory, files, scheduling, movies and audio are complete. GPU and graphics remain.
 
 | Qualified | Remaining required | Recorded questions / current deferral scope |
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 47 retained IDs / 46 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Latest execution checkpoint: the hardware-grounded constant loader in `a06f127`
+Current execution checkpoint: the exact preserved `beaa366` title process resumed
+under fresh supervision after the owner pause, retaining its frozen `523057db`
+executable and `574ceb74` GPU library. It crossed the neutral title timeout,
+produced a completed loading picture and reached initialized attract. At369.95
+resumed seconds it exited2 on the loaded compressed depth/stencil ZROP-writer
+guard. `beads-xbox.1.127` owns that reached gap. Five prefix/loading captures
+remain; moving gameplay, scored Start/retirement and neutral reentry are pending.
+Host process exit is not guest teardown or G05 acceptance.
+
+The owner selected [validation separation](BLINX-VALIDATION-REPLAY.md) first.
+The reusable captured admission replay passes20 programs/284 vertices and
+missing-input controls in0.35s; the retained516 indexed draws pass in6.09s.
+These are scoped regression checks, not additional closing gates or scene-pixel
+qualification. Existing G01-G04 and accepted HLE appearance evidence are reused.
+
+Earlier input-marker checkpoint: the hardware-grounded constant loader in `a06f127`
 passes its queued checks, but its connected run stopped at1000.422s on a host
 input-marker probe failure immediately after the opening marker was published.
 There are two startup captures and661 paired destruction returns,0 unmatched;

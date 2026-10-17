@@ -19,6 +19,28 @@ the append-only queues. Required routing, startup, ownership, clocks and process
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
 
+## Validation separation and preserved run - 2026-10-17
+
+The owner renewed the goal with captured, replayable contracts first, short
+event-driven integration checks and an owner-ready native HLE playtest build.
+Full native LLE conversion and JSRF remain separate from this bounded milestone.
+The [replay workflow](BLINX-VALIDATION-REPLAY.md) describes which existing checks
+answer each question and the new standalone captured admission helper. Its
+20-program representative pack,516-draw indexed pack and missing-lane controls
+pass; this adds no live context, shader-arithmetic or pixel qualification claim.
+
+The prior initialized title process survived the owner pause. Its exact process,
+frozen executable/library, original code map and existing neutral input were
+checked before fresh supervision resumed it. The expired old supervisors were
+kept suspended until the guest's exit was independently confirmed. The original
+neutral timeout reached state4 and a completed NOW LOADING picture, then
+initialized attract132. The run exited2 at369.95 resumed seconds on the loaded
+compressed depth/stencil ZROP-writer guard; `beads-xbox.1.127` owns that bounded
+writer work. Obsolete observation helpers were retired only after the terminal
+exit. Actual moving gameplay and the rest of G05 remain pending. No GPU/HLE
+implementation changed in the replay-tool work, and no unrelated family needs
+requalification.
+
 ## Initial constant LOAD established - 2026-10-17
 
 The reached c122 producer gap is resolved by direct physical transfer evidence.
