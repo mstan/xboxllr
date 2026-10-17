@@ -52,6 +52,47 @@ Current disposition: seven of nine families;46 retained deferral IDs,45 scopes.
 GFX-D24 retains general CFG0/old USER readback questions beyond the required
 probe publication correction; a reached original consumer reopens that scope.
 
+## Current shader admission repair - 2026-10-16
+
+The two-trigger connected run is terminal after2900.906 host seconds. Its
+optional opening skip and visible title return passed, but first attract
+loading reached an unsupported opcode in the loaded-context dependency helper
+before actual moving gameplay. The closed capture audit records four pictures,
+1293 paired normal destruction returns and no unmatched entries. The scored
+exit trigger was never armed. Exact old library/source inputs are retained in
+`build/blinx/graphics-two-trigger-20261016/frozen-failed-dependencies/`.
+
+Root and one independent worker scanned all20 SHA-matched programs covering
+4327 programmable draws in the retained first-world corpus. Four programs
+(520 draws) use direct-input ARL followed by indexed constant reads; no program
+writes context outputs. The current repair batches ordinary arithmetic
+dependencies and resolves indexed dependencies from each vertex's actual
+producer-known inputs. It preserves the renderer's arithmetic, original
+instruction pairing and program, checks fetched indices before execution and
+keeps unknown-source/state-write guards. All12 authored dependency groups pass
+(0.04s), and the maintained NV2A queued suite passes (0.50s), including14 new
+interpreted/compiled cases for pixels, normal completion, missing producers,
+out-of-range indices and a later vertex selecting an unproduced constant. The
+actual old/new vertex-index cases are resolved after each attribute fetch;
+loaded contexts retain their existing transform-cache bypass.
+
+Independent offline preflight passes all20 programs and284 vertices from their
+first retained inputs:98 actual ARLs,588 relative fetches, no resolver rejection
+or missing declared-input dependency. Signed addresses include-96/-93/-90;
+resolved indices range0..102. This is representative program/admission coverage,
+not all4327 draws, runtime producer-known proof or new pixel qualification.
+The resolver calls the same maintained ARL function as the renderer, including
+its existing near-integer bias; this adds no new silicon precision claim.
+Computed/relative ARL sources, relative reads before a produced ARL, context
+writes and raw relative bases192..255 remain guarded outside this reached
+profile. A reached supported consumer reopens those boundaries.
+
+Evidence and review are under `build/blinx/vsh-context-dependencies-20261016/`
+and `build/blinx/vsh-dependency-worker-20261016/`. No additional
+hardware, full-frame numerical comparison or closed-family rerun is required.
+The repaired library can reuse the exact selected title executable; clocks,
+input and HLE default behavior are unchanged. Connected G05 acceptance remains.
+
 ## Remaining burndown and observed startup retirement - 2026-10-16
 
 | Remaining step | Closing evidence / current state |

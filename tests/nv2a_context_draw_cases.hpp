@@ -35,6 +35,22 @@ struct LoadedDrawFixture : LoadedContextFixture {
         if(primary)emit(0x194c,0xff604020); // v3 RGBA=(20,40,60,FF)
         if(secondary)emit(0x1950,0);        // v4
     }
+    void dependency_shader(bool indexed) {
+        emit(0x1e9c,0);
+        // Optional ARL a0,v5.w; MOV oPos,v0;
+        // DP3 oD0,c56[+a0],c56[+a0]; MOV oD1,v4,FINAL.
+        // Dot(1,0,0) with itself gives RGBA=1. The unread constant W and
+        // primary input v3 deliberately have no producer in these cases.
+        const uint32_t program[]={0,0x01a00aff,0x08000000,0,
+            0,0x0020001b,0x08000000,0x0000f800,
+            0,0x00a7001b,0x0c361800,indexed?0x0000f81au:0x0000f818u,
+            0,0x0020081b,0x08000000,0x0000f821};
+        for(unsigned i=indexed?0:4,j=0;i<16;++i,++j)emit(0xb00+j*4,program[i]);
+    }
+    void xyz_constant(unsigned index,unsigned lanes=3) {
+        emit(0x1ea4,index);
+        for(unsigned lane=0;lane<lanes;++lane)emit(0xb80+lane*4,bits(lane==0?1.f:0.f));
+    }
     void triangle(bool missing_first_x=false) {
         emit(0x17fc,5);
         unsigned i=0;
@@ -47,6 +63,41 @@ struct LoadedDrawFixture : LoadedContextFixture {
 };
 
 static void test_loaded_context_draws() {
+    for(bool compiled:{false,true})for(bool complete:{false,true}) {
+        LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);
+        f.state();f.dependency_shader(false);f.color(false,true);
+        f.xyz_constant(56,complete?3:2);f.triangle();f.kick();
+        if(complete)CHECK(f.failure.empty() && get32(f.ram,0x1044)==0xffffffff && f.read(0x800048)==0x1234);
+        else CHECK(f.failure.find("c56")!=std::string::npos && get32(f.ram,0x1044)==0xa5a5a5a5 && !f.read(0x800048));
+    }
+    for(bool compiled:{false,true})for(unsigned scenario=0;scenario<5;++scenario) {
+        LoadedDrawFixture f;f.gpu.set_vsh_compile_enabled(compiled);
+        f.state();f.dependency_shader(true);f.color(false,true);
+        f.xyz_constant(57,scenario==2?2:3);
+        if(scenario!=1)f.emit(0x1a5c,LoadedDrawFixture::bits(scenario==3?136.f:0.9995f));
+        if(scenario!=4)f.triangle();
+        else {
+            // The third vertex selects c58, which has no producer. A prior
+            // vertex's dependency result must not let this draw through.
+            f.emit(0x17fc,5);unsigned i=0;
+            for(const auto& xy:{std::pair{0.f,0.f},std::pair{8.f,0.f},std::pair{0.f,8.f}}) {
+                if(i++==2)f.emit(0x1a5c,LoadedDrawFixture::bits(1.9995f));
+                f.emit(0x1518,LoadedDrawFixture::bits(xy.first));f.emit(0x151c,LoadedDrawFixture::bits(xy.second));
+                f.emit(0x1520,LoadedDrawFixture::bits(1));f.emit(0x1524,LoadedDrawFixture::bits(1));
+            }
+            f.emit(0x17fc,0);f.emit(0x50,0x1234);
+        }
+        f.kick();
+        if(!scenario) {
+            CHECK(f.failure.empty() && get32(f.ram,0x1044)==0xffffffff && f.read(0x800048)==0x1234);
+            CHECK(f.gpu.generic_combiner_executed_batches()==1);
+        } else {
+            const char* expected[]={"","ARL source lane","c57","relative context index","c58"};
+            CHECK(f.failure.find(expected[scenario])!=std::string::npos);
+            CHECK(get32(f.ram,0x1044)==0xa5a5a5a5 && !f.read(0x800048));
+            CHECK(!f.gpu.generic_combiner_executed_batches());
+        }
+    }
     // TX_SHADER_CULL_MODE carries compare polarity, not a clip enable. The
     // source-defined low16 bits are inert for NONE/PROJECT2D/CUBEMAP, whereas
     // CLIPPLANE remains unsupported even if no combiner references its color.

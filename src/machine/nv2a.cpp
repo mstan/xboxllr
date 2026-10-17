@@ -3698,6 +3698,7 @@ bool Nv2a::submit_vertex_batch() {
                                              : immediate_vertices_.size();
     std::array<uint8_t,13> context_observable{};
     VshDependencies context_dependencies;
+    bool context_dependencies_per_vertex=false;
     if(pgraph_loaded_context_) {
         if(!context_draw_ready(context_observable))return false;
         if(indexed && context_vertex_format_known_!=0xffff) {
@@ -3915,23 +3916,32 @@ bool Nv2a::submit_vertex_batch() {
         fault_("NV2A vertex batch uses unsupported transform execution mode");
         return false;
     }
-    if(pgraph_loaded_context_) {
-        const char* error=nullptr;
-        const bool valid=program_parsed && vsh_dependencies(program.steps,
-            transform_program_.size()-transform_program_start_,context_observable,
-            context_dependencies,error);
-        if(!valid) {
-            if(program_owned)nv2a_vsh_program_destroy(&program);
-            fault_(error?error:"NV2A loaded shader dependency analysis failed");return false;
-        }
+    const auto context_constants_ready = [&]() {
         for(size_t i=0;i<context_dependencies.constants.size();++i) {
             if((context_constants_known_[i]&context_dependencies.constants[i])==
                context_dependencies.constants[i])continue;
-            if(program_owned)nv2a_vsh_program_destroy(&program);
             char why[128];
             std::snprintf(why,sizeof(why),"NV2A loaded shader constant c%zu needs components %x",i,
                           context_dependencies.constants[i]);
             fault_(why);return false;
+        }
+        return true;
+    };
+    if(pgraph_loaded_context_) {
+        const char* error=nullptr;
+        const size_t slots=transform_program_.size()-transform_program_start_;
+        context_dependencies_per_vertex=program_parsed && vsh_dependencies_need_vertex(program.steps,slots);
+        size_t count=0;
+        const bool valid=program_parsed && (context_dependencies_per_vertex
+            ? vsh_dependency_detail::validate_program(program.steps,slots,true,count,error)
+            : vsh_dependencies(program.steps,slots,context_observable,context_dependencies,error));
+        if(!valid) {
+            if(program_owned)nv2a_vsh_program_destroy(&program);
+            fault_(error?error:"NV2A loaded shader dependency analysis failed");return false;
+        }
+        if(!context_dependencies_per_vertex && !context_constants_ready()) {
+            if(program_owned)nv2a_vsh_program_destroy(&program);
+            return false;
         }
         // initial_temps/initial_outputs have a different owner from persistent
         // context/attribute state: the shader invocation initializes them.
@@ -4329,9 +4339,30 @@ bool Nv2a::submit_vertex_batch() {
                     ++vertex_census_.fetch_n;
                 }
             }
-            if(pgraph_loaded_context_ && !context_vertex_inputs_ready(context_dependencies.inputs)) {
-                if(program_owned)nv2a_vsh_program_destroy(&program);
-                return false;
+            if(pgraph_loaded_context_) {
+                if(context_dependencies_per_vertex) {
+                    // Loaded contexts already bypass batch-transform reuse.
+                    // Resolve indices only AFTER this vertex's real attribute
+                    // fetch and known-mask snapshot, before any shader runs.
+                    std::array<std::array<float,4>,16> inputs;
+                    for(size_t slot=0;slot<inputs.size();++slot)inputs[slot]=vertex_attributes_[slot].value;
+                    const char* error=nullptr;
+                    if(!vsh_dependencies_for_vertex(program.steps,
+                            transform_program_.size()-transform_program_start_,context_observable,
+                            inputs,context_vertex_current_known_,transform_constants_,context_constants_known_,
+                            context_dependencies,error)) {
+                        if(program_owned)nv2a_vsh_program_destroy(&program);
+                        fault_(error?error:"NV2A indexed shader dependency analysis failed");return false;
+                    }
+                    if(!context_constants_ready()) {
+                        if(program_owned)nv2a_vsh_program_destroy(&program);
+                        return false;
+                    }
+                }
+                if(!context_vertex_inputs_ready(context_dependencies.inputs)) {
+                    if(program_owned)nv2a_vsh_program_destroy(&program);
+                    return false;
+                }
             }
             TransformedVertex vertex;
             if (program_parsed) {

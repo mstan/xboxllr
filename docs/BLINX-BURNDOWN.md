@@ -28,9 +28,27 @@ the opening countdown; generation1 delivered neutral/Start/neutral at0/20/220ms
 on its actual reference-clock epoch. Original cleanup reaches initialized title,
 and capture4 visibly shows the Blinx logo and Press START prompt at completed1384/
 submitted1385. Capture3 is retained as a plain transition, not title acceptance.
-Input is neutral and the title idle counter advances; the scored gameplay-exit
-trigger remains unarmed. `opening-skip-title.aot-private.json` retains this
-milestone. Actual moving gameplay and the scored exit/reentry remain pending.
+`opening-skip-title.aot-private.json` retains this milestone. The run then
+reached first attract loading and stopped at2900.906 host seconds on the
+loaded-context shader dependency helper's limited opcode guard. It is terminal,
+with four captures,1293 paired normal destruction returns and no unmatched
+entries. No moving gameplay or scored generation2 exit/reentry was reached.
+The old GPU library and changed source inputs are preserved under
+`frozen-failed-dependencies/`; `failed-capture-audit.aot-private.json` indexes
+the closed output. A guard stop is not normal content retirement.
+
+The next fix is batched against all20 exact retained first-world program
+identities (4327 programmable draws), rather than discovering each missing
+shader operation in another long replay. Four programs/520 draws use actual
+ARL and indexed constants; none writes context outputs. Ordinary component
+dependencies and a per-vertex producer/range-checked address resolver pass12
+authored dependency groups and the maintained queued NV2A suite, including14
+new interpreted/compiled cases. Independent preflight passes all20 programs
+and284 first-input vertices with98 ARLs/588 relative fetches. These are sampled
+program inputs, not all4327 draws or runtime producer-known proof.
+The actual renderer retains its existing arithmetic;
+unknown producers and unsupported state writes remain guarded. This is not a
+new full-scene numerical gate and does not requalify the seven closed families.
 
 The preceding scoped-DMA-cache run is sealed after3213.171s with five reviewed
 loading/logo/opening pictures and661 paired destruction returns, no unmatched
