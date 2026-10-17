@@ -75,6 +75,14 @@ static uint32_t input_replay_trigger_configure(const char *path)
 {
     return input_replay_triggers_configure(path,NULL);
 }
+static uint32_t input_replay_trigger_failure(const struct InputReplayTrigger *trigger,
+                                           const char *operation,DWORD error)
+{
+    if(!error)error=ERROR_ACCESS_DENIED;
+    fprintf(stderr,"[INPUT REPLAY TRIGGER ERROR] operation=%s error=%lu path=\"%s\"\n",
+            operation,(unsigned long)error,trigger->path);
+    return error;
+}
 /* Read an immutable, complete marker without changing replay state. Missing
  * means wait; a missing parent, sharing violation, directory or bad contents
  * is an explicit error. Publish the marker by creating it privately, closing
@@ -85,23 +93,24 @@ static uint32_t input_replay_trigger_probe(const struct InputReplayTrigger *trig
     if(attributes==INVALID_FILE_ATTRIBUTES) {
         DWORD error=GetLastError();
         if(error==ERROR_FILE_NOT_FOUND){*found=0;return ERROR_SUCCESS;}
-        return error?error:ERROR_ACCESS_DENIED;
+        return input_replay_trigger_failure(trigger,"GetFileAttributesA",error);
     }
-    if(attributes&FILE_ATTRIBUTE_DIRECTORY)return ERROR_ACCESS_DENIED;
+    if(attributes&FILE_ATTRIBUTE_DIRECTORY)return input_replay_trigger_failure(trigger,"directory",ERROR_ACCESS_DENIED);
     HANDLE file=CreateFileA(trigger->path,GENERIC_READ,FILE_SHARE_READ,NULL,
                            OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file==INVALID_HANDLE_VALUE) {
         DWORD error=GetLastError();
         if(error==ERROR_FILE_NOT_FOUND){*found=0;return ERROR_SUCCESS;}
-        return error?error:ERROR_ACCESS_DENIED;
+        return input_replay_trigger_failure(trigger,"CreateFileA",error);
     }
     LARGE_INTEGER size;DWORD got=0,error=ERROR_SUCCESS;char marker[10];
-    if(!GetFileSizeEx(file,&size))error=GetLastError();
-    else if(size.QuadPart!=9)error=ERROR_INVALID_DATA;
-    else if(!ReadFile(file,marker,sizeof(marker),&got,NULL))error=GetLastError();
-    else if(got!=9 || memcmp(marker,"start-v1\n",9))error=ERROR_INVALID_DATA;
-    if(!CloseHandle(file) && !error)error=GetLastError();
-    if(error)return error;
+    const char *operation=NULL;
+    if(!GetFileSizeEx(file,&size)){operation="GetFileSizeEx";error=GetLastError();}
+    else if(size.QuadPart!=9){operation="size";error=ERROR_INVALID_DATA;}
+    else if(!ReadFile(file,marker,sizeof(marker),&got,NULL)){operation="ReadFile";error=GetLastError();}
+    else if(got!=9 || memcmp(marker,"start-v1\n",9)){operation="contents";error=ERROR_INVALID_DATA;}
+    if(!CloseHandle(file) && !operation){operation="CloseHandle";error=GetLastError();}
+    if(operation)return input_replay_trigger_failure(trigger,operation,error);
     *found=1;return ERROR_SUCCESS;
 }
 static int input_replay_load(FILE *file)
@@ -147,7 +156,11 @@ static uint32_t input_replay_sample(uint64_t elapsed,uint8_t pad[18])
 }
 static uint32_t input_replay_poll(uint64_t now,uint8_t pad[18])
 {
-    if(input_replay_clock_started && now<input_replay_start)return ERROR_INVALID_PARAMETER;
+    if(input_replay_clock_started && now<input_replay_start) {
+        fprintf(stderr,"[INPUT REPLAY CLOCK ERROR] now_ms=%llu start_ms=%llu generation=%u\n",
+            (unsigned long long)now,(unsigned long long)input_replay_start,input_replay_generation);
+        return ERROR_INVALID_PARAMETER;
+    }
     struct InputReplayTrigger *trigger=NULL;unsigned generation=0;
     if(input_replay_trigger.enabled && !input_replay_trigger.consumed) {
         trigger=&input_replay_trigger;generation=1;

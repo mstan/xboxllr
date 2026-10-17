@@ -28,10 +28,36 @@ static DWORD WINAPI input_test_set_state(DWORD port,XINPUT_VIBRATION *vibration)
 #define XInputGetState input_test_get_state
 #define XInputGetCapabilities input_test_get_caps
 #define XInputSetState input_test_set_state
+/* A failed host API must not admit a marker even if its error slot is zero.
+ * Normal calls retain actual Windows file semantics; CloseHandle fault control
+ * closes the owned test handle first, so rejection does not leak it. */
+static unsigned input_test_marker_api_failure;
+static BOOL WINAPI input_test_marker_size(HANDLE file,PLARGE_INTEGER size)
+{
+    if(input_test_marker_api_failure==1){SetLastError(0);return FALSE;}
+    return GetFileSizeEx(file,size);
+}
+static BOOL WINAPI input_test_marker_read(HANDLE file,LPVOID buffer,DWORD bytes,LPDWORD got,LPOVERLAPPED overlap)
+{
+    if(input_test_marker_api_failure==2){SetLastError(0);return FALSE;}
+    return ReadFile(file,buffer,bytes,got,overlap);
+}
+static BOOL WINAPI input_test_marker_close(HANDLE file)
+{
+    const BOOL result=CloseHandle(file);
+    if(input_test_marker_api_failure==3){CHECK(result);SetLastError(0);return FALSE;}
+    return result;
+}
+#define GetFileSizeEx input_test_marker_size
+#define ReadFile input_test_marker_read
+#define CloseHandle input_test_marker_close
 #include "input_host.c"
 #undef XInputGetState
 #undef XInputGetCapabilities
 #undef XInputSetState
+#undef GetFileSizeEx
+#undef ReadFile
+#undef CloseHandle
 
 static uint32_t input_test_last_error;
 static void input_test_trigger_file(const char *path,const char *data,DWORD bytes)
@@ -103,6 +129,11 @@ static void test_input_replay_trigger(void)
     CHECK(CreateDirectoryA(path,NULL));input_test_trigger_failure(base+7300,ERROR_ACCESS_DENIED);
     CHECK(RemoveDirectoryA(path));
     input_test_trigger_file(path,"start-v1\n",9);
+    for(unsigned api=1;api<=3;++api) {
+        input_test_marker_api_failure=api;
+        input_test_trigger_failure(base+7400+api,ERROR_ACCESS_DENIED);
+    }
+    input_test_marker_api_failure=0;
     const ULONGLONG old_start=input_replay_start;
     CHECK(input_replay_trigger_configure(path)==ERROR_ALREADY_EXISTS);
     CHECK(input_replay_trigger.enabled && !input_replay_trigger.consumed &&

@@ -51,6 +51,39 @@ a LOAD rule or a closing requirement absent a supported consumer. Replacement
 context/SAVE remain guarded. No connected gameplay, exit or reentry is claimed
 by these checks. Total remains7/9; G05 still closes GPU and graphics together.
 
+## Host marker ingestion diagnosis - 2026-10-17
+
+The a06f127 constant-LOAD connected run is sealed at1000.422s after the first
+opening capture. USB host input polling rejected the newly published marker
+before generation1 consumption. Two startup pictures and661 paired original
+destructions remain evidence only for that prefix. All190 inherited/new pins
+were checked before instrumentation edits; original input sources, native
+binaries and result receipts are retained under graphics-constant-load-20261017.
+The displayed9F was the I/O site; the adapter did not retain the Windows status.
+The exact nine-byte marker matches the preceding successful run.
+
+The failure remains unexplained: retained-file and256 atomic-publication checks
+pass, as do the native input contracts. Added error-only diagnostics identify
+operation/status without retrying or ignoring failures. A failed size/read/close
+API with a zero last-error now rejects the marker; authored controls verify
+no replay state or controller report changes. The selected three native input,
+reference-clock and USB replay checks pass0.48s. The broad legacy usb-lle fixture
+fails at the same line115 with both retained old and new binaries; that unchanged
+baseline failure is not a regression introduced by these diagnostics.
+
+An actual selected-title input probe passes all three generation1 rows in6.922s.
+A separate deliberately locked-file control stops in6.016s with logged
+CreateFileA error32 and USB status32. That validates diagnostics and retained
+failure behavior, not the cause of the earlier uninstrumented stop. Controlled
+probe termination is not guest content retirement. Private evidence:
+build/blinx/input-trigger-failure-20261017/short-title and short-title-locked.
+The instrumented title SHA256 is
+523057db123a59687d1612b36883d3d5fda067e61d22d3ba6c4d7aef07163db1;
+GPU DLL574ceb74 remains unchanged. Prepare the opening/scored marker contents
+well before publication; actual input still goes through the original selected
+host/USB path and clocks. G05 still requires the same actual gameplay,
+Start/title/content retirement and neutral reentry. Total remains7/9.
+
 ## Owner goal and stopping rule - 2026-10-15
 
 The active goal is 9/9 qualified families for this bounded Blinx attract profile.

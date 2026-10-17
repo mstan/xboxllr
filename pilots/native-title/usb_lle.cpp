@@ -68,7 +68,10 @@ void advance()
 {
     if(host_read) {
         uint8_t report[18];uint32_t status=host_read(0,report);
-        if(status && status!=ERROR_DEVICE_NOT_CONNECTED){failure="USB LLE host input poll failed";return;}
+        if(status && status!=ERROR_DEVICE_NOT_CONNECTED){
+            std::fprintf(stderr,"[USB LLE HOST INPUT ERROR] status=%u\n",status);
+            failure="USB LLE host input poll failed";return;
+        }
         controller->set_xid_connected(status==0);
         if(status)caps_bound=false;
         if(!status && !caps_bound) {

@@ -14,7 +14,24 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 47 retained IDs / 46 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Latest checkpoint: the `c3823f8` shader-dependency repair passes its focused
+Latest execution checkpoint: the hardware-grounded constant loader in `a06f127`
+passes its queued checks, but its connected run stopped at1000.422s on a host
+input-marker probe failure immediately after the opening marker was published.
+There are two startup captures and661 paired destruction returns,0 unmatched;
+no input generation was consumed. All190 pins were rechecked before edits.
+The reported9F is the I/O location, not a recorded Windows status. The marker
+bytes are valid;256 atomic host publications and the native input contracts pass.
+The exact cause remains unreproduced.
+
+Error-only diagnostics now retain the failed marker operation and Windows status.
+A short run through the actual title input path delivers neutral/Start/release in
+6.922s; an intentional lock rejects in6.016s with CreateFileA/status32. Three
+selected input/reference-clock/USB-replay checks pass0.48s, including failed-API
+controls that reject zero error codes. A replacement is being prepared with
+precreated closed marker files and the instrumented title; the repaired GPU is
+unchanged. No reached failure is deferred, and no new family is qualified.
+
+Earlier reached-dependency checkpoint: the `c3823f8` shader-dependency repair passes its focused
 checks, but the connected replacement under `graphics-vsh-context-20261016`
 stops after2972.437s during attract initialization on an unproduced `c122`
 constant dependency. Its genuine opening skip, normal cleanup and visible title
