@@ -4,8 +4,11 @@ Serial family: `beads-xbox.1.105`, following bounded input `.104`.
 The original-driver component, build-selected title route, combined original
 input/display regression and integrated queue/lifetime qualification pass.
 The final game-owned native regression also passes. This closes the bounded
-display gate: seven of nine service-family gates remain open. Encoder phase,
-other modes and full LLE draws retain the explicit limits below.
+display gate. The current overall total is **9/9 bounded families**, including
+the later original graphics attract route; see the
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+Encoder phase, other modes and exhaustive draw coverage retain their explicit
+limits. Dated component reports below preserve historical checkpoints.
 
 ## Executable component and findings
 

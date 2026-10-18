@@ -1,9 +1,11 @@
 # Scheduling, threads, events and timers LLE
 
-Active family `beads-xbox.1.112`, under the revised `.102` burndown. The owner
-explicitly deferred real-console-dependent work on 2026-10-09; this family
-proceeds independently of GPU startup `.109` / hardware observation `.111`.
-The total remains four qualified families and five open.
+Qualified family `beads-xbox.1.112`, under the revised `.102` burndown.
+Accepted Q01-Q03 establish the bounded original scheduling/thread/event/timer
+contract; calendar is part of this family. The current overall total is
+**9/9 bounded families** under the
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+Earlier dated sections preserve their historical counts and remaining work.
 
 ## Original physical resource backing and native lifetime - 2026-10-11
 

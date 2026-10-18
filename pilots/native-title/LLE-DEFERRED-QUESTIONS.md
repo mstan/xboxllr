@@ -6,15 +6,16 @@ evidence and reopening trigger; preserve resolved questions and their outcomes.
 Deferral does not count as qualification. Missing service routing, clocks,
 ownership or required processing stages remain implementation work.
 
-The existing23 graphics questions and their replay evidence remain in the
+The existing25 graphics question IDs and their replay evidence remain in the
 [graphics queue](GRAPHICS-DEFERRED-QUESTIONS.md). This companion queue records
 questions that also affect other service families.
 
-Current reconciliation, 2026-10-16: the twenty-two entries here retain their
+Current reconciliation, 2026-10-17: the twenty-three entries here retain their
 deferred precision/extension scopes. The graphics queue now distinguishes
 GFX-D06's promotion to required work and GFX-D04's required enabled-noise
-behavior from its remaining precision question. Across both queues,45 IDs
-are retained;44 still contain deferred scope. AUDIO-D09 records the sample
+behavior from its remaining precision question. Its promoted required work is
+now complete for the bounded G01-G05 profile. Across both queues,48 IDs
+are retained;47 still contain deferred scope. AUDIO-D09 records the sample
 counter's remaining sub-sample phase question; AUDIO-D10 records AC-link
 control-transaction phase and bus latency. AUDIO-D11 retains unreached output
 configuration encodings and trap behavior. AUDIO-D12 retains the nontrapped
@@ -27,18 +28,18 @@ records AV service-edge/raw-phase precision, preserving required active timing.
 GFX-D16 retains isolated DEBUG-bit interpretation and exact field-publication
 research while preserving required functional startup, clocks and output.
 GFX-D17 retains unidentified encoder command effects without blocking separately
-specified clock/reset/sync contracts; required connected output stays open.
+specified clock/reset/sync contracts; required connected output is now accepted.
 AUDIO-D16 records the exact stopped-voice cursor reset edge and unreached
 ownership/format extensions; normal same-buffer restart/output remains A05.
 GFX-D20 records unreached active patch processing/reset contents. GFX-D21 retains
 exact inherited c137 behavior only where its sole fog output has no consumer in
-the captured draw batch; required context transfer and ordinary draws remain
-open. GFX-D22 retains the silicon mechanism behind the named per-invocation
+the captured draw batch; required context transfer and ordinary draws are now
+accepted. GFX-D22 retains the silicon mechanism behind the named per-invocation
 shader initialization contract; persistent guest inputs remain separately guarded.
 GFX-D23 records unreached DAC modes/readback and partial-upload timing; the
 reached full RGB upload and digital output lookup are implemented separately.
 See the
-[current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-14)
+[current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-17)
 and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
 
 The final reached-mode census A01 and ordinary stages A02 are complete.
@@ -46,7 +47,9 @@ References below to missing filter/spatial/headroom stages are extension
 requirements when an original supported consumer reaches them, not a new
 requirement to implement every unreached mode. Existing guards and reopening
 triggers stay in place. Required original audio startup, shared DSP cadence,
-active FE ordering and actual title output remain A03-A05, outside this queue.
+active FE ordering and actual title output are accepted through A03-A05, outside
+this queue. References to pending required portions in earlier entries and dated
+follow-ups are historical; the current closing checklist records their outcome.
 
 | ID | Question | Evidence and reason it can wait | Reopen when |
 | --- | --- | --- | --- |
@@ -73,6 +76,7 @@ active FE ordering and actual title output remain A03-A05, outside this queue.
 | AUDIO-D15 | What exact interpolation kernel, bandwidth and fractional phase quantization does silicon use for source-rate conversion? | The existing isolated rate adapter declares libsamplerate 0.2.2 SRC_SINC_FASTEST as a nominal policy, following the reference choice rather than claiming silicon identity. Independent direct coefficient convolution reproduces 101,184 captured stereo rate frames exactly; independent ADX plus the declared kernel and EP model passes representative full-band output under unchanged 0.02 RMSE / 0.99 correlation limits. The earlier SciPy-filter difference is retained, not relabeled a pass. This policy is replaceable without changing source DMA, clocks, mixing or ownership. | Independent hardware evidence distinguishes required rate/filter behavior, a supported consumer exceeds the declared output tolerance, or a new interpolation policy is selected. Replay saved source/rate/output comparisons and existing cursor, partition, pause/seek and lifecycle checks. Actual Stop/reuse and continued output remain required A05; they are not deferred. |
 
 | AUDIO-D16 | At which exact hardware edge does a stopped voice's CBO reset, and what are the rules for other formats/ownership? | The original stopped-buffer position0/frequency44100 and complete179EFD/179C4B start sequence has no CBO command but requires playback from source0. The bounded model resets low24 CBO at VOICE_ON for stopped, locked ordinary2D PCM16, preserving the adjacent envelope byte. Original-code and contrasting source-origin fixtures pass; the previous model reproduces the title's guard. Pinned xemu corroborates reset but labels it FIXME, so this is a functional nominal contract, not a new silicon measurement. Unsupported nonzero active/unlocked/spatial/stream/linked/multipass/other-format starts remain guarded. | A supported caller distinguishes cursor timing between Stop/start or VOICE_ON/unlock, reaches another nonzero start profile, or independent hardware evidence contradicts the reset/preservation policy. Actual title restart, continued output and A/V timing remain required A05. |
+| LLE-D07 | What precisely threw the historical 071e9f8 host exception after title counter 480? | The old run exited 0x20474343 at 2147.344s without enough diagnostics to identify its throwing component, type or trigger. The reproduced C ABI escape class is repaired by default: seven old escapes become zero, with stable operation/type/message, sticky failure and success-only publication. The later normal-cadence 6b2863c run completes actual G05 in 5181.891s with zero reported language exceptions and guards. Nonrecurrence does not identify the old cause. Preserve the old sealed executable/DLL and diagnostics; `.128` remains deferred for causal research rather than falsely closed. | The exception recurs in the supported profile, an exception crosses the contained boundary, failure lacks the required diagnostics, or failed processing publishes success. Use the recorded operation/type/message and bounded module/RVA stack to reproduce that boundary before another long title run. |
 
 AUDIO-D11 follow-up,2026-10-15: independent analog one/two-node ring traversal
 and explicit stop/reset are resolved and adopted. Original stream/ISR/DPC helpers

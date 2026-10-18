@@ -16,8 +16,8 @@ milestone; it does not gate a useful HLE implementation or these replays.
 
 The current G01-G04 evidence remains applicable when its dependencies do not
 change. Do not run the entire old matrix for a diagnostic/tool-only change.
-G05 still requires the connected normal gameplay/exit/reentry sequence. A passing
-replay does not close that integration requirement by itself.
+G05 is now accepted from the sealed 6b2863c original normal gameplay/exit/reentry
+sequence. A passing replay did not substitute for that integration evidence.
 
 ## Standalone captured admission replay
 
@@ -86,7 +86,23 @@ control passes0.047s and CTest0.05s; private old/fixed inputs and executable
 receipts are under build/blinx/framebuffer-request-20261017. This is host
 observation reliability evidence and adds no scene or G05 qualification claim.
 
-## Remaining integrated check
+## Completed integrated check - 2026-10-17
+
+The maintained 6b2863c run completes G05 at the unchanged 32000-block cadence.
+Reviewed moving demo pictures 7/8 precede genuine generation2 Start/release,
+original content retirement and visible title 9. Neutral input then reaches a
+fresh original attract with moving pictures 11/12. Sixteen material-linked
+resources have original creation/destruction identity matches and renewed
+creation after title. The terminal seal records 5181.891s, zero guards/reported
+language exceptions and all 268 pins unchanged. Accepted G01 supplies original
+full-device Reset/Release, since host stop is not guest teardown. The
+[closing checklist](BLINX-QUALIFICATION-CLOSURE.md) records bounded 9/9 acceptance.
+
+No new title rerun or broader test matrix is required for this closeout. Retain
+the short controls below for future changes. The historical silent exit's exact
+cause remains LLE-D07; containment is repaired, but a causal fix is not claimed.
+
+## Earlier integration attempts and isolated fixes
 
 The normal32000-block429bb45 run passed genuine opening Start/release, original
 cleanup, a correct visible title and its1440-update neutral timeout. It then
@@ -129,7 +145,8 @@ supervisors were retired after the guest's terminal exit. That process cannot
 resume. Keep the pause/takeover/seal receipts with its guest-clock, completion
 and ownership observations. Host termination is not guest teardown.
 
-After the bounded writer passes queued tests, start a fresh connected check.
+The bounded writer passed queued tests, and the later sealed 6b2863c check
+completed the original moving gameplay route and required lifecycle.
 
 Use original state hints only to request pictures; classify actual pictures
 before counting gameplay or arming the scored Start marker. The bounded G05

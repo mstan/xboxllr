@@ -7,14 +7,31 @@ now governs remaining work and family acceptance. Exhaustive scene numerical
 proof stays deferred; working LLE routing/processing and connected title evidence
 remain required. Existing blocked-fence/full64-slot evidence is reused.
 
-**Current status, 2026-10-17: 7/9 bounded families qualified.** Input, display,
-memory, files, scheduling, movies and audio are complete. GPU and graphics remain.
+**Current status, 2026-10-17: 9/9 bounded families qualified.** Input, display,
+memory, files, scheduling, movies, audio, GPU completion and graphics are complete
+for the agreed Blinx NTSC attract profile. Calendar belongs to scheduling.
 
-| Qualified | Remaining required | Recorded questions / current deferral scope |
+| Qualified | Remaining required for this milestone | Recorded questions / current deferral scope |
 | --- | --- | --- |
-| Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 47 retained IDs / 46 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
+| All 9 bounded families | None; G01-G05 and A01-A05 are accepted | 48 retained IDs /47 deferred scopes. Precision, unreached profiles and historical exception-cause research keep explicit reopening triggers. GFX-D06's promoted work is complete. |
 
-Current execution checkpoint: the normal32000-block429bb45 run passed genuine
+Final execution checkpoint: maintained 6b2863c completes the original G05 route
+at unchanged 32000 cadence in 5181.891s, with zero guards/language exceptions and
+all 268 pins unchanged. Reviewed moving demo pairs 7/8 and 11/12 bracket genuine
+generation 2 Start/release, original cleanup, visible title 9 and neutral reentry.
+Sixteen material-linked resources have matched original retirement and renewed
+creation; accepted G01 supplies unchanged full-device Reset/Release behavior.
+Actual FBD1/GPD1 output and representative/HLE evidence compose the bounded
+acceptance. Root evidence: build/blinx/graphics-eye-vector-20261017/qualified-root.aot-private.json.
+
+The normal-audio owner package is
+build/blinx/owner-hle-playtest-6b2863c-20261017/Play-Blinx.cmd; its muted startup
+smoke passes in 10.016s. HLE rendering remains unchanged. New Game/save `.101`, full
+native LLE CPU conversion and JSRF remain separate. LLE-D07 preserves the old
+unidentified exception cause without claiming a causal fix or requiring a soak
+loop after the working current route. Earlier checkpoints below are history.
+
+Earlier execution checkpoint: the normal32000-block429bb45 run passed genuine
 opening Start/release, original cleanup, a visible title and its1440-update idle
 timeout. It stopped2 at2502.063s during attract loading on NV097181C/3E808081,
 an unqualified eye-vector setter. Five completed prefix/loading captures and770
@@ -812,10 +829,10 @@ change the next controller-input dependency batch.
 | 5 | Files, cache and installed media | File bytes/errors/order plus backing storage and mount lifetime | Complete for bounded Blinx files, `.108`: actual original Nt/FATX/cache/IDE title route, whole-XBE comparison, two-process persistence, 84 original metadata/directory/error/namespace cases and 64 real lifetimes. HLE corrections pass 40/40 game tests and a 190.109s Demo/interruption/title/reentry regression. Explicit resource/metadata tolerances and guarded unqualified modes remain. [Evidence and scope](../pilots/native-title/FILES-LLE.md) |
 | 6 | Remaining scheduling, threads, events and timers | Coupled ready/block/wake/preemption and interrupt state | **Qualified `.112`**: retained original thread/IRQ/KDPC/FP/common-clock ownership plus the full changed 600-GP-second Q03 title. Required movie lifetimes, second-demo publication, interruption, title return and fresh gameplay pass. Matching HLE contracts are retained. [Bounded closure](../pilots/native-title/SCHEDULING-LLE.md#bounded-attract-family-closure---2026-10-13) |
 | 7 | Audio buffers, cursor, routing and lifetime | APU/DSP plus DMA, scheduling, reuse and output | **Qualified `.113`**: A01-A05 compose actual original title routing, census and independently supported processing, configured startup, original retirement/reentry, queued DPC completion and connected Stop/reuse/output. Root verifies54 artifacts and independently replays135168 known codec frames; all96000 required postrestart frames match exactly on both output routes. Existing HLE/Q03 timing/ownership evidence and precision deferrals remain. [Bounded closure](../pilots/native-title/AUDIO-LLE.md#bounded-attract-family-closure---2026-10-16) |
-| 8 | GPU completion, callbacks and visibility | FIFO/traps/reports, pending results and lifetime; uses memory/display | **Open: G05 only**, `.109`. G01-G04 establish original resource lifetime, AV startup/activation, owned context/PFIFO processing, maintained enabled-noise drawing and completion. Connected loading output and separate completed/submitted counters are retained. Actual attract/exit/reentry and content lifetime remain required. [Current gates](BLINX-QUALIFICATION-CLOSURE.md) |
-| 9 | Graphics state, shaders, textures and vertex fetch | NV2A draw/state/format coverage; uses memory/completion | **Open: G05 only**, `.116`. Reuse accepted state/shader/texture/fetch/alias and HLE appearance evidence; G04 now includes physically supported enabled-noise reconstruction and a bounded native GPU comparison. Shader-control and unused-palette corrections pass affected checks. Finish the same connected attract/exit/reentry/content-lifetime run as GPU completion. Exhaustive scene composition and accepted precision remain in the [deferral queue](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md). |
+| 8 | GPU completion, callbacks and visibility | FIFO/traps/reports, pending results and lifetime; uses memory/display | **Qualified**, `.109`: G01-G04 plus the sealed original G05 moving-demo, genuine exit, material retirement, visible title and neutral moving reentry. Original completion/submission and actual FBD1/GPD1 witnesses are retained. [Bounded closure](BLINX-QUALIFICATION-CLOSURE.md) |
+| 9 | Graphics state, shaders, textures and vertex fetch | NV2A draw/state/format coverage; uses memory/completion | **Qualified**, `.116`: maintained enabled-noise processing, owned context/transfer, representative state/shader/texture/fetch/alias and accepted HLE appearance compose with actual G05 output/lifetime/reentry. Exhaustive scene composition and remaining precision stay in the [deferral queue](../pilots/native-title/GRAPHICS-DEFERRED-QUESTIONS.md). |
 | 10 | Movie/A-V sequence integration | Composes qualified service selections and reference processing | **Qualified `.73`**: full original-scheduling/reference-APU Q03 and retained matching default-HLE execution pass two natural openings, actual movie interruption, title return and fresh demo. Exact movie ring provenance, whole-lifetime independent waveform and A/V bounds pass. Physical output precision and original audio/GPU families remain separate. [Bounded closure](BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#bounded-movie-family-closure---2026-10-13) |
-| Remaining connected execution | GPU and graphics share G05 | G01-G04 and audio A01-A05 passed. Actual moving attract output, Start/release, title return, content retirement and neutral reentry remain. | No new hardware batch is currently required. Recovery backups and physical observations remain retained; existing read/benign-write authorization and stop-after-unexpected-write rule remain. See the [closing checklist](BLINX-QUALIFICATION-CLOSURE.md). |
+| Bounded qualification complete |9/9 families; calendar is a scheduling slice | G01-G05 and audio A01-A05 passed; current source/code and immutable evidence are linked in the closing checklist. | No further title/hardware loop is required for this milestone. Preserve explicit deferrals/reopening triggers and the separate New Game/native CPU work. |
 
 2026-10-10 settings/status continuation: the original child now passes its
 shared-owner EEPROM query and original status mapper, then stops at

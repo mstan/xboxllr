@@ -1,7 +1,8 @@
 # Files, cache and installed-media LLE
 
 Bounded serial family `beads-xbox.1.108` is qualified, after memory `.106`.
-Four of nine family gates are complete; five remain open. The maintained
+The current overall total is **9/9 bounded families** under the
+[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md). The maintained
 original file/cache route reaches Demo play, Start/title return and Demo reentry.
 Independent original contract cases, cross-process persistence and the final
 native correction regression pass. Scope and remaining tolerances are explicit

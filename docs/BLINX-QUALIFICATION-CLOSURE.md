@@ -2,8 +2,9 @@
 
 Owner-approved finishing plan, 2026-10-11. Parent `beads-xbox.1.102`.
 This checklist governs the current NTSC attract path. It replaces open-ended
-component validation with explicit family closing conditions. Seven of nine
-families are qualified: input, display, memory, files, scheduling, movies and audio.
+component validation with explicit family closing conditions. All nine bounded
+families are qualified: input, display, memory, files, scheduling, movies, audio,
+GPU completion and graphics.
 Calendar belongs to scheduling and is not a tenth family.
 
 LLE may be slow. HLE remains the performant default. Each closed family needs
@@ -18,6 +19,59 @@ checks. Exhaustive scene-pixel proof and accepted precision questions remain in
 the append-only queues. Required routing, startup, ownership, clocks and processing
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
+
+## Bounded GPU/graphics closure: 9/9 - 2026-10-17
+
+The maintained 6b2863c original route completes G05 at unchanged 32000-block
+cadence with enabled-noise processing, original CPU/USB/files/memory/scheduling
+and native APU_REFERENCE. The sealed 5181.891s run has twelve complete captures,
+zero guards, zero reported host language exceptions and all 268 input pins
+unchanged. It stops only after the reviewed milestones; host termination is
+not guest teardown. Accepted G01 original Reset/Release supplies unchanged
+full-device destruction evidence where normal attract retains the device.
+
+Actual moving 3D demo pictures 7/8 have completed counts 2660/2692, 32 apart.
+Only then does generation 2 deliver genuine neutral/Start/release at 0/20/220ms,
+epoch 55188. Original cleanup returns to the visible Blinx Press START title in
+picture 9, completed 2895/submitted 2896. Sixteen material-linked resources have
+matched original creation/header/destruction identities across both gameplay
+windows and the immediate pre-input sample; their logical owners retire before
+the title. All 75 formerly active group 5 slots become inactive. Older allocation
+generations at reused pointers are excluded. This is representative content
+retirement, not a claim that shared backing was freed or every material sampled.
+
+Neutral input then reaches another original 1440-update timeout and fresh
+initialized attract. Pictures 11/12 show renewed moving 3D demo output at
+completed counts 4280/4311, 31 apart. Sixteen source-linked material resources
+have new original creation events after the title. Pictures 5/6/10 are loading
+and are excluded. Selected FBD1/GPD1 artifacts decode as active 640x480 output,
+with identity DAC, screen on and the declared nominal digital-input profile.
+Actual encoder-input previews of the post-exit title and fresh demo were viewed.
+No analog-output, complete bus-waveform or exhaustive scene-pixel claim is added.
+
+Private immutable evidence and the root requirement audit are under
+build/blinx/graphics-eye-vector-20261017, including sealed.aot-private.json,
+gameplay-review.aot-private.json, content-retirement-after-scored-exit,
+reentry-review.aot-private.json and qualified-root.aot-private.json. Existing
+G01-G04, representative state/shader/texture/fetch/alias, accepted HLE appearance
+and the other seven family proofs are reused; no family closes by deferral.
+The final root audit verifies 51 evidence files; SHA256
+`8ce5073f2702e3dbcf468e830538a2c13c63f813ce8a45e73c1012a1150d4dc8`.
+
+The historical 071e9f8 exit's precise cause remains unidentified. The reproduced
+C ABI escape class is repaired by default and its old-negative/fixed-positive
+controls pass; the full current route does not reproduce the language exception.
+Further causal research is explicitly LLE-D07, with recurrence/error-contract
+reopening triggers. This does not claim that the old trigger was identified.
+There are 48 retained question IDs/47 deferred scopes across the append-only
+queues; GFX-D06's promoted required work is complete in the bounded profile.
+
+The owner-ready HLE package is
+build/blinx/owner-hle-playtest-6b2863c-20261017/Play-Blinx.cmd. Its native
+D3D11/XAUDIO2_DSP profile and renderer are preserved, its one muted startup smoke
+passes in 10.016s with a real 640x480 present, and its interactive launcher enables
+normal audio. Existing guest CPU fallback, New Game/save bug `.101`, full native
+LLE CPU conversion and JSRF title two remain separate from this closed milestone.
 
 ## Normal-cadence run: title timeout passed, eye-vector gap isolated - 2026-10-17
 
@@ -2965,7 +3019,7 @@ was corrected by rerunning only its failed method). No HLE runtime changed.
 | G02 | Passed: original startup/title AV3/FIELD and actual post-mode completed output | `.109.6`, `.111` | Actual original AV/encoder startup and activation | Execute reached initialization on shared NV2A/SMBus/encoder owners; no guessed warm registers or fabricated handshake/ready state; actual launch crosses retained startup guards |
 | G03 | Passed: owned LOAD/projections/transfer and maintained enabled-noise draw/completion with digital input | `.116`, `.116.2.1` | Required original instance/PFIFO/startup state | RAMFC/instance admission and required read/write context behavior have independent semantics; maintained title renderer reaches real draws and completion |
 | G04 | Passed: independently observed enabled-noise reconstruction, actual PFIFO/original controls and bounded native GPU comparison | `.116.2` | Required enabled-noise draw behavior | A reached complete primitive has an executable supported sampling behavior; independent source/paired observation establishes it; disabling or ignoring noise is not acceptance |
-| G05 | Open: loading output and paired resource returns captured;17F8 and palette dependency fixed; connected attract/exit/reentry/lifetime rerun in progress | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual title draws/visibility/callbacks/reentry/teardown work; retained and affected state/shader/texture/fetch/alias cases qualify supported behavior and HLE tolerances; exhaustive4331-draw numerical composition stays deferred |
+| G05 | Complete: maintained original moving gameplay, genuine exit, content retirement, visible title and fresh neutral moving reentry; sealed6b2863c run | `.109`, `.116` | Connected graphics-LLE attract and representative comparisons | Actual completed FBD1/GPD1 pairs7/8 and11/12, generation2 input, title9,16 matched material-resource retirements and renewed creation. Reuse accepted G01-G04 and unchanged representative/HLE evidence; exhaustive4331-draw numerical composition stays deferred |
 | A01 | Complete: final 10,348-record / 1,094-generation census | `.113` | Census original voice modes actually used by attract | Each reached format/filter/headroom/routing mode maps to an implemented stage or a specifically named remaining required task; imported/unreached extensions stay out of scope |
 | A02 | Complete: required ordinary stage domains | `.113` | Voice filtering/scaling and lifetime stages | Independent impulse/tone/transition evidence qualifies reached stages through the actual source/envelope/mix owner; required processing is not bypassed |
 | A03 | Complete: configured reset and three original drained retirement/reentry lifetimes compose with accepted A04/A05 | `.113.9`; GP `.114` complete | GP/EP configuration and wake/reset | Original B0..B3 and coherent C5/CA/D5 context drive the existing sole DSP CPUs; independently supported descriptors copy exact bytes and publish actual completion |

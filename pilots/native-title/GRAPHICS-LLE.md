@@ -4,7 +4,8 @@ Family `.116` belongs to the shared Blinx LLE burndown `.102`. The maintained
 route is PFIFO/0x97 command consumption, physical vertex DMA or inline arrays,
 transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
-graphics-family acceptance remains open. The current total is **7/9** under the
+graphics-family acceptance is complete for the bounded NTSC attract profile.
+The current total is **9/9** under the
 [bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md); counts
 in the dated component reports below describe their historical checkpoints.
 
@@ -19,9 +20,10 @@ storage as processed pixels. Full analog output and complete bus-waveform timing
 are outside this endpoint. Default HLE is unchanged.
 
 Representative color, guard and original-AV integration checks accompany the
-implementation. Enabled-noise G04 has since passed. Whole GPU/graphics acceptance
-still requires connected attract output, exit/reentry and normal content lifetime
-(G05); see the current closing checklist for retained title-run evidence. Precision remains
+implementation. Enabled-noise G04 and connected attract output, genuine exit,
+content retirement and neutral moving reentry G05 have passed. The sealed
+6b2863c run retains actual FBD1/GPD1 pictures and source-linked ownership evidence;
+see the current closing checklist. Precision remains
 in GFX-D05/D18 without imposing a new exhaustive coefficient campaign.
 
 ## Original physical resource backing and native lifetime - 2026-10-11

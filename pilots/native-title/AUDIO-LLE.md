@@ -2,7 +2,7 @@
 
 ## Bounded attract family closure - 2026-10-16
 
-**Audio is qualified for the bounded Blinx NTSC attract profile; overall7/9.**
+**Audio is qualified for the bounded Blinx NTSC attract profile; overall 9/9.**
 The build-selected original DirectSound route executes through maintained
 APU/GP/EP/AC97 owners and the shared device clock. Root accepted A01-A05 after
 reviewing54 artifacts and independently replaying the causal output ring.
@@ -26,7 +26,8 @@ Root proof: build/blinx/audio-family-qualified-20261016/qualified-root.aot-priva
 SHA256 e5e7a9b380248bd3aa3e1d85e3f3126166a19755dbea3f37e3b9c0d807776e1d.
 The governing [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#audio-family-qualified-gpu-transfer-investigation-continues---2026-10-16)
 contains component composition and retained evidence. Default HLE remains
-unchanged; LLE speed is not required. GPU/graphics remain open. Earlier dated
+unchanged; LLE speed is not required. GPU/graphics have since completed G01-G05.
+Earlier dated
 observations below preserve their historical counts and remaining-work statements.
 
 Feedback policy,2026-10-15: use focused original-driver/device checks for changes,

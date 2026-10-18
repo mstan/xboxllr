@@ -11,6 +11,13 @@ APU_REFERENCE selection. Preserve the normal source clock, original rendering,
 interrupts, callbacks, waits, ownership and resource transitions. Keep output
 muted, with four host cores at Normal priority unless an owner game is active.
 
+Completed 2026-10-17: the sealed 6b2863c run supplies the sequence below, including
+reviewed moving demo pairs 7/8 and 11/12, genuine Start/release, visible title 9,
+16 matched material-resource retirements and renewed creation. G01-G04 and
+unchanged representative/HLE evidence compose the bounded 9/9 acceptance.
+The [closing checklist](BLINX-QUALIFICATION-CLOSURE.md) records the final audit
+and its limits; the sequence remains the contract for future affected changes.
+
 ## Sequence and evidence
 
 1. Retain actual original launch, AV3/FIELD return, instance production/LOAD and

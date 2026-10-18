@@ -1,7 +1,9 @@
 ﻿# Memory and resource lifetime LLE
 
 Bounded serial family `beads-xbox.1.106`, after display `.105`, is qualified
-on runtime `4a5dd48`: six of nine gates remain after its integration. Original
+on runtime `4a5dd48`. The current overall total is **9/9 bounded families**;
+see the [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+Dated component reports below preserve historical checkpoints. Original
 virtual memory, pool/contiguous queries, residency, physical-page relocation
 and resource ownership run through the maintained kernel/page bridge.
 LLE performance is not an acceptance requirement.

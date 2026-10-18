@@ -48,7 +48,9 @@ This is a fitted reconstruction contract, not a claim about internal silicon
 stages. Unmeasured fractional/interpolant precision, other original hardware
 revisions, and exact subtexel/mip filter arithmetic remain GFX-D04 questions.
 Observed range behavior is implemented, not waived. GPU/graphics qualification
-still requires connected original title/attract/exit/reentry and lifetime evidence.
+uses this component together with the later accepted connected original
+title/attract/exit/reentry and lifetime evidence in the
+[closing checklist](BLINX-QUALIFICATION-CLOSURE.md).
 
 The native HLE backend retains its efficient compressed-texture path and the
 owner-accepted appearance baseline. Its omission of this small reconstruction

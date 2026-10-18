@@ -4,8 +4,8 @@ Owner direction, 2026-10-10. Blinx's corrected HLE attract scenes pass the
 owner's appearance review. Prioritize a functioning, extensible LLE foundation
 and a performant HLE with compatible caller behavior. Further exhaustive draw
 and pixel qualification can follow without gating every development step.
-Full graphics qualification remains open; this direction changes the order of
-work, not the meaning of a qualified result. Tracked in `beads-xbox.1.116`,
+The bounded graphics family is qualified as of2026-10-17; exhaustive graphics
+coverage remains separate. Tracked in `beads-xbox.1.116`,
 with producer evidence in `beads-xbox.1.117`.
 
 Append new safely deferred questions here using stable IDs. Preserve each
@@ -17,14 +17,14 @@ are the default validation unit. Repeat human appearance review when a change
 affects visible behavior. Reuse the accepted baseline for qualification-only
 or documentation changes.
 
-## Current disposition - 2026-10-14
+## Current disposition - 2026-10-17
 
 The [bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md)
 supersedes the original deferral status where a reopening trigger has fired:
 
-- **GFX-D06 is required work**, not a current deferral. Original resource
-  lifetime G01 and startup/state gates G02/G03 are complete. Connected title
-  output, exit/reentry and content lifetime remain required G05.
+- **GFX-D06's promoted required work is complete** for the bounded profile.
+  Original resource lifetime G01, startup/state/noise G02-G04 and connected
+  moving output, genuine exit, content retirement and neutral reentry G05 pass.
 - **GFX-D04 retains precision scope.** Required enabled-noise G04 passed on
   2026-10-16 with maintained reconstruction, independent physical observations
   and a bounded native GPU comparison. Further sampling/rounding precision
@@ -32,9 +32,11 @@ supersedes the original deferral status where a reopening trigger has fired:
 - The other twenty-three graphics entries retain their deferred scopes and reopening
   triggers. Preserve the original entries and evidence below.
 
-Together with the twenty-two entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
-there are **47 retained question IDs:46 with deferred scope, and one fully
-promoted to required work**. GFX-D04's required portion is now complete.
+Together with the twenty-three entries in [the LLE queue](LLE-DEFERRED-QUESTIONS.md),
+there are **48 retained question IDs:47 with deferred scope, and one resolved
+promoted-work scope**. GFX-D04's required portion is complete. LLE-D07 retains
+the historical host exception's unidentified cause; current error containment
+and actual G05 execution are accepted separately, without a causal-fix claim.
 LLE-D06/AUDIO-D13/AUDIO-D14 record the owner's bounded-goal clarification on
 2026-10-15; AUDIO-D15 makes nominal interpolation precision explicit after the
 connected output check. AUDIO-D16 records exact stopped-voice cursor reset timing;
@@ -42,7 +44,8 @@ GFX-D18/D19 retain PRAMDAC interpretation and analog WSS questions. Earlier
 entries and their evidence remain unchanged. Earlier reports
 calling all 27 then-recorded questions "precision deferrals" were imprecise;
 they are historical counts, not 27 currently waived closing requirements.
-The current family count is **7/9**; this reconciliation qualifies no new work.
+The current bounded family count is **9/9**, based on actual accepted evidence;
+deferring a question does not qualify a family.
 
 GFX-D15, added 2026-10-15, isolates AV request service-edge precision from the
 still-required FP_DEBUG, active timing and original initialization behavior.
