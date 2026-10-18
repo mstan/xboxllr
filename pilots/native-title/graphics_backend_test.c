@@ -19,6 +19,7 @@
 #include "graphics_blend_backend_test.inc"
 #include "graphics_resultarg_backend_test.inc"
 #include "graphics_g8b8_backend_test.inc"
+#include "graphics_pixel_bump_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -133,6 +134,9 @@ int main(int argc,char **argv)
             CHECK(!test_fixed_resultarg());pilot_gfx_close();continue;
         }
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--pixel-bump")) {
+            CHECK(!test_pixel_bump());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--completion-alias")) {
             CHECK(!test_alias_completion(pp));pilot_gfx_close();continue;
         }

@@ -144,8 +144,10 @@ int32_t pilot_gfx_pixel_program(const uint32_t states[57],uint32_t texture_modes
      * Unsupported donor texture programs must not produce a zero/fallback draw. */
     for(unsigned stage=0;stage<4;++stage) {
         unsigned mode=(texture_modes>>(stage*5))&31;
-        if(mode>0x12 || mode==5 || mode==6 || mode==7 || mode==8 || mode==10 || mode==0x12)
+        if(mode>0x12 || mode==5 || mode==7 || mode==8 || mode==10 || mode==0x12)
             return E_NOTIMPL;
+        if(mode==6 && (!stage || (stage>1 && ((states[56]>>(8+stage*4))&15)>=stage)))
+            return E_INVALIDARG; /* A dependent lookup must read an earlier stage. */
     }
     const struct {unsigned xbox,host,count;} groups[]={
         {0,200,8},{8,208,2},{10,235,8},{18,243,8},{26,226,8},
