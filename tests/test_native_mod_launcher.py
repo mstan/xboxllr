@@ -45,6 +45,17 @@ class LauncherPolicy(unittest.TestCase):
             f = next(f for f in c.features if f['id'] == 'frame-rate')
             self.assertEqual([v for v, _ in f['options'][0]['choices']], ['original', 'interpolated'])
 
+    def test_saved_player_identity_validation(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / 'selection.json'
+            player = dict(source='gamepad', guid='0123456789abcdef' * 2)
+            ui.atomic_json(state, dict(version=1, player1=player))
+            self.assertEqual(ui.Catalog(MANIFESTS, state).player, player)
+            for bad in (dict(source='gamepad', guid='wrong'), dict(source='keyboard', guid='a' * 32), dict(source='anything', guid='')):
+                ui.atomic_json(state, dict(version=1, player1=bad))
+                with self.assertRaises(ValueError):
+                    ui.Catalog(MANIFESTS, state)
+
     @unittest.skipUnless(os.environ.get('XLLE_TEST_LAUNCHER'), 'Native launcher is an optional separate target')
     def test_compiled_provider_roundtrip_and_invalid_canvas(self):
         import subprocess
@@ -57,6 +68,11 @@ class LauncherPolicy(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(image, 'owned.xbe')
             self.assertEqual(len(c.values()), 4)
+            for source, guid in [('none', ''), ('keyboard', ''), ('gamepad', '0123456789abcdef' * 2)]:
+                c.player = dict(source=source, guid=guid)
+                c.run(Path(os.environ['XLLE_TEST_LAUNCHER']), Path(d) / 'run',
+                      title='Policy fixture', region='Test', sha='a' * 64, image='owned.xbe', validate=True)
+                self.assertEqual(ui.Catalog(MANIFESTS, c.state_path).player, c.player)
             # A malicious/truncated child result must not invent another value.
             target = Path(d) / 'run/launcher.result'
             before = c.selection()

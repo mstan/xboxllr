@@ -8,6 +8,7 @@ import hashlib
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tomllib
@@ -48,6 +49,8 @@ class Catalog:
             raise ValueError('Unsupported mod selection version')
         self.volume = persisted.get('volume', 100)
         self.skip_launcher = persisted.get('skip_launcher') is True
+        self.player = persisted.get('player1', dict(source='auto', guid=''))
+        self.validate_player(self.player)
         if type(self.volume) is not int or not 0 <= self.volume <= 100:
             self.volume = 100
         for path in map(Path, manifests):
@@ -102,6 +105,7 @@ class Catalog:
 
     def write(self, path, title, region, sha):
         lines = ['xlle-launcher 1', f'title {encoded(title)} {encoded(region)}', f'identity {sha}', f'volume {self.volume}', f'skip {int(self.skip_launcher)}']
+        lines.append(f'player {self.player["source"]} {encoded(self.player["guid"])}')
         for p in self.packages:
             lines.append('package ' + ' '.join(encoded(p[k]) for k in ('id', 'name', 'version', 'description')))
         for f in self.features:
@@ -125,6 +129,7 @@ class Catalog:
         staged = copy.deepcopy(self.features)
         staged_volume = self.volume
         staged_skip = self.skip_launcher
+        staged_player = dict(self.player)
         by_key = {(f['package'], f['id']): f for f in staged}
         for line in lines[1:-1]:
             t = line.split()
@@ -141,6 +146,10 @@ class Catalog:
                 staged_volume = volume;seen.add('volume')
             elif t[0] == 'skip' and len(t) == 2 and 'skip' not in seen and t[1] in ('0', '1'):
                 staged_skip = t[1] == '1';seen.add('skip')
+            elif t[0] == 'player' and len(t) == 3 and 'player' not in seen:
+                staged_player = dict(source=t[1], guid=decoded(t[2]))
+                self.validate_player(staged_player)
+                seen.add('player')
             elif t[0] == 'feature' and len(t) == 4:
                 key = tuple(map(decoded, t[1:3]));f = by_key[key]
                 if key in seen or t[3] not in ('0', '1'):
@@ -154,15 +163,24 @@ class Catalog:
                 seen.add(key);o['value'] = value
             else:
                 raise ValueError('Invalid launcher result record')
-        expected = {'image', 'volume', 'skip'} | set(by_key) | {(f['package'], f['id'], o['id']) for f in self.features for o in f['options']}
+        expected = {'image', 'volume', 'skip', 'player'} | set(by_key) | {(f['package'], f['id'], o['id']) for f in self.features for o in f['options']}
         if seen != expected or result not in (0, 1, 2, 3):
             raise ValueError('Incomplete launcher result inventory')
         self.features, self.volume = staged, staged_volume
         self.skip_launcher = staged_skip
+        self.player = staged_player
         return result, image
 
+    @staticmethod
+    def validate_player(player):
+        if not isinstance(player, dict) or set(player) != {'source', 'guid'} or player['source'] not in ('auto', 'none', 'keyboard', 'gamepad'):
+            raise ValueError('Invalid Player 1 source')
+        guid = player['guid']
+        if not isinstance(guid, str) or (player['source'] == 'gamepad' and not re.fullmatch('[0-9a-f]{32}', guid)) or (player['source'] != 'gamepad' and guid):
+            raise ValueError('Invalid Player 1 controller identity')
+
     def selection(self):
-        return dict(version=1, volume=self.volume, skip_launcher=self.skip_launcher, features={f['package'] + '/' + f['id']:
+        return dict(version=1, volume=self.volume, skip_launcher=self.skip_launcher, player1=dict(self.player), features={f['package'] + '/' + f['id']:
                     dict(enabled=f['enabled'], options={o['id']: o['value'] for o in f['options']}) for f in self.features})
 
     def values(self):

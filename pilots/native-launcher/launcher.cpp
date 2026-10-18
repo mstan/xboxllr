@@ -4,6 +4,7 @@
 #include "recomp_launcher.h"
 #include "launcher_profile.h"
 #include "visual_mods.h"
+#include <SDL.h>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -18,6 +19,7 @@ struct Feature {std::string package,id,name,description;int enabled=0;std::vecto
 struct Package {std::string id,name,version,description;};
 struct Catalog {
     std::string title,region,sha,error;std::vector<Package> packages;std::vector<Feature> features;
+    std::string player_source="auto",player_guid;
     RecompLauncherCSettings settings={};
 };
 static std::string unhex(const std::string &s) {
@@ -66,6 +68,12 @@ static Catalog read_catalog(const char *path) {
             c.settings.volume=std::stoi(t[1]);if(c.settings.volume>100)throw std::runtime_error("Invalid audio volume");
         } else if(t[0]=="skip"&&t.size()==2&&(t[1]=="0"||t[1]=="1")) {
             c.settings.skip_launcher=t[1]=="1";
+        } else if(t[0]=="player"&&t.size()==3) {
+            c.player_source=t[1];c.player_guid=x(2);
+            if(c.player_source!="auto"&&c.player_source!="none"&&c.player_source!="keyboard"&&c.player_source!="gamepad")throw std::runtime_error("Invalid Player 1 source");
+            if(c.player_source=="gamepad"?(c.player_guid.size()!=32||c.player_guid.find_first_not_of("0123456789abcdef")!=std::string::npos):!c.player_guid.empty())throw std::runtime_error("Invalid Player 1 controller identity");
+            c.settings.player_src[0]=c.player_source=="keyboard"?1:c.player_source=="gamepad"?2:0;
+            copy(c.settings.player_gamepad_guid[0],c.player_guid);
         } else if(t[0]=="package"&&t.size()==5&&c.packages.size()<32) {
             Package p={x(1),x(2),x(3),x(4)};
             if(std::any_of(c.packages.begin(),c.packages.end(),[&](const Package &old){return old.id==p.id;}))throw std::runtime_error("Duplicate package");
@@ -151,6 +159,9 @@ static const char *last_error(void *p){return ((Catalog*)p)->error.c_str();}
 static void save(const Catalog &c,const char *path,int result,const char *image) {
     std::ofstream out(path,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("Cannot save launcher result");
     out<<"xlle-launcher-result 1\nresult "<<result<<"\nimage "<<hex(image)<<"\nvolume "<<(c.settings.enable_audio?c.settings.volume:0)<<"\nskip "<<(c.settings.skip_launcher?1:0)<<"\n";
+    const int source=c.settings.player_src[0];
+    const std::string kind=c.player_source=="auto"&&source==0?"auto":source==2?"gamepad":source==1?"keyboard":"none";
+    out<<"player "<<kind<<" "<<hex(source==2?c.settings.player_gamepad_guid[0]:"")<<"\n";
     for(auto &f:c.features) {
         out<<"feature "<<hex(f.package)<<" "<<hex(f.id)<<" "<<f.enabled<<"\n";
         for(auto &o:f.options)out<<"option "<<hex(f.package)<<" "<<hex(f.id)<<" "<<hex(o.id)<<" "<<hex(o.value)<<"\n";
@@ -162,11 +173,27 @@ int main(int argc,char **argv) {
         if(argc!=4&&argc!=5)throw std::runtime_error("Usage: xlle_launcher catalog result owned.xbe [--validate]");
         Catalog c=read_catalog(argv[1]);
         if(argc==5){if(std::string(argv[4])!="--validate"||!commit(&c,argv[3]))throw std::runtime_error(c.error);save(c,argv[2],0,argv[3]);return 0;}
+        /* Only first use chooses a default. Saved/disconnected pads retain
+         * their GUID and the shared UI's normal hot-plug/offline behavior. */
+        if(c.player_source=="auto") {
+            c.settings.player_src[0]=1;
+            if(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER)==0) {
+                for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i)) {
+                    SDL_JoystickGUID guid=SDL_JoystickGetDeviceGUID(i);
+                    SDL_JoystickGetGUIDString(guid,c.settings.player_gamepad_guid[0],sizeof(c.settings.player_gamepad_guid[0]));
+                    c.settings.player_src[0]=2;break;
+                }
+            }
+            c.player_source=c.settings.player_src[0]==2?"gamepad":"keyboard";
+        }
         RecompLauncherCModProvider mods={};mods.ctx=&c;mods.package_count=package_count;mods.package_get=package_get;mods.set_enabled=package_enable;
         mods.feature_count=feature_count;mods.feature_get=feature_get;mods.feature_option_get=option_get;mods.feature_choice_get=choice_get;
         mods.feature_enable=feature_enable;mods.feature_set_option=set_option;mods.commit=commit;mods.last_error=last_error;
         RecompLauncherCGameInfo game={};launcher_profile_apply("xbox",&game);game.name=c.title.c_str();game.region=c.region.c_str();game.mods=&mods;
-        game.num_players=1;game.lock_device=1;game.hide_rebind=1;game.host_persists_paths=1;
+        game.num_players=1;game.lock_device=0;game.hide_rebind=1;game.host_persists_paths=1;
+#ifdef XLLE_LAUNCHER_HAS_BOXART
+        game.boxart_path="assets/img/boxart.png";
+#endif
         uint8_t sha[1][32];for(unsigned i=0;i<32;++i)sha[0][i]=(uint8_t)std::stoul(c.sha.substr(i*2,2),nullptr,16);
         game.known_sha256=sha;game.num_known_sha256=1;
         char image[4096]={};int result=recomp_launcher_run_window(c.title.c_str(),&c.settings,&game,"assets",argv[3],image,sizeof(image));

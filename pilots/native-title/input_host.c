@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "input_host.h"
+#include "input_sdl.h"
 #include "input_replay.inc"
 #include "input_control.inc"
 
@@ -19,6 +20,7 @@
  * Real OS keys are read only while this process owns the foreground window. */
 static INIT_ONCE input_host_once=INIT_ONCE_STATIC_INIT;
 static int input_host_keyboard;
+static int input_host_sdl,input_host_none;
 #ifdef PILOT_INPUT_REFERENCE_CLOCK
 static uint64_t input_host_reference_ms;
 uint32_t pilot_input_host_reference_time(uint64_t milliseconds)
@@ -40,6 +42,12 @@ static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID
     char value[24]={0};
     GetEnvironmentVariableA("XLLE_PILOT_INPUT",value,sizeof(value));
     input_host_keyboard=!strcmp(value,"keyboard");
+    input_host_none=!strcmp(value,"none");
+    if(!strcmp(value,"sdl")) {
+        uint32_t error=pilot_input_sdl_start(getenv("XLLE_PILOT_INPUT_GUID"));
+        if(error){fprintf(stderr,"[PILOT INPUT STOP] invalid SDL controller configuration error=%u\n",error);ExitProcess(2);}
+        input_host_sdl=1;
+    }
     if(!strcmp(value,"control")) {
         uint32_t error=input_control_open(getenv("XLLE_PILOT_INPUT_CONTROL"));
         if(error){fprintf(stderr,"[PILOT INPUT STOP] invalid local controller configuration error=%u\n",error);ExitProcess(2);}
@@ -96,6 +104,8 @@ static void input_host_convert(const XINPUT_GAMEPAD *source, uint8_t dest[18])
 uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 {
     input_host_is_keyboard();
+    if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
+    if(input_host_sdl)return pilot_input_sdl_state(port,gamepad);
     if(input_control_view) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         return input_control_sample(input_control_view,GetTickCount64(),gamepad);
@@ -122,6 +132,9 @@ uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 
 uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
 {
+    input_host_is_keyboard();
+    if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
+    if(input_host_sdl)return pilot_input_sdl_caps(port,gamepad,rumble);
     if(input_host_is_keyboard() || input_replay_count || input_control_view) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         if(input_replay_count) {
@@ -150,6 +163,9 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
 
 uint32_t pilot_input_host_rumble(unsigned port,uint16_t left,uint16_t right)
 {
+    input_host_is_keyboard();
+    if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
+    if(input_host_sdl)return pilot_input_sdl_rumble(port,left,right);
     if(input_host_is_keyboard() || input_replay_count || input_control_view) {
         uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
         return status?status:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;

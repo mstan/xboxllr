@@ -1,6 +1,7 @@
 /* Whole XAPI input service. Original driver bodies remain build-selectable.
  * Layout/side effects qualified against the owner's XDK4831 routines and the
- * existing OHCI Controller S report model. Host transport is Windows XInput.
+ * existing OHCI Controller S report model. Host transports are XInput and the
+ * optional shared-launcher SDL controller selection; guest ABI is unchanged.
  * No USB requests, authentication responses, or completion callbacks invented.
  */
 #include "pilot_input_bindings.h"
@@ -158,7 +159,7 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
         memset(memory+PILOT_INPUT_g_DeviceType_MU,0,12);
         memset(memory+PILOT_INPUT_g_DeviceType_IRDongle,0,12);
         input_initialized=1; input_refresh();
-        fprintf(stderr,"[INPUT INIT] native-XInput gamepads=%x capacity=%u MU=0 IR=0\n",
+        fprintf(stderr,"[INPUT INIT] native-host gamepads=%x capacity=%u MU=0 IR=0\n",
                 MEM32(PILOT_INPUT_g_DeviceType_Gamepad),input_capacity);
         break;
     }
