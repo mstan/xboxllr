@@ -32,7 +32,7 @@ static uint32_t memory_statistics(uint32_t destination)
         reserved+=vm_regions[i].size;
         committed+=vm_committed(vm_regions[i].base,vm_regions[i].size);
     }
-    for(unsigned i=0;i<256;++i)contiguous+=physical_allocations[i].bytes;
+    for(unsigned i=0;i<physical_allocation_capacity;++i)contiguous+=physical_allocations[i].bytes;
     uint64_t stacks=vm_committed(0x70000000,0x10000)+vm_committed(0x72002000,0x1e000);
     for(unsigned i=1;i<=thread_count;++i)if(threads[i].stack_size)
         stacks+=vm_committed(0x60100000u+i*0x100000u-threads[i].stack_size,threads[i].stack_size);

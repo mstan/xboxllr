@@ -112,15 +112,20 @@ static uint32_t graphics_texture_allocate(const uint32_t *args)
     /* Headers are small guest objects, not private 4 KiB allocations. Reuse
      * the maintained pool service, including its original-kernel selection,
      * without changing header bytes or caller/binding ownership. */
-    unsigned slot=graphics_texture_unused();uint32_t bytes=texture.bytes;
+    unsigned slot=graphics_texture_unused();
     texture.header=pool_allocate(24,0x48584554u);if(!texture.header)return 0;
-    if(vm_allocate(&texture.data,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)) {
+    /* Original XDK consumers (including the XPR save-image writer) derive a
+     * cached CPU pointer by setting Data bit31. Ordinary virtual allocations
+     * cannot satisfy that contract. Use the existing owned contiguous service
+     * so Data and Data|0x80000000 name the same real CPU bytes. */
+    texture.data=physical_allocate(texture.bytes,0,0x03ffffffu,4096,PAGE_READWRITE);
+    if(!texture.data) {
         pool_free(texture.header);
         return 0;
     }
     int32_t result=pilot_gfx_texture_create_usage(width,height,levels,format,usage,&texture.native);
     if(result<0) {
-        bytes=0; if(vm_free(&texture.data,&bytes,MEM_RELEASE))stop("texture data cleanup failed",texture.data);
+        physical_free(texture.data);
         pool_free(texture.header);
         if((uint32_t)result!=0x8007000eu)stop("native texture creation failed",(uint32_t)result);
         return 0;
@@ -189,7 +194,7 @@ static void graphics_texture_collect(unsigned slot)
     }
     else {
         pilot_gfx_texture_destroy(object->native);
-        uint32_t bytes=0; if(vm_free(&object->data,&bytes,MEM_RELEASE))stop("texture data release failed",object->data);
+        physical_free(object->data);
     }
     pool_free(object->header);
     memset(object,0,sizeof(*object));

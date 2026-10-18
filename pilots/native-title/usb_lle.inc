@@ -5,7 +5,7 @@
 #include "mmio_fault.h"
 #include "input_host.h"
 static INIT_ONCE usb_once=INIT_ONCE_STATIC_INIT;
-static uint8_t usb_dma_leases[256];
+static uint8_t usb_dma_leases[PHYSICAL_ALLOCATION_LIMIT];
 static uint64_t usb_isr_count;
 static RECOMP_TLS struct OriginalThreadExit {
     jmp_buf target;
@@ -268,7 +268,7 @@ static void usb_dma_release(void)
     pilot_io_device_dma_release(PILOT_IO_DMA_USB);
 #else
     AcquireSRWLockExclusive(&vm_lock);
-    for(unsigned i=0;i<256;++i)if(usb_dma_leases[i]) {
+    for(unsigned i=0;i<physical_allocation_capacity;++i)if(usb_dma_leases[i]) {
         if(!physical_allocations[i].bytes || !physical_allocations[i].borrowers)
             stop("USB DMA ownership lost",i);
         --physical_allocations[i].borrowers;usb_dma_leases[i]=0;

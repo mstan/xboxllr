@@ -63,7 +63,8 @@ def apply(directory):
         text += HEADER
     changes.append((header, text))
     for path, code in changes:
-        path.write_text(code, encoding='utf-8', newline='\n')
+        if path.read_bytes()!=code.encode('utf-8'):
+            path.write_text(code, encoding='utf-8', newline='\n')
     return dict(version=1, loop_targets=total, function_entry='recomp_trace_enter')
 
 

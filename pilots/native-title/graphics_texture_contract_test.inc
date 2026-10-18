@@ -171,7 +171,14 @@ static void test_graphics_texture_capacity(void)
     for(unsigned pass=0;pass<2;++pass) {
         for(unsigned i=0;i<520;++i) {
             headers[i]=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(headers[i] && test_pool_owned(headers[i]));
+            /* Original XPR writer F86BE/F8763 sets Data bit31, then copies
+             * payload bytes with REP MOVS. It must address this same owner. */
+            uint32_t data=MEM32(headers[i]+4),cached=data|0x80000000u;
+            CHECK(cached>=0x80000000u && cached<0x84000000u);
+            CHECK(physical_find(cached,64));
             for(unsigned p=0;p<16;++p)MEM32(MEM32(headers[i]+4)+p*4)=0xff000000u+i;
+            uint32_t copied[16];memcpy(copied,memory+cached,sizeof(copied));
+            for(unsigned p=0;p<16;++p)CHECK(copied[p]==0xff000000u+i);
         }
         uint64_t used=vm_committed(0,0x100000000ull)-resident;
         /* Payloads still own their real pages. Small guest headers must fit
@@ -272,11 +279,11 @@ static void test_graphics_textures(void)
         uint32_t args[]={texture,0};
         uint32_t view=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args),data=MEM32(texture+4);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&texture)==1);
-        CHECK(vm_find(data,offset) && MEM32(view+20)==texture);
+        CHECK(physical_find(data,offset) && MEM32(view+20)==texture);
         CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&view)==2);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&view)==1);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&view)==0);
-        CHECK(!test_pool_owned(texture) && !test_pool_owned(view) && !vm_find(data,offset));
+        CHECK(!test_pool_owned(texture) && !test_pool_owned(view) && !physical_find(data,offset));
         CHECK(vm_committed(0,0x100000000ull)==resident);
         free(pixels);free(linear);
     }

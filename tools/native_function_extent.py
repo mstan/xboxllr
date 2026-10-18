@@ -35,8 +35,25 @@ def apply_extents(blob, image, functions, records):
         f=matches[0]
         if int(f['end'],16) not in (record['original_end'],end): raise ValueError('original extent changed')
         if end<=record['original_end']: raise ValueError('recovery must extend the body')
-        if any(int(g['start'],16)<end and int(g['end'],16)>record['original_end'] for g in functions if g is not f):
-            raise ValueError('extension overlaps another discovered body')
+        overlaps=[g for g in functions if g is not f and
+                  int(g['start'],16)<end and int(g['end'],16)>record['original_end']]
+        allowed={g['start']:g for g in record.get('contained_entries',[])}
+        if len(allowed)!=len(record.get('contained_entries',[])):
+            raise ValueError('duplicate contained entry')
+        for g in overlaps:
+            low,high=int(g['start'],16),int(g['end'],16)
+            bound=allowed.pop(low,None)
+            if not bound or not start<=low<high<=end or bound['end']!=high:
+                raise ValueError('extension overlaps another discovered body')
+            source=next((s for s in image['sections'] if s['flags']&4 and
+                s['address']<=low<high<=s['address']+s['raw_size']),None)
+            if not source:raise ValueError('contained entry outside executable bytes')
+            offset=source['raw_offset']+low-source['address']
+            if hashlib.sha256(blob[offset:offset+high-low]).hexdigest()!=bound['sha256']:
+                raise ValueError('contained entry bytes changed')
+            # Keep the independently callable entry and its dispatch/body.
+            # Only the parent's reviewed extent expands to include shared tails.
+        if allowed:raise ValueError('contained entry does not match overlapping discovery')
         section=next((s for s in image['sections'] if s['flags']&4 and s['address']<=start<end<=s['address']+s['raw_size']),None)
         if not section: raise ValueError('extent outside executable file-backed section')
         offset=section['raw_offset']+start-section['address'];code=blob[offset:offset+end-start]
@@ -75,6 +92,14 @@ def recover(args):
     offset=section['raw_offset']+args.function-section['address']
     record=dict(start=args.function,original_end=int(function['end'],16),end=args.end,
                 sha256=hashlib.sha256(blob[offset:offset+args.end-args.function]).hexdigest(),reason=args.reason)
+    if getattr(args,'contained_entry',[]):
+        record['contained_entries']=[]
+        for address in args.contained_entry:
+            other=next((f for f in functions if int(f['start'],16)==address),None)
+            if not other:raise ValueError('contained entry must already be discovered')
+            end=int(other['end'],16);at=section['raw_offset']+address-section['address']
+            record['contained_entries'].append(dict(start=address,end=end,
+                sha256=hashlib.sha256(blob[at:at+end-address]).hexdigest()))
     if args.new_entry:record['new_entry']=True
     records['extents'].append(record)
     updated=apply_extents(blob,image,functions,[record])
@@ -138,4 +163,6 @@ if __name__=='__main__':
     parser.add_argument('--end',type=lambda x:int(x,0),required=True)
     parser.add_argument('--reason',required=True)
     parser.add_argument('--new-entry',action='store_true',help='Recover an observed undiscovered function with a reviewed non-overlapping extent')
+    parser.add_argument('--contained-entry',type=lambda x:int(x,0),action='append',default=[],
+                        help='Preserve an existing source-bound shared tail inside the reviewed expanded body')
     print(json.dumps(recover(parser.parse_args())))

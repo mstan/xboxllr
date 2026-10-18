@@ -36,6 +36,24 @@ class ExtentRecovery(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'executable'):
             apply_extents(self.blob,self.image,self.functions,[self.record])
 
+    def test_source_bound_shared_tail_keeps_its_independent_entry(self):
+        other=dict(start='0x00010006',end='0x0001000A',size=4)
+        self.record['contained_entries']=[dict(start=0x10006,end=0x1000a,
+            sha256=hashlib.sha256(self.blob[6:]).hexdigest())]
+        result=apply_extents(self.blob,self.image,self.functions+[other],[self.record])
+        self.assertEqual(len(result),2)
+        self.assertEqual(result[1],other)
+        self.assertEqual(apply_extents(self.blob,self.image,result,[self.record]),result)
+
+    def test_shared_tail_requires_exact_source_identity_and_boundary(self):
+        other=dict(start='0x00010006',end='0x0001000A',size=4)
+        self.record['contained_entries']=[dict(start=0x10006,end=0x1000a,sha256='0'*64)]
+        with self.assertRaisesRegex(ValueError,'bytes changed'):
+            apply_extents(self.blob,self.image,self.functions+[other],[self.record])
+        self.record['contained_entries'][0]['end']=0x10009
+        with self.assertRaisesRegex(ValueError,'overlaps'):
+            apply_extents(self.blob,self.image,self.functions+[other],[self.record])
+
     def test_reject_changed_old_boundary(self):
         self.functions[0]['end']='0x00010004'
         with self.assertRaisesRegex(ValueError,'extent changed'):

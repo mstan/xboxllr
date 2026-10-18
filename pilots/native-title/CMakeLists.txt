@@ -53,6 +53,11 @@ elseif(NOT PILOT_CPU_PROBE STREQUAL "ORIGINAL")
   message(FATAL_ERROR "PILOT_CPU_PROBE must be ORIGINAL or NATIVE")
 endif()
 target_include_directories(xlle_native_title PRIVATE "${PILOT_GENERATED}")
+set(PILOT_SAVE_KEYS_FILE "${PILOT_GENERATED}/save-keys.aot-private.bin" CACHE FILEPATH
+  "Private original-derived title/console signing inputs; prepare with native_save_keys.py")
+file(TO_CMAKE_PATH "${PILOT_SAVE_KEYS_FILE}" pilot_save_keys_path)
+set_property(SOURCE runtime.c runtime_contract_test.c APPEND PROPERTY
+  COMPILE_DEFINITIONS "PILOT_SAVE_KEYS_FILE=\"${pilot_save_keys_path}\"")
 target_compile_definitions(xlle_native_title PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(xlle_native_title PRIVATE bcrypt)
 # Keep credits current even when only a notice changes and no relink occurs.

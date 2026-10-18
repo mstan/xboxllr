@@ -31,6 +31,60 @@ native LLE CPU conversion and JSRF remain separate. LLE-D07 preserves the old
 unidentified exception cause without claiming a causal fix or requiring a soak
 loop after the working current route. Earlier checkpoints below are history.
 
+## Post-qualification New Game and first stage - 2026-10-17
+
+`beads-xbox.1.101` now passes the save screen and enters playable first-stage
+gameplay. The earlier HLE fault reproduced in 38.484s: the original XPR writer
+sets texture Data bit31 and copies through that cached address, while HLE had
+allocated ordinary virtual bytes. Created textures now use the existing owned
+contiguous/cached backing. Stable allocation metadata follows the physical page
+budget instead of an artificial 256-resource limit; memory accounting and USB
+leases use that same capacity. The focused graphics/memory checks include 520
+concurrent textures, actual data copies/GPU readback and full release/reuse.
+
+The next reached dependency was ordinal325, an exported signing-key array
+incorrectly left as a callable thunk. The loader now publishes original-derived
+title/alternate keys and the authenticated EEPROM's disk key as real data.
+Portable XcSHA335-337 matches original kernel execution and independent hashlib
+across 60 message/partition vectors, context copies, alignment and count rollover.
+The actual 6000-byte gamedata.dat ends with the correct independent HMAC-SHA1 over
+its first 5980 bytes. SaveImage.xbx is complete at 4096 bytes; SaveMeta.xbx is 26.
+
+New Game then reached an undiscovered mode1 tail in story movie pr_a01. The
+generic extent-recovery tool now admits explicitly source-bound contained entries
+while preserving their independent callable bodies. Original parent108D90 is
+retranslated through108E9B with its mode0/mode1/default branches and seven-byte
+108E48 cleanup intact. No original code, scene state or successful return is
+substituted. Eleven recovery checks pass; unchanged generated files retain their
+timestamps to avoid another whole-title compilation for a local correction.
+
+The resulting HLE run completes genuine New Game, story playback/Start skip,
+tutorial dismissal and first-stage movement. Actual analog input moves Blinx
+forward at 90031-96016ms and right at104016-109000ms; reviewed pictures86/91
+show movement off the spawn and into the street. The 125.141s run has no guards
+and is stopped deliberately. Later sustained sidestepping produces a close wall
+view; camera/collision edge behavior and completing the stage are not qualified.
+Private retained evidence: build/blinx/new-game-20261017, including source/input
+pins, full logs, 108 pictures, signed save, original-crypto and recovery receipts.
+
+CPU assessment: this HLE selection already runs AOT-compiled Xbox game code and
+native kernel/service implementations. Its 8867-entry dispatch and final link
+contain no Unicorn engine; unresolved targets stop instead of entering an x86
+interpreter. Earlier descriptions of retained guest CPU fallback were imprecise.
+This is a build/route conclusion, not a measured instruction percentage or full
+campaign coverage. The qualification LLE profile executes original game/kernel
+through Unicorn; strict native game-and-kernel LLE `.1.25.5` remains separate.
+Native dispatch/register-model costs and DSP emulation can still affect speed;
+future performance work should profile them before assuming x86 interpretation.
+
+Owner playtest: `build/blinx/owner-first-stage-20261017/Play-Blinx.cmd`, with
+normal interactive audio and separate save/cache state. The executable is the
+same SHA256 `7b88be742eab3466d99d8aaf028695bb1edf23010df0a7fec2afde65fc9a0e81`
+that completed the stage-entry/movement run. Choose New Game and an empty box;
+Start skips the story movie and A dismisses the opening stage prompts.
+
+## Earlier execution checkpoints
+
 Earlier execution checkpoint: the normal32000-block429bb45 run passed genuine
 opening Start/release, original cleanup, a visible title and its1440-update idle
 timeout. It stopped2 at2502.063s during attract loading on NV097181C/3E808081,

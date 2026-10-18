@@ -559,6 +559,7 @@ static void query_setting(void)
 #include "virtual_memory.inc"
 #include "physical_memory.inc"
 #include "pool_memory.inc"
+#include "save_crypto.inc"
 #ifdef PILOT_SCHEDULING_LLE
 #include "component_owner.inc"
 static void scheduling_lle_bootstrap(void);
@@ -817,6 +818,7 @@ static void kernel_dispatch_impl(void)
     }
 #endif
     case 304:case 305:system_time_fields(next_kernel_ordinal);return;
+    case 335:case 336:case 337:save_crypto_kernel(next_kernel_ordinal);return;
     case 124: case 143: case 144: case 224: case 231: case 246: case 250:
         thread_object_kernel(next_kernel_ordinal);return;
     case 14:case 15:case 17:case 23:pool_kernel(next_kernel_ordinal);return;
@@ -1067,6 +1069,8 @@ static void load_image(const char *path)
     }
     for (size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i) {
         MEM32(pilot_imports[i].address)=0xfe000000u+4*pilot_imports[i].ordinal;
+        if(pilot_imports[i].ordinal==323 || pilot_imports[i].ordinal==325 || pilot_imports[i].ordinal==354)
+            MEM32(pilot_imports[i].address)=save_key_import(pilot_imports[i].ordinal);
         if (pilot_imports[i].ordinal==259) {
             /* Native object-type identity, used by ObReferenceObjectByHandle.
              * Guest inspection of unqualified OBJECT_TYPE internals faults. */

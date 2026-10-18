@@ -73,6 +73,15 @@ passes in 10.016s with a real 640x480 present, and its interactive launcher enab
 normal audio. Existing guest CPU fallback, New Game/save bug `.101`, full native
 LLE CPU conversion and JSRF title two remain separate from this closed milestone.
 
+Post-qualification clarification: the owner HLE selection already executes game
+code as AOT-generated C and uses native service implementations; it does not
+fall back to an x86 interpreter. The earlier "guest CPU fallback" description
+was imprecise. Original game/kernel execution through Unicorn belongs to the
+LLE reference selection; its strict AOT conversion remains separate. Subsequent
+New Game/save and first-stage movement now pass; see the
+[gameplay checkpoint](BLINX-BURNDOWN.md#post-qualification-new-game-and-first-stage---2026-10-17).
+The immutable attract receipts retain their original scope and source identities.
+
 ## Normal-cadence run: title timeout passed, eye-vector gap isolated - 2026-10-17
 
 The original429bb45 run used the unchanged32000-block cadence and stopped2 at

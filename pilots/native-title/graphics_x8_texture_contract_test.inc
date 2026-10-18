@@ -90,11 +90,11 @@ static void test_graphics_x8_texture_lifetime(void)
         uint32_t args[]={texture,0},view=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args);
         const uint32_t data=MEM32(texture+4);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&texture)==1);
-        CHECK(vm_find(data,offset) && MEM32(view+20)==texture && test_pool_owned(texture));
+            CHECK(physical_find(data,offset) && MEM32(view+20)==texture && test_pool_owned(texture));
         CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&view)==2);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&view)==1);
         CHECK(!call_graphics(PILOT_D3D_D3DResource_Release,&view));
-        CHECK(!test_pool_owned(texture) && !test_pool_owned(view) && !vm_find(data,offset));
+        CHECK(!test_pool_owned(texture) && !test_pool_owned(view) && !physical_find(data,offset));
         CHECK(vm_committed(0,0x100000000ull)==resident);
     }
     fprintf(stderr,"PASS: XRGB normalized native alpha, exact ARGB controls/RGB, both rectangular full mip chains, unchanged guest bytes, changed-data uploads, sampled alpha and shared surface/parent lifetimes\n");

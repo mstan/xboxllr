@@ -6,7 +6,12 @@
  * WRITE_COMBINE is retained as logical protection; host cached CPU storage is
  * coherent with the renderer's explicit upload boundary. */
 struct PhysicalAllocation { uint32_t base,bytes,protect,borrowers; };
-static struct PhysicalAllocation physical_allocations[256];
+/* Metadata must not cap resource count before the guest RAM budget does.
+ * Keep record addresses stable for DMA/registered-resource borrowers. At most
+ * one record per physical page can exist; unused host records cost no guest RAM. */
+#define PHYSICAL_ALLOCATION_LIMIT (64*1024*1024/4096)
+static struct PhysicalAllocation physical_allocations[PHYSICAL_ALLOCATION_LIMIT];
+static unsigned physical_allocation_capacity=256;
 /* Cache policy is logical on the coherent host; access permission is enforced
  * by actual host pages. Track policy per page, including partial-range updates. */
 static uint16_t physical_protection[64*1024*1024/4096];
@@ -26,7 +31,7 @@ static const char *physical_original_call(unsigned ordinal,const uint32_t *args,
 #endif
 static struct PhysicalAllocation *physical_find(uint32_t address,uint32_t bytes)
 {
-    for(unsigned i=0;i<256;++i) {
+    for(unsigned i=0;i<physical_allocation_capacity;++i) {
         struct PhysicalAllocation *a=&physical_allocations[i];
         if(a->bytes && address>=a->base && (uint64_t)address+bytes<=(uint64_t)a->base+a->bytes) return a;
     }
@@ -45,8 +50,11 @@ static uint32_t physical_allocate(uint32_t length,uint32_t low,uint32_t high,uin
     at=(at+alignment-1)&~((uint64_t)alignment-1);
     vm_ensure(); AcquireSRWLockExclusive(&vm_lock);
     uint32_t result=0; struct PhysicalAllocation *slot=NULL;
-    for(unsigned i=0;i<256;++i)if(!physical_allocations[i].bytes){slot=&physical_allocations[i];break;}
-    if(!slot || vm_committed(0,0x100000000ull)+vm_service_bytes+bytes>64ull*1024*1024)goto done;
+    if(vm_committed(0,0x100000000ull)+vm_service_bytes+bytes>64ull*1024*1024)goto done;
+    for(unsigned i=0;i<physical_allocation_capacity;++i)if(!physical_allocations[i].bytes){slot=&physical_allocations[i];break;}
+    if(!slot && physical_allocation_capacity<PHYSICAL_ALLOCATION_LIMIT)
+        slot=&physical_allocations[physical_allocation_capacity++];
+    if(!slot)goto done;
 #ifdef PILOT_USB_LLE
     /* The original USB driver consumes real physical addresses. Allocate with
      * the same original kernel that owns page translation, rather than asking
@@ -59,7 +67,7 @@ static uint32_t physical_allocate(uint32_t length,uint32_t low,uint32_t high,uin
     for(;;) {
         if(at+bytes>limit)goto done;
         int conflict=0;
-        for(unsigned i=0;i<256;++i) {
+        for(unsigned i=0;i<physical_allocation_capacity;++i) {
             struct PhysicalAllocation *a=&physical_allocations[i];
             uint32_t start=a->base&0x0fffffffu;
             if(a->bytes && at+bytes>start && at<(uint64_t)start+a->bytes) {

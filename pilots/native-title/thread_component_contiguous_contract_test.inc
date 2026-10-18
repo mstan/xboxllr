@@ -11,7 +11,7 @@ static void test_memory_snapshot(uint32_t out[9]);
 static unsigned component_contiguous_owned(void)
 {
     unsigned count=0;
-    for(unsigned i=0;i<256;++i)if(physical_allocations[i].bytes)++count;
+    for(unsigned i=0;i<physical_allocation_capacity;++i)if(physical_allocations[i].bytes)++count;
     return count;
 }
 static uint32_t component_contiguous_kernel(unsigned ordinal,uint32_t sp)

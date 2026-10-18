@@ -1,12 +1,19 @@
 # Native title reference pilot
 
-Current bounded Blinx qualification is **7/9 families**: input, display,
-memory, files, scheduling, movies and audio pass. GPU and graphics remain open
-on connected attract exit/reentry and content lifetime (G05); G01-G04 passed.
-The final connected GPU/graphics acceptance run remains open. Use the
+Current bounded Blinx qualification is **9/9 families**. G01-G05 and A01-A05 are
+accepted for the agreed NTSC attract profile. Use the
 [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) for current gates
 and [audio evidence](AUDIO-LLE.md) for the latest GP/EP milestones. The earlier
 component observations below retain their original scope and limitations.
+
+Post-qualification gameplay, 2026-10-17 (`beads-xbox.1.101`): New Game creates
+the complete metadata/image and 6000-byte signed game save, plays the story
+movie, and enters the first stage. A 125.141s HLE run with real gamepad replay
+moves Blinx off the spawn and along the street, then sideways, without guards.
+Original-derived signing keys and SHA, owned cached texture backing, and one
+recovered original movie-function extent repair the reached failures. See the
+[gameplay checkpoint](../../docs/BLINX-BURNDOWN.md#post-qualification-new-game-and-first-stage---2026-10-17).
+This establishes entry and movement, not a campaign completion or a new FPS claim.
 
 The owner-facing HLE preview selects native scheduling/services and D3D11 with
 `PILOT_IO_DEVICE=OFF`. Its game code is ahead-of-time compiled; unresolved indirect
@@ -16,6 +23,44 @@ build instead executes original game threads, drivers and kernel through Unicorn
 alongside its fixed native audio components and maintained software GPU. The9/9
 behavioral qualification goal does not close the separate strict game-and-kernel
 AOT work tracked by `beads-xbox.1.25.5`.
+
+The 2026-10-17 playtest binary has 8867 native dispatch entries and links no
+Unicorn engine. Missing direct/indirect targets still stop; there is no guest
+x86 interpreter fallback in this HLE selection. Earlier package/closing-record
+phrases saying it retained guest CPU fallback were imprecise. The original
+kernel/game LLE profile, DSP emulation, dynamic native dispatch cost and full
+unreached code coverage are separate questions. Dispatch count is not a measured
+runtime percentage or proof that every campaign function is translated.
+
+For authenticated saves, prepare the private signing input once before launch:
+
+```powershell
+python tools/native_save_keys.py --xbe <owned-default.xbe> --kernel <owned-kernel-live.bin> --eeprom <owned-eeprom.bin> --output <PILOT_GENERATED>/save-keys.aot-private.bin
+```
+
+The tool executes the reviewed original per-title producer and independently
+checks all 17 title/alternate keys, then authenticates/decrypts the supplied
+EEPROM. The default CMake input is `PILOT_GENERATED/save-keys.aot-private.bin`;
+`PILOT_SAVE_KEYS_FILE` or the runtime path `XLLE_PILOT_SAVE_KEYS_FILE` relocates
+that private input. Missing/mismatched inputs stop before data publication.
+No key values or original binary bodies are printed or checked into source.
+
+The maintained portable XcSHA contract preserves the original 116-byte context,
+including the 24-byte prefix, high/low byte count, unaligned staging and Final
+reset. `tools/native_crypto_reference.py` checks copied contexts, partitioning,
+count rollover and every context byte against original execution, with independent
+hashlib digests. The reviewed donor's zero key exports and different SHA layout
+are not adopted. The current original kernel pin remains explicit in the tool;
+additional kernel/key profiles need their own source-backed admission.
+
+The reached movie case extends original `00108D90` through `00108E9B`, preserving
+the independently callable cleanup at `00108E48`. Replay this source-bound
+recovery with `native_function_extent.py --function 0x108d90 --end 0x108e9b
+--contained-entry 0x108e48` and the matching owner inputs. It executes the original
+mode branches; it adds no movie skip or success replacement. Private extent
+metadata persists in `function-extents.aot-private.json` and full regeneration
+replays it. Unchanged checkpoint output files retain their timestamps, so an
+incremental recovery rebuilds only changed generated units.
 
 USB/PIC LLE now requires the reviewed
 [source-built Unicorn IRQ-boundary package](unicorn-engine/README.md).
