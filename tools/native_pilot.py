@@ -165,6 +165,12 @@ def prepare(args):
     counts = harden_generated(out / "gen")
     from native_interrupt_lowering import apply as lower_interrupts
     counts['interrupt_flags'] = lower_interrupts(out/'gen', args.xbe)
+    if getattr(args, 'diagnostic_continuations', False):
+        from native_continuation_lowering import apply as lower_continuations
+        counts['diagnostic_continuations'] = lower_continuations(out/'gen', args.xbe)
+    else:
+        # Fresh default generation must not inherit a previous diagnostic guard.
+        (out/'gen'/'pilot_continuation_schema.h').unlink(missing_ok=True)
     analysis = json.loads((out / "analysis.aot-private.json").read_text())
     imports = analysis["kernel_imports"]
     header = ["/* Private input identity, regenerated from the owner's XBE. */",
@@ -213,6 +219,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--data-sections", default="")
     parser.add_argument("--reuse-discovery", action="store_true")
+    parser.add_argument('--diagnostic-continuations', action='store_true',
+                        help='Restricted continuation research output; requires a separate diagnostic harness')
     parser.add_argument("--seed-functions", type=Path, action="append", default=[], help="Measured/recovered indirect roots for this title revision")
     parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
     parser.add_argument("--cache-symbols", type=Path, help="Bind reviewed utility-drive service using this XDK symbol inventory")

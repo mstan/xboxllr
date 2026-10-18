@@ -822,6 +822,11 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_private_input.py")
 endif()
 if(Python3_Interpreter_FOUND)
+  option(XLLE_TEST_NATIVE_CONTINUATIONS "Run the local pinned-donor diagnostic continuation compiler fixture" OFF)
+  if(XLLE_TEST_NATIVE_CONTINUATIONS)
+    add_test(NAME native_continuation_diagnostic
+             COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_continuation.py")
+  endif()
   if(WIN32)
     add_test(NAME host_sample_report COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_host_sample_report.py $<TARGET_FILE:host_sample_probe>)
