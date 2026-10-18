@@ -36,6 +36,12 @@ if(XLLE_LAUNCHER_ARTWORK_NOTICE)
   add_custom_command(TARGET xlle_launcher POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different
     "${XLLE_LAUNCHER_ARTWORK_NOTICE}" "$<TARGET_FILE_DIR:xlle_launcher>/ARTWORK-NOTICE.md")
 endif()
+add_custom_command(TARGET xlle_launcher POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_launcher>/assets/img"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${XLLE_UI_SOURCE}/assets/consoles/xbox/img/pad_xbox.jpg"
+    "$<TARGET_FILE_DIR:xlle_launcher>/assets/img/pad_xbox.jpg"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/assets/NOTICE.md"
+    "$<TARGET_FILE_DIR:xlle_launcher>/XBOX-CONTROLLER-ARTWORK.md")
 set(ui_notices LICENSE src/third_party/imgui/LICENSE.txt
   src/third_party/stb_image.h src/third_party/stb_image_write.h src/third_party/tinyfiledialogs.c
   assets/common/fonts/NOTICE.md assets/common/img/NOTICE.md xboxlle-ui.json)
