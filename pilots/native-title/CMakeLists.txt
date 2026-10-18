@@ -421,14 +421,15 @@ if(PILOT_SDL2_DIR)
   pilot_add_test(NAME pilot_input_sdl_host_transport COMMAND pilot_input_sdl_host_test)
   set_tests_properties(pilot_input_sdl_transport PROPERTIES TIMEOUT 15)
   set_tests_properties(pilot_input_sdl_host_transport PROPERTIES TIMEOUT 15)
-  add_custom_command(TARGET pilot_input_sdl_test POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SDL2::SDL2>" "$<TARGET_FILE_DIR:pilot_input_sdl_test>")
-  add_custom_command(TARGET xlle_native_title POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SDL2::SDL2>" "$<TARGET_FILE_DIR:xlle_native_title>")
-  if(EXISTS "${PILOT_SDL2_DIR}/../LICENSE.txt")
-    add_custom_command(TARGET xlle_native_title POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_SDL2_DIR}/../LICENSE.txt" "$<TARGET_FILE_DIR:xlle_native_title>/SDL2-LICENSE.txt")
-  endif()
+  foreach(input_target xlle_native_title pilot_contract_test pilot_input_sdl_test
+      pilot_input_sdl_host_test pilot_input_replay_host_test pilot_input_replay_reference_test)
+    add_custom_command(TARGET ${input_target} POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SDL2::SDL2>" "$<TARGET_FILE_DIR:${input_target}>")
+    if(EXISTS "${PILOT_SDL2_DIR}/../LICENSE.txt")
+      add_custom_command(TARGET ${input_target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_SDL2_DIR}/../LICENSE.txt" "$<TARGET_FILE_DIR:${input_target}>/SDL2-LICENSE.txt")
+    endif()
+  endforeach()
 endif()
 target_link_libraries(pilot_contract_test PRIVATE pilot_input_sdl)
 target_link_libraries(xlle_native_title PRIVATE pilot_input_sdl)
