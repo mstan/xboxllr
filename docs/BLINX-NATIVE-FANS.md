@@ -29,5 +29,11 @@ with nonzero offset, malformed/overflow ranges and three device lifetimes.
 Explicit interior samples distinguish each rim color from the anchor. PHOBOS
 also exercises the actual user-pointer upload route. Existing backend/G8B8/bump
 checks pass alongside it, 4/4 in 3.34 seconds; guest graphics ABI passes in
-1.88 seconds. Secondary backend and actual title results are tracked with
-`beads-xbox.1.135` and the game campaign ledger. Other primitives remain guarded.
+1.88 seconds. SPOON backend/fan checks pass 2/2 in 6.72 seconds. Actual
+`campaign-020`, executable SHA-256
+`9a09d86b23c945c13a1d85f13c21fd5420a16a78c1f9d205c5bff975570bf785`,
+passes the measured guard, displays the Momentopolis introduction and Boss01.sfd,
+then reaches the first rematch (original stage 19, kind 185). Subsequent original
+rematch/movie transitions also run. Final campaign/ending coverage remains in
+the game ledger; the reached primitive fix is closed as `beads-xbox.1.135`.
+Other primitives remain guarded.
