@@ -50,7 +50,7 @@ static uint32_t graphics_log2(uint32_t value)
 }
 static uint32_t graphics_texture_bpp(const struct GraphicsTextureObject *texture)
 {
-    return texture->format<=5 || texture->format==0x24 || texture->format==0x25?2:4;
+    return texture->format<=5 || texture->format==0x24 || texture->format==0x25 || texture->format==0x28?2:4;
 }
 static uint32_t graphics_texture_block(const struct GraphicsTextureObject *texture)
 {
@@ -98,11 +98,11 @@ static uint32_t graphics_texture_allocate(const uint32_t *args)
     int yuv=format==0x24 || format==0x25;
     int linear=format==0x12 || format==0x1e || format==0x2e || yuv;
     if(yuv && (usage || (width&1)))stop("unqualified packed YUV texture dimensions/usage",width);
-    if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf))
+    if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf || format==0x28))
         stop("unqualified texture type/usage/format",format);
     if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))
         stop("unqualified texture dimensions",width);
-    if(!linear && format>=0xc && (width<4 || height<4))stop("compressed texture base below native block size",width);
+    if((format==0xc || format==0xe || format==0xf) && (width<4 || height<4))stop("compressed texture base below native block size",width);
     unsigned max_levels=linear?1:graphics_log2(width>height?width:height)+1;
     if(!levels)levels=max_levels;
     if(levels>max_levels)stop("texture mip chain exceeds dimensions",levels);

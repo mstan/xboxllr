@@ -226,7 +226,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
         (m:=re.fullmatch(r'al, byte ptr \[edx \+ (0x[0-9a-f]+)\]',i.op_str))]
     if len(format_tables)!=1: raise ValueError('unreviewed surface format table')
     state_defaults['surface_formats']=[dict(format=x,flags=data(format_tables[0]+x,1)[0])
-        for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e,0x24,0x25)]
+        for x in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e,0x24,0x25,0x28)]
     # CPU snapshot layout from the complete reviewed recorder, independently
     # checked against original-x86 execution. These offsets belong to this
     # revision's binding, never to shared native service code.

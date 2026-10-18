@@ -208,22 +208,23 @@ static void test_graphics_textures(void)
     uint32_t create[]={4096,4096,1,1,0,6,3};
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create)==0); /* guest RAM admission fails */
     CHECK(vm_committed(0,0x100000000ull)==resident);
-    const unsigned formats[]={4,5,6,7,4,0xc,0xe,0xf};
-    for(unsigned test=0;test<8;++test) {
+    const unsigned formats[]={4,5,6,7,4,0xc,0xe,0xf,0x28};
+    for(unsigned test=0;test<sizeof(formats)/sizeof(*formats);++test) {
         unsigned format=formats[test],width=test==4?128:(test&1?4:8),height=test==4?256:(test&1?8:4);
-        unsigned bpp=format<=5?2:4,levels=test==4?9:4;
-        unsigned block=test>=5?(format==0xc?8:16):0;
+        unsigned bpp=format<=5 || format==0x28?2:4,levels=test==4?9:4;
+        unsigned block=format==0xc?8:(format==0xe || format==0xf?16:0);
         create[0]=width;create[1]=height;create[3]=0;create[5]=format;
         uint32_t texture=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);
         CHECK(texture && test_pool_owned(texture) && MEM32(texture)==0x01040001u && MEM32(texture+16)==0);
         CHECK(call_graphics(PILOT_D3D_D3DBaseTexture_GetLevelCount,&texture)==levels);
         unsigned native=graphics_textures[graphics_texture_slot(texture)].native;
-        unsigned char *linear=malloc(width*height*bpp),*pixels=malloc(width*height*bpp);
+        unsigned char *linear=malloc(width*height*bpp),*pixels=malloc(width*height*4);
         CHECK(linear && pixels);
         unsigned offset=0;
         for(unsigned level=0;level<levels;++level) {
             unsigned w=width>>level,h=height>>level;if(!w)w=1;if(!h)h=1;
             unsigned bytes=block?((w+3)/4)*((h+3)/4)*block:w*h*bpp;
+            unsigned decoded_bytes=format==0x28?bytes*2:bytes;
             for(unsigned i=0;i<bytes;++i)linear[i]=(unsigned char)(i*37+level*53+test*19);
             uint32_t args[]={texture,level};
             uint32_t surface=call_graphics(PILOT_D3D_D3DTexture_GetSurfaceLevel2,args);
@@ -253,9 +254,9 @@ static void test_graphics_textures(void)
             lock[0]=alias;lock[3]=0xc0;call_graphics(PILOT_D3D_D3DSurface_LockRect,lock);
             CHECK(MEM32(0x19544)==data);
             CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&surface)==0 && MEM32(texture)==0x01040002u);
-            CHECK(pilot_gfx_texture_readback(native,level,pixels,bytes)==0);
-            for(unsigned i=0;i<bytes;++i) {
-                unsigned char expected_byte=linear[i];
+            CHECK(pilot_gfx_texture_readback(native,level,pixels,decoded_bytes)==0);
+            for(unsigned i=0;i<decoded_bytes;++i) {
+                unsigned char expected_byte=format==0x28?linear[(i/4)*2+(i&1)]:linear[i];
 #ifdef PILOT_D3D_PHOBOS
                 /* Prepared XRGB has opaque native BGRA alpha; guest X stays raw. */
                 if(format==7 && (i&3)==3)expected_byte=255;
@@ -265,9 +266,9 @@ static void test_graphics_textures(void)
             /* A persistent CPU pointer may be changed after an earlier upload. */
             MEM8(data)^=0x5a;linear[0]^=0x5a;
             CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&alias)==0 && MEM32(texture)==0x01040001u);
-            CHECK(pilot_gfx_texture_readback(native,level,pixels,bytes)==0);
-            for(unsigned i=0;i<bytes;++i) {
-                unsigned char expected_byte=linear[i];
+            CHECK(pilot_gfx_texture_readback(native,level,pixels,decoded_bytes)==0);
+            for(unsigned i=0;i<decoded_bytes;++i) {
+                unsigned char expected_byte=format==0x28?linear[(i/4)*2+(i&1)]:linear[i];
 #ifdef PILOT_D3D_PHOBOS
                 if(format==7 && (i&3)==3)expected_byte=255;
 #endif
@@ -287,5 +288,5 @@ static void test_graphics_textures(void)
         CHECK(vm_committed(0,0x100000000ull)==resident);
         free(pixels);free(linear);
     }
-    fprintf(stderr,"PASS: four color and three DXT formats, rectangular/full nine-level chains including BC 1x1 tails, actual GPU readback, shared CPU views, changed-data reupload, parent/view lifetime and RAM failure cleanup\n");
+    fprintf(stderr,"PASS: color/G8B8 and three DXT formats, rectangular/full nine-level chains including 1x1 tails, actual GPU readback, shared CPU views, changed-data reupload, parent/view lifetime and RAM failure cleanup\n");
 }

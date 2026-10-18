@@ -79,7 +79,7 @@ struct PilotNativeTexture {
     ID3D11RenderTargetView *rtv;
     ID3D11DepthStencilView *dsv;
     ID3D11ShaderResourceView *base_srv;
-    uint32_t uploaded,gpu_written;
+    uint32_t uploaded,gpu_written,guest_format;
     struct PilotImageUse *use;
     uint64_t content_serial;
     ID3D11Texture2D *argb_image;
@@ -582,7 +582,7 @@ void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
     pilot_d3d_require(pilot_device->lpVtbl->SetTexture(pilot_device,stage,(IDirect3DBaseTexture8*)texture),__FILE__,__LINE__);
     pilot_gpu_call_end("donor SetTexture",started);
     pilot_bound_textures[stage]=handle;
-    pilot_sampling_formats[stage]=texture?texture->d3d8_format:0;
+    pilot_sampling_formats[stage]=texture?pilot_textures[handle-1].guest_format:0;
     pilot_sampling_views_dirty|=1u<<stage;
 }
 void pilot_gfx_texture_sampling_format(unsigned stage,uint32_t format)
@@ -590,7 +590,7 @@ void pilot_gfx_texture_sampling_format(unsigned stage,uint32_t format)
     if(!pilot_device || stage>=4 || !pilot_bound_textures[stage])
         pilot_d3d_backend_stop("sampling format requires a bound texture");
     D3D8Texture *texture=pilot_texture(pilot_bound_textures[stage]);
-    if(format!=texture->d3d8_format && !(format==0x12 && texture->d3d8_format==0x2e))
+    if(format!=pilot_textures[pilot_bound_textures[stage]-1].guest_format && !(format==0x12 && texture->d3d8_format==0x2e))
         pilot_d3d_backend_stop("unqualified texture sampling reinterpretation");
     if(pilot_sampling_formats[stage]!=format) {
         pilot_sampling_formats[stage]=format;pilot_sampling_views_dirty|=1u<<stage;
@@ -683,7 +683,7 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
     int linear=format==0x12 || format==0x1e || format==0x2e || yuv;
     if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))return E_NOTIMPL;
     if(!levels || levels>13 || (linear && levels!=1) || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) ||
-       !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf))return E_NOTIMPL;
+       !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf || format==0x28))return E_NOTIMPL;
     unsigned slot;
     for(slot=0;slot<pilot_texture_capacity && pilot_textures[slot].object;++slot) {}
     if(slot==pilot_texture_capacity) {
@@ -695,7 +695,11 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
         pilot_textures=next;pilot_texture_capacity=capacity;
     }
     IDirect3DTexture8 *object=NULL;
-    HRESULT hr=d3d8_CreateTextureImpl(width,height,levels,usage,(D3DFORMAT)format,&object);
+    /* NV2A G8B8 (0x28) samples unsigned (B,G,B,G), including alpha=G.
+     * Keep guest layout/format in the bridge; use ordinary BGRA storage on
+     * either donor and expand only changed CPU uploads. This is not V8U8.
+     * Reference: xemu GL/Vulkan SZ_G8B8 swizzles, Cxbx G8B8 conversion. */
+    HRESULT hr=d3d8_CreateTextureImpl(width,height,levels,usage,(D3DFORMAT)(format==0x28?6:format),&object);
     if(FAILED(hr)) return hr;
     ID3D11RenderTargetView *rtv=NULL;
     ID3D11DepthStencilView *dsv=NULL;
@@ -718,6 +722,7 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
     pilot_textures[slot].rtv=rtv;
     pilot_textures[slot].dsv=dsv;
     pilot_textures[slot].object=object; pilot_textures[slot].uploaded=0;
+    pilot_textures[slot].guest_format=format;
     pilot_textures[slot].blend_depth_shape=pilot_blend_depth_shape(pilot_donor_texture((D3D8Texture*)object),1);
     pilot_textures[slot].blend_color_shape=pilot_blend_color_shape(pilot_donor_texture((D3D8Texture*)object));
     *handle=slot+1;
@@ -776,8 +781,9 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     UINT rows=d3d8_format_is_compressed(texture->d3d8_format)?(height+3)/4:height;
     int depth=texture->d3d8_format==0x2e;
     int yuv=texture->d3d8_format==0x24 || texture->d3d8_format==0x25;
+    int pair=pilot_textures[handle-1].guest_format==0x28;
     int linear=texture->d3d8_format==0x12 || texture->d3d8_format==0x1e || depth || yuv;
-    UINT pitch=d3d8_row_pitch(texture->d3d8_format,width),guest_pitch=linear?(pitch+63)&~63u:pitch;
+    UINT pitch=d3d8_row_pitch(texture->d3d8_format,width),guest_pitch=pair?width*2:(linear?(pitch+63)&~63u:pitch);
     if(bytes!=guest_pitch*rows)
         pilot_d3d_backend_stop("texture upload size does not match subresource");
     if(depth) {
@@ -806,11 +812,23 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     D3DLOCKED_RECT lock;
     pilot_d3d_require(texture->iface.lpVtbl->LockRect(&texture->iface,level,&lock,NULL,0),__FILE__,__LINE__);
     int changed=!(pilot_textures[handle-1].uploaded&(1u<<level));
-    for(UINT row=0;row<rows && !changed;++row)changed=memcmp((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
+    if(pair) {
+        const BYTE *src=data;const BYTE *dst=lock.pBits;
+        for(UINT i=0;i<width*height && !changed;++i)
+            changed=dst[i*4]!=src[i*2] || dst[i*4+1]!=src[i*2+1];
+    } else for(UINT row=0;row<rows && !changed;++row)changed=memcmp((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
     if(!changed) {
         texture->locked=FALSE; return; /* No changed CPU work to upload. */
     }
-    for(UINT row=0;row<rows;++row)memcpy((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
+    if(pair) {
+        /* Both streams retain the same Morton texel order. The existing
+         * donor upload unswizzles the expanded four-byte texels once. */
+        const BYTE *src=data;BYTE *dst=lock.pBits;
+        for(UINT i=0;i<width*height;++i) {
+            dst[i*4]=dst[i*4+2]=src[i*2];
+            dst[i*4+1]=dst[i*4+3]=src[i*2+1];
+        }
+    } else for(UINT row=0;row<rows;++row)memcpy((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
     pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
