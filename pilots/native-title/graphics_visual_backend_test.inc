@@ -1,4 +1,26 @@
 #ifdef PILOT_D3D_PHOBOS
+#include <wchar.h>
+static BOOL CALLBACK visual_find_window(HWND window,LPARAM output)
+{
+    DWORD pid=0;GetWindowThreadProcessId(window,&pid);
+    wchar_t name[64];
+    if(pid==GetCurrentProcessId() && GetClassNameW(window,name,64) && !wcscmp(name,L"xlle-native-reference")) {
+        *(HWND*)output=window;return FALSE;
+    }
+    return TRUE;
+}
+static int visual_reset_preserves_window(const uint32_t parameters[17])
+{
+    HWND window=NULL;EnumWindows(visual_find_window,(LPARAM)&window);CHECK(window);
+    /* A user-sized hidden window: never activate or resize the owner's game. */
+    CHECK(SetWindowPos(window,NULL,31,47,997,613,SWP_NOZORDER|SWP_NOACTIVATE));
+    RECT before,after,client_before,client_after;
+    CHECK(GetWindowRect(window,&before) && GetClientRect(window,&client_before));
+    CHECK(!pilot_gfx_reset(parameters));
+    CHECK(GetWindowRect(window,&after) && GetClientRect(window,&client_after));
+    CHECK(!memcmp(&before,&after,sizeof(before)) && !memcmp(&client_before,&client_after,sizeof(client_before)));
+    return 0;
+}
 #include "d3d8_display.h"
 HRESULT pilot_d3d_visual_resolve(RhiView*,unsigned,unsigned,RhiView*,D3D8DisplayFit,unsigned,unsigned);
 HRESULT pilot_d3d_interpolate_image(uint64_t,RhiView*);
@@ -161,11 +183,12 @@ static int test_visual_mod_resources(void)
         pilot_gfx_texture_destroy(alias);
         CHECK(!pilot_gfx_targets(0,UINT32_MAX));pilot_gfx_texture_destroy(color);pilot_gfx_texture_destroy(depth);
         if(!pass)CHECK(!test_float_blend(pp));
-        CHECK(!pilot_gfx_reset(pp));CHECK(!visual_target_shape(physical[0],physical[1]));
+        CHECK(!visual_reset_preserves_window(pp));CHECK(!visual_target_shape(physical[0],physical[1]));
         pilot_gfx_close();
     }
     struct PilotVisualMods original;pilot_visual_mods_default(&original);CHECK(pilot_gfx_visual_mods(&original));
     CHECK(!pilot_gfx_create(pp));uint32_t size[2];CHECK(pilot_gfx_render_size(size) && size[0]==640 && size[1]==480);
+    CHECK(!visual_reset_preserves_window(pp));
     pilot_gfx_close();
     fprintf(stderr,"PASS: actual 1080p/2160p/SSAA raster, original guest sizes/readback, scaled color/depth CPU roundtrip, aliases/reset and original restoration\n");
     CHECK(!test_visual_aa());return test_visual_interpolation();

@@ -24,7 +24,8 @@ struct PilotTitleModDraw {
     const unsigned char *positions;
     uint32_t stride,position_type;
     /* Identity leaves ordinary rasterization untouched. The plugin can map
-     * screen X to scale*X + anchor*(1-scale), in guest viewport pixels. */
+     * screen X to scale*X + anchor*(1-scale), in guest viewport pixels.
+     * A finite anchor may lie beyond the viewport for a clipped marker. */
     float x_scale,x_anchor;
     uint32_t depth_test,depth_write;
 };

@@ -358,9 +358,9 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     }
     pilot_color_target=0;pilot_depth_target=UINT32_MAX;
     pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
-    RECT client=pilot_client_rectangle(p[0],p[1]);
-    if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
-        SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))pilot_d3d_backend_stop("reset window resize failed");
+    /* Guest Reset reallocates console presentation storage. The host window
+     * belongs to the player: preserve its size, position and maximized state.
+     * The donor's next present fits/resizes its swapchain to that client area. */
     free(pilot_saved_display);pilot_saved_display=NULL;
     return S_OK;
 #else

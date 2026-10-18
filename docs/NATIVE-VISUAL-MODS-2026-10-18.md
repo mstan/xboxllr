@@ -5,6 +5,12 @@ packages and a resolved v2 plan. Disabled features preserve original rendering
 and timing. This work does not reopen the independent LLE qualification floor
 or change generated guest CPU register layout.
 
+Guest display Reset preserves host-window geometry and maximized state; it
+reallocates console presentation storage without reapplying the startup window
+size. The GPU visual regression exercises preservation at Native, 1080p, 2160p
+and supersampling. Trusted title placement callbacks may use a finite anchor
+outside the viewport so partially clipped world markers retain their centers.
+
 ## Implemented scope
 
 | Feature | Implementation and practical limit |

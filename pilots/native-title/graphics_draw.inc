@@ -127,7 +127,7 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
             data?memory+data+position_offset:NULL,stride,position_type,1,0,
             MEM32(PILOT_D3D_RENDER_STATES+143*4),MEM32(PILOT_D3D_RENDER_STATES+64*4)};
         title_mod->draw(&draw);
-        if(!(draw.x_scale>0 && draw.x_scale<=1 && draw.x_anchor>=0 && draw.x_anchor<=graphics_parameters[0]))
+        if(!(draw.x_scale>0 && draw.x_scale<=1 && isfinite(draw.x_anchor)))
             stop("invalid title mod raster placement",draw.caller);
         mod_x_scale=draw.x_scale;mod_x_anchor=draw.x_anchor;
     }
