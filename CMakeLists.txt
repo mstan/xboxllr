@@ -825,6 +825,8 @@ if(Python3_Interpreter_FOUND)
   option(XLLE_TEST_NATIVE_CONTINUATIONS "Run the local pinned-donor diagnostic continuation compiler fixture" OFF)
   add_test(NAME native_dispatch COMMAND ${Python3_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_dispatch.py")
+  add_test(NAME native_poll_waits COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_poll_waits.py")
   if(XLLE_TEST_NATIVE_CONTINUATIONS)
     add_test(NAME native_continuation_diagnostic
              COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_continuation.py")

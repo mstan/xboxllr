@@ -301,6 +301,10 @@ static void thread_finished(void)
     threads[current_thread_slot].finished=1;
     ReleaseSRWLockExclusive(&thread_lock);
 }
+void pilot_native_poll_wait(void)
+{
+    scheduler_poll_wait();
+}
 void recomp_trace_enter(const char *name, uint32_t va)
 {
     PILOT_THREAD_CHECKPOINT();

@@ -629,6 +629,32 @@ if(NOT PILOT_NATIVE_OPTIMIZATION MATCHES "^(OPTIMIZED|BRINGUP)$")
 endif()
 set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS
   "PILOT_NATIVE_OPTIMIZATION=\"${PILOT_NATIVE_OPTIMIZATION}\"")
+option(PILOT_NATIVE_POLL_WAIT "Park native host CPU in revision-bound guest-callback polls" OFF)
+if(PILOT_NATIVE_POLL_WAIT)
+  if(NOT PILOT_SCHEDULING STREQUAL "NATIVE" OR NOT PILOT_USB STREQUAL "OFF" OR
+     NOT PILOT_IO_DEVICE STREQUAL "OFF" OR NOT PILOT_DISPLAY STREQUAL "NATIVE")
+    message(FATAL_ERROR "Native poll waits require native scheduling/display and USB/IO OFF; reference builds keep original polling")
+  endif()
+  set(pilot_poll_units "${PILOT_GENERATED}/pilot_poll_wait_units.json")
+  if(NOT EXISTS "${pilot_poll_units}")
+    message(FATAL_ERROR "Native poll waits require a reviewed native_pilot.py --poll-waits contract")
+  endif()
+  file(READ "${pilot_poll_units}" pilot_poll_json)
+  string(JSON pilot_poll_count LENGTH "${pilot_poll_json}")
+  if(pilot_poll_count LESS 1)
+    message(FATAL_ERROR "Native poll wait unit inventory is empty")
+  endif()
+  math(EXPR pilot_poll_last "${pilot_poll_count}-1")
+  foreach(index RANGE 0 ${pilot_poll_last})
+    string(JSON unit GET "${pilot_poll_json}" ${index})
+    if(NOT unit MATCHES "^recomp_[0-9]+\\.c$" OR NOT EXISTS "${PILOT_GENERATED}/${unit}")
+      message(FATAL_ERROR "Invalid native poll wait unit: ${unit}")
+    endif()
+    # Only affected units need rebuilding; the register-model header is intact.
+    set_property(SOURCE "${PILOT_GENERATED}/${unit}" APPEND PROPERTY
+      COMPILE_DEFINITIONS PILOT_NATIVE_POLL_WAIT)
+  endforeach()
+endif()
 # Older generated inventories remain usable through the exact binary lookup.
 # Only initialize the bounded table after the reviewed generator transform.
 file(STRINGS "${PILOT_GENERATED}/recomp_dispatch.c" pilot_compact_dispatch
@@ -638,7 +664,7 @@ if(pilot_compact_dispatch)
 endif()
 file(SHA256 "${PILOT_GENERATED}/recomp_types.h" pilot_register_model_sha256)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-build-profile-$<CONFIG>.aot-private.json"
-  CONTENT "{\n  \"optimization\": \"${PILOT_NATIVE_OPTIMIZATION}\",\n  \"configuration\": \"$<CONFIG>\",\n  \"compiler\": \"${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}\",\n  \"register_model_sha256\": \"${pilot_register_model_sha256}\",\n  \"scheduling\": \"${PILOT_SCHEDULING}\",\n  \"calendar\": \"${PILOT_CALENDAR}\",\n  \"io_device\": \"${PILOT_IO_DEVICE}\",\n  \"files\": \"${PILOT_FILES}\",\n  \"renderer\": \"${PILOT_RENDERER}\",\n  \"audio\": \"${PILOT_AUDIO}\"\n}\n")
+  CONTENT "{\n  \"optimization\": \"${PILOT_NATIVE_OPTIMIZATION}\",\n  \"native_poll_wait\": \"${PILOT_NATIVE_POLL_WAIT}\",\n  \"configuration\": \"$<CONFIG>\",\n  \"compiler\": \"${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}\",\n  \"register_model_sha256\": \"${pilot_register_model_sha256}\",\n  \"scheduling\": \"${PILOT_SCHEDULING}\",\n  \"calendar\": \"${PILOT_CALENDAR}\",\n  \"io_device\": \"${PILOT_IO_DEVICE}\",\n  \"files\": \"${PILOT_FILES}\",\n  \"renderer\": \"${PILOT_RENDERER}\",\n  \"audio\": \"${PILOT_AUDIO}\"\n}\n")
 if(MSVC)
   # Runtime symbols and generated public names make a stopped title inspectable
   # without recompiling millions of generated lines with debug information.

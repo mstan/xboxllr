@@ -129,6 +129,7 @@ def prepare(args):
     for family in ('input', 'audio'):
         (out / 'gen' / f'pilot_{family}_binding.c').unlink(missing_ok=True)
         (out / 'gen' / f'pilot_{family}_bindings.h').unlink(missing_ok=True)
+    (out / 'gen' / 'pilot_poll_wait_units.json').unlink(missing_ok=True)
     identity.write_text(json.dumps(image, indent=2) + "\n")
 
     def run(name, argv):
@@ -211,6 +212,15 @@ def prepare(args):
     if args.audio_symbols:
         from native_audio_binding import bind
         bind(args.xbe, out, args.audio_symbols)
+    if getattr(args, 'poll_waits', None):
+        from native_poll_waits import apply as bind_poll_waits
+        path = out / 'generation.aot-private.json'
+        manifest = json.loads(path.read_text())
+        contract = json.loads(args.poll_waits.read_text(encoding='utf-8'))
+        manifest['poll_waits'] = bind_poll_waits(args.xbe.read_bytes(), image, out/'gen', contract)
+        manifest['files'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                             for p in sorted((out/'gen').iterdir()) if p.is_file()}
+        path.write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps({k: v for k, v in manifest.items() if k != "files"}, indent=2))
 
 
@@ -223,6 +233,8 @@ if __name__ == "__main__":
     parser.add_argument("--reuse-discovery", action="store_true")
     parser.add_argument('--diagnostic-continuations', action='store_true',
                         help='Restricted continuation research output; requires a separate diagnostic harness')
+    parser.add_argument('--poll-waits', type=Path,
+                        help='Reviewed image-bound guest-callback poll contract; native idle is separately selected at build time')
     parser.add_argument("--seed-functions", type=Path, action="append", default=[], help="Measured/recovered indirect roots for this title revision")
     parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
     parser.add_argument("--cache-symbols", type=Path, help="Bind reviewed utility-drive service using this XDK symbol inventory")

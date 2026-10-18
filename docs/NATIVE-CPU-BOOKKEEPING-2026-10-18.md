@@ -138,13 +138,10 @@ state writes or terminal guards. Saved payload SHA256:
 The existing 32 native runtime/ABI checks pass. No full-campaign requalification
 is claimed.
 
-All three performance experiments are retained privately and **none is promoted**.
-The canonical generated manifest and executable are restored byte-for-byte to
-`be2bd2cd...` and `a7ae3b2b...`; the register header remains `84554b7c...`.
-Restored source timestamps force correct original objects on the next build.
-Private BlinxRecomp stays at `739111c` with framework `8d3bce3`. The remaining
-investigation is entry-hook/small-function cost and its caller-side barriers;
-the large-player result does not settle that question.
+All three register/compiler experiments are retained privately and **none is
+promoted**. The baseline was restored byte-for-byte before the separate poll
+experiment below. The register header remains `84554b7c...`. The large-player
+result does not settle entry-hook/small-function cost or caller-side barriers.
 
 Four focused tests compiled uncached/cached authored C at GCC `-O0` and `-O2`
 and compare complete results across callbacks, lazy flag snapshots, guest stack,
@@ -156,6 +153,86 @@ selection during incremental recovery. Because both experiments failed the
 performance gate, the generator/recovery/game-profile edits and new test/tool
 were removed from production. A complete source/test copy remains under the
 ignored evidence directory `rejected-cache-source/`. No game preset selects it.
+
+## Accepted component: native host idle for the original frame poll
+
+The next measurement found an actual avoidable cost in the original `AB4F0`
+main loop, rather than inferring it from native code size. At `AB801` it compares
+the signed DWORD at `50A520` with EAX and spins until the original vertical-blank
+callback advances the counter. The callback at `A04F0`, its registration at
+`AB64C`, and the reviewed `D3DDevice_SetVerticalBlankCallback` binding at `1320D0`
+provide the publisher contract. The original callback still owns publication.
+
+`native_poll_waits.py` checks the exact input revision, executable byte hashes,
+decoded comparison/back edge, counter publisher and callback registration. It
+retains the generated comparison, lazy flags, checkpoint and back edge, adding
+a host-idle call only inside the still-unsatisfied branch. Generation records
+the complete contract and affected unit inventory; incremental function recovery
+reapplies it. No GPR/TLS layout, register value, guest return slot, guest memory
+or generated common header changes. The framework build option defaults off;
+the Blinx native `play` profile selects this qualified component at build time.
+The separate reference profiles retain original polling. There is no shipping
+runtime comparison/backend selector.
+
+The scheduler helper parks the **host thread while keeping the guest runnable
+and its CPU ownership intact**. It must not use the ordinary blocking-service
+helper: that would incorrectly let lower-priority guest threads run during an
+original busy poll. Readiness/suspension publication and the condition wait share
+the scheduler lock. Pending requests return immediately to the original
+checkpoint, preserving its priority/quantum behavior. A real publisher wakes the
+host; the original checkpoint admits that callback and the original comparison
+decides completion. Disabled/inapplicable scheduler contexts retain spinning.
+Callers require a reviewed guest-scheduled publisher and must hold no host lock.
+
+Whole-wait diagnostics bracket the actual original loop once per visit; there
+are no per-spin timing calls. `QueryThreadCycleTime` measures CPU execution while
+QPC separately measures elapsed wait. Each Stage 1 movement window has 180
+original updates:
+
+| Movement measurement | Original spin | Native host idle |
+| --- | ---: | ---: |
+| Wait CPU cycles / update | 4,204,445 | 13,223 |
+| Wait share of main-thread CPU cycles | 3.081% | 0.00995% |
+| Elapsed wait ms / update | 0.941 | 0.608 |
+| Main-thread CPU ms / update | 28.385 | 28.125 |
+
+This removes about 99.7% of **the measured wait's CPU cycles**, not 99.7% of
+title cost. The stationary case already has almost no unsatisfied wait.
+Unprofiled Stage 8 comparisons are mixed: stationary main CPU ms/update is
+45.31/44.88, while movement is 29.34/32.55. Process CPU is also mixed. Those
+worlds are not deterministic replays, and these totals do not establish a
+general speedup or a general regression. A private, test-only same-image ABBA
+comparison keeps code/allocation/device context fixed but still shows evolving
+world/clock costs. Its actual blocked native wait spends 15,941 CPU cycles over
+0.468 ms/update; an original-spin window spends 177,778 cycles over 0.050 ms.
+Most other windows find the counter already satisfied. The narrow component is
+accepted for removing proven spin work while preserving scheduler behavior;
+**no statistically established whole-title CPU/FPS improvement is claimed**.
+
+Focused checks passed as one batch:
+
+- Five binding tests, including authored-byte negative cases, idempotent
+  recovery, and compiled original-condition/flags/stack checks with GCC at
+  `-O0`/`-O2`, feature on/off; 13 extent and four checkpoint tests also pass.
+- The 32 native runtime/ABI tests include real host-thread cases for callback
+  publication, lower-priority exclusion, suspension/resume and already-pending
+  equal-priority requests. The host wait never fabricates poll completion.
+- With the option off, all 253 native code sections (969,551 bytes) and symbolic
+  relocation targets in the affected original unit match the preserved baseline
+  exactly. This tests the actual reference machine code, not only source intent.
+- The production native binary reaches original Round 3 Stage 1 Results,
+  scoring and save with explicit HP/position assists. A fresh process
+  authenticates that save and reaches the selector without guest diagnostic
+  writes or terminal guards. No full-campaign requalification was repeated.
+
+Production executable SHA256:
+`fac70b2095a5ae6094dc6b2a6900eaaa670f9a1403d1d1cd1c459fd41b36fd1f`.
+Generated manifest SHA256:
+`cfdcaa8d89edb18a8ce21172c4943397d6396d289dc75035a3be5bdb0e312bbf`.
+Register header SHA256:
+`84554b7cd8452a2e36cb24af1d9e87964a4ebc705c6e74ffde47da3809fc57fd`.
+Authenticated saved payload SHA256:
+`be69c9668505628bc074a4905c7063f282d3be99f7dd061a8a5e1898e430debb`.
 
 ## Donors and remaining costs
 
@@ -172,6 +249,7 @@ would not solve the observed compiler issue.
 | Guest register value promotion across calls | Address caching retains immediate visibility. Value promotion needs explicit callback/wait/exception materialization. Reopen when a narrower block/routine profile shows enough remaining cell traffic to justify it. |
 | Large-body optimizer policy / source-level dead-flag elimination | Full MSVC optimization has a substantial measured compile-time cost. Reopen if remaining native profiles still identify these bodies after the narrower cache is assessed; require dataflow proof before dropping flags. |
 | Inline entry-hook fast path | Entry frequency is high, but safe suspension and diagnostic behavior must remain. Reopen with direct caller-side timing/barrier evidence; the unused exit helper is not a target. |
+| Movie polls at `A5820`, `A5946`, `A5A50` | Identified but not selected. Reopen on a measured movie CPU hotspot, after separately reviewing each wait's locks and publisher. The main-frame poll contract is not blanket permission to sleep in every loop. |
 | Whole-routine game HLE | No suitable donor replacement was identified for the measured hot title routines. Reopen on a concrete native hotspot with a defined caller, memory and exception contract. |
 | Broader x87/flag architecture, full native original kernel and general save states | Existing distinct scope remains open. This host optimization neither proves nor changes those contracts and does not restart exhaustive qualification. |
 

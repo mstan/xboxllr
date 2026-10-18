@@ -125,6 +125,31 @@ static void scheduler_checkpoint(void)
     } else scheduler_notify_locked();
     ReleaseSRWLockExclusive(&scheduler_lock);
 }
+/* A qualified side-effect-free guest poll may park the HOST while retaining
+ * guest CPU ownership and readiness. Publishing a higher/equal ready thread or
+ * a suspension request wakes this condition under the same lock. The caller
+ * returns to its original checkpoint/read/branch; this never completes a poll,
+ * makes lower-priority threads eligible, or executes a callback itself.
+ * Only use with a reviewed guest-scheduled publisher, outside host locks. */
+static void scheduler_poll_wait(void)
+{
+#if !defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_USB_LLE)
+    if(!scheduler_enabled || !scheduler_attached || scheduler_slot==SCHEDULER_CALLBACK_SLOT)return;
+    AcquireSRWLockExclusive(&scheduler_lock);
+    if(scheduler_owner!=scheduler_slot+1)stop("guest poll without CPU ownership",scheduler_slot);
+    /* A pending request must reach the original checkpoint, including the
+     * existing equal-priority budget/quantum logic. Check before sleeping to
+     * cover publication between the caller's last read and lock acquisition. */
+    if(!scheduled[scheduler_slot].request) {
+        int ok=SleepConditionVariableSRW(&scheduler_changed,&scheduler_lock,INFINITE,0);
+        DWORD error=ok?0:GetLastError();
+        ReleaseSRWLockExclusive(&scheduler_lock);
+        if(!ok)stop("guest poll scheduler wait failed",error);
+        return;
+    }
+    ReleaseSRWLockExclusive(&scheduler_lock);
+#endif
+}
 /* Call only outside native ownership locks. The original call must perform
  * its real wait/I/O; this changes CPU eligibility, never its completion. */
 static int scheduler_block_begin(void)

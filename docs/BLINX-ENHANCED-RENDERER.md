@@ -113,3 +113,52 @@ HP/position cheats to reach original Results, save and Stage 2 unlock. Results
 and the stage selector retained their centered 4:3 presentation. These checks
 do not establish full campaign, all effect/HUD producers or enhanced-resolution
 coverage. Those remain in the title's campaign and enhancement ledgers.
+
+## Resolution, quality and frame-rate request, 2026-10-18
+
+Track in the existing `beads-xbox.1.7.4`. After the current CPU measurement
+batch, prioritize a genuine higher internal-resolution mod. Resizing the
+window or filtering the existing 640x480 image does not satisfy this request.
+Keep the original path available by disabling the mod; do not edit generated
+original CPU bodies. Shared resource/raster support belongs in xboxlle, with
+revision-specific selection and scope in the game's trusted mod registry.
+
+Offer Native plus 1080p, 1440p, 1800p and 2160p internal-height presets.
+Preserve the chosen aspect, including adaptive 21:9 and 32:9: these labels are
+vertical resolution, and only a 16:9 2160p image is 3840x2160. Record actual
+render dimensions for the owner performance handoff. Window/output dimensions
+remain independent. Keep proportional HUD anchors and centered menu scope.
+
+Implementation order and acceptance are bounded:
+
+1. Add an explicit host render-target scale at the HLE resource boundary.
+   Preserve guest descriptors, pitches, CPU-visible locks/readback and guest
+   coordinates. Scale matching color/depth attachments, viewport/scissor and
+   pixel offsets consistently. Review sampled render targets, history/time
+   effects, copies and resolves as a resource family; never stretch a guest
+   allocation or silently allocate a full-resolution copy for every texture.
+2. Add separate antialiasing choices. A postprocess option is a reasonable first
+   candidate; MSAA requires format/support checks, matched color/depth sample
+   counts and explicit resolves before sampling/readback. Do not advertise an
+   unimplemented AA choice. Supersampling uses an explicit higher render size
+   and final downsample, with its multiplier relative to the selected internal
+   size clearly represented. Texture filtering can be an independent feature.
+3. Compare one reproducible scene at Native/1080p and a high preset, plus a
+   focused resource/readback/resolve fixture. Exercise a history ability and
+   Results/save after the coherent change. Reuse prior correctness evidence;
+   exhaustive hardware or whole-campaign qualification is not a prerequisite.
+4. Hand the working options to the owner for performance playtesting. Persist
+   a per-option visibility policy in the mod/UI catalog so requested expensive
+   choices can later be hidden without deleting renderer support. Unsupported
+   choices are filtered by capabilities before selection. Do not change quality
+   automatically during play or hide choices before receiving owner feedback.
+
+Higher FPS is a distinct mod scope. Prefer real additional game/render updates
+only after demonstrating stable wall-clock game speed, physics, timers, input,
+audio and all five time controls. Merely uncapping the original clock/presents
+is insufficient. Optional interpolated presentation must identify itself and
+retain simulation timing; history/camera cuts, HUD and disocclusion require
+their own handling. Resolution/AA work can ship before either FPS technique.
+Simulation-affecting options require an agreed compatibility profile before
+netplay frame zero; local presentation choices do not imply cross-build or
+savestate compatibility.

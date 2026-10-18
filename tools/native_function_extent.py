@@ -171,6 +171,9 @@ def recover(args):
     if manifest.get('thread_checkpoints'):
         from native_thread_checkpoints import apply
         manifest['thread_checkpoints']=apply(generated)
+    if manifest.get('poll_waits'):
+        from native_poll_waits import apply as bind_poll_waits
+        manifest['poll_waits']=bind_poll_waits(blob,image,generated,manifest['poll_waits']['contract'])
     manifest['files']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(generated.iterdir()) if p.is_file()}
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',newline='\n')
     return record
