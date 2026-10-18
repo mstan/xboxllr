@@ -24,7 +24,7 @@ alongside its fixed native audio components and maintained software GPU. The9/9
 behavioral qualification goal does not close the separate strict game-and-kernel
 AOT work tracked by `beads-xbox.1.25.5`.
 
-The 2026-10-17 playtest binary has 8867 native dispatch entries and links no
+The latest 2026-10-17 campaign binary has 8869 native dispatch entries and links no
 Unicorn engine. Missing direct/indirect targets still stop; there is no guest
 x86 interpreter fallback in this HLE selection. Earlier package/closing-record
 phrases saying it retained guest CPU fallback were imprecise. The original
@@ -69,6 +69,21 @@ validation stays the default. Conditional branches, fallthrough and partial
 instructions do not satisfy the tail-jump terminal. Campaign Stage 3 exposed
 the 19-byte original `000B2360` wrapper through `000B2373`; its original table
 dispatch is retained without absorbing padding or the adjacent `000B2380`.
+
+Round 3 gameplay exposed Xbox texture state 20 (`RESULTARG`) selecting TEMP.
+The native fixed-function adapter now retains independent CURRENT/TEMP results,
+accepts TEMP arguments with the existing complement/alpha modifiers, and
+defaults the destination to CURRENT. Both reviewed D3D donors use an existing
+reserved constant-buffer lane; changing this state adds no shader compilation.
+Unsupported destinations still fail before mutation. The maintained NV2A LLE
+combiner already retains separate R0/R1 registers; this fixes the HLE adapter.
+`pilot_graphics_resultarg` checks actual GPU pixels for preservation, mixed
+reads, modifiers and changed live constants over three device lifetimes. It
+passes on PHOBOS and SPOON; the PHOBOS backend/FVF/float-blend checks also pass.
+Round 3's three normal stages subsequently reach original Results and saves.
+This does not qualify every XDK fixed-function mode or an unread TEMP value.
+Repeated Phobos preparation also preserves unchanged output timestamps to
+avoid rebuilding unrelated native units after each reached gameplay fix.
 
 USB/PIC LLE now requires the reviewed
 [source-built Unicorn IRQ-boundary package](unicorn-engine/README.md).

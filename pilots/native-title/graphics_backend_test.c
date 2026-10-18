@@ -17,6 +17,7 @@
 #include "graphics_depth_texture_selector_test.inc"
 #include "graphics_fvf_snap_backend_test.inc"
 #include "graphics_blend_backend_test.inc"
+#include "graphics_resultarg_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -124,6 +125,9 @@ int main(int argc,char **argv)
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
+        if(argc==2 && !strcmp(argv[1],"--resultarg")) {
+            CHECK(!test_fixed_resultarg());pilot_gfx_close();continue;
+        }
 #ifdef PILOT_D3D_PHOBOS
         if(argc==2 && !strcmp(argv[1],"--completion-alias")) {
             CHECK(!test_alias_completion(pp));pilot_gfx_close();continue;

@@ -123,6 +123,7 @@ int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
     case 16:host=D3DTSS_ALPHAOP; goto operation;
     case 18:host=D3DTSS_ALPHAARG1; goto argument;
     case 19:host=D3DTSS_ALPHAARG2; goto argument;
+    case 20:if(value!=1 && value!=5)return 0; host=D3DTSS_RESULTARG; break;
     case 22:host=D3DTSS_BUMPENVMAT00; break;
     case 23:host=D3DTSS_BUMPENVMAT01; break;
     case 24:host=D3DTSS_BUMPENVMAT11; break; /* Xbox swaps the final two entries. */
@@ -137,6 +138,6 @@ int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 address: if(value<1 || value>5)return 0; goto apply;
 filter: if(value<1 || value>3)return 0; goto apply;
 operation: if(value<1 || value>7)return 0; goto apply;
-argument: if((value&~0x3fu) || (value&15)>4)return 0;
+argument: if((value&~0x3fu) || (value&15)>5)return 0;
 apply: pilot_gfx_set_texture_state(stage,host,value); return 1;
 }

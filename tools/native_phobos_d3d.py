@@ -15,6 +15,7 @@ from native_d3d_donor import bodies, COM
 from native_d3d_bump import prepare_bump
 from native_d3d_raster import prepare_raster
 from native_d3d_fvf import prepare_fvf
+from native_d3d_resultarg import prepare_resultarg
 from native_d3d_feedback import prepare_feedback
 from native_d3d_explicit_blend import prepare_blend_combiners
 from native_d3d_texture import prepare_texture_views, prepare_projected_mips, prepare_xrgb_border
@@ -22,6 +23,12 @@ from native_d3d_texture import prepare_texture_views, prepare_projected_mips, pr
 PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
 GIT = 'C:/Program Files/Git/cmd/git.exe'
 PHOBOS_COM = COM | {'sf_AddRef', 'sf_Release'}
+
+
+def write_prepared(path, data):
+    """Keep unchanged headers/sources from triggering unrelated recompiles."""
+    if isinstance(data,str):data=data.encode('utf-8')
+    if not path.exists() or path.read_bytes()!=data:path.write_bytes(data)
 
 
 def once(code, old, new):
@@ -61,6 +68,7 @@ def shaders(code):
     code = prepare_bump(code)
     code = prepare_raster(code, phobos=True)
     code = prepare_fvf(code, phobos=True)
+    code = prepare_resultarg(code)
     # Guest draws (including FVF) use our native raster adapter, which supplies
     # the texture scale. The host DrawPrimitiveUP helper uses normalized UVs.
     start = code.index('    g_draw_is_program = 0;', code.index('void d3d8_shaders_prepare_draw('))
@@ -129,6 +137,9 @@ def prepare(donor, output, reference):
                     '    sd.border[2]=(border&255)/255.0f;\n'
                     '    sd.border[3]=((border>>24)&255)/255.0f;')
             if path.name=='d3d8_device.c':
+                code=once(code,'        state->tss[s][D3DTSS_TEXCOORDINDEX] = (DWORD)s;',
+                    '        state->tss[s][D3DTSS_TEXCOORDINDEX] = (DWORD)s;\n'
+                    '        state->tss[s][D3DTSS_RESULTARG] = D3DTA_CURRENT;')
                 code=prepare_feedback(code)
                 code=once(code,'        d3d8_display_output_shape(s->width, s->height, &shape_w, &shape_h);',
                     '        d3d8_display_output_shape(s->width, s->height, &shape_w, &shape_h);\n'
@@ -177,17 +188,17 @@ def prepare(donor, output, reference):
         destination=output/relative
         destination.parent.mkdir(parents=True,exist_ok=True)
         if relative.parts[0].startswith('LICENSE') or relative.name=='NOTICE':
-            destination.write_bytes(path.read_bytes()) # preserve full upstream notice bytes
-        else:destination.write_text(code,encoding='utf-8',newline='\n')
+            write_prepared(destination,path.read_bytes()) # preserve full upstream notice bytes
+        else:write_prepared(destination,code)
         hashes[str(relative).replace('\\','/')]=dict(source=hashlib.sha256(path.read_bytes()).hexdigest(),prepared=hashlib.sha256(destination.read_bytes()).hexdigest())
-    (output/'pilot_d3d_checks.h').write_text('#pragma once\n#include <windows.h>\n__declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);\nHRESULT pilot_d3d_require(HRESULT result,const char *file,unsigned line);\n')
+    write_prepared(output/'pilot_d3d_checks.h','#pragma once\n#include <windows.h>\n__declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);\nHRESULT pilot_d3d_require(HRESULT result,const char *file,unsigned line);\n')
     # Reuse the independently pinned decoder already prepared for the pilot.
     manifest=json.loads((reference/'donor.json').read_text())
     if 'nv2a_reference' not in manifest: raise ValueError('missing pinned NV2A decoder')
     dest=output/'nv2a-reference';dest.mkdir(exist_ok=True)
     for path in (reference/'nv2a-reference').iterdir():
-        if path.is_file(): (dest/path.name).write_bytes(path.read_bytes())
-    (output/'MODIFICATIONS.md').write_text(
+        if path.is_file():write_prepared(dest/path.name,path.read_bytes())
+    write_prepared(output/'MODIFICATIONS.md',
         '# Local adaptations to Phobos xboxrecomp\n\n'
         'Source: https://github.com/phobos665/xboxrecomp/tree/'+PIN+'\n\n'
         'Based on sp00nznet/xboxrecomp; upstream MIT notice retained separately.\n'
@@ -197,8 +208,11 @@ def prepare(donor, output, reference):
         'presentation defers pacing to the Xbox API adapter; renderer accessors\n'
         'and UP-ring upload expose real owned resources; independent vertex\n'
         'translation shares the pixel compiler; existing FVF/raster/bump and\n'
-        'sampler corrections are retained; sampling classification uses the\n'
-        'live caller header, including depth storage reinterpreted as ARGB.\n'
+        'sampler corrections are retained. Fixed-function CURRENT/TEMP source\n'
+        'and result routing uses live state through\n'
+        'the existing pixel constant buffer without per-state compilation;\n'
+        'sampling classification uses the live caller header, including\n'
+        'depth storage reinterpreted as ARGB.\n'
         'Pretransformed screen+bias is rounded and truncated to four subpixel\n'
         'bits on the GPU before viewport mapping, matching the qualified\n'
         'original software FVF contract. Exact silicon precision remains separate.\n'
@@ -218,12 +232,12 @@ def prepare(donor, output, reference):
         'dedicated snapshot and shader survive ordinary feedback/cache churn\n'
         'and are released with their owning device. Source color is not packed\n'
         'before blending; unsupported geometry retains the ordinary draw route.\n'
-        'Original and prepared hashes are in donor.json.\n',encoding='utf-8')
+        'Original and prepared hashes are in donor.json.\n')
     result=dict(repository='https://github.com/phobos665/xboxrecomp',donor=PIN,backend='PHOBOS',
                 license='GPL-3.0 fork; retained MIT upstream and per-file notices',
                 license_files=[str(p.relative_to(donor)).replace('\\','/') for p in paths if p.relative_to(donor).parts[0].startswith('LICENSE') or p.name=='NOTICE'],
                 scope='private reference pilot',files=hashes,nv2a_reference=manifest['nv2a_reference'])
-    (output/'donor.json').write_text(json.dumps(result,indent=2)+'\n')
+    write_prepared(output/'donor.json',json.dumps(result,indent=2)+'\n')
     return result
 
 

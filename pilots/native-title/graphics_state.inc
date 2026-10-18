@@ -39,7 +39,7 @@ static void graphics_state_init(void)
         92,93,94,95,96,97,102,103,115,138,139,143,144,145,147,148,150};
     for(unsigned i=0;i<sizeof(render)/sizeof(*render);++i)
         graphics_render_state(render[i],graphics_state_baseline[render[i]],0);
-    static const unsigned texture[]={0,1,2,3,4,5,6,7,8,12,14,15,16,18,19,22,23,24,25,26,27,28,29};
+    static const unsigned texture[]={0,1,2,3,4,5,6,7,8,12,14,15,16,18,19,20,22,23,24,25,26,27,28,29};
     for(unsigned stage=0;stage<4;++stage) {
         uint32_t *values=graphics_texture_baseline[stage];
         memcpy(values,pilot_d3d_texture_defaults,sizeof(graphics_texture_baseline[stage]));
@@ -84,7 +84,11 @@ static void graphics_sync_deferred(void)
     }
     for(unsigned stage=0;stage<4;++stage) for(unsigned state=0;state<22;++state) {
         uint32_t value=MEM32(PILOT_D3D_TEXTURE_STATES+128*stage+4*state);
-        if(!pilot_gfx_xbox_texture_state(stage,state,value) && value!=graphics_texture_baseline[stage][state])
+        if(!pilot_gfx_xbox_texture_state(stage,state,value) && value!=graphics_texture_baseline[stage][state]) {
+            fprintf(stderr,"[D3D DEFERRED TEXTURE STATE] stage=%u state=%u value=%08x baseline=%08x pixel_shader=%08x\n",
+                stage,state,value,graphics_texture_baseline[stage][state],
+                MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER));
             stop("changed unqualified deferred texture state",state);
+        }
     }
 }
