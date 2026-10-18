@@ -4,6 +4,8 @@
 Recovery metadata belongs to the input image, not a title-specific runtime
 replacement. Keep original bytes and donor lowering; never create a success
 body for the unresolved target. Full preparation replays the same extents.
+Incremental indirect entries declare their symbol in the dispatch unit,
+preserving the common header and unrelated original translation units.
 """
 from __future__ import annotations
 import argparse
@@ -131,9 +133,14 @@ def recover(args):
         path=generated/f'recomp_entry_{args.function:08x}.c'
         if path.exists():raise ValueError('new entry output already exists')
         code='#define RECOMP_GENERATED_CODE\n#include "recomp_funcs.h"\n#include <math.h>\n'+bodies[0]
-        header_path=generated/'recomp_funcs.h';header=header_path.read_text(encoding='utf-8')
-        header+='\nvoid '+symbol+'(void);\n'
         dispatch_path=generated/'recomp_dispatch.c';dispatch=dispatch_path.read_text(encoding='utf-8')
+        # This measured indirect root is referenced by the dispatch unit.
+        # Keep its declaration there, so recovering one callback does not
+        # invalidate every original CPU translation unit's common header.
+        # Full preparation still replays the source-bound extent normally.
+        include='#include "recomp_funcs.h"\n'
+        if dispatch.count(include)!=1:raise ValueError('unreviewed dispatch header boundary')
+        dispatch=dispatch.replace(include,include+'\nvoid '+symbol+'(void);\n',1)
         rows=list(re.finditer(r'^    \{ 0x([0-9A-Fa-f]{8})u, \(recomp_func_t\)sub_[0-9A-Fa-f]{8} \},$',dispatch,re.M))
         if not rows or any(int(row[1],16)==args.function for row in rows):raise ValueError('unreviewed or duplicate dispatch table')
         position=next((row.start() for row in rows if int(row[1],16)>args.function),rows[-1].end()+1)
@@ -151,7 +158,6 @@ def recover(args):
     (work/f'recovered-{args.function:08x}.c').write_text(result.stdout,newline='\n')
     path.write_text(code,newline='\n');functions_path.write_text(json.dumps(updated,indent=2)+'\n',newline='\n')
     if args.new_entry:
-        header_path.write_text(header,encoding='utf-8',newline='\n')
         dispatch_path.write_text(dispatch,encoding='utf-8',newline='\n')
     record_path.write_text(json.dumps(records,indent=2)+'\n',newline='\n')
     manifest['function_extents']=records['extents']
