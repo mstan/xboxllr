@@ -1,5 +1,18 @@
 #ifndef PILOT_GRAPHICS_BACKEND_H
 #define PILOT_GRAPHICS_BACKEND_H
+#include "visual_mods.h"
+/* Trusted resolved mod plan, before device creation. Host size is diagnostic;
+ * ordinary width/height/readback remain guest-sized. */
+int pilot_gfx_visual_mods(const struct PilotVisualMods *options);
+int pilot_gfx_render_size(uint32_t size[2]);
+struct PilotInterpolationStats {
+    uint64_t sources,presents,previous,current;
+    unsigned width,height,history;float alpha;
+};
+void pilot_gfx_frame_scope(uint32_t scope); /* 0: original presentation; new key: clear history */
+unsigned pilot_gfx_interpolation_rate(void);
+int32_t pilot_gfx_interpolate(uint64_t now); /* 100ns QPC units; 0: sample clock */
+void pilot_gfx_interpolation_stats(struct PilotInterpolationStats *out);
 #include <stdint.h>
 uint32_t pilot_gfx_feedback_mask(void);
 int32_t pilot_gfx_create(const uint32_t parameters[17]);

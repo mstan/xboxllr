@@ -15,6 +15,9 @@ static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
 static HWND pilot_window;
 static int pilot_visible;
+/* Optional raster policy is owned by the resolved static mod registry. */
+__declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);
+#include "graphics_visual_backend.inc"
 static uint32_t pilot_window_aspect[2],pilot_window_height,pilot_frame_aspect[2];
 static int pilot_aspect_valid(uint32_t n,uint32_t d)
 {return n && d && n<=65536 && d<=65536 && (uint64_t)n*3>=(uint64_t)d*4 && (uint64_t)n*9<=(uint64_t)d*32;}
@@ -209,6 +212,7 @@ void pilot_gfx_close(void)
     pilot_fan_close();
     pilot_flat_close();
     pilot_depth_texture_close();
+    pilot_visual_close();
     pilot_logic_copy=pilot_requested_blend=0;
     pilot_gfx_shaders_close();
     for (unsigned i=0;i<256;++i)
@@ -287,7 +291,8 @@ int32_t pilot_gfx_create(const uint32_t p[17])
 #endif
         if (SUCCEEDED(result)) {
             D3D11_TEXTURE2D_DESC desc; ID3D11Texture2D_GetDesc(pilot_surfaces[0],&desc);
-            pilot_blend_default_shape=desc.Width==640 && desc.Height==480 && desc.MipLevels==1 &&
+            pilot_blend_default_shape=pilot_gfx_width()==640 && pilot_gfx_height()==480 &&
+                desc.Width==d3d8_GetBackbufferWidth() && desc.Height==d3d8_GetBackbufferHeight() && desc.MipLevels==1 &&
                 desc.ArraySize==1 && desc.SampleDesc.Count==1 && !desc.SampleDesc.Quality &&
                 !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM;
             pilot_blend_default_depth_shape=pilot_blend_depth_shape(pilot_surfaces[2],0);
@@ -324,6 +329,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     if(old_color)ID3D11RenderTargetView_Release(old_color);
     if(old_depth)ID3D11DepthStencilView_Release(old_depth);
     if(FAILED(result))return result;
+    pilot_visual_close(); /* Reset is a presentation-history boundary. */
     for(unsigned i=0;i<3;++i){
         while(pilot_surface_refs[i]){ID3D11Texture2D_Release(pilot_surfaces[i]);--pilot_surface_refs[i];}
         ID3D11Texture2D_Release(pilot_surfaces[i]);pilot_surfaces[i]=NULL;
@@ -338,7 +344,8 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     ID3D11Resource *scene=(ID3D11Resource*)rhi_d3d11_native_image(d3d8_GetSceneImage());
     pilot_d3d_require(ID3D11Resource_QueryInterface(scene,&IID_ID3D11Texture2D,(void**)&pilot_surfaces[0]),__FILE__,__LINE__);
     D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(pilot_surfaces[0],&desc);
-    pilot_blend_default_shape=desc.Width==640 && desc.Height==480 && desc.MipLevels==1 &&
+    pilot_blend_default_shape=pilot_gfx_width()==640 && pilot_gfx_height()==480 &&
+        desc.Width==d3d8_GetBackbufferWidth() && desc.Height==d3d8_GetBackbufferHeight() && desc.MipLevels==1 &&
         desc.ArraySize==1 && desc.SampleDesc.Count==1 && !desc.SampleDesc.Quality &&
         !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM;
     pilot_blend_default_depth_shape=pilot_blend_depth_shape(pilot_surfaces[2],0);
@@ -379,11 +386,31 @@ int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stenc
 int32_t pilot_gfx_viewport(const void *viewport)
 {
     if (!pilot_device) return E_FAIL;
-    return pilot_device->lpVtbl->SetViewport(pilot_device,(const D3DVIEWPORT8*)viewport);
+    HRESULT result=pilot_device->lpVtbl->SetViewport(pilot_device,(const D3DVIEWPORT8*)viewport);
+    if(SUCCEEDED(result)) {
+        memcpy(pilot_guest_viewport,viewport,sizeof(pilot_guest_viewport));
+        if(pilot_visual_scaled()) {
+            /* Resources retained over Reset keep their own physical scale.
+             * Derive it from the actual current target, not today's backbuffer. */
+            ID3D11RenderTargetView *rtv=NULL;ID3D11Resource *resource=NULL;
+            ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
+            ID3D11DeviceContext_OMGetRenderTargets(ctx,1,&rtv,NULL);
+            if(!rtv)return E_FAIL;ID3D11RenderTargetView_GetResource(rtv,&resource);ID3D11RenderTargetView_Release(rtv);
+            D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc((ID3D11Texture2D*)resource,&desc);ID3D11Resource_Release(resource);
+            D3D8Texture *target=pilot_color_target?(D3D8Texture*)pilot_textures[pilot_color_target-1].object:NULL;
+            float sx=(float)desc.Width/(target?target->width:pilot_gfx_width());
+            float sy=(float)desc.Height/(target?target->height:pilot_gfx_height());
+            const D3DVIEWPORT8 *v=viewport;
+            D3D11_VIEWPORT scaled={v->X*sx,v->Y*sy,v->Width*sx,v->Height*sy,v->MinZ,v->MaxZ};
+            ID3D11DeviceContext_RSSetViewports(ctx,1,&scaled);
+        }
+    }
+    return result;
 }
 int32_t pilot_gfx_get_viewport(uint32_t viewport[6])
 {
     if (!pilot_device || !viewport) return E_INVALIDARG;
+    if(pilot_visual_scaled()){memcpy(viewport,pilot_guest_viewport,sizeof(pilot_guest_viewport));return S_OK;}
     D3D11_VIEWPORT current; UINT count=1;
     ID3D11DeviceContext_RSGetViewports(d3d8_GetD3D11Context(),&count,&current);
     if (count!=1) return E_FAIL;
@@ -412,7 +439,13 @@ int32_t pilot_gfx_present(void)
     pilot_gpu_call_end("present CopyResource",started);
     pilot_surface_use[0]->serial=pilot_surface_use[1]->serial=pilot_mark_work();
     started=pilot_gpu_call_begin();
+#ifdef PILOT_D3D_PHOBOS
+    pilot_visual_real_present=1;
+#endif
     int32_t result=pilot_device->lpVtbl->Swap(pilot_device,0);
+#ifdef PILOT_D3D_PHOBOS
+    pilot_visual_real_present=0;
+#endif
     pilot_gpu_call_end("donor Swap",started);return result;
 }
 int32_t pilot_gfx_persist_display(const unsigned char *bgra,uint32_t width,uint32_t height,uint32_t pitch)
@@ -560,6 +593,23 @@ uint32_t pilot_gfx_feedback_mask(void)
 }
 static uint32_t pilot_feedback_validate(void)
 {
+    /* A native-size lookup target may borrow the large default depth surface
+     * for a depthless pass. It must not test depth using a different pixel
+     * grid. Retained resources after Reset have their own real scale. */
+    if(pilot_visual_scaled() && pilot_depth_target &&
+       (d3d8_GetRenderStates()[D3DRS_ZENABLE] || d3d8_GetRenderStates()[D3DRS_STENCILENABLE])) {
+        ID3D11Texture2D *color=pilot_color_target?pilot_donor_texture(pilot_texture(pilot_color_target)):pilot_surfaces[0];
+        ID3D11Texture2D *depth=pilot_depth_target==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(pilot_depth_target));
+        D3D11_TEXTURE2D_DESC c,d;ID3D11Texture2D_GetDesc(color,&c);ID3D11Texture2D_GetDesc(depth,&d);
+        uint64_t cw=pilot_color_target?pilot_texture(pilot_color_target)->width:pilot_gfx_width();
+        uint64_t ch=pilot_color_target?pilot_texture(pilot_color_target)->height:pilot_gfx_height();
+        uint64_t dw=pilot_depth_target==UINT32_MAX?pilot_gfx_width():pilot_texture(pilot_depth_target)->width;
+        uint64_t dh=pilot_depth_target==UINT32_MAX?pilot_gfx_height():pilot_texture(pilot_depth_target)->height;
+        int64_t dx=(int64_t)(c.Width*dw)-(int64_t)(d.Width*cw);
+        int64_t dy=(int64_t)(c.Height*dh)-(int64_t)(d.Height*ch);
+        if(llabs(dx)>(int64_t)(cw>dw?cw:dw) || llabs(dy)>(int64_t)(ch>dh?ch:dh))
+            pilot_d3d_backend_stop("enhanced target and depth use incompatible raster grids");
+    }
     uint32_t mask=pilot_gfx_feedback_mask();
     if(mask&0xf00u)pilot_d3d_backend_stop("depth-output feedback is unqualified");
     for(unsigned stage=0;stage<4;++stage)if(mask&(1u<<stage)) {
@@ -762,7 +812,9 @@ int32_t pilot_gfx_texture_alias(unsigned kind,uint32_t source,uint32_t format,ui
     if(!image)return E_OUTOFMEMORY;
     RhiView *view=rhi_view_create(image,RHI_VIEW_SAMPLED,NULL);
     if(!view){rhi_image_destroy(image);return E_FAIL;}
-    HRESULT hr=pilot_gfx_texture_create(desc.Width,desc.Height,1,format,handle);
+    unsigned logical_width=kind==PILOT_GFX_SURFACE?pilot_gfx_width():pilot_texture(source)->width;
+    unsigned logical_height=kind==PILOT_GFX_SURFACE?pilot_gfx_height():pilot_texture(source)->height;
+    HRESULT hr=pilot_gfx_texture_create(logical_width,logical_height,1,format,handle);
     if(FAILED(hr)){rhi_view_destroy(view);rhi_image_destroy(image);return hr;}
     D3D8Texture *texture=pilot_texture(*handle);
     rhi_view_destroy(texture->srv);rhi_image_destroy(texture->image);
@@ -803,8 +855,9 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         pilot_d3d_require(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging),__FILE__,__LINE__);
         D3D11_MAPPED_SUBRESOURCE mapped;ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
         pilot_d3d_require(ID3D11DeviceContext_Map(ctx,(ID3D11Resource*)staging,0,D3D11_MAP_WRITE,0,&mapped),__FILE__,__LINE__);
-        for(UINT y=0;y<height;++y)for(UINT x=0;x<width;++x) {
-            uint32_t value;memcpy(&value,(const BYTE*)data+y*guest_pitch+x*4,4);value=(value>>8)|(value<<24);
+        for(UINT y=0;y<desc.Height;++y)for(UINT x=0;x<desc.Width;++x) {
+            unsigned sx=pilot_visual_sample(x,desc.Width,width),sy=pilot_visual_sample(y,desc.Height,height);
+            uint32_t value;memcpy(&value,(const BYTE*)data+(size_t)sy*guest_pitch+sx*4,4);value=(value>>8)|(value<<24);
             memcpy((BYTE*)mapped.pData+y*mapped.RowPitch+x*4,&value,4);
         }
         ID3D11DeviceContext_Unmap(ctx,(ID3D11Resource*)staging,0);
@@ -931,7 +984,13 @@ int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uin
     D3D11_MAPPED_SUBRESOURCE mapped;
     hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,level,D3D11_MAP_READ,0,&mapped);
     if(SUCCEEDED(hr)) {
-        for(UINT row=0;row<rows;++row) memcpy((char*)data+row*pitch,(char*)mapped.pData+row*mapped.RowPitch,pitch);
+        if(level==0 && (desc.Width!=width || desc.Height!=height)) {
+            if(pitch!=width*4 || rows!=height)pilot_d3d_backend_stop("scaled readback requires a single-level 32-bit target");
+            for(UINT y=0;y<height;++y)for(UINT x=0;x<width;++x) {
+                unsigned sx=pilot_visual_sample(x,width,desc.Width),sy=pilot_visual_sample(y,height,desc.Height);
+                memcpy((BYTE*)data+(size_t)y*pitch+x*4,(BYTE*)mapped.pData+(size_t)sy*mapped.RowPitch+sx*4,4);
+            }
+        } else for(UINT row=0;row<rows;++row)memcpy((char*)data+row*pitch,(char*)mapped.pData+row*mapped.RowPitch,pitch);
         if(texture->d3d8_format==0x12 && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM)
             for(UINT i=0;i<width*height;++i){BYTE *p=(BYTE*)data+i*4,t=p[0];p[0]=p[2];p[2]=t;}
         if(texture->d3d8_format==0x2e)for(UINT i=0;i<width*height;++i) {
@@ -1093,7 +1152,7 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
     return S_OK;
 }
-uint32_t pilot_gfx_width(void) { return d3d8_GetBackbufferWidth(); }
+uint32_t pilot_gfx_width(void) { return pilot_guest_width?pilot_guest_width:d3d8_GetBackbufferWidth(); }
 int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vertices,unsigned stride)
 {
 #ifdef PILOT_D3D_PHOBOS
@@ -1116,7 +1175,7 @@ int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vert
     (void)primitive;(void)count;(void)vertices;(void)stride;return E_NOTIMPL;
 #endif
 }
-uint32_t pilot_gfx_height(void) { return d3d8_GetBackbufferHeight(); }
+uint32_t pilot_gfx_height(void) { return pilot_guest_height?pilot_guest_height:d3d8_GetBackbufferHeight(); }
 int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity)
 {
     return pilot_gfx_surface_readback(0,rgba,capacity);
@@ -1127,7 +1186,8 @@ int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t
     ID3D11Texture2D *back=pilot_surfaces[surface],*staging=NULL;
     ID3D11Texture2D_AddRef(back);
     D3D11_TEXTURE2D_DESC desc; ID3D11Texture2D_GetDesc(back,&desc);
-    if (desc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM || capacity<(uint64_t)desc.Width*desc.Height*4) { ID3D11Texture2D_Release(back); return E_INVALIDARG; }
+    unsigned width=pilot_gfx_width(),height=pilot_gfx_height();
+    if (desc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM || capacity<(uint64_t)width*height*4) { ID3D11Texture2D_Release(back); return E_INVALIDARG; }
     desc.Usage=D3D11_USAGE_STAGING; desc.BindFlags=0; desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ; desc.MiscFlags=0;
     HRESULT status=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&staging);
     if (SUCCEEDED(status)) {
@@ -1135,7 +1195,12 @@ int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t
         D3D11_MAPPED_SUBRESOURCE mapped;
         status=ID3D11DeviceContext_Map(d3d8_GetD3D11Context(),(ID3D11Resource*)staging,0,D3D11_MAP_READ,0,&mapped);
         if (SUCCEEDED(status)) {
-            for (UINT y=0;y<desc.Height;++y) memcpy(rgba+y*desc.Width*4,(unsigned char*)mapped.pData+y*mapped.RowPitch,desc.Width*4);
+            if(width==desc.Width && height==desc.Height) {
+                for(UINT y=0;y<height;++y)memcpy(rgba+(size_t)y*width*4,(BYTE*)mapped.pData+(size_t)y*mapped.RowPitch,width*4);
+            } else for(UINT y=0;y<height;++y)for(UINT x=0;x<width;++x) {
+                unsigned sx=pilot_visual_sample(x,width,desc.Width),sy=pilot_visual_sample(y,height,desc.Height);
+                memcpy(rgba+((size_t)y*width+x)*4,(BYTE*)mapped.pData+(size_t)sy*mapped.RowPitch+sx*4,4);
+            }
             ID3D11DeviceContext_Unmap(d3d8_GetD3D11Context(),(ID3D11Resource*)staging,0);
         }
         ID3D11Texture2D_Release(staging);

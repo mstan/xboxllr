@@ -1,0 +1,74 @@
+format_version = 1
+id = "xboxlle.enhancement.visuals"
+version = "1.0.0"
+name = "Xbox Visual Quality"
+description = "Sharper geometry, smoother edges and clearer angled textures. Settings apply when the game starts."
+save_compatibility = "shared"
+
+[[target]]
+system = "xbox"
+native_title_mod_abi = 2
+
+[[feature]]
+id = "resolution"
+name = "Internal resolution"
+description = "Render the scene at a higher resolution. Wider views render more pixels at the same height."
+default_enabled = false
+[[option]]
+feature = "resolution"
+id = "height"
+type = "choice"
+default = "1080"
+values = ["0", "1080", "1440", "1800", "2160"]
+labels = ["Original", "1080p", "1440p", "1800p", "2160p (4K at 16:9)"]
+[[plugin]]
+feature = "resolution"
+id = "xboxlle.visuals.resolution"
+
+[[feature]]
+id = "antialiasing"
+name = "Antialiasing"
+description = "Smooth jagged edges with a fast presentation filter. Fine text can become softer."
+default_enabled = false
+[[option]]
+feature = "antialiasing"
+id = "method"
+type = "choice"
+default = "fxaa"
+values = ["original", "fxaa"]
+labels = ["Original", "Fast approximate AA"]
+[[plugin]]
+feature = "antialiasing"
+id = "xboxlle.visuals.antialiasing"
+
+[[feature]]
+id = "supersampling"
+name = "Supersampling"
+description = "Render extra pixels and downsample for smoother edges. This can substantially increase GPU load."
+default_enabled = false
+[[option]]
+feature = "supersampling"
+id = "axis"
+type = "choice"
+default = "2"
+values = ["1", "2", "3"]
+labels = ["Original", "2 x 2 (4 samples)", "3 x 3 (9 samples)"]
+[[plugin]]
+feature = "supersampling"
+id = "xboxlle.visuals.supersampling"
+
+[[feature]]
+id = "filtering"
+name = "Anisotropic filtering"
+description = "Keep textures clearer when viewed at an angle."
+default_enabled = false
+[[option]]
+feature = "filtering"
+id = "anisotropy"
+type = "choice"
+default = "8"
+values = ["1", "2", "4", "8", "16"]
+labels = ["Original", "2x", "4x", "8x", "16x"]
+[[plugin]]
+feature = "filtering"
+id = "xboxlle.visuals.filtering"

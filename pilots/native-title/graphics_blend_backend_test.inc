@@ -55,25 +55,27 @@ static int blend_draw_check(const struct BlendVertex vertices[4],unsigned bound,
                             const unsigned char expected[4],uint32_t copies)
 {
     CHECK(!pilot_gfx_clear(7,0xff000000u|gray*0x10101u,.25f,0x5a));
-    uint32_t metadata[3];uint32_t *before_depth=(uint32_t*)malloc(640u*480u*4);
-    uint32_t *after_depth=(uint32_t*)malloc(640u*480u*4);CHECK(before_depth && after_depth);
-    CHECK(!pilot_gfx_reference_target_readback(1,before_depth,640u*480u*4,metadata));
-    CHECK(metadata[0]==640 && metadata[1]==480 &&
+    uint32_t metadata[3],render[2];CHECK(pilot_gfx_render_size(render));
+    size_t depth_pixels=(size_t)render[0]*render[1],depth_bytes=depth_pixels*4;
+    uint32_t *before_depth=(uint32_t*)malloc(depth_bytes);
+    uint32_t *after_depth=(uint32_t*)malloc(depth_bytes);CHECK(before_depth && after_depth);
+    CHECK(!pilot_gfx_reference_target_readback(1,before_depth,(uint32_t)depth_bytes,metadata));
+    CHECK(metadata[0]==render[0] && metadata[1]==render[1] &&
         (metadata[2]==DXGI_FORMAT_R24G8_TYPELESS || metadata[2]==DXGI_FORMAT_D24_UNORM_S8_UINT));
-    for(unsigned i=0;i<640u*480u;++i)CHECK((before_depth[i]>>24)==0x5a);
+    for(size_t i=0;i<depth_pixels;++i)CHECK((before_depth[i]>>24)==0x5a);
     if(bound)CHECK(!pilot_gfx_draw_vertices(6,2,4));
     else CHECK(!pilot_gfx_draw_memory(6,4,vertices,sizeof(*vertices)));
     CHECK(!blend_pixels(expected));struct PilotBlendStats stats;pilot_gfx_blend_stats(&stats);
     CHECK(stats.copies==copies && stats.draws==copies && stats.allocations==1 && stats.shader_compilations==1);
     ID3D11ShaderResourceView *view=NULL;
     ID3D11DeviceContext_PSGetShaderResources(d3d8_GetD3D11Context(),4,1,&view);CHECK(!view);
-    CHECK(!pilot_gfx_reference_target_readback(1,after_depth,640u*480u*4,metadata));
-    CHECK(metadata[0]==640 && metadata[1]==480 &&
+    CHECK(!pilot_gfx_reference_target_readback(1,after_depth,(uint32_t)depth_bytes,metadata));
+    CHECK(metadata[0]==render[0] && metadata[1]==render[1] &&
         (metadata[2]==DXGI_FORMAT_R24G8_TYPELESS || metadata[2]==DXGI_FORMAT_D24_UNORM_S8_UINT));
     /* Exact preservation of every depth bit from the established pre-draw
      * clear storage, plus source-decided masked REPLACE of stencil F0 to zero.
      * These bytes are never used as color expected values or uploaded again. */
-    for(unsigned i=0;i<640u*480u;++i)CHECK(after_depth[i]==(before_depth[i]&0x0fffffffu));
+    for(size_t i=0;i<depth_pixels;++i)CHECK(after_depth[i]==(before_depth[i]&0x0fffffffu));
     free(after_depth);free(before_depth);
     return 0;
 }
@@ -105,9 +107,9 @@ static int test_float_blend(const uint32_t parameters[17])
     CHECK(pilot_gfx_width()==640 && pilot_gfx_height()==480);
     /* The output-only default depth allocation is typed D24S8, while
      * sampled depth storage must be typeless for its depth/stencil views. */
-    uint32_t depth_metadata[3];
+    uint32_t depth_metadata[3],render[2];CHECK(pilot_gfx_render_size(render));
     CHECK(!pilot_gfx_reference_target_readback(1,NULL,0,depth_metadata));
-    CHECK(depth_metadata[0]==640 && depth_metadata[1]==480 &&
+    CHECK(depth_metadata[0]==render[0] && depth_metadata[1]==render[1] &&
           depth_metadata[2]==DXGI_FORMAT_D24_UNORM_S8_UINT);
     struct PilotBlendStats initial;pilot_gfx_blend_stats(&initial);
     CHECK(!initial.draws && !initial.copies && !initial.allocations && !initial.shader_compilations && !initial.original_compilations);

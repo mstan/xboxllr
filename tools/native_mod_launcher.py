@@ -1,0 +1,182 @@
+"""Schema-driven native Xbox mod provider for the pinned recomp-ui launcher.
+
+Bundled manifests supply labels and independent feature defaults. The title
+supplies capabilities and its final resolver. Selection and visibility are
+data only; this module never imports a package or writes generated guest code.
+"""
+import hashlib
+import copy
+import json
+import os
+from pathlib import Path
+import subprocess
+import tomllib
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    temporary.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
+    temporary.replace(path)
+
+
+def encoded(value):
+    return str(value).encode('utf-8').hex() or '-'
+
+
+def decoded(value):
+    return '' if value == '-' else bytes.fromhex(value).decode('utf-8')
+
+
+class Catalog:
+    def __init__(self, manifests, state, *, visibility=(), frame_modes=()):
+        self.state_path = Path(state)
+        self.packages, self.features, self.hashes = [], [], {}
+        hidden, hidden_choices = set(), {}
+        for path in visibility:
+            if not Path(path).is_file():
+                continue
+            policy = json.loads(Path(path).read_text(encoding='utf-8'))
+            if policy.get('version') != 1 or set(policy) != {'version', 'hidden_features', 'hidden_choices'}:
+                raise ValueError('Invalid mod visibility policy')
+            hidden.update(policy['hidden_features'])
+            for key, values in policy['hidden_choices'].items():
+                hidden_choices.setdefault(key, set()).update(values)
+        persisted = json.loads(self.state_path.read_text(encoding='utf-8')) if self.state_path.is_file() else {}
+        if persisted and persisted.get('version') != 1:
+            raise ValueError('Unsupported mod selection version')
+        self.volume = persisted.get('volume', 100)
+        self.skip_launcher = persisted.get('skip_launcher') is True
+        if type(self.volume) is not int or not 0 <= self.volume <= 100:
+            self.volume = 100
+        for path in map(Path, manifests):
+            manifest = tomllib.loads(path.read_text(encoding='utf-8'))
+            pid = manifest['id']
+            if manifest['format_version'] != 1 or manifest['version'] != '1.0.0':
+                raise ValueError('Unsupported bundled mod catalog')
+            self.hashes[pid] = hashlib.sha256(path.read_bytes()).hexdigest()
+            for entry in manifest['feature']:
+                fid = entry['id'];key = pid + '/' + fid
+                if key in hidden or (fid == 'frame-rate' and not frame_modes):
+                    continue
+                if entry['default_enabled'] is not False:
+                    raise ValueError('Elective native enhancements must default off')
+                saved = persisted.get('features', {}).get(key, {})
+                feature = dict(package=pid, id=fid, name=entry['name'], description=entry.get('description', manifest['description']),
+                               enabled=saved.get('enabled') is True, options=[])
+                for item in manifest.get('option', []):
+                    if item['feature'] != fid:
+                        continue
+                    oid = item['id']
+                    if item['type'] == 'aspect':
+                        values = ['adaptive', '4:3'] + item['presets']
+                        labels = ['Adaptive (window aspect)', 'Original 4:3'] + item['presets']
+                    elif item['type'] == 'choice':
+                        values, labels = item['values'], item['labels']
+                    else:
+                        raise ValueError('Unsupported bundled UI option type')
+                    choices = list(zip(values, labels))
+                    if fid == 'frame-rate' and oid == 'mode':
+                        choices = [(v, label) for v, label in choices if v == 'original' or v in frame_modes]
+                    if fid == 'frame-rate' and oid == 'rate' and 'actual' in frame_modes:
+                        choices = [(v, label) for v, label in choices if v == '60']
+                    excluded = hidden_choices.get(key + '/' + oid, set())
+                    choices = [(v, label) for v, label in choices if v not in excluded]
+                    if not choices:
+                        feature['enabled'] = False
+                        feature['options'] = []
+                        break
+                    default = item['default'] if any(v == item['default'] for v, _ in choices) else choices[0][0]
+                    selected = saved.get('options', {}).get(oid, default)
+                    if not any(v == selected for v, _ in choices):
+                        selected = default
+                        feature['enabled'] = False
+                    feature['options'].append(dict(id=oid, label=item.get('label', {'height': 'Render height', 'method': 'Method', 'axis': 'Samples',
+                        'anisotropy': 'Filter strength', 'aspect': 'Aspect ratio', 'mode': 'Mode', 'rate': 'Target rate'}.get(oid, oid)),
+                        value=selected, default=default, choices=choices))
+                if feature['options']:
+                    self.features.append(feature)
+            if any(f['package'] == pid for f in self.features):
+                self.packages.append(dict(id=pid, name=manifest['name'], version=manifest['version'], description=manifest['description']))
+
+    def write(self, path, title, region, sha):
+        lines = ['xlle-launcher 1', f'title {encoded(title)} {encoded(region)}', f'identity {sha}', f'volume {self.volume}', f'skip {int(self.skip_launcher)}']
+        for p in self.packages:
+            lines.append('package ' + ' '.join(encoded(p[k]) for k in ('id', 'name', 'version', 'description')))
+        for f in self.features:
+            ids = encoded(f['package']) + ' ' + encoded(f['id'])
+            lines.append(f'feature {ids} {encoded(f["name"])} {encoded(f["description"])} {int(f["enabled"])}')
+            for o in f['options']:
+                prefix = ids + ' ' + encoded(o['id'])
+                lines.append('option ' + prefix + ' ' + ' '.join(encoded(o[k]) for k in ('label', 'value', 'default')))
+                for value, label in o['choices']:
+                    lines.append(f'choice {prefix} {encoded(value)} {encoded(label)}')
+        lines.append('end')
+        Path(path).write_text('\n'.join(lines) + '\n', encoding='ascii', newline='\n')
+
+    def ingest(self, path):
+        if Path(path).stat().st_size > 262144:
+            raise ValueError('Oversized launcher result')
+        lines = Path(path).read_text(encoding='ascii').splitlines()
+        if not lines or lines[0] != 'xlle-launcher-result 1' or lines[-1] != 'end' or len(lines) > 600:
+            raise ValueError('Incomplete launcher result')
+        result = None;image = '';seen = set()
+        staged = copy.deepcopy(self.features)
+        staged_volume = self.volume
+        staged_skip = self.skip_launcher
+        by_key = {(f['package'], f['id']): f for f in staged}
+        for line in lines[1:-1]:
+            t = line.split()
+            if not t:
+                raise ValueError('Invalid launcher result')
+            if t[0] == 'result' and len(t) == 2 and result is None:
+                result = int(t[1])
+            elif t[0] == 'image' and len(t) == 2 and 'image' not in seen:
+                image = decoded(t[1]);seen.add('image')
+            elif t[0] == 'volume' and len(t) == 2 and 'volume' not in seen:
+                volume = int(t[1])
+                if not 0 <= volume <= 100:
+                    raise ValueError('Invalid volume')
+                staged_volume = volume;seen.add('volume')
+            elif t[0] == 'skip' and len(t) == 2 and 'skip' not in seen and t[1] in ('0', '1'):
+                staged_skip = t[1] == '1';seen.add('skip')
+            elif t[0] == 'feature' and len(t) == 4:
+                key = tuple(map(decoded, t[1:3]));f = by_key[key]
+                if key in seen or t[3] not in ('0', '1'):
+                    raise ValueError('Duplicate or invalid feature state')
+                seen.add(key);f['enabled'] = t[3] == '1'
+            elif t[0] == 'option' and len(t) == 5:
+                key = tuple(map(decoded, t[1:4]));f = by_key[key[:2]];value = decoded(t[4])
+                o = next(o for o in f['options'] if o['id'] == key[2])
+                if key in seen or not any(v == value for v, _ in o['choices']):
+                    raise ValueError('Unsupported launcher option')
+                seen.add(key);o['value'] = value
+            else:
+                raise ValueError('Invalid launcher result record')
+        expected = {'image', 'volume', 'skip'} | set(by_key) | {(f['package'], f['id'], o['id']) for f in self.features for o in f['options']}
+        if seen != expected or result not in (0, 1, 2, 3):
+            raise ValueError('Incomplete launcher result inventory')
+        self.features, self.volume = staged, staged_volume
+        self.skip_launcher = staged_skip
+        return result, image
+
+    def selection(self):
+        return dict(version=1, volume=self.volume, skip_launcher=self.skip_launcher, features={f['package'] + '/' + f['id']:
+                    dict(enabled=f['enabled'], options={o['id']: o['value'] for o in f['options']}) for f in self.features})
+
+    def values(self):
+        return {(f['package'], f['id'], o['id']): o['value'] for f in self.features if f['enabled'] for o in f['options']}
+
+    def run(self, binary, output, *, title, region, sha, image, validate=False, env=None):
+        output = Path(output);output.mkdir(parents=True, exist_ok=True)
+        source, target = output / 'launcher.catalog', output / 'launcher.result'
+        self.write(source, title, region, sha)
+        command = [str(binary), str(source.resolve()), str(target.resolve()), str(image)]
+        if validate:
+            command.append('--validate')
+        subprocess.run(command, cwd=Path(binary).parent, env=env, check=True)
+        result, selected_image = self.ingest(target)
+        if result in (0, 1):
+            atomic_json(self.state_path, self.selection())
+        return result, selected_image

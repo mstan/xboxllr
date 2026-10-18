@@ -5,6 +5,7 @@
 #include "pilot_d3d_bindings.h"
 #include "graphics_profile.inc"
 static SRWLOCK graphics_lock=SRWLOCK_INIT;
+#include "graphics_interpolation.inc"
 #ifdef PILOT_SCHEDULING_LLE
 /* Participating whole components acquire the real original recursive RTL
  * object before any renderer/VM host lock. A preempting graphics thread can

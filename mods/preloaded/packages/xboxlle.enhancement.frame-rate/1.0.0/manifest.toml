@@ -1,0 +1,33 @@
+format_version = 1
+id = "xboxlle.enhancement.frame-rate"
+version = "1.0.0"
+name = "Xbox Frame Rate"
+description = "Choose one higher-frame-rate mode. Availability depends on the game's timing support."
+save_compatibility = "shared"
+
+[[target]]
+system = "xbox"
+native_title_mod_abi = 2
+
+[[feature]]
+id = "frame-rate"
+name = "Higher frame rate"
+description = "Blended interpolation keeps the original game updates, adds one frame of delay and can show double edges. Actual mode changes the update rate and requires game-specific timing support."
+default_enabled = false
+[[option]]
+feature = "frame-rate"
+id = "mode"
+type = "choice"
+default = "interpolated"
+values = ["original", "interpolated", "actual"]
+labels = ["Original", "Blended interpolation", "Actual game updates"]
+[[option]]
+feature = "frame-rate"
+id = "rate"
+type = "choice"
+default = "60"
+values = ["60", "120"]
+labels = ["60 FPS target", "120 FPS target"]
+[[plugin]]
+feature = "frame-rate"
+id = "xboxlle.frame-rate"

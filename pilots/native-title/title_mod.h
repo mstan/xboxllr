@@ -1,12 +1,13 @@
 #ifndef PILOT_TITLE_MOD_H
 #define PILOT_TITLE_MOD_H
 #include <stdint.h>
+#include "visual_mods.h"
 
 /* Trusted, statically linked title plugins. Packages select registry IDs;
  * they never supply executable code. No generated guest body is instrumented.
  * Calls run on the graphics owner under its existing lock. The host lives for
  * the process; draw pointers are borrowed only for the callback. */
-#define PILOT_TITLE_MOD_ABI 1u
+#define PILOT_TITLE_MOD_ABI 2u
 struct PilotTitleModHost {
     uint32_t abi;
     const char *xbe_sha256;
@@ -15,6 +16,8 @@ struct PilotTitleModHost {
     int (*presentation)(uint32_t numerator,uint32_t denominator,uint32_t height);
     int (*client_size)(uint32_t size[2]);
     int (*frame_shape)(uint32_t numerator,uint32_t denominator);
+    int (*visual_mods)(const struct PilotVisualMods *options);
+    void (*frame_scope)(uint32_t key); /* 0: original presentation; new key: reset history */
 };
 struct PilotTitleModDraw {
     uint32_t caller,shader,primitive,count,default_target;

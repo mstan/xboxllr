@@ -170,6 +170,7 @@ static void graphics_set_vblank_callback(uint32_t callback)
 }
 static void graphics_clock_close(void)
 {
+    graphics_interpolation_close();
     AcquireSRWLockExclusive(&graphics_display_lock);
     if(graphics_display_waiters)stop("device release with active vertical-blank waits",graphics_display_waiters);
     graphics_display_open=0;
@@ -335,6 +336,7 @@ static uint32_t graphics_present(void)
     if(title_mod && title_mod->present)title_mod->present();
 #endif
     int32_t hr=pilot_gfx_present();
+    graphics_interpolation_start();
     /* DXGI_STATUS_OCCLUDED is a nonfailure: the desktop window is invisible,
      * but rendering was submitted. Guest scanout and retirement still follow
      * their actual display clock/GPU checkpoint; desktop visibility is not a
@@ -342,6 +344,11 @@ static uint32_t graphics_present(void)
     if(hr<0)stop("native presentation was not accepted",(uint32_t)hr);
     uint64_t serial=pilot_gfx_checkpoint();
     uint32_t swap=++graphics_swap_submitted;
+    if(pilot_gfx_interpolation_rate() && !(swap&127u)) {
+        struct PilotInterpolationStats stats;pilot_gfx_interpolation_stats(&stats);
+        fprintf(stderr,"[INTERPOLATION PROFILE] guest_swaps=%u sources=%llu host_presents=%llu history=%u output=%ux%u\n",
+            swap,(unsigned long long)stats.sources,(unsigned long long)stats.presents,stats.history,stats.width,stats.height);
+    }
     graphics_movie_capture_present(submitted,swap,serial);
     graphics_presents[graphics_present_count++]=(struct GraphicsPresent){serial,target,swap};
     graphics_swap_expected=target?target+1:graphics_frame_at(submitted);

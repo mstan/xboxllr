@@ -19,6 +19,7 @@ from native_d3d_resultarg import prepare_resultarg
 from native_d3d_combiner_bump import prepare_combiner_bump
 from native_d3d_feedback import prepare_feedback
 from native_d3d_explicit_blend import prepare_blend_combiners
+from native_d3d_visual import prepare_visual
 from native_d3d_texture import prepare_texture_views, prepare_projected_mips, prepare_xrgb_border
 
 PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
@@ -182,6 +183,7 @@ def prepare(donor, output, reference):
             if path.name=='rhi_d3d11.c':
                 code+='\nID3D11Device *d3d8_GetD3D11Device(void) { return g_dev; }\n'
                 code+='ID3D11DeviceContext *d3d8_GetD3D11Context(void) { return g_ctx; }\n'
+            code=prepare_visual(code,path.name)
             code=('/* Private pilot adaptation of https://github.com/phobos665/xboxrecomp\n'
                   ' * revision '+PIN+', '+relative.as_posix()+'.\n'
                   ' * Original notices below are retained. See ../../MODIFICATIONS.md\n'

@@ -98,6 +98,8 @@ if(EXISTS "${PILOT_GENERATED}/third_party")
       "$<TARGET_FILE_DIR:xlle_native_title>/third_party")
 endif()
 enable_testing()
+add_executable(pilot_visual_mods_test visual_mods_test.c visual_mods.c visual_mod_plan.c)
+add_test(NAME pilot_visual_mod_policy COMMAND pilot_visual_mods_test)
 include(pilot_tests.cmake)
 include(input_replay_tests.cmake)
 add_executable(pilot_reference_clock_quantum_test reference_clock_quantum_test.c reference_clock.c)
@@ -454,7 +456,7 @@ if(PILOT_D3D_SOURCE)
         rhi rhi_shader_cache rhi_d3d11)
       list(APPEND phobos_sources "${PILOT_D3D_SOURCE}/src/d3d/${name}.c")
     endforeach()
-    add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c
+    add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c visual_mods.c visual_mod_plan.c
       ${phobos_sources} "${PILOT_D3D_SOURCE}/src/config/recomp_config.c"
       "${PILOT_D3D_SOURCE}/src/kernel/nv2a_vsh.c")
     target_include_directories(pilot_d3d_backend PUBLIC "${PILOT_D3D_SOURCE}/src/d3d"
@@ -462,7 +464,7 @@ if(PILOT_D3D_SOURCE)
     target_compile_definitions(pilot_d3d_backend PRIVATE PILOT_D3D_PHOBOS)
     target_compile_definitions(pilot_contract_test PRIVATE PILOT_D3D_PHOBOS)
   elseif(PILOT_D3D_DONOR STREQUAL "SPOON")
-    add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c
+    add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c visual_mods.c visual_mod_plan.c
     "${PILOT_D3D_SOURCE}/d3d8_device.c" "${PILOT_D3D_SOURCE}/d3d8_gamma.c"
     "${PILOT_D3D_SOURCE}/d3d8_resources.c" "${PILOT_D3D_SOURCE}/d3d8_shaders.c"
     "${PILOT_D3D_SOURCE}/d3d8_states.c" "${PILOT_D3D_SOURCE}/d3d8_combiners.c"
@@ -505,6 +507,12 @@ if(PILOT_D3D_SOURCE)
     target_compile_definitions(pilot_graphics_test PRIVATE PILOT_D3D_PHOBOS)
   endif()
   target_link_libraries(pilot_graphics_test PRIVATE pilot_d3d_backend)
+  if(PILOT_D3D_DONOR STREQUAL "PHOBOS")
+    pilot_add_test(NAME pilot_graphics_visual_mods COMMAND pilot_graphics_test --visual)
+    set_tests_properties(pilot_graphics_visual_mods PROPERTIES TIMEOUT 90)
+    pilot_add_test(NAME pilot_graphics_visual_depth_guard COMMAND "${CMAKE_COMMAND}"
+      "-DBINARY=$<TARGET_FILE:pilot_graphics_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_visual_expect_stop.cmake")
+  endif()
   add_executable(pilot_shader_test graphics_shader_test.c)
   target_link_libraries(pilot_shader_test PRIVATE pilot_d3d_backend)
   pilot_add_test(NAME pilot_shader_gpu_reference COMMAND pilot_shader_test)
