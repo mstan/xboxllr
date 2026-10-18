@@ -42,5 +42,7 @@ The dedicated GPU check covers unsigned byte endpoints 0/127/128/255, actual
 sampling/alpha, rectangular Morton storage, all mip levels through 2x1/1x1,
 changed uploads, unchanged source buffers, rejected usage/dimensions/other
 formats, and three native device lifetimes per backend. Actual Round 8 title
-validation remains required after these focused checks. This does not assert
+run `campaign-019` subsequently creates/samples the reached format and clears
+all three normal stages through original Results/save and boss unlock, after
+separate original callback and combiner bump fixes. This does not assert
 new signed-format, linear-format or real-hardware precision qualification.

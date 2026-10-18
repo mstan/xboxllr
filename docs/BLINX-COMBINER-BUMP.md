@@ -15,10 +15,8 @@ The existing Xbox-to-host state mapper exchanges the final two matrix slots.
 Stage 1 reads stage 0; later stages use the original PSInputTexture selection.
 Invalid stage-zero and forward/self-dependent lookups are rejected.
 
-Contract references are [NV_texture_shader's offset texture operations]
-(https://registry.khronos.org/OpenGL/extensions/NV/NV_texture_shader.txt),
-[Microsoft's bump matrix formulas]
-(https://learn.microsoft.com/en-us/windows/win32/direct3d9/bump-mapping-formulas),
+Contract references are [NV_texture_shader's offset texture operations](https://registry.khronos.org/OpenGL/extensions/NV/NV_texture_shader.txt),
+[Microsoft's bump matrix formulas](https://learn.microsoft.com/en-us/windows/win32/direct3d9/bump-mapping-formulas),
 and local xemu `482088490c2d5983ed5e1eafbd09906157c1eca0`,
 `hw/xbox/nv2a/pgraph/glsl/psh.c`: BUMPENVMAP, sign3 and bump matrix uniforms.
 No emulator implementation is copied. Prepared donor code stays in ignored
@@ -37,5 +35,11 @@ backend and G8B8 tests also pass: 3/3 in 2.51 seconds on this host.
 
 Signed texture storage, luminance mode, other rejected texture programs and
 silicon-exact filtering remain outside this new contract. This unit evidence
-does not establish a campaign clear; actual title retry is tracked separately
-in the game campaign ledger and `beads-xbox.1.7.7` / `beads-xbox.1.134`.
+does not by itself establish a campaign clear. Actual title `campaign-019`,
+executable SHA-256 `cda7e482cb6e715d0cbcfcd1a8d0e6d46fc4a55e2cf3a9b9a5574051412af838`,
+then passed all three Forge of Hours normal stages through original Results,
+signed saves and boss unlock. The final Stage 3 save is
+`3f6ae3e2332b004d78cff85f3e47d27b57d192043593042042b2f2f23e7bd52e`.
+This is cheat-assisted traversal, not every effect/route or complete pixel
+qualification. Boss and further campaign work remain in the game ledger and
+`beads-xbox.1.7.7`; the reached renderer fix is closed as `beads-xbox.1.134`.
