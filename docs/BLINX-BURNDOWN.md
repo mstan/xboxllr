@@ -31,6 +31,43 @@ native LLE CPU conversion and JSRF remain separate. LLE-D07 preserves the old
 unidentified exception cause without claiming a causal fix or requiring a soak
 loop after the working current route. Earlier checkpoints below are history.
 
+## Post-qualification gameplay coverage - 2026-10-17
+
+The normal-input exercise has covered tutorials, walking/jumping, trash and
+crystals, two enemy kills, both golden-door switches, damage/Retry, Game Over
+and stage reentry. The owner's native callback stop at E9DD0 is repaired with
+the complete original body through E9E6C; native dispatch now has 8868 entries.
+A bounded optional control-report input source enables background QA without
+desktop focus or speaker output and leaves ordinary input defaults unchanged.
+
+At the owner's direction, remaining coverage uses explicit cheats instead of
+automated aiming. The final Stage 1 monster's HP was zeroed and Blinx's
+current/previous position moved to the original resident goal gate. The game
+ran its original goal tutorial, exit and Results screen. This is assisted
+completion evidence, not an unassisted full-stage playthrough.
+
+Advancing Results exposed the missing HLE SetInformationFile basic-information
+class used to update an existing save directory. Native aligned staging now
+passes that request to the actual host filesystem. Independent GetFileTime,
+short-buffer, access-denial and guest-bound tests pass; host timestamp/FATX
+tolerance remains unchanged. The next cheat-assisted run completes the save
+transition and visibly unlocks Stage 2. Its full launch-to-results route took
+about two minutes instead of another long navigation/aiming loop.
+
+Entering Stage 2 then exposed the truncated original 41190 body: branches to
+4143C fell outside its discovered extent. The recovered body extends through
+41669, preserving the separately callable shared tails at 41424 and 41432.
+The next process authenticates and loads the saved completion, selects the
+unlocked Stage 2 and reaches playable gameplay without the previous native
+stop. Later campaign coverage remains separate from the accepted 9/9 attract
+milestone. Private gameplay receipts, write journals, captures and
+failure logs are retained under build/blinx/gameplay-coverage-20261017.
+
+[Renderer/mod integration direction](BLINX-ENHANCED-RENDERER.md) records the
+Toshinden/Tomba 2 review and the default-off enhancement boundary. Shared
+recomp-ui now has an Xbox black/green theme and console identity on its own
+feature branch; integration into the Blinx launcher is still separate.
+
 ## Post-qualification New Game and first stage - 2026-10-17
 
 `beads-xbox.1.101` now passes the save screen and enters playable first-stage

@@ -1758,6 +1758,20 @@ function diagnostics for one selected address. It is disabled by default and
 changes no title behavior. `XLLE_PILOT_VISIBLE=1` shows the native window;
 `XLLE_PILOT_INPUT=keyboard` selects real foreground keyboard input at startup.
 
+For focus-independent background QA, explicitly select
+`XLLE_PILOT_INPUT=control` and
+`XLLE_PILOT_INPUT_CONTROL=Local\xlle-input-<unique-name>`. The writer creates a
+64-byte local mapping before launch; the pilot opens it read-only. Its
+little-endian report is magic `XLLEPAD1` (8 bytes), sequence (u32), lease in
+milliseconds (u32, 1-5000), `GetTickCount64` publication time (u64), the ordinary
+18-byte Xbox pad report and 22 zero reserved bytes. Publish an odd sequence,
+full memory barrier, payload, full barrier and an even sequence. Zero/odd,
+changed or expired publications produce a connected neutral controller;
+invalid data fails explicitly. Only port 0 is connected; nonzero rumble is
+unsupported. This optional input source supplies no guest-memory or execution
+control. Owner interactive launchers select ordinary keyboard/XInput and enable
+normal audio. Explicit gameplay cheats are recorded separately from input QA.
+
 ## Earlier observed result
 
 The original NTSC Blinx XDK 4831 and JSRF XDK 4134 both execute their own XBE
@@ -2748,7 +2762,8 @@ New-Item -ItemType Directory -Force build/blinx/storage | Out-Null
 & build/blinx/host/Release/xlle_native_title.exe <original-default.xbe> <eeprom.bin> <installed-content-directory> build/blinx/storage
 ```
 
-Create dispositions, writes, flushes, allocation/end-of-file/disposition changes
+Create dispositions, writes, flushes, basic-information timestamp/attribute
+updates (including existing save directories), allocation/end-of-file/disposition changes
 and file metadata operate through native NT services on owned handles. Host
 failures propagate; there is no flush-success fallback. Standard, position and
 network-open query structures use aligned host staging because the Xbox caller

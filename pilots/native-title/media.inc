@@ -421,7 +421,7 @@ static void media_kernel(unsigned ordinal)
                  * In-range unqualified classes retain an explicit guard. */
                 unsigned size=a[4]==34 ? 56 : a[4]==4 ? 40 : a[4]==5 ? 24 : a[4]==14 || a[4]==19 || a[4]==20 ? 8 : a[4]==13 ? 1 : 0;
                 if (a[4]==0 || a[4]>=37) g_eax=0xc0000003u;
-                else if (!size || (ordinal==226 && a[4]!=14 && a[4]!=19 && a[4]!=20 && a[4]!=13) ||
+                else if (!size || (ordinal==226 && a[4]!=4 && a[4]!=14 && a[4]!=19 && a[4]!=20 && a[4]!=13) ||
                     (ordinal==211 && a[4]!=4 && a[4]!=5 && a[4]!=14 && a[4]!=34)) stop("file information class unsupported",a[4]);
                 else if (a[3]<size) g_eax=0xc0000004u;
                 else if (ordinal==211 && (a[4]==4 || a[4]==5)) {
@@ -433,6 +433,10 @@ static void media_kernel(unsigned ordinal)
                      * native ABI struct, even when the field offsets match. */
                     union { uint64_t alignment; unsigned char bytes[56]; } stage={0};
                     if (ordinal==226 && a[4]!=14) fsc_forget(owned->id);
+                    /* Basic information sets real file/directory timestamps
+                     * and attributes. Blinx updates its existing save folder
+                     * after Results; metadata retains the documented host
+                     * semantics, including zero fields meaning unchanged. */
                     if (ordinal==226) memcpy(stage.bytes,memory+a[2],size);
                     g_eax=(uint32_t)(ordinal==226 ? media_nt_set : media_nt_query)(file,&io,stage.bytes,size,a[4]);
                     if (ordinal==211 && !g_eax) {

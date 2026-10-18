@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "input_host.h"
 #include "input_replay.inc"
+#include "input_control.inc"
 
 /* Startup-selected virtual gamepad, inspired by Phobos's keyboard source:
  * phobos665/xboxrecomp bcccf8c, src/input/input_bindings.c. Independent code;
@@ -39,6 +40,11 @@ static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID
     char value[24]={0};
     GetEnvironmentVariableA("XLLE_PILOT_INPUT",value,sizeof(value));
     input_host_keyboard=!strcmp(value,"keyboard");
+    if(!strcmp(value,"control")) {
+        uint32_t error=input_control_open(getenv("XLLE_PILOT_INPUT_CONTROL"));
+        if(error){fprintf(stderr,"[PILOT INPUT STOP] invalid local controller configuration error=%u\n",error);ExitProcess(2);}
+        fprintf(stderr,"[INPUT CONTROL] local read-only mapping; port 0; maximum hold 5000ms\n");
+    }
     if(!strcmp(value,"replay")) {
         const char *path=getenv("XLLE_PILOT_INPUT_REPLAY");FILE *file=path?fopen(path,"r"):NULL;
         int ok=file && input_replay_load(file);if(file && fclose(file))ok=0;
@@ -90,6 +96,10 @@ static void input_host_convert(const XINPUT_GAMEPAD *source, uint8_t dest[18])
 uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 {
     input_host_is_keyboard();
+    if(input_control_view) {
+        if(port)return ERROR_DEVICE_NOT_CONNECTED;
+        return input_control_sample(input_control_view,GetTickCount64(),gamepad);
+    }
     if(input_replay_count) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         return input_replay_poll(input_host_replay_time(),gamepad);
@@ -112,7 +122,7 @@ uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 
 uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
 {
-    if(input_host_is_keyboard() || input_replay_count) {
+    if(input_host_is_keyboard() || input_replay_count || input_control_view) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         if(input_replay_count) {
             uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
@@ -120,7 +130,7 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
         }
         uint8_t keys[256];memset(keys,1,sizeof(keys));XINPUT_GAMEPAD pad;
         input_host_keyboard_convert(keys,&pad);
-        if(input_replay_count)pad.wButtons=0xffff;
+        if(input_replay_count || input_control_view)pad.wButtons=0xffff;
         /* Capabilities encode supported bits, not a positive axis position.
          * The virtual source can emit signed values spanning all 16 bits. */
         pad.sThumbLX=pad.sThumbLY=pad.sThumbRX=pad.sThumbRY=(SHORT)0xffff;
@@ -140,7 +150,7 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
 
 uint32_t pilot_input_host_rumble(unsigned port,uint16_t left,uint16_t right)
 {
-    if(input_host_is_keyboard() || input_replay_count) {
+    if(input_host_is_keyboard() || input_replay_count || input_control_view) {
         uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
         return status?status:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
     }

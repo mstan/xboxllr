@@ -1,3 +1,42 @@
+/* Save updates set directory timestamps, including a 4-byte-aligned guest
+ * FILE_BASIC_INFORMATION. Verify the host effect independently of NtSet. */
+static void test_storage_metadata(const char *directory)
+{
+    const uint32_t out=0x1d000,iosb=0x1d010,info=0x1d024;
+    uint32_t create[]={out,FILE_WRITE_ATTRIBUTES|FILE_READ_ATTRIBUTES|SYNCHRONIZE,
+        0x1a000,iosb,0,FILE_ATTRIBUTE_DIRECTORY,3,2,0x21};
+    test_media_name("\\Device\\Harddisk0\\Partition1\\save-metadata",0);
+    call_kernel(190,create,9);CHECK(!g_eax);uint32_t file=MEM32(out);
+    const uint64_t created=132000000000000000ull,accessed=132100000000000000ull,
+        written=132200000000000000ull;
+    memset(memory+info-4,0xcc,48);memset(memory+info,0,40);
+    MEM64(info)=created;MEM64(info+8)=accessed;MEM64(info+16)=written;
+    unsigned char original[40];memcpy(original,memory+info,40);
+    uint32_t set[]={file,iosb,info,39,4};
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    call_kernel(226,set,5);CHECK(g_eax==0xc0000004u);
+    CHECK(MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678);
+    set[3]=40;call_kernel(226,set,5);CHECK(!g_eax && !MEM32(iosb) && !MEM32(iosb+4));
+    CHECK(!memcmp(memory+info,original,40) && MEM32(info-4)==0xcccccccc && MEM32(info+40)==0xcccccccc);
+    call_kernel(187,&file,1);CHECK(!g_eax);
+    char path[MAX_PATH];sprintf(path,"%s\\Partition1\\save-metadata",directory);
+    HANDLE host=CreateFileA(path,FILE_READ_ATTRIBUTES,3,NULL,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS,NULL);
+    CHECK(host!=INVALID_HANDLE_VALUE);
+    FILETIME ct,at,wt;CHECK(GetFileTime(host,&ct,&at,&wt));
+    CHECK((((uint64_t)ct.dwHighDateTime<<32)|ct.dwLowDateTime)==created);
+    CHECK((((uint64_t)at.dwHighDateTime<<32)|at.dwLowDateTime)==accessed);
+    CHECK((((uint64_t)wt.dwHighDateTime<<32)|wt.dwLowDateTime)==written);
+    CHECK(CloseHandle(host));
+    create[1]=FILE_READ_ATTRIBUTES|SYNCHRONIZE;create[7]=1;
+    call_kernel(190,create,9);CHECK(!g_eax);file=MEM32(out);set[0]=file;
+    MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+    call_kernel(226,set,5);CHECK(g_eax==0xc0000022u);
+    CHECK(MEM32(iosb)==0xdeadbeef && MEM32(iosb+4)==0x12345678 && !memcmp(memory+info,original,40));
+    call_kernel(187,&file,1);CHECK(!g_eax);
+    CHECK(RemoveDirectoryA(path));
+    puts("save metadata: real directory timestamps, guest alignment/bounds, short length and denied write passed");
+}
+
 /* Completed writes must be independently visible through ordinary host reads.
  * No provider replacement or artificial completion is used. */
 static void test_storage_async(const char *directory)

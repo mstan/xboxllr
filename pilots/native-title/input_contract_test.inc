@@ -307,6 +307,40 @@ static void input_test_setup(void)
 {
     /* Deterministic XInput provider independent of the user's launch choice. */
     input_host_is_keyboard();input_host_keyboard=0;input_replay_count=0;
+    /* Exercise actual mapping lifetime and lease expiration independently of
+     * keyboard focus, using the same reader as automated gameplay. */
+    char control_name[100];snprintf(control_name,sizeof(control_name),"Local\\xlle-input-test-%lu",GetCurrentProcessId());
+    CHECK(input_control_open("Global\\wrong")==ERROR_INVALID_PARAMETER);
+    HANDLE control_map=CreateFileMappingA(INVALID_HANDLE_VALUE,NULL,PAGE_READWRITE,0,64,control_name);
+    CHECK(control_map && GetLastError()!=ERROR_ALREADY_EXISTS);
+    struct InputControlReport *control=MapViewOfFile(control_map,FILE_MAP_WRITE,0,0,64);CHECK(control);
+    memset(control,0,64);memcpy(control->magic,"XLLEPAD1",8);
+    CHECK(!input_control_open(control_name));
+    uint8_t controlled[18];memset(controlled,0xcc,18);
+    CHECK(!input_control_sample(input_control_view,1000,controlled));
+    for(unsigned i=0;i<18;++i)CHECK(!controlled[i]);
+    control->sequence=1;control->issued_ms=1000;control->lease_ms=200;
+    control->pad[0]=0x10;control->pad[2]=255;control->pad[12]=255;control->pad[13]=127;
+    CHECK(!input_control_sample(input_control_view,1000,controlled) && !controlled[0]);
+    MemoryBarrier();control->sequence=2;
+    CHECK(!input_control_sample(input_control_view,1000,controlled) && controlled[0]==0x10 && controlled[2]==255 && controlled[13]==127);
+    CHECK(!input_control_sample(input_control_view,1199,controlled) && controlled[0]==0x10);
+    CHECK(!input_control_sample(input_control_view,1200,controlled));
+    for(unsigned i=0;i<18;++i)CHECK(!controlled[i]);
+    CHECK(input_control_sample(input_control_view,999,controlled)==ERROR_INVALID_DATA);
+    control->lease_ms=5001;CHECK(input_control_sample(input_control_view,1000,controlled)==ERROR_INVALID_DATA);control->lease_ms=200;
+    control->pad[1]=1;CHECK(input_control_sample(input_control_view,1000,controlled)==ERROR_INVALID_DATA);control->pad[1]=0;
+    control->reserved[21]=1;CHECK(input_control_sample(input_control_view,1000,controlled)==ERROR_INVALID_DATA);control->reserved[21]=0;
+    uint8_t controlled_caps[18],controlled_rumble[4];
+    CHECK(!pilot_input_host_caps(0,controlled_caps,controlled_rumble));
+    CHECK(controlled_caps[0]==255 && controlled_caps[1]==0 && controlled_caps[2]==255);
+    for(unsigned i=10;i<18;++i)CHECK(controlled_caps[i]==255);
+    CHECK(pilot_input_host_state(1,controlled)==ERROR_DEVICE_NOT_CONNECTED);
+    CHECK(pilot_input_host_rumble(0,1,0)==ERROR_NOT_SUPPORTED);
+    CHECK(!pilot_input_host_rumble(0,0,0));
+    CHECK(UnmapViewOfFile((const void *)input_control_view) && CloseHandle(input_control_mapping));
+    input_control_view=NULL;input_control_mapping=NULL;input_control_reported=0;
+    CHECK(UnmapViewOfFile(control) && CloseHandle(control_map));
     FILE *replay=tmpfile();CHECK(replay);
     CHECK(fputs("0 000000000000000000000000000000000000\n20 1000ff00000000000000ff7f000000000000\n220 000000000000000000000000000000000000\n300 disconnected\n400 000000000000000000000000000000000000\n",replay)>=0);
     rewind(replay);CHECK(input_replay_load(replay) && input_replay_count==5);CHECK(!fclose(replay));

@@ -12,6 +12,7 @@ static void test_storage(void)
     CHECK(DeleteFileA(directory) && CreateDirectoryA(directory,NULL));
     storage_mount(directory);
     test_storage_async(directory);
+    test_storage_metadata(directory);
     const uint32_t out=0x1b000,iosb=0x1b010,info=0x1b020,offset=0x1b060,buffer=0x1b100;
     uint32_t open[]={out,FILE_LIST_DIRECTORY|SYNCHRONIZE,0x1a000,iosb,3,0x800021};
     test_media_name("\\Device\\Harddisk0\\Partition1\\",0);
