@@ -146,6 +146,11 @@ def recover(args):
         position=next((row.start() for row in rows if int(row[1],16)>args.function),rows[-1].end()+1)
         dispatch=dispatch[:position]+f'    {{ 0x{args.function:08X}u, (recomp_func_t){symbol} }},\n'+dispatch[position:]
         dispatch=re.sub(r'Maps \d+ Xbox VAs',f'Maps {len(rows)+1} Xbox VAs',dispatch,count=1)
+        from native_dispatch import compact, refresh_inventory_count
+        # A sorted insertion shifts the table's upper bound and compact range.
+        # Derive the count from the C array so recovered high-address callbacks
+        # cannot silently fall beyond an old numeric binary-search bound.
+        dispatch, compact_record = compact(refresh_inventory_count(dispatch))
     else:
         if len(matches)!=1: raise ValueError('expected one original generated body')
         path,code=matches[0];code,count=pattern.subn(lambda m:bodies[0],code)
@@ -161,6 +166,8 @@ def recover(args):
         dispatch_path.write_text(dispatch,encoding='utf-8',newline='\n')
     record_path.write_text(json.dumps(records,indent=2)+'\n',newline='\n')
     manifest['function_extents']=records['extents']
+    if args.new_entry:
+        manifest['compact_dispatch']=compact_record
     if manifest.get('thread_checkpoints'):
         from native_thread_checkpoints import apply
         manifest['thread_checkpoints']=apply(generated)

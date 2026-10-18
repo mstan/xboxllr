@@ -15,6 +15,19 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### Compact dispatch and HLE/CPU audit - 2026-10-18
+
+Phobos xboxrecomp `7bf9c188f6f4dd5e31dec8c477ae6dedcc0b48d1`,
+`tools/recomp/translator.py` and `test_dispatch_flat.py`, provide the behavioral
+reference for choosing a compact main-code lookup while retaining outliers.
+`tools/native_dispatch.py` and its tests independently implement the bounded
+lookup transformation for the existing private GPL-dependent generated pilot;
+no additional donor implementation body is copied. Existing generated CPU and
+renderer notices still apply. The register declaration, HLE binding and sampling
+references and exact fork revisions are recorded in the
+[optimization audit](docs/NATIVE-HLE-OPTIMIZATION-2026-10-18.md). No new donor
+kernel or live shadow execution is adopted.
+
 ### Deferred stream upload - 2026-10-08
 
 Phobos `05040ec103dfbaca5e3daed28bbc569bd896f59f`,

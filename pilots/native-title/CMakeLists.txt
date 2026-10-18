@@ -621,17 +621,44 @@ foreach(kind instruction indirect kernel)
   pilot_add_test(NAME pilot_stops_${kind} COMMAND pilot_contract_test ${kind})
   set_tests_properties(pilot_stops_${kind} PROPERTIES WILL_FAIL TRUE)
 endforeach()
+set(PILOT_NATIVE_OPTIMIZATION "OPTIMIZED" CACHE STRING
+  "Build-time native CPU/host profile: OPTIMIZED or BRINGUP")
+set_property(CACHE PILOT_NATIVE_OPTIMIZATION PROPERTY STRINGS OPTIMIZED BRINGUP)
+if(NOT PILOT_NATIVE_OPTIMIZATION MATCHES "^(OPTIMIZED|BRINGUP)$")
+  message(FATAL_ERROR "PILOT_NATIVE_OPTIMIZATION must be OPTIMIZED or BRINGUP")
+endif()
+set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS
+  "PILOT_NATIVE_OPTIMIZATION=\"${PILOT_NATIVE_OPTIMIZATION}\"")
+# Older generated inventories remain usable through the exact binary lookup.
+# Only initialize the bounded table after the reviewed generator transform.
+file(STRINGS "${PILOT_GENERATED}/recomp_dispatch.c" pilot_compact_dispatch
+  REGEX "^#define PILOT_DISPATCH_COMPACT 1$")
+if(pilot_compact_dispatch)
+  set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS PILOT_DISPATCH_COMPACT)
+endif()
+file(SHA256 "${PILOT_GENERATED}/recomp_types.h" pilot_register_model_sha256)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-build-profile-$<CONFIG>.aot-private.json"
+  CONTENT "{\n  \"optimization\": \"${PILOT_NATIVE_OPTIMIZATION}\",\n  \"configuration\": \"$<CONFIG>\",\n  \"compiler\": \"${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}\",\n  \"register_model_sha256\": \"${pilot_register_model_sha256}\",\n  \"scheduling\": \"${PILOT_SCHEDULING}\",\n  \"calendar\": \"${PILOT_CALENDAR}\",\n  \"io_device\": \"${PILOT_IO_DEVICE}\",\n  \"files\": \"${PILOT_FILES}\",\n  \"renderer\": \"${PILOT_RENDERER}\",\n  \"audio\": \"${PILOT_AUDIO}\"\n}\n")
 if(MSVC)
   # Runtime symbols and generated public names make a stopped title inspectable
   # without recompiling millions of generated lines with debug information.
   set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_OPTIONS /Z7)
   target_link_options(xlle_native_title PRIVATE /DEBUG:FULL)
-  # Bring-up iteration: donor discovery can produce enormous overlapping
-  # functions. Qualify execution before spending minutes optimizing those.
-  target_compile_options(xlle_native_title PRIVATE /bigobj /we4013 /Od /MP4)
+  target_compile_options(xlle_native_title PRIVATE /bigobj /we4013 /MP4)
+  if(PILOT_NATIVE_OPTIMIZATION STREQUAL "OPTIMIZED")
+    target_compile_options(xlle_native_title PRIVATE /O2 /fp:precise)
+  else()
+    target_compile_options(xlle_native_title PRIVATE /Od)
+  endif()
   target_link_options(xlle_native_title PRIVATE /STACK:8388608)
 else()
-  target_compile_options(xlle_native_title PRIVATE -O0 -Werror=implicit-function-declaration)
+  target_compile_options(xlle_native_title PRIVATE -Werror=implicit-function-declaration)
+  if(PILOT_NATIVE_OPTIMIZATION STREQUAL "OPTIMIZED")
+    # Guest byte/word/float accesses alias the same backing memory.
+    target_compile_options(xlle_native_title PRIVATE -O2 -fno-strict-aliasing)
+  else()
+    target_compile_options(xlle_native_title PRIVATE -O0)
+  endif()
   target_link_options(xlle_native_title PRIVATE -Wl,--stack,8388608)
 endif()
 

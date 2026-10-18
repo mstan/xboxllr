@@ -1159,6 +1159,9 @@ static void load_image(const char *path)
 
 int main(int argc,char **argv)
 {
+#ifdef PILOT_NATIVE_OPTIMIZATION
+    fprintf(stderr,"[PILOT BUILD] native_optimization=%s\n",PILOT_NATIVE_OPTIMIZATION);
+#endif
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     thread_guest_cpu_configure();
     scheduler_configure();
@@ -1206,6 +1209,13 @@ int main(int argc,char **argv)
     /* Selected data imports are finalized after the original mount setup.
      * Protect preloads only after every loader-owned import write is complete. */
     sections_finalize_preloads();
+#ifdef PILOT_DISPATCH_COMPACT
+    /* Publish the immutable host index before any original guest thread runs.
+     * On allocation failure the same generated function inventory is searched. */
+    int flat_dispatch=recomp_dispatch_init();
+    fprintf(stderr,"[DISPATCH] lookup=%s host_index_bytes=%zu\n",
+        flat_dispatch?"compact-flat":"binary",recomp_dispatch_flat_bytes());
+#endif
 #ifdef PILOT_MEDIA_INSTALLED
     fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
 #else
