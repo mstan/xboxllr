@@ -15,6 +15,55 @@ static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
 static HWND pilot_window;
 static int pilot_visible;
+static uint32_t pilot_window_aspect[2],pilot_window_height,pilot_frame_aspect[2];
+static int pilot_aspect_valid(uint32_t n,uint32_t d)
+{return n && d && n<=65536 && d<=65536 && (uint64_t)n*3>=(uint64_t)d*4 && (uint64_t)n*9<=(uint64_t)d*32;}
+int pilot_gfx_presentation(uint32_t numerator,uint32_t denominator,uint32_t height)
+{
+    if(pilot_device)return 0;
+    if(!numerator && !denominator){memset(pilot_window_aspect,0,sizeof(pilot_window_aspect));pilot_window_height=0;return 1;}
+#ifdef PILOT_D3D_PHOBOS
+    if(!pilot_aspect_valid(numerator,denominator) || height<240 || height>2160)return 0;
+    pilot_window_aspect[0]=numerator;pilot_window_aspect[1]=denominator;pilot_window_height=height;return 1;
+#else
+    return 0;
+#endif
+}
+int pilot_gfx_frame_shape(uint32_t numerator,uint32_t denominator)
+{
+    if(!numerator && !denominator){memset(pilot_frame_aspect,0,sizeof(pilot_frame_aspect));return 1;}
+#ifdef PILOT_D3D_PHOBOS
+    if(!pilot_aspect_valid(numerator,denominator))return 0;
+    pilot_frame_aspect[0]=numerator;pilot_frame_aspect[1]=denominator;return 1;
+#else
+    return 0;
+#endif
+}
+int pilot_gfx_client_size(uint32_t size[2])
+{
+    RECT client;
+    if(!size || !pilot_window || !GetClientRect(pilot_window,&client) || client.right<=0 || client.bottom<=0)return 0;
+    size[0]=(uint32_t)client.right;size[1]=(uint32_t)client.bottom;return 1;
+}
+/* Called by the pinned donor's presentation resolve, after its default fit
+ * policy. Rendering remains in the original guest-sized scene allocation. */
+void pilot_d3d_present_shape(uint32_t *width,uint32_t *height)
+{if(pilot_frame_aspect[0]){*width=pilot_frame_aspect[0];*height=pilot_frame_aspect[1];}}
+static RECT pilot_client_rectangle(uint32_t width,uint32_t height)
+{
+    RECT client={0,0,(LONG)width,(LONG)height};
+    if(pilot_window_aspect[0]) {
+        client.right=(LONG)((uint64_t)pilot_window_height*pilot_window_aspect[0]/pilot_window_aspect[1]);
+        client.bottom=(LONG)pilot_window_height;
+        /* Keep the initial window inside the current desktop work area. */
+        RECT work;if(SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0)) {
+            LONG max_width=work.right-work.left-32,max_height=work.bottom-work.top-64;
+            if(max_width>0 && client.right>max_width){client.bottom=(LONG)((int64_t)client.bottom*max_width/client.right);client.right=max_width;}
+            if(max_height>0 && client.bottom>max_height){client.right=(LONG)((int64_t)client.right*max_height/client.bottom);client.bottom=max_height;}
+        }
+    }
+    AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);return client;
+}
 static uint32_t pilot_logic_copy,pilot_requested_blend;
 static unsigned char *pilot_saved_display;
 static uint32_t pilot_saved_width,pilot_saved_height;
@@ -199,7 +248,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     WNDCLASSW window_class={0}; window_class.lpfnWndProc=pilot_window_proc;
     window_class.hInstance=GetModuleHandleW(NULL); window_class.lpszClassName=L"xlle-native-reference";
     if (!RegisterClassW(&window_class) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return HRESULT_FROM_WIN32(GetLastError());
-    RECT client={0,0,(LONG)p[0],(LONG)p[1]}; AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);
+    RECT client=pilot_client_rectangle(p[0],p[1]);
     /* Hidden until scene qualification; a successful hidden present is not
      * treated as title cadence evidence. Tests read actual GPU output. */
     if(!pilot_window)pilot_window=CreateWindowW(window_class.lpszClassName,L"Xbox native reference",WS_OVERLAPPEDWINDOW,
@@ -298,7 +347,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     }
     pilot_color_target=0;pilot_depth_target=UINT32_MAX;
     pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
-    RECT client={0,0,(LONG)p[0],(LONG)p[1]};AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);
+    RECT client=pilot_client_rectangle(p[0],p[1]);
     if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
         SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))pilot_d3d_backend_stop("reset window resize failed");
     free(pilot_saved_display);pilot_saved_display=NULL;
@@ -930,6 +979,8 @@ uint32_t pilot_gfx_fvf_extent(uint32_t fvf)
     return extent;
 }
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
+{return pilot_gfx_fvf_placement(fvf,screen_x,screen_y,1,0);}
+int32_t pilot_gfx_fvf_placement(uint32_t fvf,float screen_x,float screen_y,float x_scale,float x_anchor)
 {
     if(!pilot_device)return E_FAIL;
     pilot_gfx_shader_fixed_binding();
@@ -941,6 +992,7 @@ int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
      * truncation. The VS owns that operation; spare w lanes carry the bias. */
     float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/(high-low),screen_x};
     float offset[]={-1-viewport[0]*scale[0],1-viewport[1]*scale[1],-low/(high-low),screen_y};
+    offset[0]+=(1-x_scale)*x_anchor*scale[0];scale[0]*=x_scale;
     pilot_d3d_program_fog_mode(0);
     pilot_d3d_fvf_prepare(fvf,scale,offset);return S_OK;
 }

@@ -48,6 +48,9 @@ static void graphics_transform_viewport(const uint32_t viewport[6])
 static void graphics_transform_set(uint32_t state,uint32_t pointer)
 {
     if(state>=10)stop("unqualified transform index",state);
+#ifdef PILOT_TITLE_MODS
+    if(title_mod && title_mod->transform)title_mod->transform(state,pointer,MEM32(g_esp));
+#endif
     float matrix[16];memcpy(matrix,graphics_pointer(pointer,sizeof(matrix)),sizeof(matrix));
     if(pilot_gfx_transform(state,matrix)<0)stop("native transform update failed",state);
     memcpy(memory+TRANSFORM_STATE(TRANSFORMS)+state*64,matrix,sizeof(matrix));

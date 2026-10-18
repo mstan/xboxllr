@@ -613,6 +613,8 @@ static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
 #include "input.inc"
 #endif
 #ifdef PILOT_D3D_NATIVE
+#include "graphics_backend.h"
+#include "title_mod.inc"
 #include "graphics.inc"
 #endif
 #if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_D3D_NATIVE)
@@ -1188,6 +1190,9 @@ int main(int argc,char **argv)
 #endif
     }
     load_image(argv[1]);
+#ifdef PILOT_TITLE_MODS
+    title_mod_initialize();
+#endif
 #ifdef PILOT_FILES_LLE
     files_lle_start();
 #else

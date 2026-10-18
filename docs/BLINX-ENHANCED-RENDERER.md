@@ -84,9 +84,32 @@ Tomba 2 documents the concrete failure to avoid: extra terrain overflowed the
 stock packet arena into other game data. Its later owned arenas and explicit
 capacity limits are more valuable here than copying a far-plane constant.
 
+## First widescreen implementation
+
+The native pilot now exposes a small trusted title graphics ABI in
+[`TITLE-MODS.md`](../pilots/native-title/TITLE-MODS.md). The Blinx repository
+owns a default-off `blinx.enhancement.widescreen` package and the static
+`blinx.widescreen` plugin. One configurable aspect covers 4:3 through 32:9,
+including 16:9, 21:9, 3440:1440 and resize-driven adaptive presentation.
+
+The mod changes the original perspective matrix data before the game's
+SetTransform/matrix-copy boundary, so its CPU projection consumers share the
+wider matrix. Identified overlay sprite/text draws use proportional left,
+right or center anchoring. Gameplay widens; results and menus retain 4:3
+between bars. Guest render buffers remain at their original size. Higher
+internal resolution, further visibility enhancements and the shared launcher
+provider remain separate work, rather than prerequisites for this first mod.
+
 First-feature acceptance: off preserves the baseline route; on changes the
 intended scene behavior; invalid identity/conflicting plans fail before effects;
 resource bounds and cleanup hold. Reuse existing device/LLE family evidence and
 add a focused comparison for the behavior actually changed. Track remaining
-enhancement work in `beads-xbox.1.7.4`; no enhancement is included in the current
-owner gameplay executable yet.
+enhancement work in `beads-xbox.1.7.4`. The earlier 4:3 owner gameplay package
+remains a separate baseline.
+
+Actual adaptive title run `wide-stage-006` reached Stage 1 gameplay, rendered
+the same paused scene at 16:9, 21:9 and 32:9, and used explicitly logged enemy
+HP/position cheats to reach original Results, save and Stage 2 unlock. Results
+and the stage selector retained their centered 4:3 presentation. These checks
+do not establish full campaign, all effect/HUD producers or enhanced-resolution
+coverage. Those remain in the title's campaign and enhancement ledgers.

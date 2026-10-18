@@ -331,6 +331,9 @@ static uint32_t graphics_present(void)
 #ifdef PILOT_DISPLAY_LLE
     display_lle_present(graphics_swap_submitted+1,graphics_parameters[12]);
 #endif
+#ifdef PILOT_TITLE_MODS
+    if(title_mod && title_mod->present)title_mod->present();
+#endif
     int32_t hr=pilot_gfx_present();
     /* DXGI_STATUS_OCCLUDED is a nonfailure: the desktop window is invisible,
      * but rendering was submitted. Guest scanout and retirement still follow

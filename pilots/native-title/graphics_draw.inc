@@ -110,10 +110,32 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     graphics_draw_profile_step(&profile,2);
     graphics_sync_deferred();
     graphics_draw_profile_step(&profile,3);
+    float mod_x_scale=1,mod_x_anchor=0;
+#ifdef PILOT_TITLE_MODS
+    if(title_mod && title_mod->draw) {
+        uint32_t stride=up_stride,data=up_data,position_type=0x42,position_offset=0;
+        if(!up_data && (streams&1)) {
+            stride=MEM32(PILOT_D3D_STREAMS);
+            data=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8))->data+first*stride;
+        }
+        if(shader&1) {
+            uint32_t descriptor=graphics_shader(shader)->header+0x14;
+            if(MEM32(descriptor)!=0)data=0; /* only stream-zero position here */
+            position_offset=MEM32(descriptor+4);position_type=MEM32(descriptor+8);
+        }
+        struct PilotTitleModDraw draw={MEM32(g_esp),shader,primitive,count,graphics_target==graphics_headers,
+            data?memory+data+position_offset:NULL,stride,position_type,1,0,
+            MEM32(PILOT_D3D_RENDER_STATES+143*4),MEM32(PILOT_D3D_RENDER_STATES+64*4)};
+        title_mod->draw(&draw);
+        if(!(draw.x_scale>0 && draw.x_scale<=1 && draw.x_anchor>=0 && draw.x_anchor<=graphics_parameters[0]))
+            stop("invalid title mod raster placement",draw.caller);
+        mod_x_scale=draw.x_scale;mod_x_anchor=draw.x_anchor;
+    }
+#endif
     if(!(shader&1)) {
         if(MEM32(PILOT_D3D_RENDER_STATES+92*4))stop("pretransformed fog is unqualified",shader);
-        if(pilot_gfx_fvf_prepare(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
-            graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4))<0)stop("native FVF preparation failed",shader);
+        if(pilot_gfx_fvf_placement(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
+            graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4),mod_x_scale,mod_x_anchor)<0)stop("native FVF preparation failed",shader);
         const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture && !up_data) {
             struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8));
@@ -132,6 +154,7 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     if(!viewport[2] || !viewport[3] || !(high>low) || !(depth>0))stop("unqualified draw viewport range",0);
     float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/((high-low)*depth),1};
     float offset[]={-1-viewport[0]*scale[0],1-viewport[1]*scale[1],-low/(high-low),0};
+    offset[0]+=(1-mod_x_scale)*mod_x_anchor*scale[0];scale[0]*=mod_x_scale;
     if(pilot_gfx_shader_raster(scale,offset)<0)stop("native raster constants failed",0);
     if(!up_data)scene_reference=graphics_draw_capture(args);
     }

@@ -130,6 +130,10 @@ def prepare(donor, output, reference):
                     '    sd.border[3]=((border>>24)&255)/255.0f;')
             if path.name=='d3d8_device.c':
                 code=prepare_feedback(code)
+                code=once(code,'        d3d8_display_output_shape(s->width, s->height, &shape_w, &shape_h);',
+                    '        d3d8_display_output_shape(s->width, s->height, &shape_w, &shape_h);\n'
+                    '        pilot_d3d_present_shape(&shape_w,&shape_h);')
+                code='void pilot_d3d_present_shape(unsigned *width,unsigned *height);\n'+code
                 # The donor's function-local empty-stage view survives device
                 # destruction. Rebinding it to a new D3D11 device corrupts the
                 # context and can leave real occlusion queries pending forever.
