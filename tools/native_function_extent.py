@@ -59,8 +59,14 @@ def apply_extents(blob, image, functions, records):
         offset=section['raw_offset']+start-section['address'];code=blob[offset:offset+end-start]
         if hashlib.sha256(code).hexdigest()!=record['sha256']: raise ValueError('recovered bytes changed')
         instructions=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(code,start))
-        if sum(i.size for i in instructions)!=end-start or instructions[-1].mnemonic!='ret':
-            raise ValueError('reviewed extension must decode completely through a return')
+        terminal=record.get('terminal','return')
+        if terminal not in ('return','tail-jump'):
+            raise ValueError('unknown reviewed terminal kind')
+        mnemonic='ret' if terminal=='return' else 'jmp'
+        if (not instructions or sum(i.size for i in instructions)!=end-start or
+                instructions[-1].mnemonic!=mnemonic):
+            ending='a return' if terminal=='return' else 'an unconditional tail jump'
+            raise ValueError('reviewed extension must decode completely through '+ending)
         f.update(end=f'0x{end:08X}',size=end-start,num_instructions=len(instructions))
     return sorted(functions,key=lambda f:int(f['start'],16))
 
@@ -92,6 +98,7 @@ def recover(args):
     offset=section['raw_offset']+args.function-section['address']
     record=dict(start=args.function,original_end=int(function['end'],16),end=args.end,
                 sha256=hashlib.sha256(blob[offset:offset+args.end-args.function]).hexdigest(),reason=args.reason)
+    if getattr(args,'terminal','return')!='return':record['terminal']=args.terminal
     if getattr(args,'contained_entry',[]):
         record['contained_entries']=[]
         for address in args.contained_entry:
@@ -163,6 +170,8 @@ if __name__=='__main__':
     parser.add_argument('--end',type=lambda x:int(x,0),required=True)
     parser.add_argument('--reason',required=True)
     parser.add_argument('--new-entry',action='store_true',help='Recover an observed undiscovered function with a reviewed non-overlapping extent')
+    parser.add_argument('--terminal',choices=('return','tail-jump'),default='return',
+                        help='Reviewed final instruction; tail-jump admits source-bound wrappers without extending through unrelated bodies')
     parser.add_argument('--contained-entry',type=lambda x:int(x,0),action='append',default=[],
                         help='Preserve an existing source-bound shared tail inside the reviewed expanded body')
     print(json.dumps(recover(parser.parse_args())))

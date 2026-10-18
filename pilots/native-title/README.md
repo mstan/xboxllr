@@ -62,6 +62,14 @@ metadata persists in `function-extents.aot-private.json` and full regeneration
 replays it. Unchanged checkpoint output files retain their timestamps, so an
 incremental recovery rebuilds only changed generated units.
 
+Original dispatch wrappers can end with an unconditional tail jump instead of
+a return. Recover those with explicit `--terminal tail-jump` and the exact
+source-bound end; full regeneration replays that terminal metadata. Return
+validation stays the default. Conditional branches, fallthrough and partial
+instructions do not satisfy the tail-jump terminal. Campaign Stage 3 exposed
+the 19-byte original `000B2360` wrapper through `000B2373`; its original table
+dispatch is retained without absorbing padding or the adjacent `000B2380`.
+
 USB/PIC LLE now requires the reviewed
 [source-built Unicorn IRQ-boundary package](unicorn-engine/README.md).
 Original scheduling has bounded no-peer idle-clock and integer compute

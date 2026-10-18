@@ -82,6 +82,28 @@ class ExtentRecovery(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'overlaps'):
             apply_extents(self.blob,self.image,[existing],[record])
 
+    def test_explicit_source_bound_tail_wrapper_replays_without_next_body(self):
+        blob=bytes.fromhex('8b442404ff209090c3')
+        image={'sections':[dict(name='.text',address=0x10000,raw_offset=0,raw_size=len(blob),flags=4)]}
+        next_body=dict(start='0x00010008',end='0x00010009',size=1)
+        record=dict(start=0x10000,original_end=0x10000,end=0x10006,new_entry=True,
+                    terminal='tail-jump',sha256=hashlib.sha256(blob[:6]).hexdigest())
+        result=apply_extents(blob,image,[next_body],[record])
+        self.assertEqual(result[0]['size'],6)
+        self.assertEqual(result[1],next_body)
+        self.assertEqual(apply_extents(blob,image,result,[record]),result)
+        del record['terminal']
+        with self.assertRaisesRegex(ValueError,'through a return'):
+            apply_extents(blob,image,[next_body],[record])
+
+    def test_tail_wrapper_rejects_fallthrough_conditional_and_partial_instruction(self):
+        for blob in [bytes.fromhex('31c090'),bytes.fromhex('31c07400'),bytes.fromhex('31c0ff24')]:
+            image={'sections':[dict(name='.text',address=0x10000,raw_offset=0,raw_size=len(blob),flags=4)]}
+            record=dict(start=0x10000,original_end=0x10000,end=0x10000+len(blob),new_entry=True,
+                        terminal='tail-jump',sha256=hashlib.sha256(blob).hexdigest())
+            with self.assertRaisesRegex(ValueError,'unconditional tail jump'):
+                apply_extents(blob,image,[],[record])
+
     def test_full_regeneration_retires_only_replaced_entry(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory=Path(temporary);old=directory/'recomp_entry_00010006.c'
