@@ -14,15 +14,28 @@ memory, files, scheduling, movies and audio are complete. GPU and graphics remai
 | --- | --- | --- |
 | Input, display, memory, files, scheduling, movies, audio | GPU/graphics G05: connected attract output, genuine exit, neutral reentry and content lifetime; G01-G04 passed | 47 retained IDs / 46 deferred scopes. Existing precision and unreached-profile questions retain their guards and reopening triggers. |
 
-Current execution checkpoint: the bounded 4000-block diagnostic reached original
-opening130, then stopped at751.828s on host CreateFileA sharing violation32.
-Its precreated, closed marker had just been renamed; no language exception was
-reported and the earlier silent exit was not reached. An actual Windows rename
-with a retained DELETE-access handle reproduces rejection in both old clock
-selections. Sharing namespace access fixes both controls in0.015/0.125s while
-content writers, malformed markers and API failures still reject without replay
-mutation. CTest passes2/2 in0.19s. The normal32000-block executable is rebuilt;
-the changed diagnostic cadence supplies no qualification claim. G05 stays open.
+Current execution checkpoint: the normal32000-block429bb45 run passed genuine
+opening Start/release, original cleanup, a visible title and its1440-update idle
+timeout. It stopped2 at2502.063s during attract loading on NV097181C/3E808081,
+an unqualified eye-vector setter. Five completed prefix/loading captures and770
+paired destruction returns are retained; all247 pins are sealed unchanged.
+No host language exception recurred; the old silent exit's cause remains unknown.
+There is no accepted moving gameplay or scored generation2 exit/reentry.
+
+The three-component181C/1820/1824 command family now has maintained raw command
+ownership and a queued old-negative/fixed-positive check:0.422s to reproduce,
+0.453s for the fixed NV2A suite. Ordering, partial producers, adjacent-method,
+physical-readback and unsupported-reflection guards are checked in both batching
+modes. Inactive commands preserve the complete rendered target. The actual G05
+route still needs a fresh check; these fixtures do not close it. Native HLE
+rendering is unchanged. The analogous isolated framebuffer-request sharing fix
+is integrated in d3a1e7c. No original hardware is needed for this reached gap.
+
+Earlier execution checkpoint: the bounded4000-block diagnostic stopped at751.828s
+on opening-marker CreateFileA sharing violation32. The repaired marker reader's
+real Windows rename controls pass both clock selections while excluding content
+writers and malformed markers. The subsequent normal run passed that boundary;
+the changed diagnostic cadence supplies no qualification claim.
 
 Earlier execution checkpoint: the 071e9f8 replacement reached a correct visible
 title after genuine opening Start/release and original cleanup. It then exited

@@ -50,6 +50,76 @@ static void context_initializer_bumps(LoadedContextFixture& f, bool overwrite) {
 static void test_loaded_context_initializers() {
     for (bool batching : {false,true}) {
         LoadedContextFixture f(batching);
+        uint32_t observed=0xaabbccdd;
+        for(unsigned lane=0;lane<4;++lane)
+            CHECK(!f.gpu.debug_context_eye_vector(lane,observed) && observed==0xaabbccdd);
+        f.emit(0,1);
+        // One actual incrementing packet covers all three methods. The first
+        // word is the reached Blinx command; signed zero/NaN are raw receipts.
+        const uint32_t input[]={0x3e808081,0x80000000,0x7fc12345};
+        put32(f.ram,f.put,(3u<<18)|0x181c);
+        for(unsigned lane=0;lane<3;++lane)put32(f.ram,f.put+4+lane*4,input[lane]);
+        f.put+=16;f.emit(0x50,0x1111);f.kick();
+        CHECK(f.failure.empty() && f.read(0x800048)==0x1111);
+        if(!f.failure.empty()) {std::printf("EYE VECTOR GUARD: %s\n",f.failure.c_str());continue;}
+        for(unsigned lane=0;lane<3;++lane)
+            CHECK(f.gpu.debug_context_eye_vector(lane,observed) && observed==input[lane]);
+        f.emit(0x1820,0x3f800000);f.emit(0x50,0x2222);
+        CHECK(f.gpu.debug_context_eye_vector(1,observed) && observed==input[1]);
+        f.kick();CHECK(f.failure.empty() && f.read(0x800048)==0x2222);
+        CHECK(f.gpu.debug_context_eye_vector(0,observed) && observed==input[0]);
+        CHECK(f.gpu.debug_context_eye_vector(1,observed) && observed==0x3f800000);
+        CHECK(f.gpu.debug_context_eye_vector(2,observed) && observed==input[2]);
+        observed=0xaabbccdd;
+        CHECK(!f.gpu.debug_context_eye_vector(3,observed) && observed==0xaabbccdd);
+        // Replacement LOAD stays unqualified and must not erase live state.
+        f.write(0x400720,0);f.write(0x400788,1);
+        CHECK(f.failure.find("replacement context load")!=std::string::npos);
+        CHECK(f.gpu.debug_context_eye_vector(0,observed) && observed==input[0]);
+        CHECK(f.gpu.debug_context_eye_vector(1,observed) && observed==0x3f800000);
+        CHECK(f.gpu.debug_context_eye_vector(2,observed) && observed==input[2]);
+    }
+    for (bool batching : {false,true}) {
+        LoadedContextFixture f(batching);
+        // A component command does not fabricate the other two producers.
+        f.emit(0,1);f.emit(0x1820,0xff800000);f.emit(0x50,0x1111);f.kick();
+        uint32_t observed=0xaabbccdd;
+        CHECK(f.failure.empty() && f.read(0x800048)==0x1111);
+        CHECK(!f.gpu.debug_context_eye_vector(0,observed) && observed==0xaabbccdd);
+        CHECK(f.gpu.debug_context_eye_vector(1,observed) && observed==0xff800000);
+        observed=0xaabbccdd;
+        CHECK(!f.gpu.debug_context_eye_vector(2,observed) && observed==0xaabbccdd);
+        // A raw command receipt does not authorize physical PGRAPH readback.
+        f.read(0x401aac);
+        CHECK(f.failure.find("no qualified context value")!=std::string::npos);
+    }
+    for (bool batching : {false,true}) {
+        LoadedContextFixture f(batching);
+        f.emit(0,1);f.emit(0x181c,0x3e808081);f.emit(0x1824,0);
+        const uint32_t stopped_get=f.put+8;
+        // End of the three-word family must not admit the adjacent method.
+        f.emit(0x1828,0);f.emit(0x50,0x3333);f.kick();
+        CHECK(f.failure.find("method 1828")!=std::string::npos);
+        CHECK(f.read(0x800044)==stopped_get && !f.read(0x800048));
+        CHECK(get32(f.ram,0x1000)==0xa5a5a5a5);
+        uint32_t observed=0;
+        CHECK(f.gpu.debug_context_eye_vector(0,observed) && observed==0x3e808081);
+        f.failure.clear();f.kick();
+        CHECK(!f.failure.empty() && !f.read(0x800048));
+    }
+    for (bool batching : {false,true}) {
+        LoadedDrawFixture f;f.gpu.set_pfifo_run_batching(batching);
+        f.state();f.shader();f.color();
+        f.emit(0x181c,0x3e808081);f.emit(0x1820,0);f.emit(0x1824,0x3f800000);
+        // The stored setter cannot authorize constant-eye reflection draws.
+        f.emit(0x1e70,0x12);f.triangle();f.emit(0x50,0x3333);
+        const auto before=f.ram;f.kick();
+        CHECK(f.failure.find("texture shader side effects")!=std::string::npos);
+        CHECK(f.gpu.generic_combiner_executed_batches()==0 && !f.read(0x800048));
+        CHECK(f.ram==before);
+    }
+    for (bool batching : {false,true}) {
+        LoadedContextFixture f(batching);
         context_initializer_objects(f);
         context_initializer_emit(f,1,0,0xe); // M2MF
         context_initializer_emit(f,2,0,0x10); // blit
@@ -106,6 +176,7 @@ static void test_loaded_context_initializers() {
         put32(f.ram,0x3000,0xff0000ff);put32(f.ram,0x3004,0xff00ff00);
         put32(f.ram,0x3008,0xffff0000);put32(f.ram,0x300c,0xffffffff);
         context_initializer_bumps(f,false);
+        f.emit(0x181c,0x3e808081);f.emit(0x1820,0x80000000);f.emit(0x1824,0x7fc12345);
         f.triangle();f.kick();
         CHECK(f.failure.empty() && f.gpu.generic_combiner_executed_batches()==1);
         CHECK(get32(f.ram,0x1044)==0xffff0000 && f.read(0x800048)==0x1234);
@@ -113,6 +184,7 @@ static void test_loaded_context_initializers() {
         // Reprogram every receipt, including the reached stage2 matrix4.0.
         // Inactive bump state must not affect the entire rendered target.
         context_initializer_bumps(f,true);
+        f.emit(0x181c,0xff800000);f.emit(0x1820,0xffffffff);f.emit(0x1824,0x3f800000);
         f.triangle();f.emit(0x50,0x5678);f.kick();
         CHECK(f.failure.empty() && f.gpu.generic_combiner_executed_batches()==2);
         CHECK(f.read(0x800048)==0x5678);

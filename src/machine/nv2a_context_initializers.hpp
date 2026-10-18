@@ -39,6 +39,9 @@ struct ContextInitializerState {
     Word multisample, context_write_enable;
     Word opaque_raster_09f8, opaque_z_1d84;
     std::array<Word, 4> color_key{};
+    // NV097181C/1820/1824 command bits. Inactive in the admitted texture modes;
+    // not a guessed physical register/context projection or reflection result.
+    std::array<Word, 3> eye_vector{};
     // Stages1..3, in method order: four matrix commands, scale, offset.
     // Raw command receipts, not transformed PGRAPH/context readback. The
     // current draw admission excludes bump texture modes6/7.

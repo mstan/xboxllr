@@ -1,5 +1,7 @@
 // Audited first-context initialization methods, included after the NV097 table.
 // Primary attribution: context-init-method-audit-20261016 private source pins.
+// Eye-vector family: xemu8fc320869718 pgraph/methods.h.inc and pgraph.c;
+// NV097_SET_EYE_VECTOR has three independently addressed DWORD components.
 // No method below triggers a notifier write, M2MF copy, or raster submission.
 // Selectors still change owned state; nothing is accepted as an ignored method.
 ContextInitializerResult Nv2a::context_initializer_method(const PushMethod& push, bool apply) {
@@ -18,6 +20,7 @@ ContextInitializerResult Nv2a::context_initializer_method(const PushMethod& push
     const bool state_dma = cls == 0x97 && m == 0x190;
     const bool null_selector = cls == 0x9f && m >= 0x184 && m <= 0x198 && !(m & 3);
     const bool eye = cls == 0x97 && m >= 0xa50 && m <= 0xa5c && !(m & 3);
+    const bool eye_vector = cls == 0x97 && m >= 0x181c && m <= 0x1824 && !(m & 3);
     const bool fog = cls == 0x97 && m >= 0x9d0 && m <= 0x9dc && !(m & 3);
     const bool color_key = cls == 0x97 && m >= 0xae0 && m <= 0xaec && !(m & 3);
     const bool texture_bump = cls == 0x97 && m >= 0x1b00 && m < 0x1c00 &&
@@ -25,7 +28,7 @@ ContextInitializerResult Nv2a::context_initializer_method(const PushMethod& push
     const bool named = cls == 0x97 && (m == 0x16bc || m == 0x1710 || m == 0x1e68 || m == 0x380 ||
         m == 0x2b4 || m == 0x9f8 || m == 0x147c || m == 0x1d84 || m == 0x1d7c ||
         m == 0x1e98 || m == 0x43c || m == 0x17c4);
-    if (!(notifier || state_dma || null_selector || eye || fog || color_key || texture_bump || named))
+    if (!(notifier || state_dma || null_selector || eye || eye_vector || fog || color_key || texture_bump || named))
         return Result::Unhandled;
     if (push.subchannel >= object_class_.size() || push.channel >= channels_.size())
         return reject("invalid owner index");
@@ -134,6 +137,14 @@ ContextInitializerResult Nv2a::context_initializer_method(const PushMethod& push
     }
     if (color_key) {
         if (apply) context_initializers_.color_key[(m - 0xae0) / 4] = {p, true};
+        return Result::Ready;
+    }
+    if (eye_vector) {
+        // NV097_SET_EYE_VECTOR is three independent raw float commands, not
+        // an INLINE_ARRAY alias. The admitted NONE/PROJECT2D/CUBE_MAP texture
+        // modes do not consume it; constant-eye reflection remains guarded.
+        // Keep every bit without inventing hardware quantization/readback.
+        if (apply) context_initializers_.eye_vector[(m - 0x181c) / 4] = {p, true};
         return Result::Ready;
     }
 

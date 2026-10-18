@@ -19,6 +19,45 @@ the append-only queues. Required routing, startup, ownership, clocks and process
 cannot be deferred when their absence prevents this supported route from working.
 New Game, dashboard, other titles and LLE performance work are outside this phase.
 
+## Normal-cadence run: title timeout passed, eye-vector gap isolated - 2026-10-17
+
+The original429bb45 run used the unchanged32000-block cadence and stopped2 at
+2502.063s on loaded NV097181C/3E808081 during attract loading. All247 input pins
+were sealed unchanged before implementation edits. Five completed FBD1/GPD1
+pictures remain: loading, opening/transition, visible Press START title and
+post-timeout NOW LOADING. None establishes moving gameplay. Genuine generation1
+neutral/Start/release reached original opening cleanup; its prefix census has770
+paired destruction returns and no open/mismatched calls. The title crossed the
+earlier480-update exit region and the full1440-update neutral timeout without
+a reported host language exception. The old silent exit's cause remains unknown;
+nonrecurrence is not a causal diagnosis. There was no scored generation2.
+
+beads-xbox.1.129 owns the reached command family. Pinned
+[xemu definitions](https://github.com/xemu-project/xemu/blob/8fc3208697181253eeb6befe09bda53e4ac3adc9/hw/xbox/nv2a/pgraph/methods.h.inc)
+and its [method handler](https://github.com/xemu-project/xemu/blob/8fc3208697181253eeb6befe09bda53e4ac3adc9/hw/xbox/nv2a/pgraph/pgraph.c)
+identify SET_EYE_VECTOR as three separately addressed DWORD components at
+181C/1820/1824. A real queued three-word packet reproduces the old guard in both
+PFIFO batching modes in0.422s. The maintained initializer now retains every
+command bit and component's production knowledge. It neither aliases INLINE_ARRAY
+nor invents physical readback or reflection results. NONE/PROJECT2D/CUBE_MAP,
+the admitted draw modes, do not consume this state. Constant-eye reflection
+remains guarded; its unreached precision/readback scope is recorded under GFX-D02.
+
+The queued NV2A suite passes0.453s, covering component overwrite/order, partial
+production, negative zero/NaN bits, adjacent-method rejection, rejected LOAD
+atomicity, denied physical readback and denied reflection with no target writes
+or false completion. Changing inactive eye/bump commands preserves the complete
+rendered target in both batching modes. The rebuilt reference-library exception
+control passes0.14s. Private old/fixed executables, sources and hashes are under
+build/blinx/nv097-eye-vector-20261017; no Xbox or full-title run was needed to
+develop these controls. Native HLE rendering is unchanged.
+
+The analogous framebuffer-request publication fix is integrated in d3a1e7c;
+its isolated Win32 old/fixed controls preserve content-writer exclusion. This
+removes an observation race without adding a GPU behavior or closing claim.
+Total remains7/9. Actual moving gameplay, genuine generation2 exit/content
+retirement, visible title return, neutral timeout and moving reentry remain G05.
+
 ## Host replay publication race isolated - 2026-10-17
 
 The instrumented 4da619f diagnostic uses the existing explicit4000-block clock

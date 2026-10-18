@@ -2397,6 +2397,11 @@ public:
     uint32_t debug_raster_state_word(RasterStateWord word) const {
         return word < kRasterStateWords ? raster_state_[word] : 0;
     }
+    // Passive command receipt, deliberately distinct from hardware readback.
+    bool debug_context_eye_vector(unsigned lane,uint32_t& value) const {
+        if(lane>=3 || !context_initializers_.eye_vector[lane].known)return false;
+        value=context_initializers_.eye_vector[lane].value;return true;
+    }
     struct RasterStateSample {
         struct ImmediateQuadTransformVariant {
             uint8_t mode = 0;

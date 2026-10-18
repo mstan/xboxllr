@@ -88,6 +88,22 @@ observation reliability evidence and adds no scene or G05 qualification claim.
 
 ## Remaining integrated check
 
+The normal32000-block429bb45 run passed genuine opening Start/release, original
+cleanup, a correct visible title and its1440-update neutral timeout. It then
+stopped2 at2502.063s during attract loading on unqualified NV097181C/3E808081.
+All247 pins are sealed unchanged; five completed prefix/loading pictures and770
+paired destruction returns remain. No language exception was observed. The old
+silent exit's cause is still unknown; no moving gameplay or scored exit/reentry
+has been accepted.
+
+The full three-component SET_EYE_VECTOR family is now covered by queued real-LOAD
+controls in both batching modes: the old guard reproduces in0.422s, and the fixed
+NV2A suite passes0.453s. Partial production, overwrite/order, unsupported neighbors,
+physical readback, failed replacement LOAD and unsupported reflection are checked
+without startup. Inactive eye/bump updates preserve actual rendered target bytes.
+Private source/binary receipts: build/blinx/nv097-eye-vector-20261017. Reuse these
+fast checks for this boundary; they do not establish the remaining connected G05.
+
 The instrumented4000-block diagnostic stopped earlier, at opening-marker
 publication, on a logged CreateFileA sharing violation32. Its changed cadence
 does not supply G05 acceptance. The missing rename-access sharing contract is

@@ -336,3 +336,21 @@ ordering observation or rendered result distinguishes the representation.
 Required logical depth/stencil, actual1D80 ownership, initialized tags and
 success-only publication are not deferred. This clarifies existing D01/D05
 scope; it adds no question ID or waived closing requirement.
+
+## GFX-D02 addendum: inactive eye-vector state - 2026-10-17
+
+The original normal-cadence run reached NV097181C/3E808081 during attract loading.
+The required three-component SET_EYE_VECTOR setter at181C/1820/1824 is implemented
+as exact raw command receipts with per-component provenance; this reached producer
+is not deferred. Pinned xemu8fc320869718 definitions and handler establish the
+component layout. The existing admitted texture modes NONE/PROJECT2D/CUBE_MAP do
+not consume eye-vector state. Queued controls vary all components, including
+signed zero/NaN encodings, without changing the entire rendered target.
+
+Constant-eye reflection (mode12 hex), exact silicon quantization, physical
+EYEVEC readback and context serialization remain outside this bounded profile.
+Their guards are retained; raw command receipts do not assert those projections.
+Reopen this part of GFX-D02 when a supported draw consumes that vector through
+reflection, an actual register/context consumer reaches it, or output identifies
+a mismatch. Implement that consumer before accepting its route. This extends
+the existing state/shader-profile question; it creates no new ID or G05 waiver.
