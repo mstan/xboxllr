@@ -125,6 +125,7 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_completion_backend.inc"
 #include "graphics_visibility_backend.inc"
 #include "graphics_quad_backend.inc"
+#include "graphics_fan_backend.inc"
 #include "graphics_flat_backend.inc"
 #include "graphics_depth_texture_backend.inc"
 
@@ -205,6 +206,7 @@ void pilot_gfx_close(void)
     pilot_visibility_close();
     pilot_completion_close();
     pilot_quad_close();
+    pilot_fan_close();
     pilot_flat_close();
     pilot_depth_texture_close();
     pilot_logic_copy=pilot_requested_blend=0;
@@ -1027,6 +1029,8 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     D3D11_PRIMITIVE_TOPOLOGY topology;
     if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else if(primitive==6 && count>=3)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+    else if(primitive==7 && count>=3 && count-2<=UINT32_MAX/12 && first<=INT32_MAX)
+        topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else if(primitive==8 && count>=4 && !(count%4) && first<=INT32_MAX && count<=UINT32_MAX/6)
         topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else return E_NOTIMPL;
@@ -1069,7 +1073,9 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
         ID3D11DeviceContext_OMSetBlendState(context,NULL,NULL,saved_mask);
     }
 #endif
-    if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);else ID3D11DeviceContext_Draw(context,count,first);
+    if(primitive==7)pilot_fan_draw(first,count);
+    else if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);
+    else ID3D11DeviceContext_Draw(context,count,first);
 #ifdef PILOT_D3D_PHOBOS
     if(explicit_blend) {
         ID3D11ShaderResourceView *none=NULL;

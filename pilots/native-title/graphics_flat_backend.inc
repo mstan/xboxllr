@@ -1,6 +1,7 @@
 /* Independently implemented color broadcast after the borrowed vertex stage.
  * Original Xbox XDK initialization selects FIRST provoking vertex. Triangles
- * and strips use their leading vertex; NV2A quads use their fourth vertex.
+ * and strips use their leading vertex; fans use the leading rim vertex,
+ * supplied first by the index adapter. NV2A quads use their fourth vertex.
  * Texture coordinates, fog, depth and perspective W retain interpolation.
  * Cached shaders run only for flat draws; no CPU vertex expansion/readback. */
 #include <d3dcompiler.h>
@@ -27,7 +28,7 @@ static HRESULT pilot_flat_prepare(unsigned primitive)
     if(d3d8_GetRenderStates()[D3DRS_SHADEMODE]!=1) {
         ID3D11DeviceContext_GSSetShader(context,NULL,NULL,0);return S_OK;
     }
-    if(primitive!=5 && primitive!=6 && primitive!=8)return E_NOTIMPL;
+    if(primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8)return E_NOTIMPL;
     unsigned index=primitive==8;
     if(!pilot_flat_shaders[index]) {
         ID3DBlob *code=NULL,*errors=NULL;

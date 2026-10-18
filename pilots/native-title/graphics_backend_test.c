@@ -20,6 +20,7 @@
 #include "graphics_resultarg_backend_test.inc"
 #include "graphics_g8b8_backend_test.inc"
 #include "graphics_pixel_bump_backend_test.inc"
+#include "graphics_fan_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -129,6 +130,9 @@ int main(int argc,char **argv)
         CHECK(pilot_gfx_create(pp)>=0);
         if(argc==2 && !strcmp(argv[1],"--g8b8")) {
             CHECK(!test_g8b8_texture());pilot_gfx_close();continue;
+        }
+        if(argc==2 && !strcmp(argv[1],"--fan")) {
+            CHECK(!test_native_fan());pilot_gfx_close();continue;
         }
         if(argc==2 && !strcmp(argv[1],"--resultarg")) {
             CHECK(!test_fixed_resultarg());pilot_gfx_close();continue;

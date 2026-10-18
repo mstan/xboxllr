@@ -64,7 +64,7 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     if(profile)++graphics_service_profile.draw_calls;
     unsigned primitive=args[0],first=args[1],count=args[2];
     if(!count || (uint64_t)first+count>UINT32_MAX)stop("invalid draw range",count);
-    if((primitive!=5 && primitive!=6 && primitive!=8) || count<3 ||
+    if((primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || count<3 ||
         (primitive==5 && count%3) || (primitive==8 && count%4))stop("unqualified primitive/count",primitive);
     if(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER) &&
         pilot_gfx_pixel_program((const uint32_t*)(memory+PILOT_D3D_RENDER_STATES),
