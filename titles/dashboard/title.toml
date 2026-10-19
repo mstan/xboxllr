@@ -13,7 +13,7 @@ drive = "C:"
 
 [generation]
 profile = "../../pilots/native-title/profiles/dashboard-5960.json"
-bindings = ["cache", "cpu", "input", "audio", "d3d"]
+bindings = ["cache", "cpu", "input", "audio", "d3d", "startup"]
 unit_max_functions = 64
 unit_max_bytes = 524288
 
@@ -22,6 +22,7 @@ PILOT_NATIVE_OPTIMIZATION = "OPTIMIZED"
 PILOT_MEDIA = "HOST"
 PILOT_CACHE = "NATIVE"
 PILOT_CPU_PROBE = "NATIVE"
+PILOT_STARTUP = "NATIVE"
 PILOT_RENDERER = "D3D11"
 PILOT_D3D_DONOR = "PHOBOS"
 PILOT_AUDIO = "NATIVE"

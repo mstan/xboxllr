@@ -264,3 +264,41 @@ or ordering outside the supported serialized FE/VP prefix.
 Reopen if hardware contradicts retained storage or a supported consumer needs
 such behavior. Replay the positive/negative fence tests and original caller;
 never treat a successful control read as evidence that pending work completed.
+
+## LLE-D08 - general segmentation beyond admitted native startup components
+
+The native dashboard reaches an XDK startup compatibility component that adjusts
+selector 8's code limit and saves the previous descriptor. Its original body also
+contains legacy kernel patch branches. A shared native component is required
+work in `beads-xbox.1.137`; an unmapped kernel-header read is not an acceptable
+completed implementation. The adapter owns a modeled descriptor and admits only
+reviewed bodies, callers and native-kernel conditions. Original teardown's IDE
+quiescence remains separate guarded work.
+
+Deferred: arbitrary SGDT/GDT inspection, descriptor types/selectors outside that
+component, exact segmentation #GP behavior, far control transfers and dead-stack
+scratch-byte equivalence. Unknown operations retain their existing guards. This
+does not qualify a general protected-mode CPU implementation or waive an actual
+caller-visible setup/restore effect. Reopen when a supported title reaches such
+an operation or observes a code-range/fault mismatch; extend the CPU ownership
+interface and replay the retained original component and ABI cases.
+
+## LLE-D09 - canonical native kernel version and original reference identity
+
+The native service backend has historically advertised build 5838. The qualified
+flat kernel (`827c39fd...97b3c`) and separate live RAM observation
+(`eacc9552...a7b1`) both report 1.0.4983.6. The live observation establishes a
+base-zero selector-8 descriptor with a 3 GiB limit; both sources identify the
+same original INIT boundary. These are 4983 observations, not 5838 silicon facts.
+The selected native compatibility model is explicitly distinct from executing
+or mapping an original kernel image. Both versions skip the reached component's
+legacy patch branches.
+
+Deferred: choosing a broader canonical kernel/version profile and obtaining
+additional original version-specific metadata where it is actually consumed.
+Keep the existing native version behavior stable for this scoped startup change;
+do not transplant observed values under a false source label. Reopen when a
+supported caller distinguishes the advertised build, another kernel profile is
+admitted, or cross-backend comparison requires matching that identity. Changing
+the policy belongs at the shared kernel-profile boundary and requires affected
+title checks; a version string alone does not establish netplay compatibility.

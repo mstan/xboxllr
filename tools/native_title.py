@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -22,6 +23,9 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "xboxllr.native-title.v1"
+BINDINGS = {name: "native_" + name + "_binding" for name in
+            ("media", "cache", "cpu", "jump", "d3d", "input", "audio", "startup")}
+INCOMPLETE_BIND = "native-title-bind-incomplete.json"
 DEPENDENCIES = {
     "PILOT_D3D_SOURCE": "d3d_source", "PILOT_DSP_SOURCE": "dsp_source",
     "PILOT_DSP_LIBRARY": "dsp_library", "PILOT_ADPCM_SOURCE": "adpcm_source",
@@ -139,7 +143,7 @@ def prepare_command(source, data, paths, output):
         if generation.get(key):
             command += ["--" + key.replace("_", "-"), str(generation[key])]
     for family in generation.get("bindings", []):
-        if family not in {"media", "cache", "cpu", "jump", "d3d", "input", "audio"}:
+        if family not in BINDINGS:
             raise ValueError("unknown native binding family")
         command += [f"--{family}-symbols", str(paths["xdk_symbols"])]
     for seed in generation.get("seeds", []):
@@ -187,10 +191,44 @@ def identity(source, data, output):
 
 
 def preparation_identity(source, data, output):
+    return _preparation_identity(source, data, output)
+
+
+def selected_bindings(data):
+    families = data.get("generation", {}).get("bindings", [])
+    if not isinstance(families, list) or any(not isinstance(f, str) or f not in BINDINGS for f in families) or len(set(families)) != len(families):
+        raise ValueError("declare unique reviewed binding families")
+    return families
+
+
+def admitted_bindings(manifest):
+    families = set()
+    for key, family in [(family + "_binding", family) for family in BINDINGS] + [("jump_abi", "jump")]:
+        if key in manifest:
+            if not isinstance(manifest[key], dict) or not manifest[key]:
+                raise ValueError("invalid native binding admission: " + key)
+            families.add(family)
+    return sorted(families)
+
+
+def generation_proof(manifest):
+    """Fingerprint code/proof metadata, excluding configurable title policy."""
+    proof = {key: value for key, value in manifest.items() if key not in ("files", "title_runtime")}
+    proof["files"] = {key: value for key, value in manifest["files"].items() if key != "pilot_title_runtime.h"}
+    return hashlib.sha256(json.dumps(proof, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _preparation_identity(source, data, output, *, completing_bind=False):
+    if not completing_bind and (Path(output) / INCOMPLETE_BIND).exists():
+        raise ValueError("native binding refresh is incomplete; successfully bind every selected family before configuring or running")
     manifest = check_generated(output, data["title"])
+    families = sorted(selected_bindings(data))
+    if families != admitted_bindings(manifest):
+        raise ValueError("selected native binding families differ from actual generation admissions")
     profile = data.get("generation", {}).get("profile")
     return {"xbe_sha256": data["title"]["xbe_sha256"],
             "profile_sha256": profile_identity(source, profile),
+            "bindings": families, "generation_proof_sha256": generation_proof(manifest),
             "files": {key: value for key, value in manifest["files"].items() if key != "pilot_title_runtime.h"}}
 
 
@@ -243,6 +281,56 @@ def partition_prepared(source, data, output):
         old_manifest.write_text(json.dumps(manifest, indent=2) + "\n")
         preparation.write_text(json.dumps(preparation_identity(source, data, output), indent=2) + "\n")
     return transform
+
+
+def bind_prepared(source, data, paths, output):
+    """Revalidate every selected service proof without retranslating the CPU."""
+    output = Path(output)
+    manifest = check_generated(output, data["title"])
+    preparation = output / "native-title-preparation.json"
+    prior = json.loads(preparation.read_text())
+    current_files = {key: value for key, value in manifest["files"].items()
+                     if key != "pilot_title_runtime.h"}
+    if prior.get("xbe_sha256") != data["title"]["xbe_sha256"] or prior.get("files") != current_files:
+        raise ValueError("changed preparation cannot receive incremental bindings")
+    families = selected_bindings(data)
+    if not families:
+        raise ValueError("declare unique reviewed binding families")
+    retained = set(admitted_bindings(manifest))
+    # Current receipts also protect admission metadata. Legacy receipts can be
+    # upgraded only here, after the same image/files check and complete rebinding.
+    if ("bindings" in prior or "generation_proof_sha256" in prior) and (
+            prior.get("bindings") != sorted(retained) or prior.get("generation_proof_sha256") != generation_proof(manifest)):
+        raise ValueError("changed generation proof cannot receive incremental bindings")
+    if not retained.issubset(families):
+        raise ValueError("incremental binding must revalidate all previously admitted families")
+    profile = data.get("generation", {}).get("profile")
+    profile = (Path(source).parent / profile).resolve() if profile else None
+    from native_binding import has_profile_binding
+    display = "d3d" in families and has_profile_binding(data["title"]["xbe_sha256"], "display", profile)
+    if "display_binding" in manifest and not display:
+        raise ValueError("incremental binding cannot remove the original display proof")
+    history = output / "binding-history" / str(time.time_ns())
+    history.mkdir(parents=True)
+    for path in (output / "generation.aot-private.json", preparation):
+        shutil.copy2(path, history / path.name)
+    # Each binder independently checks original XBE bodies/layouts and existing
+    # generated wrappers. Even a rejection before the first artifact changes
+    # leaves a persisted failure marker, so configuration cannot bless a failed
+    # attempt. Retrying unchanged inputs is allowed; partial artifact changes
+    # still have to satisfy the original preparation inventory above.
+    incomplete = output / INCOMPLETE_BIND
+    incomplete.write_text(json.dumps({"bindings": families, "history": str(history)}, indent=2) + "\n")
+    for family in families:
+        importlib.import_module(BINDINGS[family]).bind(paths["xbe"], output, paths["xdk_symbols"], profile=profile)
+    if display:
+        importlib.import_module("native_display_binding").bind(paths["xbe"], output, paths["xdk_symbols"], profile=profile)
+    write_runtime_profile(output, data)
+    result = _preparation_identity(source, data, output, completing_bind=True)
+    preparation.write_text(json.dumps(result, indent=2) + "\n")
+    incomplete.unlink()
+    return {"bindings": families, "original_display": display,
+            "generation_sha256": digest(output / "generation.aot-private.json"), "history": str(history)}
 
 
 def require_receipt(path, expected):
@@ -315,11 +403,12 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
             child.wait()
         receipt.update(exit_code=child.returncode, stopped_at_deadline=deadline)
         (run / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        return receipt
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("check", "prepare", "partition", "configure", "build", "run"))
+    parser.add_argument("action", choices=("check", "prepare", "bind", "partition", "configure", "build", "run"))
     parser.add_argument("--title", type=Path, required=True)
     parser.add_argument("--paths", type=Path, required=True)
     parser.add_argument("--generated", type=Path, required=True)
@@ -336,12 +425,15 @@ def main():
     source, data = definition(args.title)
     paths = private_paths(args.paths)
     check_image(data["title"], paths)
-    if args.action in ("prepare", "partition", "configure", "build"):
+    if args.action in ("prepare", "bind", "partition", "configure", "build"):
         reject_staging_mutation(args.generated, args.build_dir)
     if args.action == "prepare":
         subprocess.run(prepare_command(source, data, paths, args.generated), check=True)
         write_runtime_profile(args.generated, data)
-        (args.generated / "native-title-preparation.json").write_text(json.dumps(preparation_identity(source, data, args.generated), indent=2) + "\n")
+        (args.generated / "native-title-preparation.json").write_text(json.dumps(_preparation_identity(source, data, args.generated, completing_bind=True), indent=2) + "\n")
+        (args.generated / INCOMPLETE_BIND).unlink(missing_ok=True)
+    elif args.action == "bind":
+        print(json.dumps(bind_prepared(source, data, paths, args.generated), indent=2))
     elif args.action == "partition":
         print(json.dumps(partition_prepared(source, data, args.generated), indent=2))
     elif args.action == "configure":
@@ -357,11 +449,13 @@ def main():
         selected["executable_sha256"] = digest(executable(args.build_dir, data["title"]["executable"]))
         (args.build_dir / "native-title-build.json").write_text(json.dumps(selected, indent=2) + "\n")
     elif args.action == "run":
-        launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source)
+        result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source)
+        if result is not None and not result["stopped_at_deadline"]:
+            return result["exit_code"]
     else:
         identity(source, data, args.generated)
         print("Native title identity and generated artifacts verified.")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

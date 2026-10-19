@@ -43,7 +43,8 @@ XLLE_PILOT_TRACE = "0"
         artifact = self.output / 'gen/recomp.c'
         artifact.write_text('/* authored fixture */')
         self.manifest = self.output / 'generation.aot-private.json'
-        self.manifest.write_text(json.dumps(dict(sha256=n.digest(self.xbe), files={artifact.name: n.digest(artifact)})))
+        self.manifest.write_text(json.dumps(dict(sha256=n.digest(self.xbe),
+            files={artifact.name: n.digest(artifact)}, cpu_binding={'authored': 'admitted CPU proof'})))
         self.build = self.root / 'build'
         binary = n.executable(self.build, 'Authored')
         binary.parent.mkdir(parents=True)
@@ -60,6 +61,27 @@ XLLE_PILOT_TRACE = "0"
         value = n.identity(self.source, self.data, self.output)
         value['executable_sha256'] = n.digest(self.binary)
         (self.build / 'native-title-build.json').write_text(json.dumps(value))
+
+    def select_families(self, families):
+        old = self.data['generation']['bindings']
+        self.source.write_text(self.source.read_text().replace(
+            'bindings = ' + json.dumps(old), 'bindings = ' + json.dumps(families)))
+        _, self.data = n.definition(self.source)
+
+    def assert_not_configurable_or_launchable(self):
+        pathsfile = self.root / 'paths.json'
+        pathsfile.write_text(json.dumps({key: str(value) for key, value in self.paths.items()}))
+        arguments = ['native_title.py', '--title', str(self.source), '--paths', str(pathsfile),
+                     '--generated', str(self.output), '--build-dir', str(self.build)]
+        with patch.object(n.subprocess, 'run') as runner, patch.object(n.subprocess, 'Popen') as spawn:
+            for action in ('configure', 'build'):
+                with self.subTest(action=action), patch.object(sys, 'argv', [arguments[0], action, *arguments[1:]]):
+                    with self.assertRaises(ValueError):
+                        n.main()
+            with self.assertRaises(ValueError):
+                n.launch(self.data, self.paths, self.output, self.build, detach=True, source=self.source)
+            runner.assert_not_called()
+            spawn.assert_not_called()
 
     def test_owned_identity_and_profile_rejected(self):
         self.xbe.write_bytes(b'tampered')
@@ -141,6 +163,186 @@ XLLE_PILOT_TRACE = "0"
             with self.assertRaises(ValueError):
                 n.partition_prepared(self.source, self.data, self.output)
             transform.assert_not_called()
+
+    def test_run_command_propagates_an_early_child_failure(self):
+        pathsfile = self.root / 'paths.json'
+        pathsfile.write_text(json.dumps({key: str(value) for key, value in self.paths.items()}))
+        child = Mock(pid=123, returncode=2)
+        arguments = ['native_title.py', 'run', '--title', str(self.source),
+                     '--paths', str(pathsfile), '--generated', str(self.output),
+                     '--build-dir', str(self.build), '--automated', '--seconds', '15']
+        with patch.object(sys, 'argv', arguments), patch.object(n.subprocess, 'Popen', return_value=child):
+            self.assertEqual(n.main(), 2)
+
+    def test_incremental_bind_revalidates_old_admission_and_refreshes_proof(self):
+        manifest = json.loads(self.manifest.read_text())
+        manifest['cpu_binding'] = {'authored': 'previous proof'}
+        self.manifest.write_text(json.dumps(manifest))
+        self.receipt()
+        old = self.manifest.read_bytes()
+        self.profile.write_text(self.profile.read_text() + ' ')
+        self.paths['xdk_symbols'] = self.root / 'symbols.json'
+        def checked_binding(xbe, output, symbols, *, profile):
+            self.assertEqual((xbe, output, symbols, profile),
+                (self.xbe, self.output, self.paths['xdk_symbols'], self.profile))
+            value = n.check_generated(output, self.data['title'])
+            header = output / 'gen/cpu-proof.h'
+            header.write_bytes(b'/* authored newly checked proof */')
+            value['files'][header.name] = n.digest(header)
+            value['cpu_binding'] = {'authored': 'newly checked proof'}
+            self.manifest.write_text(json.dumps(value))
+        module = Mock(bind=Mock(side_effect=checked_binding))
+        with patch.object(n.importlib, 'import_module', return_value=module) as importer:
+            result = n.bind_prepared(self.source, self.data, self.paths, self.output)
+            importer.assert_called_once_with('native_cpu_binding')
+            module.bind.assert_called_once()
+        self.assertEqual((Path(result['history']) / self.manifest.name).read_bytes(), old)
+        n.identity(self.source, self.data, self.output)
+        with self.assertRaises(ValueError):
+            n.launch(self.data, self.paths, self.output, self.build, source=self.source)
+
+    def test_incremental_bind_cannot_leave_an_old_family_unvalidated(self):
+        manifest = json.loads(self.manifest.read_text())
+        manifest['audio_binding'] = {'authored': 'existing audio ownership'}
+        self.manifest.write_text(json.dumps(manifest))
+        self.select_families(['cpu', 'audio'])
+        self.receipt()
+        self.select_families(['cpu'])
+        with patch.object(n.importlib, 'import_module') as importer:
+            with self.assertRaises(ValueError):
+                n.bind_prepared(self.source, self.data, self.paths, self.output)
+            importer.assert_not_called()
+
+    def test_unadmitted_selected_family_cannot_be_blessed_by_configure(self):
+        self.select_families(['cpu', 'startup'])
+        with self.assertRaisesRegex(ValueError, 'actual generation admissions'):
+            n.identity(self.source, self.data, self.output)
+        self.assert_not_configurable_or_launchable()
+
+    def test_failed_bind_before_mutation_blocks_configuration_and_retry_can_finish(self):
+        self.paths['xdk_symbols'] = self.root / 'symbols.json'
+        prior_files = json.loads(self.manifest.read_text())['files']
+        module = Mock(bind=Mock(side_effect=ValueError('original proof rejected')))
+        with patch.object(n.importlib, 'import_module', return_value=module), self.assertRaisesRegex(ValueError, 'original proof rejected'):
+            n.bind_prepared(self.source, self.data, self.paths, self.output)
+        self.assertEqual(json.loads(self.manifest.read_text())['files'], prior_files)
+        self.assertTrue((self.output / n.INCOMPLETE_BIND).exists())
+        with self.assertRaisesRegex(ValueError, 'refresh is incomplete'):
+            n.identity(self.source, self.data, self.output)
+        self.assert_not_configurable_or_launchable()
+        with patch.object(n.importlib, 'import_module', return_value=Mock(bind=Mock(return_value={}))):
+            n.bind_prepared(self.source, self.data, self.paths, self.output)
+        self.assertFalse((self.output / n.INCOMPLETE_BIND).exists())
+        n.identity(self.source, self.data, self.output)
+
+    def test_failed_new_family_after_first_binder_mutation_cannot_bless_binary(self):
+        self.select_families(['cpu', 'startup'])
+        self.paths['xdk_symbols'] = self.root / 'symbols.json'
+        original_binary = self.binary.read_bytes()
+        def first_binding(*args, **kwargs):
+            manifest = n.check_generated(self.output, self.data['title'])
+            header = self.output / 'gen/cpu-proof.h'
+            header.write_text('/* newly verified CPU header */')
+            manifest['files'][header.name] = n.digest(header)
+            manifest['cpu_binding'] = {'authored': 'refreshed CPU proof'}
+            self.manifest.write_text(json.dumps(manifest))
+        modules = {'native_cpu_binding': Mock(bind=Mock(side_effect=first_binding)),
+                   'native_startup_binding': Mock(bind=Mock(side_effect=ValueError('startup proof rejected')))}
+        with patch.object(n.importlib, 'import_module', side_effect=modules.__getitem__), patch.object(n.subprocess, 'run') as runner:
+            with self.assertRaisesRegex(ValueError, 'startup proof rejected'):
+                n.bind_prepared(self.source, self.data, self.paths, self.output)
+            runner.assert_not_called()  # Incremental binding never retranslates the CPU.
+        self.assertTrue((self.output / 'gen/cpu-proof.h').exists())
+        self.assertNotIn('startup_binding', json.loads(self.manifest.read_text()))
+        self.assert_not_configurable_or_launchable()
+        self.assertEqual(self.binary.read_bytes(), original_binary)
+
+    def test_successful_incremental_bind_must_actually_admit_the_new_family(self):
+        self.select_families(['cpu', 'startup'])
+        self.paths['xdk_symbols'] = self.root / 'symbols.json'
+        with patch.object(n.importlib, 'import_module', return_value=Mock(bind=Mock(return_value={}))):
+            with self.assertRaisesRegex(ValueError, 'actual generation admissions'):
+                n.bind_prepared(self.source, self.data, self.paths, self.output)
+        self.assert_not_configurable_or_launchable()
+
+    def test_bind_safely_upgrades_legacy_preparation(self):
+        path = self.output / 'native-title-preparation.json'
+        prior = json.loads(path.read_text())
+        prior.pop('bindings')
+        prior.pop('generation_proof_sha256')
+        path.write_text(json.dumps(prior))
+        self.paths['xdk_symbols'] = self.root / 'symbols.json'
+        with self.assertRaises(ValueError):
+            n.identity(self.source, self.data, self.output)
+        with patch.object(n.importlib, 'import_module', return_value=Mock(bind=Mock(return_value={}))):
+            n.bind_prepared(self.source, self.data, self.paths, self.output)
+        current = json.loads(path.read_text())
+        self.assertEqual(current['bindings'], ['cpu'])
+        self.assertIn('generation_proof_sha256', current)
+        n.identity(self.source, self.data, self.output)
+
+    def test_admission_metadata_tamper_cannot_erase_retained_family(self):
+        original = json.loads(self.manifest.read_text())
+        for change in ('erase', 'replace'):
+            manifest = dict(original)
+            if change == 'erase':
+                del manifest['cpu_binding']
+            else:
+                manifest['cpu_binding'] = {'authored': 'changed admission'}
+            self.manifest.write_text(json.dumps(manifest))
+            with self.subTest(change=change), patch.object(n.importlib, 'import_module') as importer:
+                with self.assertRaisesRegex(ValueError, 'changed generation proof'):
+                    n.bind_prepared(self.source, self.data, self.paths, self.output)
+                importer.assert_not_called()
+
+    def test_legacy_jump_abi_admission_is_retained(self):
+        manifest = json.loads(self.manifest.read_text())
+        manifest['jump_abi'] = {'authored': 'legacy jump admission'}
+        self.manifest.write_text(json.dumps(manifest))
+        self.select_families(['cpu', 'jump'])
+        self.receipt()
+        self.select_families(['cpu'])
+        with patch.object(n.importlib, 'import_module') as importer, self.assertRaisesRegex(ValueError, 'all previously admitted'):
+            n.bind_prepared(self.source, self.data, self.paths, self.output)
+        importer.assert_not_called()
+
+    def test_empty_or_null_admission_is_not_a_checked_binding(self):
+        original = json.loads(self.manifest.read_text())
+        for key, value in [('cpu_binding', None), ('cpu_binding', {}), ('jump_abi', None), ('jump_abi', {})]:
+            manifest = dict(original)
+            manifest[key] = value
+            self.manifest.write_text(json.dumps(manifest))
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, 'invalid native binding admission'):
+                n.preparation_identity(self.source, self.data, self.output)
+
+    def explicit_prepare(self):
+        self.paths.update(cpu_donor=self.root, xdk_symbols=self.root / 'symbols.json')
+        pathsfile = self.root / 'paths.json'
+        pathsfile.write_text(json.dumps({key: str(value) for key, value in self.paths.items()}))
+        arguments = ['native_title.py', 'prepare', '--title', str(self.source), '--paths', str(pathsfile),
+                     '--generated', str(self.output), '--build-dir', str(self.build)]
+        with patch.object(sys, 'argv', arguments), patch.object(n.subprocess, 'run') as runner:
+            n.main()
+            runner.assert_called_once()
+
+    def test_explicit_prepare_recovers_only_after_complete_family_admission(self):
+        marker = self.output / n.INCOMPLETE_BIND
+        marker.write_text('authored failed binding attempt')
+        self.explicit_prepare()  # Mocked generator returns a fully admitted authored tree.
+        self.assertFalse(marker.exists())
+        n.identity(self.source, self.data, self.output)
+
+    def test_explicit_prepare_cannot_clear_failure_for_missing_admission(self):
+        marker = self.output / n.INCOMPLETE_BIND
+        marker.write_text('authored failed binding attempt')
+        self.select_families(['cpu', 'startup'])
+        preparation = self.output / 'native-title-preparation.json'
+        old_receipt = preparation.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'actual generation admissions'):
+            self.explicit_prepare()
+        self.assertTrue(marker.exists())
+        self.assertEqual(preparation.read_bytes(), old_receipt)
+        self.assert_not_configurable_or_launchable()
 
     def test_deadline_policy_rejects_invalid_and_unowned_runs(self):
         cases = [dict(seconds=1), dict(automated=True), dict(automated=True, seconds=1, detach=True)]

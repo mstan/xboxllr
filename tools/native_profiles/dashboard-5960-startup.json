@@ -1,0 +1,74 @@
+{
+  "adapter": "native-xapi-kernel-startup-v1",
+  "native_contract": {
+    "kernel_build": 5838,
+    "hardware_flags": 0,
+    "export_only": true,
+    "io_device": "OFF",
+    "usb": "OFF",
+    "scheduling": "NATIVE"
+  },
+  "functions": {
+    "apply": {
+      "sha256": "703a6056827b9fd8a91ba9d042314b0506776b46b234c9aa0b6cea191840584e",
+      "bytes": 197,
+      "stack_bytes": 0
+    },
+    "setup": {
+      "sha256": "54433965d39a2bbbfee7f270c4e42b8f760585ac858acf41665185a6f63f4266",
+      "bytes": 100,
+      "stack_bytes": 0
+    },
+    "exchange": {
+      "sha256": "675b2f93cb3bea6575b899fe73b7774c25ecd87460254fc49fa8807b7b2e71af",
+      "bytes": 37,
+      "stack_bytes": 8
+    },
+    "teardown_consumer": {
+      "sha256": "1e32197e7aad066e19d99802dfebc669fdaf08320b585089b9cd899cb5751291",
+      "bytes": 86,
+      "stack_bytes": 4
+    },
+    "startup_caller": {
+      "sha256": "028d2b67d0323fbeff29314fb5e9340b4fb6de283136928b242214df842a14cc",
+      "bytes": 116
+    },
+    "next_initializer": {
+      "sha256": "94a963a37a10e5b37ab4b5b96d3b4362f686b49a5c5b7f4491f12c34d18501cb",
+      "bytes": 367
+    }
+  },
+  "layout": {
+    "saved_low": 1610800,
+    "saved_high": 1610804,
+    "hardware_import": 73756,
+    "version_import": 73808,
+    "apply_return": 455944,
+    "setup_exchange_return": 469337,
+    "restore_exchange_return": 469695
+  },
+  "kernel_observation": {
+    "kind": "owned-physical-ram",
+    "sha256": "eacc9552abe48622644d450aaf48b1822d598659968358e5de559a53dec4a7b1",
+    "kernel_base": 2147549184,
+    "kernel_build": 4983,
+    "gdt_base": 2147810520,
+    "code_selector": 8,
+    "initial_descriptor": "0x00cb9b000000ffff",
+    "last_section": "INIT",
+    "init_start": 2147816736,
+    "pcr_base": 2147736124,
+    "prcb_base": 2147736164,
+    "prcb_offset_250": 0,
+    "prcb_field_name": "unqualified; debug-monitor interface inferred from original consumers",
+    "model_policy": "Observed4983 descriptor and INIT boundary selected for native export-only5838; no5838 silicon layout claim"
+  },
+  "kernel_metadata": {
+    "kind": "owned-flat-kernel",
+    "sha256": "827c39fd9dea2e831c7ef9091a2a4a4b13ac6ae9f69a2075c4b12e1b9ae97b3c",
+    "kernel_base": 2147549184,
+    "kernel_build": 4983,
+    "last_section": "INIT",
+    "init_start": 2147816736
+  }
+}

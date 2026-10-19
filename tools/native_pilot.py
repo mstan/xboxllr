@@ -129,7 +129,7 @@ def prepare(args):
     (out / "gen" / "pilot_d3d_bindings.h").unlink(missing_ok=True)
     (out / "gen" / "pilot_jump_bindings.h").unlink(missing_ok=True)
     (out / "gen" / "pilot_cpu_binding.c").unlink(missing_ok=True)
-    for family in ('input', 'audio'):
+    for family in ('input', 'audio', 'startup'):
         (out / 'gen' / f'pilot_{family}_binding.c').unlink(missing_ok=True)
         (out / 'gen' / f'pilot_{family}_bindings.h').unlink(missing_ok=True)
     (out / 'gen' / 'pilot_poll_wait_units.json').unlink(missing_ok=True)
@@ -230,6 +230,9 @@ def prepare(args):
     if args.audio_symbols:
         from native_audio_binding import bind
         bind(args.xbe, out, args.audio_symbols, profile=profile)
+    if getattr(args, 'startup_symbols', None):
+        from native_startup_binding import bind
+        bind(args.xbe, out, args.startup_symbols, profile=profile)
     if getattr(args, 'poll_waits', None):
         from native_poll_waits import apply as bind_poll_waits
         path = out / 'generation.aot-private.json'
@@ -267,4 +270,5 @@ if __name__ == "__main__":
     parser.add_argument("--cpu-symbols", type=Path, help="Bind the reviewed CPU capability probe")
     parser.add_argument("--input-symbols", type=Path, help="Bind the reviewed whole XAPI input family")
     parser.add_argument("--audio-symbols", type=Path, help="Bind the reviewed whole DirectSound API")
+    parser.add_argument("--startup-symbols", type=Path, help="Bind reviewed native kernel startup compatibility")
     prepare(parser.parse_args())

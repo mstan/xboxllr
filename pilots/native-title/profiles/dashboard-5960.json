@@ -211,6 +211,9 @@
     },
     "d3d": {
       "include": "../../../tools/native_profiles/dashboard-5960-d3d.json"
+    },
+    "startup": {
+      "include": "../../../tools/native_profiles/dashboard-5960-startup.json"
     }
   }
 }

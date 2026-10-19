@@ -14,6 +14,10 @@
 #include "recomp_types.h"
 #include "pilot_image.h"
 #include "title_profile.h"
+#include "kernel_profile.h"
+#ifdef PILOT_STARTUP_NATIVE
+#include "pilot_startup_bindings.h"
+#endif
 #include "guest_cpu_config.h"
 #ifdef PILOT_AUDIO_DEVICE_LLE
 #include "audio_device_lle.h"
@@ -48,6 +52,7 @@ static int trace_original_usb;
 static unsigned trace_original_usb_count;
 #endif
 static int pilot_verbose=1;
+static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 static unsigned char *memory, *image_bytes;
 static size_t image_size;
 static uint32_t image_base, header_bytes, section_table, section_count;
@@ -151,10 +156,12 @@ static const char *graphics_original_clock_bind(void);
 static void graphics_original_callback_dpc(void);
 #endif
 #endif
-static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 #endif
 #include "thread_scheduler.inc"
 #include "kernel_rwlock.inc"
+#ifdef PILOT_STARTUP_NATIVE
+#include "startup.inc"
+#endif
 #ifdef PILOT_DISPLAY_LLE
 static void display_lle_tick(void);
 static const char *display_lle_access(uint32_t address,unsigned size,int write,uint32_t *value);
@@ -1132,7 +1139,7 @@ static void load_image(const char *path)
                 MEM8(data+4)=0xa1; MEM8(data+5)=0xb1;
             } else {
                 MEM16(data)=1; MEM16(data+2)=0;
-                MEM16(data+4)=5838; MEM16(data+6)=1;
+                MEM16(data+4)=PILOT_NATIVE_KERNEL_BUILD; MEM16(data+6)=1;
             }
             MEM32(pilot_imports[i].address)=data;
         }
