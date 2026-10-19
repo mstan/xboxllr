@@ -98,6 +98,23 @@ The frozen `16eb3bd` executable and verified private008 image are now launched
 as an owner preview, with the functional receipt bound to that binary's hash.
 It is not a public release or a physical-console installation.
 
+The owner subsequently reported that this preview appeared frozen and closed
+it. This handoff **failed usability**. The final log records only the host
+window-close stop, with no device fault: 97,363,933,290 retired instructions
+over 16,242.9015 seconds, 7,965 presentations, 7,966 vblanks and zero presentation
+failures. Mean presentation rate is0.49fps and guest speed0.008; the final100
+intervals deliver100 frames in284.0923 seconds (0.352fps). Thirty-three
+intervals exceed5 seconds, with the longest36.977 seconds for one frame.
+Framebuffer hashes are absent, so these counters do not prove changing pixels.
+The cumulative input poll rate is8.2Hz. Final-interval capture/upload/swap
+times are about1.072/0.251/0.064ms, far below its2.908-second frame interval.
+This supports severe guest-execution slowdown, without isolating its main
+CPU/device/render cost. No exclusive stage timing was enabled in this run;
+retired native/fallback/idle proportions alone cannot identify host cost.
+Do not reuse this unchanged build as an owner-ready performance handoff.
+The earlier Credits checks remain scoped functional evidence; performance
+and normal interactive acceptance stay open under `beads-xbox.1.17`.
+
 This full-machine route has partial CPU AOT with interpreter fallback and an
 OpenGL HLE GPU. It does not yet use Blinx's complete native title CPU/service
 route or its D3D11 backend. Boot-animation speed is not menu performance.
