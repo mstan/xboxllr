@@ -53,6 +53,9 @@ static unsigned trace_original_usb_count;
 #endif
 static int pilot_verbose=1;
 static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
+#ifdef PILOT_KERNEL_CLOCK_NATIVE
+static uint64_t kernel_clock_tsc_counter(void);
+#endif
 static unsigned char *memory, *image_bytes;
 static size_t image_size;
 static uint32_t image_base, header_bytes, section_table, section_count;
@@ -159,6 +162,9 @@ static void graphics_original_callback_dpc(void);
 #endif
 #include "thread_scheduler.inc"
 #include "kernel_rwlock.inc"
+#ifndef PILOT_IO_DEVICE_LLE
+#include "kernel_shutdown.inc"
+#endif
 #ifdef PILOT_STARTUP_NATIVE
 #include "startup.inc"
 #endif
@@ -360,6 +366,8 @@ uint64_t xbox_ReadTimeStampCounter(void)
     const char *error=pilot_audio_device_timeline_counter(&counter);
     if(error)stop(error,0);
     return counter;
+#elif defined(PILOT_KERNEL_CLOCK_NATIVE)
+    return kernel_clock_tsc_counter();
 #else
     LARGE_INTEGER now, frequency;
     QueryPerformanceCounter(&now);
@@ -570,6 +578,9 @@ static void query_setting(void)
 }
 
 #include "dispatcher.inc"
+#ifdef PILOT_KERNEL_CLOCK_NATIVE
+#include "kernel_clock.inc"
+#endif
 #include "system_time.inc"
 #include "event_objects.inc"
 #ifdef PILOT_IO_DEVICE_LLE
@@ -774,6 +785,12 @@ static void kernel_dispatch_impl(void)
     if(files_lle_kernel(next_kernel_ordinal))return;
 #endif
     if(kernel_rwlock_dispatch(next_kernel_ordinal))return;
+#ifdef PILOT_KERNEL_CLOCK_NATIVE
+    if(kernel_clock_dispatch(next_kernel_ordinal))return;
+#endif
+#ifndef PILOT_IO_DEVICE_LLE
+    if(kernel_shutdown_dispatch(next_kernel_ordinal))return;
+#endif
     const char *name = "unknown ordinal";
     for (size_t i=0; i<sizeof(pilot_imports)/sizeof(pilot_imports[0]); ++i)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
@@ -862,6 +879,9 @@ static void kernel_dispatch_impl(void)
     }
     case 67: case 69: case 203: case 215: namespace_kernel(next_kernel_ordinal); return;
     case 184: case 199: case 204: case 217: vm_kernel(next_kernel_ordinal); return;
+#ifndef PILOT_FILES_LLE
+    case 210: media_kernel(next_kernel_ordinal); return;
+#endif
     case 190: case 198: case 202: case 207: case 211: case 218: case 219: case 226: case 236: media_kernel(next_kernel_ordinal); return;
     case 186: case 189: case 209: case 225: case 233: case 234: event_kernel(next_kernel_ordinal);return;
     case 97: g_eax=dispatch_cancel_timer(MEM32(g_esp+4)); g_esp+=8; return;
@@ -1095,6 +1115,19 @@ static void load_image(const char *path)
     }
     for (size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i) {
         MEM32(pilot_imports[i].address)=0xfe000000u+4*pilot_imports[i].ordinal;
+#ifdef PILOT_KERNEL_CLOCK_NATIVE
+        if(pilot_imports[i].ordinal==156) {
+            commit(PILOT_KERNEL_TICK_COUNT,4096);
+            MEM32(PILOT_KERNEL_TICK_COUNT)=0;
+            MEM32(pilot_imports[i].address)=PILOT_KERNEL_TICK_COUNT;
+        }
+#endif
+#ifndef PILOT_IO_DEVICE_LLE
+        if(pilot_imports[i].ordinal==47) {
+            commit(PILOT_KERNEL_SHUTDOWN_HEAD,4096);
+            kernel_shutdown_initialize(PILOT_KERNEL_SHUTDOWN_HEAD);
+        }
+#endif
         if(pilot_imports[i].ordinal==323 || pilot_imports[i].ordinal==325 || pilot_imports[i].ordinal==354)
             MEM32(pilot_imports[i].address)=save_key_import(pilot_imports[i].ordinal);
         if (pilot_imports[i].ordinal==259) {
@@ -1228,6 +1261,15 @@ int main(int argc,char **argv)
 #endif
     }
     load_image(argv[1]);
+#ifdef PILOT_KERNEL_CLOCK_NATIVE
+    /* One immutable native epoch serves PM/TSC queries, timers and tick data.
+     * Initialize outside the clock lock; the dispatcher owns its own startup. */
+    dispatch_ensure();
+    uint32_t tick_data=0;
+    for(size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i)
+        if(pilot_imports[i].ordinal==156)tick_data=PILOT_KERNEL_TICK_COUNT;
+    kernel_clock_initialize(tick_data,dispatch_clock_origin);
+#endif
 #ifdef PILOT_TITLE_MODS
     title_mod_initialize();
 #endif

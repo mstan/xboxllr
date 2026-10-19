@@ -430,6 +430,36 @@ static uint32_t media_open(uint32_t *args,int create)
     if(!status)media_iosb(iosb,0,io.Information);
     return status;
 }
+/* NtQueryFullAttributesFile: OBJECT_ATTRIBUTES + FILE_NETWORK_OPEN_INFORMATION,
+ * NTSTATUS/RET8. Use the same confined namespace and no-reparse open policy as
+ * ordinary media files, without allocating a guest handle or granting writes.
+ * Original FATX reports the actual EOF in both size fields and zeroes the ABI
+ * padding. Host timestamps/EOF/attributes come only from the real query. */
+static uint32_t media_query_full_attributes(uint32_t attributes,uint32_t output)
+{
+    if(!output || (uint64_t)output+56>UINT64_C(0x100000000) ||
+       !attributes || (uint64_t)attributes+12>UINT64_C(0x100000000))return MEDIA_INVALID;
+    uint32_t name=MEM32(attributes+4);
+    if(name && ((uint64_t)name+8>UINT64_C(0x100000000) ||
+        (uint64_t)MEM32(name+4)+MEM16(name)>UINT64_C(0x100000000)))return MEDIA_INVALID;
+    WCHAR path[1024];HANDLE parent=NULL,file=NULL;unsigned partition=0;
+    uint32_t status=media_path(attributes,path,&parent,&partition);
+    if(status)return status;
+    IO_STATUS_BLOCK io={0};
+    status=media_open_host(parent,path,FILE_READ_ATTRIBUTES|SYNCHRONIZE,
+        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,0x20,&file,&io);
+    if(status)return status;
+    union {uint64_t alignment;unsigned char bytes[56];} stage={0};
+    status=(uint32_t)media_nt_query(file,&io,stage.bytes,sizeof(stage.bytes),34);
+    if(status==0x103u)stop("synchronous named metadata unexpectedly pending",210);
+    if(!CloseHandle(file))stop("named metadata handle release failed",210);
+    if(!status) {
+        memcpy(stage.bytes+32,stage.bytes+40,8); /* proved original FATX sizes */
+        memset(stage.bytes+52,0,4);
+        memcpy(memory+output,stage.bytes,sizeof(stage.bytes));
+    }
+    return status;
+}
 #include "directory.inc"
 #include "file_async.inc"
 static void media_kernel(unsigned ordinal)
@@ -437,7 +467,7 @@ static void media_kernel(unsigned ordinal)
     struct MediaProfile profile=media_profile_begin();
     fsc_ensure();
     int transfer=ordinal==219 || ordinal==236;
-    unsigned count=ordinal==207 ? 10 : ordinal==190 ? 9 : ordinal==202 ? 6 : transfer ? 8 : ordinal==198 ? 2 : 5;
+    unsigned count=ordinal==207 ? 10 : ordinal==190 ? 9 : ordinal==202 ? 6 : transfer ? 8 : ordinal==198 || ordinal==210 ? 2 : 5;
     uint32_t a[10]; for (unsigned i=0;i<count;++i) a[i]=MEM32(g_esp+4+i*4);
     int opening=ordinal==190 || ordinal==202;
     uint64_t owner_begin=profile.begin?dispatch_monotonic():0;
@@ -445,6 +475,7 @@ static void media_kernel(unsigned ordinal)
     else AcquireSRWLockShared(&media_lock);
     uint64_t owner_wait=owner_begin?dispatch_monotonic()-owner_begin:0;
     if (opening) g_eax=media_open(a,ordinal==190);
+    else if(ordinal==210)g_eax=media_query_full_attributes(a[0],a[1]);
     else {
         struct MediaFile *owned=media_owned(a[0]);
         HANDLE file=owned ? owned->host : NULL; IO_STATUS_BLOCK io={0};
@@ -545,7 +576,7 @@ static void media_kernel(unsigned ordinal)
     }
     if (opening) ReleaseSRWLockExclusive(&media_lock);
     else ReleaseSRWLockShared(&media_lock);
-    if(profile.begin)media_profile_end("service",ordinal,opening?(!g_eax?MEM32(a[0]):0):a[0],
+    if(profile.begin)media_profile_end("service",ordinal,opening?(!g_eax?MEM32(a[0]):0):ordinal==210?0:a[0],
         transfer?a[6]:0,g_eax,profile,owner_wait);
     if (g_eax&0x80000000u) fprintf(stderr,"[FILE FAILURE] ordinal=%u status=%08x\n",ordinal,g_eax);
     g_esp+=4+count*4;

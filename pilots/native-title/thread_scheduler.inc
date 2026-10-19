@@ -218,6 +218,9 @@ static int scheduler_kernel_blocks(unsigned ordinal)
     }
 #endif
     switch(ordinal) {
+#ifndef PILOT_FILES_LLE
+    case 210:return 1; /* Confined host metadata uses real blocking file I/O. */
+#endif
     case 190:case 198:case 202:case 207:case 211:case 218:case 219:case 226:case 236:
     case 158:case 159:case 233:case 234:case 277:case 327:case 328:
         return 1;

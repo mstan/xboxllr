@@ -22,7 +22,10 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 | Legacy graphics lifecycle fixture under this profile | Explicitly skipped: required original APIs are absent |
 | First actual native boot | Entry and title thread execute; initial attempt guarded at an original-kernel PE read |
 | Native startup compatibility adapter | Reviewed original component/ABI, six binder checks and integrated CTest pass; actual native boot now passes this component |
-| Latest actual native boot | Reaches next XAPI initializer; guarded at ordinal 47, HalRegisterShutdownNotification |
+| Native shutdown registration | Original list comparison, independent review and optimized integrated CTest pass; actual boot now passes ordinal 47 |
+| Native kernel clock | Tick data, PM performance queries and native TSC share one epoch; integrated clock CTest passes and actual boot now passes CRT constructors |
+| Named file metadata | Original 56-byte ABI, confined host queries and failure preservation tested/reviewed; native-only dispatch integrated; actual title call not yet reached |
+| Latest actual native boot | Reaches dashboard main initialization (1,514 entries); guarded at IoDismountVolumeByName, ordinal 91 |
 | Driver incremental admission | 25 authored checks pass; selected families, actual admissions and failed-bind state are checked before configure/build/run |
 | Menu rendering/input/audio/performance | Unverified |
 | Credits asset mod under native execution | Pending native baseline; old full-machine evidence does not transfer automatically |
@@ -46,6 +49,24 @@ this component and reached `6fb47`, then stopped at
 recorded that this was an early failure, not a deadline stop. See
 [startup scope](NATIVE-KERNEL-STARTUP.md).
 
+The next executable, `e28598ddb09f78a8d1ad2914bc2417948e2b71905481b81623fc421a56ba35a1`,
+also passes shutdown registration and reaches CRT constructors. The next failure
+is a read of `fe000270`: the unimplemented `KeTickCount` data import still points
+at a callable thunk. A shared native clock owner is in progress. Shutdown
+registration has real guest links and retained callback ownership; callback
+delivery and firmware transitions remain guarded. See
+[shutdown scope](NATIVE-KERNEL-SHUTDOWN.md).
+
+The current executable is
+`dbf4492863fe99cce0268ce787e172dd31d413703af0bfc6392e8fa2be2b6f7e`.
+It uses the shared native clock: PM performance queries run at 3,375,000 Hz;
+native TSC runs at 733,333,333 Hz; volatile millisecond tick publication has an
+independent host timer. The original clock failure is cleared. The actual run
+reaches dashboard main initialization and stops at `IoDismountVolumeByName`
+(`3a2ff`, ordinal 91), before the tray-state query. See
+[clock scope](NATIVE-KERNEL-CLOCK.md) and
+[metadata scope](NATIVE-FILE-METADATA-2026-10-19.md).
+
 Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original
 generation/preparation receipts remain available there. Temporary compiler
@@ -53,14 +74,15 @@ scratch is on Z; original dashboard content remains read-only.
 
 ## Remaining service inventory
 
-Reconciliation of the conservative 67-import list removed the implemented image
-name export, HMAC and four reader/writer-lock exports. The remaining 61 imports
-are **54 functions and seven data exports**. This is a conservative subset:
-imports delegated only under an original-device build must also be reconciled
-for the selected native route. Ordinal 47 is one such newly reached gap; its
-presence in an IO-LLE dispatch case does not provide native registration.
-This inventory is not a
-requirement to implement every optional path before an owner menu preview.
+An exact source audit of all 160 imports after shutdown-registration integration
+finds **81 bounded native owners, 15 imports available only through disabled LLE
+paths, and 64 absent imports**. That leaves 79 gaps: 71 functions and eight data
+exports. This supersedes the earlier conservative 61-import subset. Source
+ownership does not establish full API conformance or that execution reached it.
+The source-hashed private audit is retained alongside the build; ongoing clock
+work is not yet counted as an admission in this snapshot.
+
+This inventory does not require every optional path before an owner menu preview.
 Implement coherent families when execution or a documented caller requires
 them; keep unexercised DVD, network and firmware operations deferred.
 
@@ -69,17 +91,18 @@ them; keep unexercised DVD, network and firmware operations deferred.
 | Clock and scheduling | 99, 126, 127, 238; data 156 | Shared clocks and scheduler; 64-bit EDX:EAX returns and observable tick storage |
 | Handle synchronization | 192, 193, 221, 222, 230, 235; data 16 | Extend actual handle ownership; semaphore/mutant state and atomic signal/wait |
 | Named objects | 247 | Shared namespace; qualify object identity and lifetime |
-| File metadata/lifetime | 210, 195, 91 | Confined host metadata; dismount requires actual mount lifetime handling |
-| System memory | 167, 172 | Shared VM budget and ownership; distinguish system and contiguous allocations |
+| File metadata/lifetime | 210, 195, 91, 196, 200; data 40 | Confined host metadata, volume/cache ownership and actual device-control contracts |
+| System memory | 167, 172, 173, 175 | Shared VM budget and ownership; distinguish system and contiguous allocations |
 | Strings/memory | 260, 308, 313, 269 | Encoding, allocation ownership and matched-byte-count contracts |
 | Diagnostics/exceptions | 8, 302, 312, 95 | Logging and real exception ownership; bugcheck remains fatal |
-| Board/settings/power | 9, 25, 29, 49, 228, 358, 360, 365; data 41, 42 | Explicit virtual-device identity; firmware/persistent writes stay guarded |
+| Board/settings/power | 9, 25, 29, 44, 49, 228, 358, 360, 365; data 41, 42 | Explicit virtual-device identity; firmware/persistent writes stay guarded |
+| AV/GPU kernel bridge | 2, 3, 168 | Shared native renderer exists; original device exports need separate ownership |
 | Crypto/integrity | 338, 339, 344, 345, 346, 347, 349; data 353, 355 | Existing SHA/HMAC; qualify cipher/RSA/key ownership separately |
-| Driver/IRP/interrupt | 62, 74, 81, 83, 84, 85, 86, 87, 153, 176, 359; data 357 | Coherent device and request ownership; no general driver admission yet |
+| Driver/IRP/interrupt | 46, 62, 65, 74, 81, 83, 84, 85, 86, 87, 98, 100, 109, 129, 151, 153, 160, 161, 176, 359; data 357 | Coherent device and request ownership; no general driver admission yet |
 | Floating-point context | 139, 142 | Preserve modeled guest state, not just host registers |
 | Network hardware | 252, 253 | Defer until reached; no invented PHY/link success |
 
-The seven unimplemented data exports are 16, 41, 42, 156, 353, 355 and 357.
+The eight unimplemented data exports are 16, 40, 41, 42, 156, 353, 355 and 357.
 They need explicit data/ownership admission; the existing default callable thunk
 is not an implementation of a data export. Ordinal 347 is callable, not data.
 ABI classification was checked against local nxdk kernel definitions.
@@ -97,6 +120,9 @@ behavior remains implementation work in `.1.137`.
 
 The framework is XboxLLR. Its eventual releases contain the recompiler tool and
 the dashboard application. Blinx remains a separate repository with a tested
-framework submodule pin and its own game release. Jet Set Radio Future is title
-3 after dashboard and Blinx. Public packaging, complete attribution and license
+framework submodule pin and its own game release. After the native dashboard is
+usable, rebuild and regression-test Blinx against that same framework revision.
+Both titles must be good on the shared revision before proceeding. Jet Set Radio
+Future is title 3 after that joint dashboard/Blinx checkpoint.
+Public packaging, complete attribution and license
 resolution remain separate release work; this private port is not a publication.
