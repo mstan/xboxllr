@@ -45,21 +45,42 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
         case 0x19c:case 0x2fc:case 0x300:case 0x304:return true;
         case 0x308:
             {
-                // The copy path implements disabled chroma/clip/pattern/ROP/
-                // beta selectors. A LOAD or another object's receipts cannot
-                // establish those selections for the current blit owner.
-                bool selectors=false;
+                // Receipts belong to this exact current object, never another
+                // LOAD/subchannel or an object whose descriptor has changed.
+                const uint32_t instance=object_instance_[sub];
+                uint32_t identity=0;
+                if(!pramin_range_initialized(instance,4))return reject("2D copy owner identity is unknown");
+                std::memcpy(&identity,pramin_.data()+instance,4);
+                if((identity&0xfff)!=cls)return reject("2D copy owner identity changed");
+                bool selectors=false,stale_owner=false,matching_owner=false;
                 for(const auto& owner:context_initializers_.objects) {
-                    if(!owner.used || owner.channel!=push.channel || owner.object_class!=cls ||
-                       owner.instance!=object_instance_[sub])continue;
-                    uint32_t identity=0;
-                    if(!pramin_range_initialized(owner.instance,4))continue;
-                    std::memcpy(&identity,pramin_.data()+owner.instance,4);
-                    if(identity!=owner.identity_word)continue;
-                    selectors=std::all_of(owner.null_selectors.begin(),owner.null_selectors.end(),
-                        [](const auto& binding){return binding.known && (binding.words[0]&0xfff)==0x30;});
-                    if(selectors)break;
+                    if(!owner.used || owner.channel!=push.channel || owner.instance!=instance)continue;
+                    if(owner.object_class!=cls || owner.identity_word!=identity) {stale_owner=true;continue;}
+                    matching_owner=true;
+                    selectors=true;
+                    for(const auto& binding:owner.null_selectors) {
+                        if(binding.known && (binding.words[0]&0xfff)!=0x30)
+                            return reject("2D copy nonnull selector is unsupported");
+                        if(!binding.known)selectors=false;
+                    }
+                    break;
                 }
+                if(stale_owner && !matching_owner)return reject("2D copy selector owner is stale");
+#if defined(XLLE_RENDERER_HLE)
+                // Existing host SRCCOPY and consulted reference dispatch do
+                // not consume these optional selectors. Do not fabricate NULL
+                // bindings or alter raw receipts; known nonnull stays rejected.
+                if(!selectors && image_blit_.operation==3) {
+                    if(!(pgraph_object_header_known_&(1u<<sub)) ||
+                       pgraph_object_header_cache_[sub]!=identity)
+                        return reject("2D copy current owner identity is stale or unknown");
+                    if(!hle_blit_selectors_reported_) {
+                        std::fprintf(stderr,"[nv2a] HLE SRCCOPY omission: absent optional selector receipts ch%u/sub%u instance=%08x; raw state retained\n",push.channel,sub,instance);
+                        hle_blit_selectors_reported_=true;
+                    }
+                    selectors=true;
+                }
+#endif
                 if(!selectors)return reject("2D copy context selectors are unknown");
             }
             if(!known(kContext2dObject|kContext2dFormat|kContextBlitObject|

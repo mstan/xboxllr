@@ -2806,6 +2806,7 @@ private:
     std::vector<std::array<uint8_t,16>> context_immediate_known_,context_inline_known_;
     uint8_t context_viewport_scale_known_=0, context_viewport_offset_known_=0;
     ContextInitializerState context_initializers_;
+    bool hle_blit_selectors_reported_=false;
     uint16_t hle_cold_default_w_=0,hle_default_w_reported_=0;
     bool hle_context_seen_=false;
     uint64_t hle_default_w_uses_=0;

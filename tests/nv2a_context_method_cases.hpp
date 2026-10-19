@@ -60,23 +60,30 @@ static void test_loaded_context_methods() {
     // Same already-qualified method contracts under both exact configurations.
     // Invalid sources/draw inputs retain their queued consumer in either mode.
     for(uint32_t debug7:{0x0028c3ffu,0x0008cfffu}) {
-    for(unsigned copy_case=0;copy_case<3;++copy_case) {
+    for(unsigned copy_case=0;copy_case<5;++copy_case) {
         const bool operation_known=copy_case!=0, selectors_known=copy_case!=2;
         auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;
         for(unsigned y=0;y<2;++y)for(unsigned x=0;x<2;++x)
             put32(f.ram,0x1200+y*64+x*4,0x11220000+y*2+x);
         f.emit(0,3);f.emit(0x184,2);f.emit(0x188,2);f.emit(0x300,0xa);
         f.emit(0,5);f.emit(0x19c,3);
-        if(selectors_known)for(uint32_t m=0x184;m<=0x198;m+=4)f.emit(m,9);
+        if(selectors_known)for(uint32_t m=0x184;m<=0x198;m+=4)f.emit(m,copy_case==3?2:9);
+        if(copy_case==4){f.kick();f.write(0x700600,0x1009f);}
         if(operation_known)f.emit(0x2fc,3);
         f.emit(0x300,0);f.emit(0x304,0);f.emit(0x308,0x00020002);
         f.emit(0x50,0x9876);f.kick();
-        if(operation_known && selectors_known) {
+        bool accepted=operation_known && selectors_known && copy_case<3;
+#if defined(XLLE_RENDERER_HLE)
+        accepted=operation_known && copy_case<3;
+#endif
+        if(accepted) {
             CHECK(f.failure.empty() && f.gpu.image_blit_copies()==1 && f.read(0x800048)==0x9876);
             for(unsigned y=0;y<2;++y)for(unsigned x=0;x<2;++x)
                 CHECK(get32(f.ram,0x1300+y*64+x*4)==0x11220000+y*2+x);
         } else {
-            CHECK(f.failure.find(selectors_known?"2D copy input is unknown":"context selectors are unknown")!=std::string::npos);
+            if(copy_case==3)CHECK(f.failure.find("only explicit NULL")!=std::string::npos);
+            else if(copy_case==4)CHECK(f.failure.find("selector owner is stale")!=std::string::npos);
+            else CHECK(f.failure.find(selectors_known?"2D copy input is unknown":"context selectors are unknown")!=std::string::npos);
             CHECK(!f.gpu.image_blit_copies() && get32(f.ram,0x1300)==0xa5a5a5a5 && !f.read(0x800048));
         }
     }

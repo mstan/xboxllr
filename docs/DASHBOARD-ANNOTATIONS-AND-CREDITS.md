@@ -21,9 +21,19 @@ The private output preserves every original archive and the base HDD image.
 Archive replacement/readback and generated controller/menu logic checks pass.
 Actual dashboard rendering, positioning, text readability, XAP compilation,
 controller navigation and return to the main menu are **unverified**. The
-current optimized dashboard stops at its tiled-storage/enhanced-renderer
-boundary before the menu. Do not describe this prototype as installed or
-playable. It is not a public release.
+2026-10-19 modern HLE cold-boot candidate passes tiled storage, loaded draws,
+the reached nominal audio modes and SRCCOPY, and displays the Xbox boot logo.
+It stops at an unimplemented GPU context SAVE after 6.062 billion instructions;
+preserving context across transfers is still required before menu validation.
+Do not describe this prototype as installed or playable. It is not a public
+release.
+
+This full-machine route has partial CPU AOT with interpreter fallback and an
+OpenGL HLE GPU. It does not yet use Blinx's complete native title CPU/service
+route or its D3D11 backend. Boot-animation speed is not menu performance.
+The full-machine codec currently retains a headless output sink; accepting an
+APU signal model does not establish audible host output. These limits must
+remain visible in any owner handoff.
 
 ## Theseus and licensing
 
