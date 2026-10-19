@@ -2792,8 +2792,10 @@ private:
         kContextProgramStart=1ull<<15, kContextTransformMode=1ull<<16,
         kContextCompression=1ull<<17, kContextZpassEnable=1ull<<18,
         kContextZpassCount=1ull<<19, kContextPatternColor=1ull<<20,
+        kContextFixedMaterialSource=1ull<<21,
     };
     uint64_t context_known_ = 0;
+    uint32_t context_fixed_known_=0;
     uint8_t context_objects_known_ = 0, context_semaphore_dma_known_ = 0,
             context_semaphore_offset_known_ = 0;
     std::array<uint32_t, kRasterStateWords> context_raster_known_{};

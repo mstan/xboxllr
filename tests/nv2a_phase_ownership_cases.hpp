@@ -170,6 +170,43 @@ static void test_gpu_phase_ownership() {
         f.triangle();f.kick();
         CHECK(missing ? (!f.failure.empty() && !renderer.draws) : (f.failure.empty() && renderer.draws==1));
     }
+    // Fixed shader executes no vertex program: only unlit control receipts,
+    // real position/selected colors and loaded/uploaded matrix constants.
+    for(unsigned missing=0;missing<6;++missing) {
+        PhaseRenderer renderer;auto fixture=std::make_unique<LoadedDrawFixture>();auto& f=*fixture;
+        f.gpu.set_renderer(&renderer);f.state(0x1ea0);f.emit(0x1e94,0);
+        f.emit(0x328,0);if(missing!=1)f.emit(0x314,0);
+        f.emit(0x2a4,0);f.emit(0x3bc,missing==2?1:0);
+        for(unsigned stage=0;stage<4;++stage) {
+            f.emit(0x420+stage*4,0);
+            for(unsigned lane=0;lane<4;++lane)f.emit(0x3c0+stage*16+lane*4,0);
+        }
+        f.emit(0x680,LoadedDrawFixture::bits(1));f.emit(0xa20,LoadedDrawFixture::bits(2.25f));
+        if(missing!=3)f.color();
+        if(missing==5){f.emit(0x1ea4,192);f.emit(0xb80,0);}
+        renderer.observe=[](const xlle::Nv2aHleDraw& p){CHECK(p.transform_mode==0 && p.program.empty() && p.constants[0][0]==1.f && p.constants[59][0]==2.25f);};
+        f.triangle(missing==4);f.kick();
+        CHECK(missing ? (!f.failure.empty() && !renderer.draws) : (f.failure.empty() && renderer.draws==1));
+    }
+    // Actual ambient/no-enabled-light HLE path retains supplied material bits.
+    for(unsigned missing=0;missing<7;++missing) {
+        PhaseRenderer renderer;auto fixture=std::make_unique<LoadedDrawFixture>();auto& f=*fixture;
+        f.gpu.set_renderer(&renderer);f.state(0x1ea0);f.emit(0x1e94,0);
+        f.emit(0x328,0);f.emit(0x314,1);f.emit(0x2a4,0);f.emit(0x3bc,0);f.emit(0x294,1);
+        if(missing!=5)f.emit(0x298,missing==6?1:0);
+        for(unsigned stage=0;stage<4;++stage) {
+            f.emit(0x420+stage*4,0);
+            for(unsigned lane=0;lane<3;++lane)f.emit(0x3c0+stage*16+lane*4,0);
+        }
+        for(unsigned lane=0;lane<3;++lane) {
+            if(!(missing==1 && lane==1))f.emit(0xa10+lane*4,LoadedDrawFixture::bits(.25f));
+            if(!(missing==2 && lane==2))f.emit(0x3a8+lane*4,LoadedDrawFixture::bits(.5f));
+        }
+        if(missing!=3)f.emit(0x3b4,LoadedDrawFixture::bits(.75f));
+        if(missing==4)f.emit(0x3cc,0x2400); // known enabled Q stays unsupported
+        renderer.observe=[](const xlle::Nv2aHleDraw& p){const std::array<float,4> expected{.375f,.375f,.375f,.75f};CHECK(p.ambient_lighting && p.ambient_color==expected);};
+        f.triangle();f.kick();CHECK(missing ? (!f.failure.empty() && !renderer.draws) : (f.failure.empty() && renderer.draws==1));
+    }
     // All existing loaded dependencies remain consumers even with a renderer.
     for(unsigned missing=0;missing<3;++missing) {
         PhaseRenderer renderer;auto fixture=std::make_unique<LoadedDrawFixture>();auto& f=*fixture;

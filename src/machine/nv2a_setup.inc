@@ -331,7 +331,7 @@ bool Nv2a::pgraph_load_context() {
     pgraph_object_header_cache_.fill(0);pgraph_object_header_known_=0;
     pgraph_active_header_known_=false;
     pgraph_method_faulted_=false;
-    context_known_=0;
+    context_known_=0;context_fixed_known_=0;
     context_initializers_={};
     context_objects_known_=context_semaphore_dma_known_=context_semaphore_offset_known_=0;
     context_raster_known_.fill(0);

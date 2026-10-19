@@ -10,11 +10,16 @@ bool Nv2a::context_draw_ready(std::array<uint8_t,13>& observable) {
     };
     if(renderer_ && !gpu_phase_depth_)
         return reject("NV2A loaded draw renderer has no coherent device phase");
-    if((context_known_&(kContextTransformMode|kContextProgramStart))!=
-       (kContextTransformMode|kContextProgramStart))
+    const uint64_t transform_required=kContextTransformMode | (transform_execution_mode_==2?kContextProgramStart:0);
+    if((context_known_&transform_required)!=transform_required)
         return reject("NV2A loaded draw transform selector is unknown");
     const bool primitive_ready=primitive_mode_>=5 && primitive_mode_<=8;
-    if(transform_execution_mode_!=2 || !primitive_ready) {
+#if XLLE_RENDERER_HLE
+    const bool transform_ready=transform_execution_mode_==0 || transform_execution_mode_==2;
+#else
+    const bool transform_ready=transform_execution_mode_==2;
+#endif
+    if(!transform_ready || !primitive_ready) {
         char reason[192];std::snprintf(reason,sizeof(reason),
             "NV2A loaded draw requires supported programmable primitive: transform=%u primitive=%u line-width=%u/%08x point-size=%u/%08x",
             unsigned(transform_execution_mode_),unsigned(primitive_mode_),unsigned(context_initializers_.line_width.known),context_initializers_.line_width.value,
@@ -200,24 +205,54 @@ bool Nv2a::context_hle_draw_inputs_ready() {
        (!indexed && !inlined && context_immediate_known_.size()!=count)) {
         fault_("NV2A loaded vertex snapshot provenance is missing");return false;
     }
-    bool final=false;
-    for(size_t slot=transform_program_start_;slot<transform_program_.size();++slot) {
-        if(context_program_known_[slot]!=15) {
-            fault_("NV2A loaded shader executed program words are unknown");return false;
-        }
-        if(transform_program_[slot][3]&1u){final=true;break;}
-    }
-    if(!final){fault_("NV2A loaded shader has no known FINAL");return false;}
+    const bool fixed=transform_execution_mode_==0;
     Nv2aVshProgram program{};
-    const size_t slots=transform_program_.size()-transform_program_start_;
-    if(nv2a_vsh_parse_program(&program,transform_program_[transform_program_start_].data(),uint32_t(slots))!=NV2AVPR_SUCCESS) {
-        fault_("NV2A loaded shader dependency parse failed");return false;
-    }
     struct Release {Nv2aVshProgram& p;~Release(){nv2a_vsh_program_destroy(&p);}} release{program};
-    const bool per_vertex=vsh_dependencies_need_vertex(program.steps,slots);
-    VshDependencies deps;const char* error=nullptr;
-    if(!per_vertex && !vsh_dependencies(program.steps,slots,observable,deps,error)) {
-        fault_(error?error:"NV2A loaded shader dependency analysis failed");return false;
+    const size_t slots=fixed?0:transform_program_.size()-transform_program_start_;
+    bool per_vertex=false;VshDependencies deps;const char* error=nullptr;
+    if(fixed) {
+        bool texture_matrix=false,texgen=false;
+        for(bool enabled:fixed_texture_matrix_enable_)texture_matrix|=enabled;
+        for(const auto& stage:fixed_texgen_)for(unsigned mode:stage)texgen|=mode!=0;
+        // Missing Q-texgen receipt is an explicit HLE feature omission;
+        // known/nonzero texgen remains rejected, without synthesizing receipt.
+        const uint32_t controls=0x7777ffu;
+        const uint32_t material=fixed_lighting_ ? (0x7f000000u | ((observable[4]&8)?0x80000000u:0)) : 0;
+        if((context_fixed_known_&(controls|material))!=(controls|material) || fixed_skin_mode_ ||
+           fixed_fog_ || fixed_light_enable_mask_ || texture_matrix || texgen ||
+           (fixed_lighting_ && (!(context_known_&kContextFixedMaterialSource) || fixed_color_material_))) {
+            char reason[256];std::snprintf(reason,sizeof(reason),
+                "NV2A HLE fixed controls unknown/unsupported: known=%06x skin=%u lighting=%u fog=%u lights=%04x matrix=%u texgen=%u source=%u/%02x",
+                context_fixed_known_,unsigned(fixed_skin_mode_),unsigned(fixed_lighting_),unsigned(fixed_fog_),
+                unsigned(fixed_light_enable_mask_),unsigned(texture_matrix),unsigned(texgen),
+                unsigned(bool(context_known_&kContextFixedMaterialSource)),unsigned(fixed_color_material_));
+            std::fprintf(stderr,"[nv2a] fixed material need=%08x known=%08x ambient=%a,%a,%a emission=%a,%a,%a alpha=%a light-control=%u\n",
+                material,context_fixed_known_,double(fixed_scene_ambient_[0]),double(fixed_scene_ambient_[1]),double(fixed_scene_ambient_[2]),
+                double(fixed_material_emission_[0]),double(fixed_material_emission_[1]),double(fixed_material_emission_[2]),
+                double(fixed_material_alpha_),unsigned(fixed_light_control_));
+            fault_(reason);return false;
+        }
+        // Existing host fixed shader: transformed position, unlit/ambient primary
+        // current color, literal specular/fog, and direct texture coordinates.
+        deps.inputs[0]=15;deps.inputs[3]=fixed_lighting_?0:observable[3];
+        if(fixed_lighting_ && (fixed_light_control_&4))deps.inputs[4]=observable[4]&8;
+        for(unsigned stage=0;stage<4;++stage)deps.inputs[9+stage]=observable[9+stage];
+        for(unsigned row=0;row<4;++row)deps.constants[row]=15;
+        deps.constants[59]=3;
+    } else {
+        bool final=false;
+        for(size_t slot=transform_program_start_;slot<transform_program_.size();++slot) {
+            if(context_program_known_[slot]!=15){fault_("NV2A loaded shader executed program words are unknown");return false;}
+            if(transform_program_[slot][3]&1u){final=true;break;}
+        }
+        if(!final){fault_("NV2A loaded shader has no known FINAL");return false;}
+        if(nv2a_vsh_parse_program(&program,transform_program_[transform_program_start_].data(),uint32_t(slots))!=NV2AVPR_SUCCESS) {
+            fault_("NV2A loaded shader dependency parse failed");return false;
+        }
+        per_vertex=vsh_dependencies_need_vertex(program.steps,slots);
+        if(!per_vertex && !vsh_dependencies(program.steps,slots,observable,deps,error)) {
+            fault_(error?error:"NV2A loaded shader dependency analysis failed");return false;
+        }
     }
     for(size_t vertex=0;vertex<count;++vertex) {
         if(indexed) {
@@ -279,7 +314,7 @@ bool Nv2a::context_hle_draw_inputs_ready() {
             for(size_t constant=0;constant<deps.constants.size();++constant)
                 if(deps.constants[constant])std::fprintf(stderr,"[nv2a] constant%zu need=%x known=%x\n",constant,
                     unsigned(deps.constants[constant]),unsigned(context_constants_known_[constant]));
-            for(size_t slot=transform_program_start_;slot<transform_program_.size();++slot) {
+            for(size_t slot=transform_program_start_;!fixed && slot<transform_program_.size();++slot) {
                 const auto& op=transform_program_[slot];
                 std::fprintf(stderr,"[nv2a] program%zu known=%x words=%08x,%08x,%08x,%08x\n",slot,
                     unsigned(context_program_known_[slot]),op[0],op[1],op[2],op[3]);

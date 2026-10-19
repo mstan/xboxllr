@@ -470,3 +470,38 @@ pixels is introduced. Authored tests check strict refusal before reads, actual
 HLE RGB bytes and direct/copy agreement, malformed pitch, incomplete LUT,
 blanking, unmodified guest RAM and unchanged command/timing receipts. Physical
 TV-output qualification remains deferred independently of this host endpoint.
+
+## Fixed-function HLE consumer admission
+
+The next coherent probe confirms transform0 with primitive6 (triangle strip),
+not an unsupported topology. HLE fixed admission executes no vertex-program
+parser and does not require a program cursor, FINAL token or program words.
+It requires the actual host shader inputs: position0, matrix c0..3, viewport
+translation c59.xy, selected primary color or actual ambient material, and
+selected direct texture coordinates9..12. No CPU vertex transform is introduced.
+Loaded constants remain real192-slot producers; explicit matrix0680 uploads
+now mark their written lanes without inventing missing source data.
+
+Control receipts track skin, lighting, fog, enabled lights, texture matrices and
+texgen. The supported path is unlit or ambient-only with no enabled lights;
+skinning, fog, enabled lights/matrices or nonzero texgen still reject. Missing
+Q-texgen receipt is an owner-accepted HLE feature omission, never synthesized
+known state; known enabled Q remains rejected and strict LLE is unchanged.
+Ambient mode requires real scene-ambient RGB, emission RGB, material alpha,
+and relevant light-control producers; its material-source selector must be
+known zero. Existing host arithmetic and all supplied numeric values remain.
+
+Focused tests verify no-program fixed submission, supplied matrix/viewport
+values, required input/control rejection, invalid constant upload, real ambient
+material values, missing ambient/emission/alpha/source receipts and known
+unsupported Q/material sources. Both GPU focused targets pass coherently.
+
+Cold-ambient-036 progresses to169155556 instructions,4270 GPU draws and159162
+vertices,9 shaders,97 uploads,73 resolves. The next fault is APU voice quantum
+mode admission. Root owns that audio follow-up. Combined cold-vp-037 repeats
+this progress with material-source guard and passive APU diagnostic included:
+voice73,state11200000,format5200E0E6,misc008100C0,route14830820,control50/70 zero.
+No main menu/input/performance handoff is claimed. Stock assets remain COW with
+no HDD writeback, captures muted, two normal-priority cores. Root committed the
+preceding reviewed batch as d2e1477; this fixed-function follow-up stays unstaged
+for root review/integration.

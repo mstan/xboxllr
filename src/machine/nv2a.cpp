@@ -17756,10 +17756,12 @@ void Nv2a::dispatch_method(PushMethod push) {
             static_cast<uint8_t>((parameter & 1u) |
                                  ((parameter >> 15) & 2u) |
                                  ((parameter >> 15) & 4u));
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<31;
         break;
     }
     case kNv097M0298: {
         fixed_color_material_ = static_cast<uint8_t>(parameter);
+        if(pgraph_loaded_context_)context_known_|=kContextFixedMaterialSource;
         break;
     }
     case kNv097M02A4: {
@@ -17768,6 +17770,7 @@ void Nv2a::dispatch_method(PushMethod push) {
             return;
         }
         fixed_fog_ = parameter != 0;
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<2;
         set_raster_word(kRasterFogEnable, parameter);
         break;
     }
@@ -17789,6 +17792,7 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     case kNv097M0314: {
         fixed_lighting_ = parameter != 0;
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<1;
         break;
     }
     case kNv097M0328: {
@@ -17797,6 +17801,7 @@ void Nv2a::dispatch_method(PushMethod push) {
             return;
         }
         fixed_skin_mode_ = static_cast<uint8_t>(parameter);
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<0;
         break;
     }
     case kNv097M03A4: {
@@ -17807,10 +17812,12 @@ void Nv2a::dispatch_method(PushMethod push) {
         const uint32_t component = (method - 0x03A8) / 4;
         std::memcpy(&fixed_material_emission_[component],
                     &parameter, sizeof(parameter));
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<(27+component);
         break;
     }
     case kNv097M03B4: {
         std::memcpy(&fixed_material_alpha_, &parameter, sizeof(parameter));
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<30;
         break;
     }
     case kNv097M03B8: {
@@ -17819,16 +17826,19 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     case kNv097M03BC: {
         fixed_light_enable_mask_ = static_cast<uint16_t>(parameter);
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<3;
         break;
     }
     case kNv097R03C0_0400: {
         const uint32_t stage = (method - 0x03C0) / 0x10;
         const uint32_t component = ((method - 0x03C0) & 0xFu) / 4;
         fixed_texgen_[stage][component] = parameter;
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<(8+stage*4+component);
         break;
     }
     case kNv097R0420_0430: {
         fixed_texture_matrix_enable_[(method - 0x0420) / 4] = parameter != 0;
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<(4+(method-0x420)/4);
         break;
     }
     // Fixed-function matrix uploads share Cheops constant memory. Matrices are
@@ -17861,6 +17871,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         const uint32_t slot = (method - 0x0680) / 4;
         std::memcpy(&transform_constants_[slot / 4][slot & 3u],
                     &parameter, sizeof(parameter));
+        if(pgraph_loaded_context_)context_constants_known_[slot/4]|=uint8_t(1u<<(slot&3u));
         break;
     }
     case kNv097R06C0_07C0: {
@@ -17885,6 +17896,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         const uint32_t component = (method - 0x0A10) / 4;
         std::memcpy(&fixed_scene_ambient_[component],
                     &parameter, sizeof(parameter));
+        if(pgraph_loaded_context_)context_fixed_known_|=1u<<(24+component);
         break;
     }
     // Kelvin viewport and Cheops programmable-transform state. Program/constant upload
