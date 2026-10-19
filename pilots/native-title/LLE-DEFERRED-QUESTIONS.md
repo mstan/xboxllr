@@ -225,3 +225,30 @@ coefficients; first actual use logs signed scale and affected-frame counter reco
 usage. Strict rejection remains. Exact scale sign/units/envelope coefficient
 mapping and audible impact remain deferred; reopen on a validated mapping,
 audible discrepancy, or modulation-dependent title requirement.
+
+## AUDIO-D18 - active retained FE control transport
+
+The explicit full-machine board-reset owner establishes the DWORD at `0x1510`
+as known retained storage. Exact DWORD reads return the stored value, and
+exact writes accept only0/1 during ordinary, active and trapped FE states.
+The original ISR reads/modifies bit0 at FB28D..FB2A1. This is register transport, without
+time advancement, trap acknowledgement, IRQ/RAM mutation, token submission or
+fence completion. Existing imported/warm-context restrictions and all partial
+access, unknown control-bit, address/token and publication guards remain in place.
+
+The primary xemu reference has plain register reads at1510, with no special
+read side effect or asynchronous update. The framework's own service owner
+never changes this control when publishing a token. Authored trapped/active
+read/modify/write cases preserve status, RAM, IRQs and publication counts, and
+still reject address/token submission through the same trapped state. Changing
+retained control while a token is queued does not publish or discard it.
+Dashboard054's original ISR
+reaches this read after selecting Credits; this is a newly reached dashboard
+route, not a change to bounded Blinx qualification or its signal model.
+
+Deferred: independent silicon confirmation of this retained transport during
+active DSP/ISR interleavings, including gating/stall effects of bit0, and any
+unmodeled dynamic bits or read side effects.
+Reopen if hardware contradicts retained storage or a supported consumer needs
+such behavior. Replay the positive/negative fence tests and original caller;
+never treat a successful control read as evidence that pending work completed.

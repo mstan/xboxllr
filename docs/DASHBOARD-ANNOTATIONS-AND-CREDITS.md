@@ -61,7 +61,22 @@ the old script using the enlarged size, continuing into texture data. The008
 repacker preserves that stream order, moves later ordinary offsets, and keeps
 packed mesh-reference fields and their backing IB/VB bytes intact. The
 authored sequential-consumer check and independent comparison of all other
-payloads pass; retail compilation, name binding and UI remain unverified.
+payloads pass. Run054 visually reaches the main menu at10,000,466,663 with the
+new fifth CREDITS item beneath SETTINGS. This establishes retail script
+compilation and main-menu rendering; page/section navigation and return are
+still being checked. Source preparation explicitly truncates smaller FATX
+replacements and reopens them for exact-length/content checks; overwrite alone
+would retain old tails.
+
+The same054 run confirms real Down input selecting/highlighting Credits.
+Pressing A reaches an overrestricted APU1510 retained-control read during the
+original ISR, before the first page. Adjacent original code immediately writes
+bit0 back; the board-reset model now admits that exact DWORD0/1 retained
+read/modify/write transport, preserving all address/token and fence-publication
+guards. Focused HLE and genuine LLE checks cover the transport separately from
+completion. The page/navigation pass must be rerun with that fix before owner handoff.
+The remaining hardware precision question is tracked in
+[AUDIO-D18](../pilots/native-title/LLE-DEFERRED-QUESTIONS.md#audio-d18---active-retained-fe-control-transport).
 Do not describe this prototype as installed or playable. It is not a public
 release.
 

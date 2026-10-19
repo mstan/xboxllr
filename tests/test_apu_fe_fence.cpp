@@ -71,6 +71,32 @@ int main() {
         CHECK(!f.error.empty() && !f.writes && f.apu.RegFileMmio::mmio_read(0xfe83fffc,4)==1);
     }
     {Fixture f;f.read(0x1004);CHECK(!f.apu.initialize_board_audio_reset());}
+    // A real FE trap must not hide already-owned control storage. The active
+    // ISR polls1510 and replaces bit0 while handling its pending FET. Retained
+    // storage transport cannot acknowledge that trap or publish/admit a token.
+    for(uint32_t control:{0u,1u})for(bool active:{false,true}) {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());
+        f.write(0x1510,control);f.write(0x5fffc,1);
+        f.write(0x1100,0xe0); // original trapped-method control produces FET
+        if(active)f.write(0x2000,15);
+        CHECK(f.error.empty());
+        const auto before=f.ram;
+        const auto status=f.read(0x1000);
+        const unsigned irqs=f.irq_edges,writes=f.writes;
+        for(unsigned poll=0;poll<32;++poll)CHECK(f.read(0x1510)==control);
+        CHECK(f.error.empty() && f.ram==before && f.read(0x1000)==status);
+        CHECK(f.irq_edges==irqs && f.writes==writes && !f.apu.fe_fences_published());
+        f.write(0x1510,1-control); // original ISR's retained-bit RMW
+        for(unsigned poll=0;poll<8;++poll)CHECK(f.read(0x1510)==1-control);
+        CHECK(f.error.empty() && f.ram==before && f.read(0x1000)==status);
+        CHECK(f.irq_edges==irqs && f.writes==writes && !f.apu.fe_fence_pending());
+        f.write(0x1324,4096); // transport cannot authorize a trapped fence
+        CHECK(!f.error.empty() && f.ram==before && f.writes==writes);
+        CHECK(f.apu.RegFileMmio::mmio_read(0xfe801510,4)==1-control);
+    }
+    {Fixture f;CHECK(f.apu.initialize_board_audio_reset());f.write(0x1510,2);
+     CHECK(!f.error.empty() && !f.writes && !f.irq_edges);
+     CHECK(f.apu.RegFileMmio::mmio_read(0xfe801510,4)==0);}
     {
         Fixture cold,warm;CHECK(cold.apu.initialize_board_audio_reset());
         CHECK(warm.apu.initialize_kernel_audio_handoff());cold.write(0x5fffc,1);
@@ -100,6 +126,11 @@ int main() {
         CHECK(f.error.empty() && f.apu.fe_fence_pending());
         CHECK(f.word(4096)==0xa5a5a5a5 && !f.writes);
         for(unsigned poll=0;poll<8;++poll)CHECK(f.read(0x1510)==1);
+        for(uint32_t control:{0u,1u,0u}) {
+            f.write(0x1510,control);CHECK(f.read(0x1510)==control);
+            CHECK(f.apu.fe_fence_pending() && !f.writes && !f.apu.fe_fences_published());
+            CHECK(f.word(4096)==0xa5a5a5a5 && !f.irq_edges);
+        }
         CHECK(f.apu.service_fe_fence() && f.word(4096)==0x87654321);
         CHECK(f.writes==1 && f.apu.fe_fences_published()==1 && !f.irq_edges);
     }

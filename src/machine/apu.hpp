@@ -621,8 +621,13 @@ public:
         }
         if(ApuDspHostRegisters::touches(off,size))return dsp_host_read(off,size);
         if(touches_fe_fence(off,size)) {
+            // Explicit board reset owns this retained DWORD for its lifetime.
+            // Reading it neither admits nor completes a fence; active/trapped
+            // FE state must not make known control storage unreadable. xemu's
+            // ordinary register transport also has no 1510 read side effects.
             if(off==kFeFenceControl && size==4 &&
-               (audio_control_drained() || retirement_control_accessible() || fe_fence_context()))return reg32(off);
+               (board_audio_reset_ || audio_control_drained() ||
+                retirement_control_accessible() || fe_fence_context()))return reg32(off);
             device_fault("FE notification fence/control remains unqualified");return 0;
         }
         if(off>=0x30000 && off<0x40000) {
@@ -745,10 +750,12 @@ public:
         // Guard the device itself, including partial/overlapping transactions;
         // reference-wrapper whitelists cannot establish unknown fence behavior.
         if(touches_fe_fence(off,size)) {
-            // Knowing the startup control register supplies no notification
-            // address/data admission or completion of pending work.
+            // The original ISR reads/modifies bit0 while handling a trap.
+            // Board-owned0/1 storage transport is separate from admitting an
+            // address/token or publishing pending work; those guards follow.
             if(off==kFeFenceControl && size==4 && value<=1 &&
-               (audio_control_drained() || (value==1 && retirement_control_accessible()))) {
+               (board_audio_reset_ || audio_control_drained() ||
+                (value==1 && retirement_control_accessible()))) {
                 set_reg32(off,value);return;
             }
             if(size==4 && (off==kFeFenceControl || off==kFememaddr || off==kFememdata) &&
