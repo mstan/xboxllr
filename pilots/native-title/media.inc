@@ -18,7 +18,12 @@ static uint32_t media_next_id=0x50000001u;
 /* Optional sparse host-file diagnosis. These observations retain actual file
  * calls, lock ownership and completion; slow wall time alone is not I/O cost.
  * At most 256 records are written, after releasing the media owner lock. */
-struct MediaProfile {uint64_t begin,cpu;unsigned cpu_available;};
+struct MediaReadProfile {uint64_t begin,end,cpu;unsigned called,cache_hit,cpu_available;};
+struct MediaProfile {
+    uint64_t begin,cpu,io_wait,transfer_log;
+    unsigned cpu_available,io_sampled,log_sampled;
+    struct MediaReadProfile read;
+};
 static uint64_t media_profile_cpu(unsigned *available)
 {
     *available=0;
@@ -57,10 +62,14 @@ static void media_profile_end(const char *operation,unsigned ordinal,uint32_t ha
     if(end-profile.begin<=500000 || InterlockedIncrement(&records)>256)return;
     unsigned available;uint64_t cpu=media_profile_cpu(&available);
     available=available && profile.cpu_available && cpu>=profile.cpu;
-    fprintf(stderr,"[FILE SLOW] thread=%lu operation=%s ordinal=%u handle=%08x bytes=%u status=%08x begin=%llu end=%llu elapsed_ms=%.3f owner_lock_ms=%.3f thread_cpu_ms=%.3f cpu_available=%u\n",
+    fprintf(stderr,"[FILE SLOW] thread=%lu operation=%s ordinal=%u handle=%08x bytes=%u status=%08x begin=%llu end=%llu elapsed_ms=%.3f owner_lock_ms=%.3f thread_cpu_ms=%.3f cpu_available=%u io_lock_ms=%.3f io_lock_sampled=%u transfer_log_ms=%.3f transfer_log_sampled=%u nt_read_called=%u cache_hit=%u nt_read_begin=%llu nt_read_end=%llu nt_read_ms=%.3f nt_read_thread_cpu_ms=%.3f nt_read_cpu_available=%u\n",
         GetCurrentThreadId(),operation,ordinal,handle,bytes,status,
         (unsigned long long)profile.begin,(unsigned long long)end,(end-profile.begin)/10000.0,
-        owner_wait/10000.0,available?(cpu-profile.cpu)/10000.0:0.0,available);
+        owner_wait/10000.0,available?(cpu-profile.cpu)/10000.0:0.0,available,
+        profile.io_wait/10000.0,profile.io_sampled,profile.transfer_log/10000.0,profile.log_sampled,
+        profile.read.called,profile.read.cache_hit,(unsigned long long)profile.read.begin,
+        (unsigned long long)profile.read.end,(profile.read.end-profile.read.begin)/10000.0,
+        profile.read.cpu/10000.0,profile.read.cpu_available);
 }
 typedef LONG (NTAPI *MediaOpen)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
 typedef LONG (NTAPI *MediaRead)(HANDLE,HANDLE,PVOID,PVOID,PIO_STATUS_BLOCK,PVOID,ULONG,PLARGE_INTEGER,PULONG);
@@ -430,7 +439,9 @@ static void media_kernel(unsigned ordinal)
         g_eax=MEDIA_BAD_HANDLE;
         if (!iosb) g_eax=MEDIA_INVALID;
         else if (file) {
+            uint64_t io_begin=profile.begin?dispatch_monotonic():0;
             AcquireSRWLockExclusive(&owned->io_lock);
+            if(io_begin){profile.io_wait=dispatch_monotonic()-io_begin;profile.io_sampled=1;}
             if(ordinal==207) g_eax=media_directory(file,&io,a);
             else if (transfer) {
                 if(ordinal==219 && !(owned->access&FILE_READ_DATA))g_eax=0xc0000022u;
@@ -447,7 +458,8 @@ static void media_kernel(unsigned ordinal)
                     stop("file event/APC delivery unsupported",ordinal);
                 }
                 LARGE_INTEGER offset; if (a[7]) offset.QuadPart=(int64_t)MEM64(a[7]);
-                if (ordinal==219) g_eax=fsc_read(owned,&io,memory+a[5],a[6],a[7]?&offset:NULL);
+                if (ordinal==219) g_eax=fsc_read(owned,&io,memory+a[5],a[6],a[7]?&offset:NULL,
+                    profile.begin?&profile.read:NULL);
                 else {
                     fsc_forget(owned->id);
                     g_eax=(uint32_t)media_nt_write(file,NULL,NULL,NULL,&io,memory+a[5],a[6],a[7]?&offset:NULL,NULL);
@@ -511,8 +523,12 @@ static void media_kernel(unsigned ordinal)
          * requests own their later success/failure publication separately. */
         if (iosb && !async_delivery && (g_eax&0xc0000000u)!=0xc0000000u)
             media_iosb(iosb,g_eax,io.Information);
-        if (transfer && !async_delivery) fprintf(stderr,"[FILE TRANSFER] ordinal=%u handle=%08x requested=%u completed=%llu status=%08x\n",
-                              ordinal,a[0],a[6],(unsigned long long)io.Information,g_eax);
+        if (transfer && !async_delivery) {
+            uint64_t log_begin=profile.begin?dispatch_monotonic():0;
+            fprintf(stderr,"[FILE TRANSFER] ordinal=%u handle=%08x requested=%u completed=%llu status=%08x\n",
+                ordinal,a[0],a[6],(unsigned long long)io.Information,g_eax);
+            if(log_begin){profile.transfer_log=dispatch_monotonic()-log_begin;profile.log_sampled=1;}
+        }
     }
     if (opening) ReleaseSRWLockExclusive(&media_lock);
     else ReleaseSRWLockShared(&media_lock);

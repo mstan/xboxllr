@@ -14,7 +14,7 @@ static DWORD WINAPI fsc_test_worker(void *unused)
     for (unsigned i=0;i<200;++i) {
         unsigned char bytes[600]; LARGE_INTEGER offset; offset.QuadPart=(i*37)%7000;
         IO_STATUS_BLOCK io={0}; AcquireSRWLockExclusive(&fsc_test_file->io_lock);
-        uint32_t status=fsc_read(fsc_test_file,&io,bytes,sizeof(bytes),&offset);
+        uint32_t status=fsc_read(fsc_test_file,&io,bytes,sizeof(bytes),&offset,NULL);
         ReleaseSRWLockExclusive(&fsc_test_file->io_lock);
         CHECK(!status && io.Information==sizeof(bytes) && !memcmp(bytes,fsc_test_payload+offset.QuadPart,sizeof(bytes)));
     }
@@ -42,6 +42,27 @@ static void test_file_cache(void)
     call_kernel(219,read,8); CHECK(!g_eax && MEM32(iosb+4)==5000 && !memcmp(memory+buffer,fsc_test_payload+100,5000));
     LONG misses=fsc_test_reads; memset(memory+buffer,0,5000);
     call_kernel(219,read,8); CHECK(!g_eax && fsc_test_reads==misses && !memcmp(memory+buffer,fsc_test_payload+100,5000));
+    /* The opt-in read bracket identifies a real NT call, while a cache hit
+     * records no invented host-read interval. Both retain bytes and cursor. */
+    struct MediaFile *profiled_file=media_owned(file);
+    struct MediaReadProfile hit={0},cold={0};IO_STATUS_BLOCK profiled_io={0};
+    LARGE_INTEGER profiled_offset;profiled_offset.QuadPart=100;
+    AcquireSRWLockExclusive(&profiled_file->io_lock);
+    uint32_t profiled_status=fsc_read(profiled_file,&profiled_io,memory+buffer,5000,&profiled_offset,&hit);
+    ReleaseSRWLockExclusive(&profiled_file->io_lock);
+    CHECK(!profiled_status && hit.cache_hit && !hit.called && !hit.begin && !hit.end && fsc_test_reads==misses);
+    fsc_forget(file);
+    AcquireSRWLockExclusive(&profiled_file->io_lock);
+    profiled_status=fsc_read(profiled_file,&profiled_io,memory+buffer,5000,&profiled_offset,&cold);
+    ReleaseSRWLockExclusive(&profiled_file->io_lock);
+    CHECK(!profiled_status && cold.called && !cold.cache_hit && cold.begin && cold.end>=cold.begin &&
+        profiled_io.Information==5000 && !memcmp(memory+buffer,fsc_test_payload+100,5000) && fsc_test_reads==misses+1);
+    AcquireSRWLockExclusive(&profiled_file->io_lock);
+    profiled_status=fsc_read(profiled_file,&profiled_io,memory+buffer,5000,&profiled_offset,&cold);
+    ReleaseSRWLockExclusive(&profiled_file->io_lock);
+    CHECK(!profiled_status && cold.cache_hit && !cold.called && !cold.begin && !cold.end && !cold.cpu &&
+        !cold.cpu_available && fsc_test_reads==misses+1);
+    misses=fsc_test_reads;
     uint32_t query[]={file,iosb,info,8,14}; call_kernel(211,query,5); CHECK(!g_eax && MEM64(info)==5100);
     MEM64(info)=300; call_kernel(226,query,5); CHECK(!g_eax);
     read[6]=20; read[7]=0;

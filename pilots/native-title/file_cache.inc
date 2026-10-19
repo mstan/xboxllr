@@ -91,8 +91,10 @@ static void fsc_store(uint32_t id,uint64_t start,unsigned length,const void *buf
         done+=count;
     }
 }
-static uint32_t fsc_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *buffer,unsigned length,LARGE_INTEGER *offset)
+static uint32_t fsc_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *buffer,unsigned length,LARGE_INTEGER *offset,
+                         struct MediaReadProfile *profile)
 {
+    if(profile)memset(profile,0,sizeof(*profile));
     int eligible=file->cacheable && length;
     LARGE_INTEGER start;
     if (eligible) {
@@ -106,6 +108,7 @@ static uint32_t fsc_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *buffer
     }
     AcquireSRWLockExclusive(&fsc_lock);
     if (eligible && fsc_copy(file->id,(uint64_t)start.QuadPart,length,buffer)) {
+        if(profile)profile->cache_hit=1;
         LARGE_INTEGER next; next.QuadPart=start.QuadPart+length; IO_STATUS_BLOCK position_io={0};
         uint32_t status=(uint32_t)media_nt_set(file->host,&position_io,&next,sizeof(next),14);
         if (!status) { io->Status=0; io->Information=length; fsc_hit_bytes+=length; }
@@ -113,7 +116,18 @@ static uint32_t fsc_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *buffer
     }
     ++fsc_host_reads; ReleaseSRWLockExclusive(&fsc_lock);
     /* No global cache lock while the host performs storage IO. */
+    uint64_t cpu_begin=0;unsigned cpu_available=0;
+    if(profile) {
+        cpu_begin=media_profile_cpu(&cpu_available);
+        profile->called=1;profile->begin=dispatch_monotonic();
+    }
     uint32_t status=(uint32_t)media_nt_read(file->host,NULL,NULL,NULL,io,buffer,length,offset,NULL);
+    if(profile) {
+        profile->end=dispatch_monotonic();
+        unsigned available;uint64_t cpu=media_profile_cpu(&available);
+        profile->cpu_available=available && cpu_available && cpu>=cpu_begin;
+        profile->cpu=profile->cpu_available?cpu-cpu_begin:0;
+    }
     if (!status && eligible && io->Information) {
         AcquireSRWLockExclusive(&fsc_lock);
         fsc_store(file->id,(uint64_t)start.QuadPart,(unsigned)io->Information,buffer);
