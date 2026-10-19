@@ -171,6 +171,8 @@ static void test_graphics_texture_capacity(void)
     for(unsigned pass=0;pass<2;++pass) {
         for(unsigned i=0;i<520;++i) {
             headers[i]=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(headers[i] && test_pool_owned(headers[i]));
+            /* Warm lookup hints before later table growth/reallocation. */
+            CHECK(graphics_textures[graphics_texture_slot(headers[i])].header==headers[i]);
             /* Original XPR writer F86BE/F8763 sets Data bit31, then copies
              * payload bytes with REP MOVS. It must address this same owner. */
             uint32_t data=MEM32(headers[i]+4),cached=data|0x80000000u;
@@ -185,6 +187,13 @@ static void test_graphics_texture_capacity(void)
          * in shared pool pages instead of costing a second page per texture. */
         CHECK(used<=520ull*4096+16*4096);
         fprintf(stderr,"[TEXTURE MEMORY] 520 live textures: %llu guest bytes including headers\n",(unsigned long long)used);
+        /* More live resources than hint entries forces collisions. Reverse
+         * lookup must still find each actual owner after table relocation. */
+        for(unsigned i=520;i--;) {
+            unsigned slot=graphics_texture_slot(headers[i]);
+            CHECK(graphics_textures[slot].header==headers[i]);
+            CHECK(graphics_texture_slot(headers[i])==slot);
+        }
         for(unsigned i=0;i<520;++i) {
             unsigned slot=graphics_texture_slot(headers[i]);uint32_t pixels[16];
             graphics_texture_upload(&graphics_textures[slot],0);

@@ -1,5 +1,54 @@
 # Optimized native Blinx and the HLE register boundary
 
+## Stage 1 entrance texture lookup follow-up
+
+The owner reported visible slowdown around the Stage 1-1 entrance ring while
+audio continued normally. Short isolated observations at adaptive 21:9,
+1080p, FXAA and 8x anisotropy reproduce a graphics-heavy CPU workload. An
+independent eight-second leaf sample includes 21/388 samples in texture-owner
+lookup and 20/388 in deferred-state synchronization. Leaf samples and service
+timings are diagnostic estimates, not exact cycle attribution or GPU timings.
+They do not establish that particles alone cause the slowdown.
+
+Texture lookup now uses a 1 KiB direct-mapped slot hint before the retained
+linear ownership search. Each hit checks the current table capacity and live
+header; it stores neither object pointers nor ownership references. Collisions,
+release/reuse, table relocation and alias replacement retain the original
+lookup semantics. Texture-byte comparisons/uploads and every actual draw,
+visibility query, effect, GPU completion and simulation step remain intact.
+The 520-resource real GPU fixture now warms hints before growth and checks
+reverse lookup across collisions and two complete release/reuse cycles.
+Four graphics ABI/depth/alias/unsupported checks pass in 3.08 seconds.
+
+Sequential observations with profiling and GPU readbacks disabled use the
+same authentic copied QA save, original controller actions and four logical
+CPUs at normal priority. Measurements align to the first initialized spawn
+position, excluding selector/loading time. The 3-16 second windows give:
+
+| Build | CPU ms/game update | Game updates/s | Mean host CPU load |
+| --- | ---: | ---: | ---: |
+| Previous owner build | 39.714 | 24.20 | 50.1% |
+| Texture lookup candidate | 36.751 | 26.50 | 47.7% |
+
+This is about 7.5% less process CPU time per update in this bounded sample,
+not a sustained FPS guarantee. The initial four seconds also improve from
+42.969 to 38.125 CPU ms/update, with differing host load. Both builds still
+have room for improvement. Deferred-state work, draw submission and host
+contention remain follow-ups under `beads-xbox.1.100` / `beads-xbox.1.7.3`;
+the bounded 9/9 correctness scope is unchanged. No hardware was used.
+
+Private evidence is retained under
+`build/blinx/gameplay-coverage-20261017/entrance-perf-001` through `006`.
+`002` missed selector input and was retired without a performance result;
+`003` is the leaf observation; `005`/`006` are the unprofiled comparison.
+All automated children are muted, isolated from owner saves and retired.
+Previous executable SHA256 is
+`207bfa1ebdef0d79158d168096d457a802c73882f5c12c8de37a0f0b94a94129`;
+candidate is
+`8dbd192a42e6f11c1b574e43ca92f383624cedd71a719370d9db60f9bbcb7a59`.
+
+## Earlier compiler and register assessment
+
 The gameplay snapshot was already committed before this work: framework
 `6bb5fc0` and private BlinxRecomp `e2f57af`. Both repositories started clean.
 Work continues on `perf/blinx-native-optimized-20261018`, tracked by

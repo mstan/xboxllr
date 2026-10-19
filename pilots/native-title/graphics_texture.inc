@@ -13,6 +13,10 @@ struct GraphicsTextureObject {
 };
 static struct GraphicsTextureObject *graphics_textures;
 static unsigned graphics_texture_capacity;
+/* A hint into the live ownership table, never another owner or a cached
+ * pointer. Recheck the header on every hit: release/reuse, alias replacement
+ * and realloc must retain exactly the same lookup and lifetime semantics. */
+static unsigned graphics_texture_lookup[256]; /* slot + 1; zero is empty */
 static unsigned graphics_texture_adopt_alias(uint32_t header);
 static int graphics_texture_exposure_cache(void)
 {
@@ -27,9 +31,16 @@ static int graphics_texture_exposure_cache(void)
 
 static unsigned graphics_texture_slot(uint32_t header)
 {
+    unsigned key=((header>>4)^(header>>12))&255;
+    unsigned cached=graphics_texture_lookup[key];
+    if(header && cached && cached<=graphics_texture_capacity &&
+       graphics_textures[cached-1].header==header)return cached-1;
     for(unsigned i=0;i<graphics_texture_capacity;++i)
-        if(graphics_textures[i].header==header && header) return i;
-    return graphics_texture_adopt_alias(header);
+        if(graphics_textures[i].header==header && header) {
+            graphics_texture_lookup[key]=i+1;return i;
+        }
+    unsigned slot=graphics_texture_adopt_alias(header);
+    graphics_texture_lookup[key]=slot+1;return slot;
 }
 static unsigned graphics_texture_unused(void)
 {
