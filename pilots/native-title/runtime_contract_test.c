@@ -167,6 +167,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_fp_contract_test.inc"
 #include "thread_scheduler_contract_test.inc"
 #include "event_objects_contract_test.inc"
+#include "mutant_objects_contract_test.inc"
 #ifdef PILOT_EVENT_TIMER_LLE
 #include "event_timer_lle_contract_test.inc"
 #include "callback_kernel_lle_contract_test.inc"
@@ -803,6 +804,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"thread-fp")) { test_thread_fp(); return 0; }
         if (!strcmp(argv[1],"thread-lifetimes")) { test_thread_lifetimes(); return 0; }
         if (!strcmp(argv[1],"events")) { test_event_objects(); return 0; }
+        if (!strcmp(argv[1],"mutants")) { test_mutant_objects();return 0; }
+        if (!strcmp(argv[1],"mutants-dpc233")) { test_mutant_dpc_wait(0);return 1; }
+        if (!strcmp(argv[1],"mutants-dpc234")) { test_mutant_dpc_wait(1);return 1; }
 #ifdef PILOT_EVENT_TIMER_LLE
         if (!strcmp(argv[1],"event-timer-lle")) { test_event_timer_lle(); return 0; }
         if (!strcmp(argv[1],"timer-dpc-lle")) { test_timer_dpc_lle(); return 0; }

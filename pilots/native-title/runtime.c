@@ -902,6 +902,8 @@ static void kernel_dispatch_impl(void)
 #endif
     case 190: case 198: case 202: case 207: case 211: case 218: case 219: case 226: case 236: media_kernel(next_kernel_ordinal); return;
     case 186: case 189: case 209: case 225: case 233: case 234: event_kernel(next_kernel_ordinal);return;
+    case 192:case 213:case 221:mutant_kernel(next_kernel_ordinal);return;
+    case 235:wait_multiple_kernel();return;
     case 97: g_eax=dispatch_cancel_timer(MEM32(g_esp+4)); g_esp+=8; return;
     case 108: {
         uint32_t va=MEM32(g_esp+4),type=MEM32(g_esp+8),state=MEM32(g_esp+12);
@@ -963,7 +965,7 @@ static void kernel_dispatch_impl(void)
         ExitThread(MEM32(g_esp+4));
     case 187: {
         uint32_t handle=MEM32(g_esp+4),slot=handle&63u;
-        if((handle&0xf0000000u)==0x30000000u){g_eax=event_close(handle);g_esp+=8;return;}
+        if((handle&0xf0000000u)==0x30000000u){g_eax=wait_close(handle);g_esp+=8;return;}
         if ((handle&0xf0000000u)==0x60000000u) {
             g_eax=namespace_close(handle); g_esp+=8; return;
         }

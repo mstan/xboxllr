@@ -29,6 +29,6 @@ static void test_event_objects(void)
         call_kernel(209,query,2);CHECK(g_eax==0xc0000008u);
         call_kernel(187,&id,1);CHECK(g_eax==0xc0000008u);
     }
-    CHECK(!event_handles && GetProcessHandleCount(GetCurrentProcess(),&after) && before==after);
+    CHECK(!wait_handles && GetProcessHandleCount(GetCurrentProcess(),&after) && before==after);
     fprintf(stderr,"PASS: actual native event objects, manual/auto reset, previous state, query, NT deadlines, retained object lifetime and no handle growth\n");
 }

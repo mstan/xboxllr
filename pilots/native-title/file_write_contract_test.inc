@@ -92,6 +92,6 @@ static void test_storage_async(const char *directory)
     uint32_t wait[]={file,0,timeout};call_kernel(233,wait,3);CHECK(g_eax==0xc0000022u); /* no SYNCHRONIZE */
     call_kernel(187,&file,1);CHECK(!g_eax);CHECK(DeleteFileA(path));
     for(unsigned i=0;i<256;++i)CHECK(!media_files[i].host && !media_files[i].pending && !media_files[i].async_idle && !media_files[i].async_signal);
-    CHECK(!event_handles);
+    CHECK(!wait_handles);
     puts("async writes: real persisted bytes, optional events/file waits, exact EOF/offsets, retained completion, access and32 lifetimes passed");
 }

@@ -54,7 +54,7 @@ static void test_media_async(const unsigned char *content,unsigned length)
     call_kernel(187,&event,1);CHECK(!g_eax);
     call_kernel(187,&file,1);CHECK(!g_eax);
     CHECK(WaitForSingleObject(retained,5000)==WAIT_OBJECT_0 && !MEM32(iosb) && MEM32(iosb+4)==length);
-    CHECK(CloseHandle(retained) && !event_handles);
+    CHECK(CloseHandle(retained) && !wait_handles);
     for(unsigned i=0;i<256;++i)CHECK(!media_files[i].host && !media_files[i].pending && !media_files[i].async_idle);
     fprintf(stderr,"PASS: real async movie reads, event/IOSB/data ordering, EOF, nonbuffered short read, 64 close/reopen drains and retained completion lifetime\n");
 }
