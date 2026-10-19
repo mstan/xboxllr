@@ -165,6 +165,9 @@ static void graphics_original_callback_dpc(void);
 #ifndef PILOT_IO_DEVICE_LLE
 #include "kernel_shutdown.inc"
 #endif
+#ifdef PILOT_OPTICAL_EMPTY_NATIVE
+#include "optical_empty.inc"
+#endif
 #ifdef PILOT_STARTUP_NATIVE
 #include "startup.inc"
 #endif
@@ -785,6 +788,9 @@ static void kernel_dispatch_impl(void)
     if(files_lle_kernel(next_kernel_ordinal))return;
 #endif
     if(kernel_rwlock_dispatch(next_kernel_ordinal))return;
+#ifdef PILOT_OPTICAL_EMPTY_NATIVE
+    if(kernel_optical_dispatch(next_kernel_ordinal))return;
+#endif
 #ifdef PILOT_KERNEL_CLOCK_NATIVE
     if(kernel_clock_dispatch(next_kernel_ordinal))return;
 #endif
@@ -881,6 +887,9 @@ static void kernel_dispatch_impl(void)
     case 184: case 199: case 204: case 217: vm_kernel(next_kernel_ordinal); return;
 #ifndef PILOT_FILES_LLE
     case 210: media_kernel(next_kernel_ordinal); return;
+#endif
+#ifdef PILOT_OPTICAL_EMPTY_NATIVE
+    case 91: media_kernel(next_kernel_ordinal); return;
 #endif
     case 190: case 198: case 202: case 207: case 211: case 218: case 219: case 226: case 236: media_kernel(next_kernel_ordinal); return;
     case 186: case 189: case 209: case 225: case 233: case 234: event_kernel(next_kernel_ordinal);return;
@@ -1261,6 +1270,9 @@ int main(int argc,char **argv)
 #endif
     }
     load_image(argv[1]);
+#ifdef PILOT_OPTICAL_EMPTY_NATIVE
+    kernel_optical_initialize();
+#endif
 #ifdef PILOT_KERNEL_CLOCK_NATIVE
     /* One immutable native epoch serves PM/TSC queries, timers and tick data.
      * Initialize outside the clock lock; the dispatcher owns its own startup. */

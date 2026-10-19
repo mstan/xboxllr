@@ -25,7 +25,8 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 | Native shutdown registration | Original list comparison, independent review and optimized integrated CTest pass; actual boot now passes ordinal 47 |
 | Native kernel clock | Tick data, PM performance queries and native TSC share one epoch; integrated clock CTest passes and actual boot now passes CRT constructors |
 | Named file metadata | Original 56-byte ABI, confined host queries and failure preservation tested/reviewed; native-only dispatch integrated; actual title call not yet reached |
-| Latest actual native boot | Reaches dashboard main initialization (1,514 entries); guarded at IoDismountVolumeByName, ordinal 91 |
+| Empty optical owner | Explicit dashboard policy; original-software comparison, independent remap review and integrated CTest pass; existing media/async contracts also pass |
+| Latest actual native boot | Passes drive initialization and reaches 1,517 entries; guarded at factory AV-region setting index `0x103` |
 | Driver incremental admission | 25 authored checks pass; selected families, actual admissions and failed-bind state are checked before configure/build/run |
 | Menu rendering/input/audio/performance | Unverified |
 | Credits asset mod under native execution | Pending native baseline; old full-machine evidence does not transfer automatically |
@@ -57,7 +58,7 @@ registration has real guest links and retained callback ownership; callback
 delivery and firmware transitions remain guarded. See
 [shutdown scope](NATIVE-KERNEL-SHUTDOWN.md).
 
-The current executable is
+The clock/metadata executable is
 `dbf4492863fe99cce0268ce787e172dd31d413703af0bfc6392e8fa2be2b6f7e`.
 It uses the shared native clock: PM performance queries run at 3,375,000 Hz;
 native TSC runs at 733,333,333 Hz; volatile millisecond tick publication has an
@@ -67,6 +68,21 @@ reaches dashboard main initialization and stops at `IoDismountVolumeByName`
 [clock scope](NATIVE-KERNEL-CLOCK.md) and
 [metadata scope](NATIVE-FILE-METADATA-2026-10-19.md).
 
+The current optimized executable is
+`4b42152c913603d4bb70dc8f0461bdcdbe338bbe2072a4b152f77b528ca098a8`.
+It selects the shared immutable empty-drive policy: tray state `0x10`, change
+count zero, and an absent optical-volume error for dismount. Integrated optical,
+clock and shutdown tests pass. The extracted production path resolver also
+passes existing metadata, directory, async-read and handle-lifetime contracts.
+The first candidate admitted only the device-name form; the actual caller uses
+`\??\CdRom0:`. Additional original-kernel calls establish that this DOS name
+also is absent, without an existing symbolic link. The corrected native run
+passes ordinal 91 and the tray query, then reaches `2dd20 -> 6c56b -> 7c010`.
+It stops at the factory AV-region setting (`ExQueryNonVolatileSetting`, index
+`0x103`), outside the existing user-setting implementation. No menu or
+performance result is implied.
+See [empty optical scope](NATIVE-EMPTY-OPTICAL-2026-10-19.md).
+
 Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original
 generation/preparation receipts remain available there. Temporary compiler
@@ -74,13 +90,14 @@ scratch is on Z; original dashboard content remains read-only.
 
 ## Remaining service inventory
 
-An exact source audit of all 160 imports after shutdown-registration integration
-finds **81 bounded native owners, 15 imports available only through disabled LLE
-paths, and 64 absent imports**. That leaves 79 gaps: 71 functions and eight data
-exports. This supersedes the earlier conservative 61-import subset. Source
+An exact source audit of all 160 imports after empty-optical integration finds
+**87 bounded native owners, 15 imports available only through disabled LLE paths,
+and 58 absent imports**. That leaves 73 gaps: 66 functions and seven data exports.
+This supersedes the earlier conservative 61-import subset. Source
 ownership does not establish full API conformance or that execution reached it.
-The source-hashed private audit is retained alongside the build; ongoing clock
-work is not yet counted as an admission in this snapshot.
+The source-hashed private audit is retained alongside the build; the older
+post-shutdown snapshot remains unchanged. A bounded source owner is distinct
+from an API reached by actual title execution.
 
 This inventory does not require every optional path before an owner menu preview.
 Implement coherent families when execution or a documented caller requires
@@ -88,21 +105,21 @@ them; keep unexercised DVD, network and firmware operations deferred.
 
 | Family | Remaining imports | Foundation / required distinction |
 |---|---|---|
-| Clock and scheduling | 99, 126, 127, 238; data 156 | Shared clocks and scheduler; 64-bit EDX:EAX returns and observable tick storage |
+| Clock and scheduling | 99, 238 | Shared clocks now exist; delay/APC semantics and ready-thread yielding remain guarded |
 | Handle synchronization | 192, 193, 221, 222, 230, 235; data 16 | Extend actual handle ownership; semaphore/mutant state and atomic signal/wait |
 | Named objects | 247 | Shared namespace; qualify object identity and lifetime |
-| File metadata/lifetime | 210, 195, 91, 196, 200; data 40 | Confined host metadata, volume/cache ownership and actual device-control contracts |
+| File metadata/lifetime | 195, 196, 200; data 40 | Named metadata and absent optical-volume handling now exist; deletion, mounted volume/cache ownership and device-control contracts remain |
 | System memory | 167, 172, 173, 175 | Shared VM budget and ownership; distinguish system and contiguous allocations |
 | Strings/memory | 260, 308, 313, 269 | Encoding, allocation ownership and matched-byte-count contracts |
 | Diagnostics/exceptions | 8, 302, 312, 95 | Logging and real exception ownership; bugcheck remains fatal |
-| Board/settings/power | 9, 25, 29, 44, 49, 228, 358, 360, 365; data 41, 42 | Explicit virtual-device identity; firmware/persistent writes stay guarded |
+| Board/settings/power | 25, 29, 44, 49, 228, 358, 360, 365; data 41, 42 | Immutable empty tray now exists; other virtual-device identity and firmware/persistent writes stay guarded |
 | AV/GPU kernel bridge | 2, 3, 168 | Shared native renderer exists; original device exports need separate ownership |
 | Crypto/integrity | 338, 339, 344, 345, 346, 347, 349; data 353, 355 | Existing SHA/HMAC; qualify cipher/RSA/key ownership separately |
 | Driver/IRP/interrupt | 46, 62, 65, 74, 81, 83, 84, 85, 86, 87, 98, 100, 109, 129, 151, 153, 160, 161, 176, 359; data 357 | Coherent device and request ownership; no general driver admission yet |
 | Floating-point context | 139, 142 | Preserve modeled guest state, not just host registers |
 | Network hardware | 252, 253 | Defer until reached; no invented PHY/link success |
 
-The eight unimplemented data exports are 16, 40, 41, 42, 156, 353, 355 and 357.
+The seven unimplemented data exports are 16, 40, 41, 42, 353, 355 and 357.
 They need explicit data/ownership admission; the existing default callable thunk
 is not an implementation of a data export. Ordinal 347 is callable, not data.
 ABI classification was checked against local nxdk kernel definitions.

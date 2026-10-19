@@ -42,9 +42,10 @@ static uint32_t namespace_close(uint32_t id)
     }
     ReleaseSRWLockExclusive(&media_lock); return status;
 }
-static uint32_t namespace_resolve(const char *input,char output[1024])
+static uint32_t namespace_resolve_checked(const char *input,char output[1024],void (*inspect)(const char *))
 {
     if (strlen(input)>=1024) return 0xc0000033u;
+    if(inspect)inspect(input);
     if (input[0] && input[1]==':') snprintf(output,1024,"\\??\\%s",input);
     else strcpy(output,input);
     for (unsigned depth=0;depth<32;++depth) {
@@ -60,9 +61,14 @@ static uint32_t namespace_resolve(const char *input,char output[1024])
         size_t tail=strlen(output+prefix);
         if (target+tail>=sizeof(next)) return 0xc0000033u;
         memcpy(next,namespace_links[best].target,target); memcpy(next+target,output+prefix,tail+1);
+        if(inspect)inspect(next);
         strcpy(output,next);
     }
     return 0xc0000039u; /* bounded cycle/depth failure, never invent a destination */
+}
+static uint32_t namespace_resolve(const char *input,char output[1024])
+{
+    return namespace_resolve_checked(input,output,NULL);
 }
 static void namespace_kernel(unsigned ordinal)
 {
