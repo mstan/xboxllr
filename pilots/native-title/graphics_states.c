@@ -25,6 +25,8 @@ int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
 {
     uint32_t host,converted=value;
     switch(state) {
+    case 65:case 112:case 117:case 137:case 142:case 149:
+        return pilot_gfx_initializer_set(state,value);
     case 150:return pilot_gfx_logic_op(value);
     case 159:
         /* Preserve the caller's boolean cache contract using native compressed

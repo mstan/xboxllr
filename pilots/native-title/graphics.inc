@@ -370,6 +370,9 @@ static void graphics_dispatch_impl(unsigned entry)
         if(pilot_verbose)fprintf(stderr,"[D3D SIMPLE] method=%08x value=%08x\n",g_ecx,g_edx);
         graphics_simple_state(g_ecx,g_edx); break;
     case PILOT_D3D_D3DDevice_SetRenderState_CullMode:graphics_render_state(147,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_ZBias:graphics_render_state(149,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_NormalizeNormals:graphics_render_state(142,arguments[0],1);break;
+    case PILOT_D3D_D3DDevice_SetRenderState_VertexBlend:graphics_render_state(137,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_ZEnable:graphics_render_state(143,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_StencilEnable:graphics_render_state(144,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_StencilFail:graphics_render_state(145,arguments[0],1);break;

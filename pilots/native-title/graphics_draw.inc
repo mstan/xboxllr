@@ -157,6 +157,8 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
         }
     }
     graphics_draw_profile_step(&profile,2);
+    if(!pilot_gfx_initializer_consumer((shader&1)!=0,primitive,shader))
+        stop("unqualified initializer state consumer",shader);
     graphics_sync_deferred();
     graphics_draw_profile_step(&profile,3);
     float mod_x_scale=1,mod_x_anchor=0;

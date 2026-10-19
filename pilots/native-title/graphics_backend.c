@@ -78,6 +78,9 @@ static ID3D11Texture2D *pilot_surfaces[3];
 static unsigned pilot_surface_refs[3];
 static ID3D11DepthStencilView *pilot_default_depth;
 static uint32_t pilot_color_target,pilot_depth_target;
+static struct PilotInitializerState pilot_initializer;
+static uint32_t pilot_default_color_format;
+static int pilot_initializer_target_format(void);
 struct PilotImageUse;
 struct PilotNativeTexture {
     IDirect3DTexture8 *object;
@@ -231,6 +234,7 @@ void pilot_gfx_close(void)
     }
     if(pilot_default_depth){ID3D11DepthStencilView_Release(pilot_default_depth);pilot_default_depth=NULL;}
     pilot_color_target=pilot_depth_target=0;
+    memset(&pilot_initializer,0,sizeof(pilot_initializer));pilot_default_color_format=0;
 #ifdef PILOT_D3D_PHOBOS
     pilot_guest_resolve_close();
 #endif
@@ -262,6 +266,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     if(pilot_device)return E_INVALIDARG;
     int32_t validation=pilot_gfx_parameters(p);if(validation<0)return validation;
     if(!pilot_presentation_parse(p,&pilot_presentation))return E_INVALIDARG;
+    pilot_initializer.precision_policy=PILOT_COLOR_NATIVE_RGBA8;pilot_default_color_format=p[2];
     WNDCLASSW window_class={0}; window_class.lpfnWndProc=pilot_window_proc;
     window_class.hInstance=GetModuleHandleW(NULL); window_class.lpszClassName=L"xlle-native-reference";
     if (!RegisterClassW(&window_class) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return HRESULT_FROM_WIN32(GetLastError());
@@ -400,7 +405,8 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
         !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM;
     pilot_blend_default_depth_shape=pilot_surfaces[2] && pilot_blend_depth_shape(pilot_surfaces[2],0);
     pilot_blend_transient=pilot_blend_transient_proof=0;
-    pilot_color_target=0;pilot_depth_target=next.depth?UINT32_MAX:0;
+    pilot_color_target=0;pilot_depth_target=next.depth?UINT32_MAX:0;pilot_default_color_format=p[2];
+    memset(&pilot_initializer,0,sizeof(pilot_initializer));pilot_initializer.precision_policy=PILOT_COLOR_NATIVE_RGBA8;
     pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
     /* Guest Reset reallocates console presentation storage. The host window
      * belongs to the player: preserve its size, position and maximized state.
@@ -752,6 +758,7 @@ void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void 
 }
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
+    if(pilot_initializer.dither && color && !pilot_initializer_format(pilot_texture(color)->d3d8_format))return E_NOTIMPL;
     pilot_sampling_views_dirty=15;
 #ifndef PILOT_D3D_PHOBOS
     for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i]) {
@@ -1084,6 +1091,8 @@ void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf)
 {
     if (!pilot_device) return E_FAIL;
+    if((pilot_initializer.controls || pilot_initializer.dither) &&
+       !pilot_gfx_initializer_consumer(0,primitive==4?5:primitive==5?6:0,fvf))return E_NOTIMPL;
     pilot_gfx_shader_fixed_binding();
 #ifdef PILOT_D3D_PHOBOS
     pilot_donor_blend_candidate(0);
@@ -1139,6 +1148,7 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     pilot_donor_blend_candidate(0);
 #endif
     if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
+    if(pilot_initializer.dither && !pilot_initializer_target_format())return E_NOTIMPL;
     uint32_t feedback=pilot_feedback_validate();
     D3D11_PRIMITIVE_TOPOLOGY topology;
     if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -1349,4 +1359,41 @@ int pilot_gfx_multisample(unsigned enable,uint32_t mask)
 {
     if(!pilot_device || enable!=1 || mask!=UINT32_MAX)return 0;
     return pilot_presentation.sample_type==0x11 || pilot_presentation.sample_type==0x2222;
+}
+
+/* Only native RGBA8 quantization is admitted. Dither requests remain visible
+ * under that explicit approximation policy; no ignored donor enum is used. */
+static int pilot_initializer_target_format(void)
+{
+    return pilot_initializer_format(pilot_color_target?
+        pilot_texture(pilot_color_target)->d3d8_format:pilot_default_color_format);
+}
+static int pilot_initializer_zero_bias(void)
+{
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();ID3D11RasterizerState *old=NULL;
+    ID3D11DeviceContext_RSGetState(context,&old);
+    if(!old)return 1; /* D3D11's actual default has all three coefficients zero. */
+    D3D11_RASTERIZER_DESC desc;ID3D11RasterizerState_GetDesc(old,&desc);ID3D11RasterizerState_Release(old);
+    if(!desc.DepthBias && desc.DepthBiasClamp==0 && desc.SlopeScaledDepthBias==0)return 1;
+    desc.DepthBias=0;desc.DepthBiasClamp=desc.SlopeScaledDepthBias=0;
+    ID3D11RasterizerState *zero=NULL;
+    HRESULT result=ID3D11Device_CreateRasterizerState(d3d8_GetD3D11Device(),&desc,&zero);
+    if(FAILED(result))return 0;
+    ID3D11DeviceContext_RSSetState(context,zero);ID3D11RasterizerState_Release(zero);return 1;
+}
+int pilot_gfx_initializer_set(uint32_t state,uint32_t value)
+{
+    if(!pilot_device || !pilot_initializer_value(state,value))return 0;
+    if(state==65 && value && !pilot_initializer_target_format())return 0;
+    if(state==149 && !pilot_initializer_zero_bias())return 0;
+    return pilot_initializer_observe(&pilot_initializer,state,value);
+}
+int pilot_gfx_initializer_snapshot(struct PilotInitializerState *out)
+{
+    if(!pilot_device || !out)return 0;*out=pilot_initializer;return 1;
+}
+int pilot_gfx_initializer_consumer(unsigned program,uint32_t primitive,uint32_t fvf)
+{
+    if(!pilot_device || !pilot_initializer_consumer(program,primitive,fvf))return 0;
+    return !pilot_initializer.dither || pilot_initializer_target_format();
 }

@@ -13,7 +13,12 @@ static void graphics_render_state(uint32_t state,uint32_t value,int cache)
         fprintf(stderr,"[D3D STATE] state=%u value=%08x\n",state,value);
         stop("unqualified render-state value",state);
     }
-    if(cache)MEM32(PILOT_D3D_RENDER_STATES+4*state)=value;
+    if(cache) {
+        if(state==65 || state==112 || state==117 || state==137 || state==142 || state==149) {
+            if(!pilot_initializer_cache((uint32_t*)(memory+PILOT_D3D_RENDER_STATES),166,state,value))
+                stop("invalid initializer cache update",state);
+        } else MEM32(PILOT_D3D_RENDER_STATES+4*state)=value;
+    }
 }
 static void graphics_texture_state(uint32_t stage,uint32_t state,uint32_t value,int cache)
 {
@@ -53,18 +58,7 @@ static void graphics_state_init(void)
 static void graphics_simple_state(uint32_t method,uint32_t value)
 {
     uint32_t state;
-    switch(method) {
-    case 0x40300:state=60;break; case 0x40304:state=59;break;
-    case 0x4033c:state=58;break; case 0x40340:state=61;break;
-    case 0x40344:state=62;break; case 0x40348:state=63;break;
-    case 0x40350:state=74;break; case 0x40354:state=57;break;
-    case 0x40358:state=67;break; case 0x4035c:state=64;break;
-    case 0x40360:state=73;break; case 0x40364:state=70;break;
-    case 0x40368:state=71;break; case 0x4036c:state=72;break;
-    case 0x40370:state=145;break; case 0x40374:state=68;break;
-    case 0x40378:state=69;break; case 0x4037c:state=66;break;
-    default:stop("unqualified simple graphics packet",method);
-    }
+    if(!pilot_graphics_simple_decode(method,&state))stop("unqualified simple graphics packet",method);
     graphics_render_state(state,value,0);
 }
 static void graphics_sync_deferred(void)

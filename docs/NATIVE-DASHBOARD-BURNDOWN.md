@@ -11,9 +11,10 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 ## Playtest delivery burndown
 
 The latest actual native run passes network startup and the cached-update
-query and creates the native graphics device with the requested Gaussian raster
-and optional-depth contract. The next guarded operation is a dither-enable
-packet in original graphics setup. No native menu frame has been captured. This is implementation work; original hardware
+query, creates the requested Gaussian graphics device, completes graphics
+initializer state setup and loads the initial `default.xip` assets. The next
+guarded operation is an offline network call at `00130746`. No native menu
+frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
 functions execute.
@@ -24,7 +25,8 @@ functions execute.
 | Reached platform startup services | Done for current startup | Clocks, shutdown registration, file metadata, drive ownership, empty optical drive, settings and absent keyboard pass actual execution |
 | Offline network initialization | Done for bounded lifecycle | Native startup passes; real host lifetime and unsupported consumer guards are retained |
 | Offline cached-update handling | Passed for absent mounted cache | Actual read-only probe finds absence and query returns the original no-update result; existing cache formats remain guarded |
-| First rendered native menu | Current blocker | Actual device creation and guest surface setup pass; surrounding render-state setup needs native admission |
+| Graphics initialization and initial assets | Passed in actual startup | Native state setup returns and the original dashboard loads `default.xip`; exact RGBA8 dithering remains an explicit precision deferral |
+| First rendered native menu | Current blocker | Initial assets load; reached offline network operation `00130746` requires a bounded contract |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -34,6 +36,9 @@ menu and exposes the remaining runtime dependencies. Do not treat the current
 guard as the last blocker. Optional online/DVD/firmware paths and public-release
 licensing remain separately deferred; not every missing kernel import is a
 prerequisite for the offline menu.
+The [native-title deferral ledger](NATIVE-TITLE-DEFERRALS.md) records precision
+questions and deliberately unavailable enhancements separately from this
+delivery burndown.
 
 ## Current evidence
 
@@ -60,7 +65,8 @@ prerequisite for the offline menu.
 | Additional absent input classes | Exact profile-owned keyboard object; original query comparison, independent review and modern/legacy integrated CTest pass; actual dashboard passes enumeration |
 | Offline native network lifecycle | Startup/cleanup and real host reference ownership implemented and reviewed; actual startup now passes without entering the original NIC/raw-disk stack; other network operations remain guarded |
 | D3D creation and presentation surfaces | Actual native device creates the 1280x960 raster; guest surface allocation/projection setup returns. Real Gaussian pixels, optional depth and legacy visual mods pass focused GPU checks |
-| Latest actual native boot | Reaches guarded simple packet `00040310` inside original `2C660`, after successful graphics creation; no captured frame |
+| Initializer-state component and integration | Passed | Real zero raster bias, original cache roles, tracked native precision, inactive consumer bounds and Reset ownership; five combined CTests pass in 6.53 seconds |
+| Latest actual native boot | Passes graphics initialization and initial `default.xip` loading; stops at offline network operation `00130746` after 186,936 native entries; no captured frame |
 | Driver incremental admission and QA launches | 31 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
@@ -210,7 +216,7 @@ storage regressions pass together in 0.65 seconds; the narrow fix also passes
 independent review. Earlier Win32-root evidence is retained with a private
 supersession record.
 
-The current optimized executable is
+The cached-update executable was
 `eb97515fe0f7da49febfd5d89d1b2920e81f18bd116e1fd13da77b953195b873`.
 Run `20261019-131757-mib9tn_r` obtains genuine CACHE absence and passes the
 cached-update query into `2ccf0` graphics initialization. Device creation receives
@@ -226,6 +232,20 @@ Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original
 generation/preparation receipts remain available there. Temporary compiler
 scratch is on Z; original dashboard content remains read-only.
+
+The presentation candidate `f108a9cd...` subsequently creates the requested
+1280x960 raster and guest surfaces, then stops at dither packet `00040310` in
+original `2c660`. The next candidate is
+`c8b7f766fbf653485db6e685328ccf7c9a0363a6603a7c66149a415a3de20ed9`.
+Run `20261019-142602-dexjff80` passes that initializer, loads the original XIPS
+section and `default.xip` assets, and reaches an explicit offline-network guard
+at `00130746` after 186,936 native function entries. It exits 2 before the
+20-second deadline with no captured frame. Entry count includes repeat calls;
+it is not a unique-function coverage metric. The native build contains no
+CPU interpreter fallback. The initializer and existing presentation/visual
+checks pass together: five CTests, 6.53 seconds. See
+[initializer scope](NATIVE-GRAPHICS-INITIALIZER-2026-10-19.md) for the precision
+approximation and retained guards. This is still not a menu or performance pass.
 
 ## Remaining service inventory
 
@@ -274,15 +294,14 @@ behavior remains implementation work in `.1.137`.
 
 ## Delivery order
 
-Credits remain a title-owned mod. The previous private XIP transforms can be
-reused, but replacing archives alone would fail the original XIPS integrity
-table. The current native title-mod interface has no asset or section-provider
-hook. After the native baseline, implement a shared, manifest-bound content/data
-section provider (or a separately reviewed authenticated XAP transformation
-boundary), preserving original XBE identity, executable bodies, real section
-load/lifetime and hash checks. Do not adopt the old modified XBE under the
-original native-body profile. Native Credits navigation and ordinary menu
-regression remain separate acceptance checks.
+Credits remain a title-owned mod. The shared, exact-image
+[section-data provider](NATIVE-SECTION-MODS.md) now supplies a separate loader
+view for the revised XIPS data while preserving original XBE identity and
+executable bodies. Preload, deferred reload, boundary-page ownership and the
+actual private registry admission pass; the revised archives and registry are
+prepared in an isolated content/state stage. Enable that stage after the native
+baseline works, then validate actual Credits navigation and ordinary menus.
+The old modified XBE is not admitted under the original native-body profile.
 
 The framework is XboxLLR. Its eventual releases contain the recompiler tool and
 the dashboard application. Blinx remains a separate repository with a tested
