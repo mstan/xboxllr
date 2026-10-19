@@ -357,3 +357,16 @@ Reopen this part of GFX-D02 when a supported draw consumes that vector through
 reflection, an actual register/context consumer reaches it, or output identifies
 a mismatch. Implement that consumer before accepting its route. This extends
 the existing state/shader-profile question; it creates no new ID or G05 waiver.
+
+
+## GFX-D25 addendum: reached dashboard semantic SAVE
+
+The stock dashboard boot now reaches SAVE during target2 graphics suspension.
+The HLE build preserves a real per-instance context capsule, not stale source
+bytes; strict SAVE rejection remains. Raw unknown prefix bytes lose their
+initialized bits and are rejected by CPU/GPU consumers. Only established
+surface projections are serialized; the eight constant anomalies remain
+unresolved. See [HLE context transport](../../docs/HLE-CONTEXT-TRANSPORT.md).
+Reopen exact raw mapping when an actual saved-byte consumer is reached, a
+validated mapping contradicts semantic state, or an unsupported context-local
+field becomes necessary. This adds no silicon timing or netplay claim.

@@ -25,6 +25,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -110,7 +111,7 @@ public:
         : fault_([this, sink=std::move(fault)](const std::string& why) {
               // A returning diagnostic callback must not let a failed loaded
               // method execute subsequent commands using its preceding state.
-              if(pgraph_loaded_context_ && pgraph_executing_) pgraph_method_faulted_=true;
+              if((pgraph_loaded_context_ || hle_context_transport_started_) && pgraph_executing_) pgraph_method_faulted_=true;
               sink(why);
           }), renderer_(renderer), pramin_(0x100000, 0),
           pramin_initialized_(0x100000 / 64, 0), methods_(4096) {}
@@ -396,6 +397,8 @@ public:
         uint32_t last_parameter = 0;
     };
     ClassMethodStat class_method_stat(uint8_t object_class, uint32_t method) const;
+    uint16_t debug_hle_default_w_eligibility() const { return hle_cold_default_w_; }
+    size_t hle_saved_context_count() const { return saved_contexts_.size(); }
     uint64_t image_blit_copies() const { return image_blit_copies_; }
     uint64_t image_blit_bytes() const { return image_blit_bytes_; }
     uint32_t last_image_blit_source() const { return last_image_blit_source_; }
@@ -2744,19 +2747,19 @@ private:
     std::function<uint8_t*(uint32_t, size_t)> mem_direct_;
     // NV097 Z-pass reporting: CPU reference for the bounded single-sample
     // generic rasterizer. Report writes follow actual ordered raster work.
-    std::array<uint32_t, 8> report_dma_{};
-    std::array<bool, 8> report_dma_bound_{};
-    bool zpass_enabled_ = false;
-    bool zpass_valid_ = true;
-    uint32_t zpass_count_ = 0;
-    std::array<uint32_t, 8> semaphore_dma_{};
-    std::array<uint32_t, 8> semaphore_offset_{};
-    std::array<uint32_t, 8> object_instance_{};
-    std::array<uint8_t, 8> object_class_{};
+    std::array<uint32_t, 8>& report_dma_=context_state_.report_dma_;
+    std::array<bool, 8>& report_dma_bound_=context_state_.report_dma_bound_;
+    bool& zpass_enabled_=context_state_.zpass_enabled_;
+    bool& zpass_valid_=context_state_.zpass_valid_;
+    uint32_t& zpass_count_=context_state_.zpass_count_;
+    std::array<uint32_t, 8>& semaphore_dma_=context_state_.semaphore_dma_;
+    std::array<uint32_t, 8>& semaphore_offset_=context_state_.semaphore_offset_;
+    std::array<uint32_t, 8>& object_instance_=context_state_.object_instance_;
+    std::array<uint8_t, 8>& object_class_=context_state_.object_class_;
     uint64_t semaphore_writes_ = 0;
-    uint8_t flip_read_ = 0;
-    uint8_t flip_write_ = 0;
-    uint8_t flip_modulo_ = 0;
+    uint8_t& flip_read_=context_state_.flip_read_;
+    uint8_t& flip_write_=context_state_.flip_write_;
+    uint8_t& flip_modulo_=context_state_.flip_modulo_;
     bool waiting_for_flip_ = false;
     bool waiting_for_nop_ = false;
     bool pgraph_fifo_access_ = true;
@@ -2779,7 +2782,7 @@ private:
     bool pgraph_context_pointer_initialized_ = false;
     bool pgraph_context_reset_seen_ = false;
     bool pgraph_context_cache_invalidated_ = false;
-    std::unique_ptr<Nv2aContextImage> pgraph_loaded_context_;
+    std::optional<Nv2aContextImage>& pgraph_loaded_context_=context_state_.pgraph_loaded_context_;
     bool pgraph_method_faulted_ = false;
     enum ContextField : uint64_t {
         kContextClearColor=1ull<<0, kContextClearZeta=1ull<<1,
@@ -2794,20 +2797,25 @@ private:
         kContextZpassCount=1ull<<19, kContextPatternColor=1ull<<20,
         kContextFixedMaterialSource=1ull<<21,
     };
-    uint64_t context_known_ = 0;
-    uint32_t context_fixed_known_=0;
-    uint8_t context_objects_known_ = 0, context_semaphore_dma_known_ = 0,
-            context_semaphore_offset_known_ = 0;
-    std::array<uint32_t, kRasterStateWords> context_raster_known_{};
-    std::array<uint8_t,136> context_program_known_{};
-    std::array<uint8_t,192> context_constants_known_{};
-    uint16_t context_vertex_format_known_=0, context_vertex_offset_known_=0;
-    std::array<uint8_t,16> context_vertex_current_known_{};
-    std::vector<std::array<uint8_t,16>> context_immediate_known_,context_inline_known_;
-    uint8_t context_viewport_scale_known_=0, context_viewport_offset_known_=0;
-    ContextInitializerState context_initializers_;
+    uint64_t& context_known_=context_state_.context_known_;
+    uint32_t& context_fixed_known_=context_state_.context_fixed_known_;
+    uint8_t& context_objects_known_=context_state_.context_objects_known_;
+    uint8_t& context_semaphore_dma_known_=context_state_.context_semaphore_dma_known_;
+    uint8_t& context_semaphore_offset_known_=context_state_.context_semaphore_offset_known_;
+    std::array<uint32_t, kRasterStateWords>& context_raster_known_=context_state_.context_raster_known_;
+    std::array<uint8_t,136>& context_program_known_=context_state_.context_program_known_;
+    std::array<uint8_t,192>& context_constants_known_=context_state_.context_constants_known_;
+    uint16_t& context_vertex_format_known_=context_state_.context_vertex_format_known_;
+    uint16_t& context_vertex_offset_known_=context_state_.context_vertex_offset_known_;
+    std::array<uint8_t,16>& context_vertex_current_known_=context_state_.context_vertex_current_known_;
+    std::vector<std::array<uint8_t,16>>& context_immediate_known_=context_state_.context_immediate_known_;
+    std::vector<std::array<uint8_t,16>>& context_inline_known_=context_state_.context_inline_known_;
+    uint8_t& context_viewport_scale_known_=context_state_.context_viewport_scale_known_;
+    uint8_t& context_viewport_offset_known_=context_state_.context_viewport_offset_known_;
+    ContextInitializerState& context_initializers_=context_state_.context_initializers_;
     bool hle_blit_selectors_reported_=false;
-    uint16_t hle_cold_default_w_=0,hle_default_w_reported_=0;
+    uint16_t& hle_cold_default_w_=context_state_.hle_cold_default_w_;
+    uint16_t& hle_default_w_reported_=context_state_.hle_default_w_reported_;
     bool hle_context_seen_=false;
     uint64_t hle_default_w_uses_=0;
     ContextInitializerResult context_initializer_method(const PushMethod& push, bool apply);
@@ -2832,14 +2840,14 @@ private:
     uint16_t pgraph_fd_initialized_ = 0;
     // Original/nxdk DXT1-noise controls in RDI E0:50 and DF:08. Transport
     // is modeled separately; enabled pixel behavior remains guarded.
-    std::array<uint32_t, 2> dxt1_noise_control_{};
+    std::array<uint32_t, 2>& dxt1_noise_control_=context_state_.dxt1_noise_control_;
     uint32_t* dxt1_noise_control_word(uint32_t select, uint32_t address);
-    std::array<uint32_t, 4> pgraph_context_switch_{};
+    std::array<uint32_t, 4>& pgraph_context_switch_=context_state_.pgraph_context_switch_;
     // SET_OBJECT captures the initialized object header for each subchannel;
     // LOAD alone does not supply these cache entries or the active header.
-    std::array<uint32_t,8> pgraph_object_header_cache_{};
-    uint8_t pgraph_object_header_known_=0;
-    bool pgraph_active_header_known_=false;
+    std::array<uint32_t,8>& pgraph_object_header_cache_=context_state_.pgraph_object_header_cache_;
+    uint8_t& pgraph_object_header_known_=context_state_.pgraph_object_header_known_;
+    bool& pgraph_active_header_known_=context_state_.pgraph_active_header_known_;
     std::array<uint32_t, 0xc00 / 4> pgraph_setup_{};
     uint16_t pgraph_setup_mode_initialized_ = 0;
     struct RamTileConfig {
@@ -2851,7 +2859,7 @@ private:
     // controller's partition/tag address, not by tile or host surface identity.
     // Unknown power-on contents must not be silently reported as uncompressed.
     std::unordered_map<uint32_t,bool> zeta_compression_tags_;
-    bool compress_zbuffer_ = false;
+    bool& compress_zbuffer_=context_state_.compress_zbuffer_;
     struct ZetaBlock {
         uint32_t key=0;
         std::array<uint32_t,4> rows{};
@@ -2876,7 +2884,7 @@ private:
     bool pgraph_load_context();
     void pgraph_reset_setup();
     uint32_t pgraph_status() const;
-    uint32_t patt_color0_ = 0;
+    uint32_t& patt_color0_=context_state_.patt_color0_;
     struct ContextSurfaces2DState {
         uint32_t object_instance = 0;
         uint32_t dma_source = 0;
@@ -2889,7 +2897,7 @@ private:
         uint32_t source_offset = 0;
         uint32_t dest_offset = 0;
     };
-    ContextSurfaces2DState context_surfaces_2d_{};
+    ContextSurfaces2DState& context_surfaces_2d_=context_state_.context_surfaces_2d_;
     struct ImageBlitState {
         uint32_t object_instance = 0;
         uint32_t context_surfaces = 0;
@@ -2902,7 +2910,7 @@ private:
         uint32_t width = 0;
         uint32_t height = 0;
     };
-    ImageBlitState image_blit_{};
+    ImageBlitState& image_blit_=context_state_.image_blit_;
     uint64_t image_blit_copies_ = 0;
     uint64_t image_blit_bytes_ = 0;
     uint32_t last_image_blit_source_ = 0;
@@ -2911,20 +2919,20 @@ private:
 
     // Minimal Kelvin color-surface state. Object-taking methods hold resolved PRAMIN
     // instances, matching the PFIFO puller's RAMHT translation before PGRAPH dispatch.
-    uint32_t color_dma_ = 0;
-    uint32_t zeta_dma_ = 0;
-    bool color_dma_bound_ = false;
-    bool zeta_dma_bound_ = false;
-    uint32_t surface_clip_horizontal_ = 0;
-    uint32_t surface_clip_vertical_ = 0;
-    uint32_t surface_format_ = 0;
-    uint32_t surface_pitch_ = 0;
-    uint32_t surface_color_offset_ = 0;
-    uint32_t surface_zeta_offset_ = 0;
-    uint32_t zeta_clear_value_ = 0;
-    uint32_t color_clear_value_ = 0;
-    uint32_t clear_rect_horizontal_ = 0;
-    uint32_t clear_rect_vertical_ = 0;
+    uint32_t& color_dma_=context_state_.color_dma_;
+    uint32_t& zeta_dma_=context_state_.zeta_dma_;
+    bool& color_dma_bound_=context_state_.color_dma_bound_;
+    bool& zeta_dma_bound_=context_state_.zeta_dma_bound_;
+    uint32_t& surface_clip_horizontal_=context_state_.surface_clip_horizontal_;
+    uint32_t& surface_clip_vertical_=context_state_.surface_clip_vertical_;
+    uint32_t& surface_format_=context_state_.surface_format_;
+    uint32_t& surface_pitch_=context_state_.surface_pitch_;
+    uint32_t& surface_color_offset_=context_state_.surface_color_offset_;
+    uint32_t& surface_zeta_offset_=context_state_.surface_zeta_offset_;
+    uint32_t& zeta_clear_value_=context_state_.zeta_clear_value_;
+    uint32_t& color_clear_value_=context_state_.color_clear_value_;
+    uint32_t& clear_rect_horizontal_=context_state_.clear_rect_horizontal_;
+    uint32_t& clear_rect_vertical_=context_state_.clear_rect_vertical_;
     uint64_t color_clears_ = 0;
     uint64_t color_clear_pixels_ = 0;
     uint32_t last_color_clear_address_ = 0;
@@ -3188,15 +3196,15 @@ private:
         bool dma_b = false;
         std::array<float, 4> value{{0.0f, 0.0f, 0.0f, 1.0f}};
     };
-    uint32_t vertex_dma_a_ = 0;
-    uint32_t vertex_dma_b_ = 0;
-    bool vertex_dma_a_bound_ = false;
-    bool vertex_dma_b_bound_ = false;
-    uint32_t texture_dma_a_ = 0;
-    uint32_t texture_dma_b_ = 0;
-    bool texture_dma_a_bound_ = false;
-    bool texture_dma_b_bound_ = false;
-    std::array<VertexAttribute, 16> vertex_attributes_{};
+    uint32_t& vertex_dma_a_=context_state_.vertex_dma_a_;
+    uint32_t& vertex_dma_b_=context_state_.vertex_dma_b_;
+    bool& vertex_dma_a_bound_=context_state_.vertex_dma_a_bound_;
+    bool& vertex_dma_b_bound_=context_state_.vertex_dma_b_bound_;
+    uint32_t& texture_dma_a_=context_state_.texture_dma_a_;
+    uint32_t& texture_dma_b_=context_state_.texture_dma_b_;
+    bool& texture_dma_a_bound_=context_state_.texture_dma_a_bound_;
+    bool& texture_dma_b_bound_=context_state_.texture_dma_b_bound_;
+    std::array<VertexAttribute, 16>& vertex_attributes_=context_state_.vertex_attributes_;
     uint8_t primitive_mode_ = 0;
     std::vector<uint32_t> vertex_indices_;
     using VertexInputs =
@@ -3233,14 +3241,14 @@ private:
     // four-word instructions and address 192 float4 constants. The pinned xemu CPU
     // interpreter executes these exact tokens; shader output oPos is already in Xbox
     // screen space, which is the input contract for the software rasterizer.
-    std::array<std::array<uint32_t, 4>, 136> transform_program_{};
-    std::array<std::array<float, 4>, 192> transform_constants_{};
-    std::array<float, 4> viewport_offset_{};
-    std::array<float, 4> viewport_scale_{};
-    uint8_t transform_execution_mode_ = 0;
-    uint8_t transform_program_load_ = 0;
-    uint8_t transform_program_start_ = 0;
-    uint8_t transform_constant_load_ = 0;
+    std::array<std::array<uint32_t, 4>, 136>& transform_program_=context_state_.transform_program_;
+    std::array<std::array<float, 4>, 192>& transform_constants_=context_state_.transform_constants_;
+    std::array<float, 4>& viewport_offset_=context_state_.viewport_offset_;
+    std::array<float, 4>& viewport_scale_=context_state_.viewport_scale_;
+    uint8_t& transform_execution_mode_=context_state_.transform_execution_mode_;
+    uint8_t& transform_program_load_=context_state_.transform_program_load_;
+    uint8_t& transform_program_start_=context_state_.transform_program_start_;
+    uint8_t& transform_constant_load_=context_state_.transform_constant_load_;
     uint64_t transform_program_words_ = 0;
     uint64_t transform_constant_words_ = 0;
     // ---- parsed-program cache (beads-xbox.1.15.10 phase 5, item 3) ---------
@@ -3327,19 +3335,19 @@ private:
     uint64_t transformed_vertices_ = 0;
     uint64_t transform_output_hash_ = 1469598103934665603ull;
     std::array<uint64_t, 4> transform_mode_batches_{};
-    uint8_t fixed_skin_mode_ = 0;
-    bool fixed_lighting_ = false;
-    bool fixed_normalization_ = false;
-    bool fixed_specular_ = false;
-    bool fixed_fog_ = false;
-    uint8_t fixed_color_material_ = 0;
-    uint8_t fixed_light_control_ = 0;
-    uint16_t fixed_light_enable_mask_ = 0;
-    std::array<float, 3> fixed_scene_ambient_{};
-    std::array<float, 3> fixed_material_emission_{};
-    float fixed_material_alpha_ = 0.0f;
-    std::array<bool, 4> fixed_texture_matrix_enable_{};
-    std::array<std::array<uint32_t, 4>, 4> fixed_texgen_{};
+    uint8_t& fixed_skin_mode_=context_state_.fixed_skin_mode_;
+    bool& fixed_lighting_=context_state_.fixed_lighting_;
+    bool& fixed_normalization_=context_state_.fixed_normalization_;
+    bool& fixed_specular_=context_state_.fixed_specular_;
+    bool& fixed_fog_=context_state_.fixed_fog_;
+    uint8_t& fixed_color_material_=context_state_.fixed_color_material_;
+    uint8_t& fixed_light_control_=context_state_.fixed_light_control_;
+    uint16_t& fixed_light_enable_mask_=context_state_.fixed_light_enable_mask_;
+    std::array<float, 3>& fixed_scene_ambient_=context_state_.fixed_scene_ambient_;
+    std::array<float, 3>& fixed_material_emission_=context_state_.fixed_material_emission_;
+    float& fixed_material_alpha_=context_state_.fixed_material_alpha_;
+    std::array<bool, 4>& fixed_texture_matrix_enable_=context_state_.fixed_texture_matrix_enable_;
+    std::array<std::array<uint32_t, 4>, 4>& fixed_texgen_=context_state_.fixed_texgen_;
     std::array<uint64_t, 7> fixed_skin_batches_{};
     uint64_t fixed_lighting_batches_ = 0;
     uint64_t fixed_normalization_batches_ = 0;
@@ -3350,7 +3358,108 @@ private:
     std::array<uint64_t, 4> fixed_light_type_batches_{};
     std::array<uint64_t, 256> fixed_color_material_batches_{};
     std::array<uint64_t, 8> fixed_light_control_batches_{};
-    std::array<uint32_t, kRasterStateWords> raster_state_{};
+    std::array<uint32_t, kRasterStateWords>& raster_state_=context_state_.raster_state_;
+    // Authoritative context-local owner. Aliases above reference this stable
+    // object; assignment replaces values, never the owner or its references.
+    struct ContextState {
+        std::array<uint32_t, 8> report_dma_{};
+        std::array<bool, 8> report_dma_bound_{};
+        bool zpass_enabled_ = false;
+        bool zpass_valid_ = true;
+        uint32_t zpass_count_ = 0;
+        std::array<uint32_t, 8> semaphore_dma_{};
+        std::array<uint32_t, 8> semaphore_offset_{};
+        std::array<uint32_t, 8> object_instance_{};
+        std::array<uint8_t, 8> object_class_{};
+        uint8_t flip_read_ = 0;
+        uint8_t flip_write_ = 0;
+        uint8_t flip_modulo_ = 0;
+        std::optional<Nv2aContextImage> pgraph_loaded_context_;
+        uint64_t context_known_ = 0;
+        uint32_t context_fixed_known_=0;
+        uint8_t context_objects_known_ = 0, context_semaphore_dma_known_ = 0,
+            context_semaphore_offset_known_ = 0;
+        std::array<uint32_t, kRasterStateWords> context_raster_known_{};
+        std::array<uint8_t,136> context_program_known_{};
+        std::array<uint8_t,192> context_constants_known_{};
+        uint16_t context_vertex_format_known_=0, context_vertex_offset_known_=0;
+        std::array<uint8_t,16> context_vertex_current_known_{};
+        std::vector<std::array<uint8_t,16>> context_immediate_known_,context_inline_known_;
+        uint8_t context_viewport_scale_known_=0, context_viewport_offset_known_=0;
+        ContextInitializerState context_initializers_;
+        uint16_t hle_cold_default_w_=0,hle_default_w_reported_=0;
+        std::array<uint32_t, 2> dxt1_noise_control_{};
+        std::array<uint32_t, 4> pgraph_context_switch_{};
+        std::array<uint32_t,8> pgraph_object_header_cache_{};
+        uint8_t pgraph_object_header_known_=0;
+        bool pgraph_active_header_known_=false;
+        bool compress_zbuffer_ = false;
+        uint32_t patt_color0_ = 0;
+        ContextSurfaces2DState context_surfaces_2d_{};
+        ImageBlitState image_blit_{};
+        uint32_t color_dma_ = 0;
+        uint32_t zeta_dma_ = 0;
+        bool color_dma_bound_ = false;
+        bool zeta_dma_bound_ = false;
+        uint32_t surface_clip_horizontal_ = 0;
+        uint32_t surface_clip_vertical_ = 0;
+        uint32_t surface_format_ = 0;
+        uint32_t surface_pitch_ = 0;
+        uint32_t surface_color_offset_ = 0;
+        uint32_t surface_zeta_offset_ = 0;
+        uint32_t zeta_clear_value_ = 0;
+        uint32_t color_clear_value_ = 0;
+        uint32_t clear_rect_horizontal_ = 0;
+        uint32_t clear_rect_vertical_ = 0;
+        uint32_t vertex_dma_a_ = 0;
+        uint32_t vertex_dma_b_ = 0;
+        bool vertex_dma_a_bound_ = false;
+        bool vertex_dma_b_bound_ = false;
+        uint32_t texture_dma_a_ = 0;
+        uint32_t texture_dma_b_ = 0;
+        bool texture_dma_a_bound_ = false;
+        bool texture_dma_b_bound_ = false;
+        std::array<VertexAttribute, 16> vertex_attributes_{};
+        std::array<std::array<uint32_t, 4>, 136> transform_program_{};
+        std::array<std::array<float, 4>, 192> transform_constants_{};
+        std::array<float, 4> viewport_offset_{};
+        std::array<float, 4> viewport_scale_{};
+        uint8_t transform_execution_mode_ = 0;
+        uint8_t transform_program_load_ = 0;
+        uint8_t transform_program_start_ = 0;
+        uint8_t transform_constant_load_ = 0;
+        uint8_t fixed_skin_mode_ = 0;
+        bool fixed_lighting_ = false;
+        bool fixed_normalization_ = false;
+        bool fixed_specular_ = false;
+        bool fixed_fog_ = false;
+        uint8_t fixed_color_material_ = 0;
+        uint8_t fixed_light_control_ = 0;
+        uint16_t fixed_light_enable_mask_ = 0;
+        std::array<float, 3> fixed_scene_ambient_{};
+        std::array<float, 3> fixed_material_emission_{};
+        float fixed_material_alpha_ = 0.0f;
+        std::array<bool, 4> fixed_texture_matrix_enable_{};
+        std::array<std::array<uint32_t, 4>, 4> fixed_texgen_{};
+        std::array<uint32_t, kRasterStateWords> raster_state_{};
+    };
+    ContextState context_state_{};
+    struct SavedContext {
+        uint32_t instance=0;
+        ContextState state;
+    };
+    static constexpr size_t kMaxSavedContexts=16;
+    static constexpr size_t kMaxSavedContextBytes=8*1024*1024;
+    std::vector<SavedContext> saved_contexts_;
+    // Unknown serialized SAVE bytes are tracked independently from CPU RAM.
+    std::vector<uint8_t> context_save_raw_unknown_=std::vector<uint8_t>(0x100000,0);
+    bool pgraph_context_suspended_=false;
+    bool hle_context_transport_started_=false;
+    bool pgraph_save_context();
+    bool pgraph_restore_context();
+    bool context_save_raw_range_known(uint32_t offset,size_t bytes) const;
+    bool context_save_raw_read_ready(uint32_t offset,size_t bytes);
+    void context_saved_image_written(uint32_t offset,size_t bytes);
     Nv2aRenderer* renderer_ = nullptr;  // owned by the host/application layer
     std::function<void(const GenericBatchDebugInfo&)> generic_batch_debug_cb_;
     std::function<bool(const GenericPacketDebugInfo&)>

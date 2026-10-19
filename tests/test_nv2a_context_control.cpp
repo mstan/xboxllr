@@ -17,6 +17,7 @@ static uint32_t get32(const std::vector<uint8_t>& b,uint32_t a) {
 #include "nv2a_context_method_cases.hpp"
 #include "nv2a_context_draw_cases.hpp"
 #include "nv2a_phase_ownership_cases.hpp"
+#include "nv2a_context_transport_cases.hpp"
 static void test_loaded_object_header_switch() {
     for(uint32_t mode:{0x28c3ffu,0x8cfffu})for(bool batching:{false,true}) {
         auto fixture=std::make_unique<LoadedContextFixture>(batching,nullptr,mode);auto& f=*fixture;
@@ -94,6 +95,7 @@ static void test_tiled_clear_phase_uses_cpu_codec() {
     }
 }
 int main() {
+    test_hle_context_transport();
     test_gpu_phase_ownership();
     test_tiled_clear_phase_uses_cpu_codec();test_single_sample_clear_raster_independence();test_loaded_object_header_switch();test_pgraph_setup();test_pgraph_context_transfer();test_loaded_context_methods();
     test_pgraph_boot_configuration();test_pgraph_context_admission();

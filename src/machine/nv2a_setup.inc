@@ -223,6 +223,9 @@ uint32_t Nv2a::pgraph_status() const {
 }
 
 void Nv2a::pgraph_reset_setup() {
+    pgraph_context_suspended_=false; // frontend reset retains PRAMIN-backed saved owners
+    // PRAMIN is memory, not reset frontend state: unknown SAVE bytes remain
+    // unknown until CPU writes them. Clearing this bitmap would expose stale RAM.
     pgraph_setup_.fill(0);pgraph_context_switch_.fill(0);
     pgraph_object_header_cache_.fill(0);pgraph_object_header_known_=0;
     pgraph_active_header_known_=false;
@@ -278,7 +281,8 @@ bool Nv2a::pgraph_load_context() {
     if(!pgraph_context_reset_seen_ || pgraph_setup_[0x080/4] ||
        !pgraph_context_cache_invalidated_ || pgraph_fd_initialized_!=0x7fff ||
        primitive_mode_ || !vertex_indices_.empty() || !inline_array_words_.empty() ||
-       !inline_vertices_.empty() || !immediate_vertices_.empty() || methods_.total()) {
+       !inline_vertices_.empty() || !immediate_vertices_.empty() ||
+       (methods_.total() && !hle_context_transport_started_)) {
         fault_("NV2A context load lacks the original first-context reset preparation");return false;
     }
     if(!pgraph_context_pointer_initialized_) {
@@ -289,16 +293,17 @@ bool Nv2a::pgraph_load_context() {
         fault_("NV2A context image exceeds instance RAM");return false;
     }
     for(size_t i=base;i<base+Nv2aContextImage::kSourceBytes;++i) {
-        if(!(pramin_initialized_[i/64]&(uint64_t(1)<<(i%64)))) {
+        if(context_save_raw_unknown_[i] || !(pramin_initialized_[i/64]&(uint64_t(1)<<(i%64)))) {
             fault_("NV2A context image contains uninitialized instance bytes");return false;
         }
     }
-    auto staged=std::make_unique<Nv2aContextImage>();
+    auto staged=std::make_optional<Nv2aContextImage>();
     const char* error=nullptr;
     if(!staged->load(pramin_.data()+base,Nv2aContextImage::kSourceBytes,error)) {
         fault_(error);return false;
     }
 
+    if(hle_context_transport_started_)context_state_=ContextState{};
     // Commit only after every admission/encoding check passes. Restore actual
     // measured fields directly, not via method handlers with extra side effects.
     // Primary surface slots: DST0, SRC1, COLOR2, ZETA3, DVD4, SWIZZLED5.
@@ -469,11 +474,23 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
         return true;
     }
     switch(offset) {
-    case 0x080:
-        if(value&~0x70000u || (value && (pgraph_loaded_context_ || methods_.total() || pgraph_status()))) {
+    case 0x080: {
+        bool saved_reset=false;
+#if XLLE_RENDERER_HLE
+        saved_reset=value==0x70000 && pgraph_context_suspended_ && !draw_faulted_ &&
+            !pgraph_method_faulted_ && !pgraph_fifo_access_ &&
+            !pgraph_status() && !primitive_mode_ && vertex_indices_.empty() &&
+            inline_array_words_.empty() && inline_vertices_.empty() && immediate_vertices_.empty();
+#endif
+        if(value&~0x70000u || (value && !saved_reset && (pgraph_loaded_context_ || methods_.total() || pgraph_status()))) {
             fault_("NV2A active/unsupported PGRAPH subengine reset");return true;
         }
         if(value) {
+            if(saved_reset) {
+                context_state_=ContextState{};pgraph_context_suspended_=false;
+                pgraph_context_user_=0;hle_cold_default_w_=0;
+                current_raster_state_sample_index_=UINT32_MAX;
+            }
             vertex_indices_.clear();inline_array_words_.clear();inline_vertices_.clear();immediate_vertices_.clear();
             primitive_mode_=0;invalidate_vsh_program_cache();
             // A subengine reset does not establish FD SRAM contents.
@@ -482,6 +499,7 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
             pgraph_context_cache_invalidated_=false;
         }
         pgraph_setup_[offset/4]=value;return true;
+    }
     case 0x144:
         if(value&~0x10010103u){fault_("NV2A unsupported context-control mode");return true;}
         pgraph_context_managed_=true;pgraph_context_control_=value;return true;
@@ -504,8 +522,12 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
     case 0x788:
         // SAVE needs the inverse live-state mapping, including state changed
         // by methods. Copying the opaque source image back would be a false save.
-        if(value==1)pgraph_load_context();
-        else if(value==2)fault_("NV2A PGRAPH context save is not implemented");
+        if(value==1) {
+            const auto saved=std::find_if(saved_contexts_.begin(),saved_contexts_.end(),[&](const SavedContext& entry){return entry.instance==pgraph_context_pointer_;});
+            if(saved!=saved_contexts_.end())pgraph_restore_context();
+            else pgraph_load_context();
+        }
+        else if(value==2)pgraph_save_context();
         else fault_("NV2A unsupported PGRAPH context transfer command");
         return true;
     case 0x71c:

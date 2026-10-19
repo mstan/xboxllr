@@ -892,6 +892,7 @@ void Nv2a::invalidate_renderer_depth_overlap(uint32_t address, size_t size,
 static constexpr uint32_t kPciNv0 = 0x02A0'10DEu;  // device<<16 | vendor
 static constexpr uint32_t kPciNv2 = 0x0300'00A1u;  // class(0x030000)<<8 | revision(0xA1)
 
+#include "nv2a_context_transport.inc"
 #include "nv2a_setup.inc"
 #include "nv2a_zeta_memory.inc"
 #include "nv2a_fifo_context.inc"
@@ -1158,6 +1159,7 @@ uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
         if((size!=1 && size!=2 && size!=4) || uint64_t(bo)+uint32_t(size)>pramin_.size()) {
             fault_("NV2A invalid PRAMIN read width/extent");return 0;
         }
+        if(!context_save_raw_read_ready(bo,size))return 0;
         if(pgraph_loaded_context_ && !context_initializer_pramin_read_ready(bo,size))return 0;
         if (bo + static_cast<uint32_t>(size) <= pramin_.size()) {
             uint32_t value = 0;
@@ -1524,6 +1526,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             fault_("NV2A PRAMIN write exceeds aperture");
             return;
         }
+        context_saved_image_written(bo,size);
         std::memcpy(pramin_.data() + bo, &value, size);
         if(pgraph_loaded_context_)context_initializer_pramin_written(bo,size);
         for(int i=0;i<size;++i) {
@@ -1558,7 +1561,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
 }
 
 bool Nv2a::dma_object_address(uint32_t instance, uint32_t offset, uint32_t& address) const {
-    if (instance > pramin_.size() - 12 ||
+    if (instance > pramin_.size() - 12 || !context_save_raw_range_known(instance,12) ||
         (pgraph_loaded_context_ && !pramin_range_initialized(instance,12))) return false;
     uint32_t flags = 0, limit = 0, frame = 0;
     std::memcpy(&flags, pramin_.data() + instance, 4);
@@ -1586,7 +1589,7 @@ bool Nv2a::ramht_instance(uint8_t channel, uint32_t handle, uint32_t& instance,
     hash ^= static_cast<uint32_t>(channel) << (bits - 4);
     uint32_t base = (ramht & 0x000001F0u) << 8;
     uint32_t entry = base + hash * 8;
-    if (entry > pramin_.size() - 8 ||
+    if (entry > pramin_.size() - 8 || !context_save_raw_range_known(entry,8) ||
         (pgraph_loaded_context_ && !pramin_range_initialized(entry,8))) return false;
     uint32_t entry_handle = 0, context = 0;
     std::memcpy(&entry_handle, pramin_.data() + entry, 4);
@@ -1615,7 +1618,7 @@ bool Nv2a::bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle) {
     if(!ramht_instance(channel,handle,instance,&engine) || engine!=1) {
         fault_("NV2A unsupported RAMHT object engine");return false;
     }
-    if (instance > pramin_.size() - 4 ||
+    if (instance > pramin_.size() - 4 || !context_save_raw_range_known(instance,4) ||
         (pgraph_loaded_context_ && !pramin_range_initialized(instance,4))) {
         char why[128];
         std::snprintf(why, sizeof(why),
@@ -11320,6 +11323,10 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
         fault_(message);
         return false;
     };
+    if(color_dma_bound_ && !context_save_raw_range_known(color_dma_,12))
+        return reject_destination("color","context SAVE descriptor projection unknown");
+    if(depth_bytes64 && zeta_dma_bound_ && !context_save_raw_range_known(zeta_dma_,12))
+        return reject_destination("zeta","context SAVE descriptor projection unknown");
     const auto color_range = resolve_destination(pramin_.data(), pramin_.size(),
         color_dma_bound_, color_dma_, surface_color_offset, color_bytes64);
     if (color_range.status != RangeStatus::kReady)
@@ -18336,10 +18343,9 @@ bool Nv2a::drain_pull_queue() {
             dispatch_method(push);
         }
         pgraph_executing_=was_executing;
-        if(pgraph_loaded_context_) {
-            if(pgraph_method_faulted_ || draw_faulted_)return false;
-            context_method_completed(push);
-        }
+        if((pgraph_loaded_context_ || hle_context_transport_started_) &&
+           (pgraph_method_faulted_ || draw_faulted_))return false;
+        if(pgraph_loaded_context_)context_method_completed(push);
         // The handler slot closes here rather than at the tail of
         // dispatch_method: the call and return are part of what a per-word
         // dispatch costs, and the tail of dispatch_method is pinned by

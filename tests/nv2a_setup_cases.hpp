@@ -92,8 +92,14 @@ static void test_pgraph_setup() {
     CHECK(read(0x400784)==0xffff);
     for(uint32_t command:{1u,2u,0u,3u}) {
         write(0x400788,command);
-        CHECK(command==1?failure.find("NV2A context load configuration is unsupported:")==0:failure==(command==2?"NV2A PGRAPH context save is not implemented":
-                                   "NV2A unsupported PGRAPH context transfer command"));
+        if(command==2) {
+#if XLLE_RENDERER_HLE
+            CHECK(failure.find("NV2A HLE context SAVE requires an owned idle context")==0);
+#else
+            CHECK(failure=="NV2A PGRAPH context save is not implemented");
+#endif
+        } else CHECK(command==1?failure.find("NV2A context load configuration is unsupported:")==0:
+            failure=="NV2A unsupported PGRAPH context transfer command");
         failure.clear();
         CHECK(read(0x400784)==0xffff && read(0x400144)==0x10000100 &&
               read(0x400148)==0x03000000 && read(0x400700)==0 && !gpu.push_methods());
@@ -286,6 +292,9 @@ static void test_pgraph_context_transfer() {
         gpu.mmio_read(0xfd400828,1);CHECK(!failure.empty());failure.clear();
         write(0x400828,0x123400);CHECK(!failure.empty());failure.clear();CHECK(read(0x400828)==0x3300);
         for(uint32_t command:{1u,2u,3u}) {
+#if XLLE_RENDERER_HLE
+            if(command==2)continue; // admitted semantic SAVE is tested independently
+#endif
             const auto saved=gpu.first_context_diagnostic_snapshot();
             write(0x400788,command);CHECK(!failure.empty());failure.clear();
             CHECK(gpu.first_context_diagnostic_snapshot().pramin==saved.pramin && read(0x400148)==0x11);
