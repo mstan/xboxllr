@@ -173,6 +173,8 @@ if(pilot_audio_dsp OR pilot_audio_device_lle)
   if(NOT EXISTS "${PILOT_DSP_SOURCE}/third_party/inventory.json")
     message(FATAL_ERROR "Run tools/native_dsp_notices.py --source ${PILOT_DSP_SOURCE} to retain dependency notices")
   endif()
+  include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ValidateDspSource.cmake")
+  xlle_validate_dsp_source("${PILOT_DSP_SOURCE}")
   add_custom_command(TARGET pilot_notices POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_DSP_SOURCE}/LICENSE" "${PILOT_DSP_SOURCE}/donor.json"

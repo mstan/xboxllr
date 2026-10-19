@@ -505,3 +505,22 @@ No main menu/input/performance handoff is claimed. Stock assets remain COW with
 no HDD writeback, captures muted, two normal-priority cores. Root committed the
 preceding reviewed batch as d2e1477; this fixed-function follow-up stays unstaged
 for root review/integration.
+
+## Reused DSP source must include the maintained SEN implementation
+
+After semantic context SAVE and idle-reset work, cold-menu-047 aborts at the
+DSP guard with SR=C00300 and OMR=100300. The old prepared dashboard source
+still included SEN in its unsupported mask. The maintained framework already
+has the bounded resident SEN implementation and its original-EP checks;
+the dashboard had selected an obsolete prepared source/library pair. This is
+a build-input mismatch, not evidence that the existing implementation failed.
+The abort did not flush a final CPU retirement count, so it does not establish
+an exact reset-admission timestamp or main-menu progress.
+
+Reprepare with current tools into a fresh source directory and build a separate
+locked host-ABI archive. The new prepared-source check rejects old metadata,
+changed generators or changed source bytes before linking. It does not prove
+an independently supplied library's compilation provenance; retain the actual
+Cargo command, source manifest and resulting archive hashes. No DSP guard or
+signal behavior is relaxed by this repair. Blinx's tested private build stays
+on its existing dependency and framework identities.

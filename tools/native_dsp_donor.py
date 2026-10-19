@@ -15,6 +15,13 @@ PIN = 'c60aeedb6a6014850204c71e53bc0cf5b3104222'
 GIT = 'C:/Program Files/Git/cmd/git.exe'
 
 
+def preparation_identity():
+    directory = Path(__file__).resolve().parent
+    return dict(schema='xboxllr.dsp-prepared-source.v1', generators={
+        name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
+        for name in ('native_dsp_donor.py', 'native_dsp_sen.py')})
+
+
 def guarded(name, text):
     replacements = {
         'crates/emu/src/core.rs': [(
@@ -68,6 +75,7 @@ def prepare(donor, output, cargo):
                     for p in metadata['packages']]
     record = dict(repository='https://github.com/mborgerson/dsp56300', revision=PIN,
                   license='MIT', sources=hashes, guarded=patched,
+                  preparation=preparation_identity(),
                   dependencies=dependencies,
                   policy='Bounded hardware-resident SEN supports logical SP=SC depths0..14 without extension-memory access; spill/refill/underflow, direct task/configuration writes, explicit stack ports, early loop abort and interrupts stop. Other unsupported arithmetic/memory modes and RESET/DEBUG/WAIT stop; full stack extension and cache/bus timing remain unqualified.')
     (output / 'donor.json').write_text(json.dumps(record, indent=2)+'\n', newline='\n')

@@ -22,9 +22,12 @@ Archive replacement/readback and generated controller/menu logic checks pass.
 Actual dashboard rendering, positioning, text readability, XAP compilation,
 controller navigation and return to the main menu are **unverified**. The
 2026-10-19 modern HLE cold-boot candidate passes tiled storage, loaded draws,
-the reached nominal audio modes and SRCCOPY, and displays the Xbox boot logo.
-It stops at an unimplemented GPU context SAVE after 6.062 billion instructions;
-preserving context across transfers is still required before menu validation.
+the reached nominal audio modes, SRCCOPY and semantic context SAVE, and displays
+the Xbox boot logo. The subsequent idle PGRAPH reset is implemented and passes
+focused HLE/strict-boundary checks. Boot047 aborts on an older DSP dependency
+that lacks the framework's maintained resident SEN stack support. A fresh
+isolated dependency is being built; no modern menu/input result follows from
+these component checks.
 Do not describe this prototype as installed or playable. It is not a public
 release.
 

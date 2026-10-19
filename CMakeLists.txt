@@ -864,6 +864,9 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_compile.py")
   add_test(NAME aot_inventory
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_inventory.py")
+  add_test(NAME dsp_preparation
+           COMMAND ${CMAKE_COMMAND} -E env "CMAKE_COMMAND=${CMAKE_COMMAND}"
+             ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsp_preparation.py")
   add_test(NAME cpu_block_census
            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpu_block_census.py")
   add_test(NAME aot_private_input

@@ -72,7 +72,37 @@ The private JSON reports retain asset hashes, per-program hashes and original
 decoder comparison evidence. `probe.c` and its build definition remain an
 investigation prototype, not production-quality input validation.
 
-## Integrated checkpoint
+## Prepared source freshness (2026-10-19)
+
+Dashboard boot047 linked an older prepared donor/library that still rejected
+SEN, despite the maintained resident-stack implementation already being present
+in the framework. An existing archive and the upstream revision alone did not
+identify the current maintained patch set.
+
+Preparation now records its schema and both generator hashes in `donor.json`.
+Full-machine and native-title DSP configuration verify those identities and
+the actual prepared source hashes, including patched files, before selecting
+the external library. Source/manifest/generator changes trigger configuration
+again. Old preparation fails with a request for a fresh private donor; it is
+not silently relabeled or modified.
+
+This source check does not attest how an independently supplied archive was
+compiled. Keep the locked Cargo command, target ABI, manifest hash and resulting
+library hash with each build's evidence. Rebuild into a separate target directory
+when changing the prepared source, preserving older candidate identities.
+
+Run the source check independently with:
+
+```powershell
+cmake -DSOURCE=<prepared-directory> -P cmake/ValidateDspSource.cmake
+```
+
+The six authored preparation checks cover current input, obsolete metadata,
+changed generator, changed source, missing source and unreviewed revision.
+The actual old dashboard donor rejects; the fresh eight-file SEN preparation
+passes. This does not by itself establish a completed dashboard boot.
+
+## Historical integrated checkpoint (2026-10-07)
 
 The implementation is now `audio_dsp.c` plus the build-selected
 `audio_xaudio2.cpp` transport. `native_dsp_donor.py` preserves the pinned MIT
