@@ -2,6 +2,23 @@
  * duplicated real thread handle, so NtClose cannot invalidate the object while
  * a caller still holds it. Guest handles, objects and host handles are distinct.
  * The reference map is guarded by thread_lock; no scheduler/IRQL success stubs. */
+static HANDLE thread_wait_duplicate(uint32_t id,uint32_t *status)
+{
+    if(!wait_native_thread_supported())stop("native thread wait context unqualified",id);
+    HANDLE host=NULL;*status=0xc0000008u;
+    unsigned slot=id&63u;
+    AcquireSRWLockShared(&thread_lock);
+    if((id&0xf0000000u)==0x40000000u && slot && slot<=thread_count) {
+        struct PilotThread *thread=&threads[slot];
+        if(thread->identity==id && thread->handle && thread->execution_handle && !thread->retiring)
+            *status=DuplicateHandle(GetCurrentProcess(),thread->execution_handle,GetCurrentProcess(),
+                                    &host,0,FALSE,DUPLICATE_SAME_ACCESS)?0:0xc000009au;
+    }
+    ReleaseSRWLockShared(&thread_lock);
+    /* Only a kernel-object reference escapes the lock. Guest close/reaping and
+     * slot reuse cannot retarget this operation to a new thread lifetime. */
+    return host;
+}
 static struct PilotThread *thread_from_handle(uint32_t handle,HANDLE *host)
 {
     if(handle==0xfffffffeu) {

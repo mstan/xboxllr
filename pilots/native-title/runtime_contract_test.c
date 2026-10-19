@@ -168,6 +168,7 @@ static void call_kernel(unsigned ordinal,const uint32_t *args,unsigned argc)
 #include "thread_scheduler_contract_test.inc"
 #include "event_objects_contract_test.inc"
 #include "mutant_objects_contract_test.inc"
+#include "native_wait_contract_test.inc"
 #ifdef PILOT_EVENT_TIMER_LLE
 #include "event_timer_lle_contract_test.inc"
 #include "callback_kernel_lle_contract_test.inc"
@@ -815,6 +816,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"mutants")) { test_mutant_objects();return 0; }
         if (!strcmp(argv[1],"mutants-dpc233")) { test_mutant_dpc_wait(0);return 1; }
         if (!strcmp(argv[1],"mutants-dpc234")) { test_mutant_dpc_wait(1);return 1; }
+        if (!strcmp(argv[1],"native-delay")) { test_native_delay();return 0; }
+        if (!strcmp(argv[1],"native-worker-waits")) { test_native_worker_waits();return 0; }
+        if (!strncmp(argv[1],"native-wait-",12)) { test_native_wait_guard(argv[1]);return 1; }
 #ifdef PILOT_EVENT_TIMER_LLE
         if (!strcmp(argv[1],"event-timer-lle")) { test_event_timer_lle(); return 0; }
         if (!strcmp(argv[1],"timer-dpc-lle")) { test_timer_dpc_lle(); return 0; }

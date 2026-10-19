@@ -222,7 +222,7 @@ static int scheduler_kernel_blocks(unsigned ordinal)
     case 210:return 1; /* Confined host metadata uses real blocking file I/O. */
 #endif
     case 190:case 198:case 202:case 207:case 211:case 218:case 219:case 226:case 236:
-    case 158:case 159:case 233:case 234:case 235:case 277:case 327:case 328:
+    case 99:case 158:case 159:case 230:case 233:case 234:case 235:case 277:case 327:case 328:
         return 1;
     case 187: /* Closing a file joins its real outstanding I/O. */
         return (MEM32(g_esp+4)&0xf0000000u)==0x50000000u;

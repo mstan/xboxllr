@@ -13,16 +13,21 @@ typedef LONG (NTAPI *EventSet)(HANDLE,PLONG);
 typedef LONG (NTAPI *EventQuery)(HANDLE,ULONG,PVOID,ULONG,PULONG);
 typedef LONG (NTAPI *EventWait)(HANDLE,BOOLEAN,PLARGE_INTEGER);
 typedef LONG (NTAPI *EventWaitMultiple)(ULONG,const HANDLE *,ULONG,BOOLEAN,PLARGE_INTEGER);
+typedef LONG (NTAPI *EventSignalWait)(HANDLE,HANDLE,BOOLEAN,PLARGE_INTEGER);
+typedef LONG (NTAPI *ThreadDelay)(BOOLEAN,PLARGE_INTEGER);
 typedef LONG (NTAPI *MutantCreate)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,BOOLEAN);
 static EventCreate event_nt_create;
 static EventSet event_nt_set,event_nt_reset;
 static EventQuery event_nt_query;
 static EventWait event_nt_wait;
 static EventWaitMultiple event_nt_wait_multiple;
+static EventSignalWait event_nt_signal_wait;
+static ThreadDelay thread_nt_delay;
 static MutantCreate mutant_nt_create;
 static EventSet mutant_nt_release;
 static EventQuery mutant_nt_query;
 static HANDLE media_wait_duplicate(uint32_t id,uint32_t *status);
+static HANDLE thread_wait_duplicate(uint32_t id,uint32_t *status);
 static BOOL CALLBACK event_start(PINIT_ONCE once,void *parameter,void **context)
 {
     (void)once;(void)parameter;(void)context;HMODULE nt=GetModuleHandleW(L"ntdll.dll");
@@ -32,10 +37,13 @@ static BOOL CALLBACK event_start(PINIT_ONCE once,void *parameter,void **context)
     event_nt_query=(EventQuery)(void*)GetProcAddress(nt,"NtQueryEvent");
     event_nt_wait=(EventWait)(void*)GetProcAddress(nt,"NtWaitForSingleObject");
     event_nt_wait_multiple=(EventWaitMultiple)(void*)GetProcAddress(nt,"NtWaitForMultipleObjects");
+    event_nt_signal_wait=(EventSignalWait)(void*)GetProcAddress(nt,"NtSignalAndWaitForSingleObject");
+    thread_nt_delay=(ThreadDelay)(void*)GetProcAddress(nt,"NtDelayExecution");
     mutant_nt_create=(MutantCreate)(void*)GetProcAddress(nt,"NtCreateMutant");
     mutant_nt_release=(EventSet)(void*)GetProcAddress(nt,"NtReleaseMutant");
     mutant_nt_query=(EventQuery)(void*)GetProcAddress(nt,"NtQueryMutant");
     if(!event_nt_create || !event_nt_set || !event_nt_reset || !event_nt_query || !event_nt_wait || !event_nt_wait_multiple ||
+       !event_nt_signal_wait || !thread_nt_delay ||
        !mutant_nt_create || !mutant_nt_release || !mutant_nt_query)
         stop("native waitable services unavailable",0);
     return TRUE;
@@ -102,7 +110,75 @@ static int wait_range(uint32_t address,unsigned bytes,int writable)
 }
 static void wait_native_thread_context(unsigned ordinal)
 {
-    if(!wait_native_thread_supported())stop("native mutex/multiwait context unqualified",ordinal);
+    if(!wait_native_thread_supported())stop("native blocking wait context unqualified",ordinal);
+}
+static HANDLE wait_reference(uint32_t id,uint32_t *status)
+{
+    if((id&0xf0000000u)==0x40000000u)return thread_wait_duplicate(id,status);
+    if((id&0xf0000000u)==0x50000000u)return media_wait_duplicate(id,status);
+    return wait_duplicate_owned(id,0,status,1);
+}
+static void delay_thread_kernel(void)
+{
+    wait_native_thread_context(99);
+    if(!InitOnceExecuteOnce(&event_once,event_start,NULL,NULL))stop("delay initialization failed",0);
+    uint32_t mode=MEM8(g_esp+4),alertable=MEM8(g_esp+8),interval=MEM32(g_esp+12);
+    if(mode>1 || alertable)stop("native delay APC/mode unqualified",mode);
+    if(!wait_range(interval,8,0))stop("native delay interval range unqualified",interval);
+    LARGE_INTEGER due;memcpy(&due,memory+interval,8);
+    /* Relative 100ns intervals and zero share the original contract. Absolute
+     * dates need a proved guest/host clock-domain translation, not a guess. */
+    if(due.QuadPart>0)stop("native absolute delay unqualified",interval);
+    g_eax=(uint32_t)thread_nt_delay(FALSE,&due);
+    /* Desktop's optimized yield may report STATUS_NO_YIELD_PERFORMED.
+     * Original KeDelay returns success on the expired/zero-time path, even
+     * when no peer runs. Retain the real wait and all other native statuses. */
+    if(g_eax==0x40000024u)g_eax=0;
+    g_esp+=16;
+}
+static void wait_single_kernel(unsigned ordinal)
+{
+    uint32_t id=MEM32(g_esp+4),mode=ordinal==234?MEM8(g_esp+8):0;
+    uint32_t alertable=MEM8(g_esp+(ordinal==234?12:8));
+    uint32_t timeout=MEM32(g_esp+(ordinal==234?16:12));
+    if(mode>1 || alertable)stop("native single wait APC/mode unqualified",id);
+    if(timeout && !wait_range(timeout,8,0))stop("native single wait timeout range unqualified",timeout);
+    LARGE_INTEGER due;if(timeout)memcpy(&due,memory+timeout,8);
+    uint32_t status;HANDLE host=wait_reference(id,&status);g_eax=status;
+    if(host) {
+        g_eax=(uint32_t)event_nt_wait(host,FALSE,timeout?&due:NULL);
+        if(!CloseHandle(host))stop("single wait operation reference close failed",id);
+    }
+    g_esp+=ordinal==234?20:16;
+}
+static void signal_wait_kernel(void)
+{
+    wait_native_thread_context(230);
+    if(!InitOnceExecuteOnce(&event_once,event_start,NULL,NULL))stop("signal/wait initialization failed",0);
+    uint32_t signal=MEM32(g_esp+4),wait=MEM32(g_esp+8),mode=MEM8(g_esp+12);
+    uint32_t alertable=MEM8(g_esp+16),timeout=MEM32(g_esp+20);
+    if(mode>1 || alertable)stop("native signal/wait APC/mode unqualified",signal);
+    if(timeout && !wait_range(timeout,8,0))stop("native signal/wait timeout range unqualified",timeout);
+    if((signal&0xf0000000u)!=0x30000000u)stop("native signal/wait signal type unqualified",signal);
+    LARGE_INTEGER due;if(timeout)memcpy(&due,memory+timeout,8);
+    /* Desktop paired waits do not promise the original cross-CPU handoff.
+     * Actual thread termination is persistent; other targets are admitted only
+     * for the source-compared zero-poll component, never a transient handshake. */
+    if((wait&0xf0000000u)!=0x40000000u && (!timeout || due.QuadPart!=0))
+        stop("native signal/wait blocking target unqualified",wait);
+    uint32_t status;HANDLE first=event_duplicate(signal,&status);g_eax=status;
+    if(!first && status==0xc0000024u)stop("native signal/wait signal type unqualified",signal);
+    if(first) {
+        HANDLE second=wait_reference(wait,&status);g_eax=status;
+        if(second) {
+            /* Both references precede the first mutation. Use the real paired
+             * NT service; a separate SetEvent+Wait sequence is not used. */
+            g_eax=(uint32_t)event_nt_signal_wait(first,second,FALSE,timeout?&due:NULL);
+            if(!CloseHandle(second))stop("signal/wait wait reference close failed",wait);
+        }
+        if(!CloseHandle(first))stop("signal/wait signal reference close failed",signal);
+    }
+    g_esp+=24;
 }
 static void wait_multiple_kernel(void)
 {
@@ -116,7 +192,6 @@ static void wait_multiple_kernel(void)
         stop("unqualified multi-object wait range",array);
     uint32_t ids[64];HANDLE handles[64]={0};memcpy(ids,memory+array,count*4);
     for(unsigned i=0;i<count;++i) {
-        if((ids[i]&0xf0000000u)==0x40000000u)stop("thread-handle multiwait unqualified",ids[i]);
 #ifdef PILOT_FILES_LLE
         if(ids[i]<0x30000000u)stop("original-handle multiwait unqualified",ids[i]);
 #endif
@@ -127,8 +202,7 @@ static void wait_multiple_kernel(void)
     LARGE_INTEGER due;if(timeout)memcpy(&due,memory+timeout,8);
     g_eax=0;
     for(unsigned i=0;i<count;++i) {
-        uint32_t status;handles[i]=wait_duplicate(ids[i],0,&status);
-        if(!handles[i] && (ids[i]&0xf0000000u)==0x50000000u)handles[i]=media_wait_duplicate(ids[i],&status);
+        uint32_t status;handles[i]=wait_reference(ids[i],&status);
         if(!handles[i]){g_eax=status;break;}
     }
     if(!g_eax)g_eax=(uint32_t)event_nt_wait_multiple(count,handles,kind,FALSE,timeout?&due:NULL);
@@ -139,6 +213,7 @@ static void wait_multiple_kernel(void)
 static void event_kernel(unsigned ordinal)
 {
     if(!InitOnceExecuteOnce(&event_once,event_start,NULL,NULL))stop("event initialization failed",0);
+    if(ordinal==233 || ordinal==234){wait_single_kernel(ordinal);return;}
     uint32_t first=MEM32(g_esp+4),second=MEM32(g_esp+8);
     if(ordinal==189) {
         uint32_t type=MEM32(g_esp+12),state=MEM32(g_esp+16);g_eax=0xc000000du;
@@ -154,13 +229,7 @@ static void event_kernel(unsigned ordinal)
         }
         g_esp+=20;return;
     }
-    uint32_t status;int waiting=ordinal==233 || ordinal==234;
-    HANDLE host=wait_duplicate_owned(first,waiting?0:PILOT_WAIT_EVENT,&status,waiting);g_eax=status;
-    if(!host && (ordinal==233 || ordinal==234) && (first&0xf0000000u)==0x50000000u) {
-        host=media_wait_duplicate(first,&status);g_eax=status;
-    }
-    if(!host && (ordinal==233 || ordinal==234) && (first&0xf0000000u)==0x40000000u)
-        stop("non-event handle wait outside qualified scope",first);
+    uint32_t status;HANDLE host=event_duplicate(first,&status);g_eax=status;
     if(host) {
         if(ordinal==225 || ordinal==186) {
             LONG previous;g_eax=(uint32_t)(ordinal==225?event_nt_set:event_nt_reset)(host,&previous);
@@ -169,17 +238,10 @@ static void event_kernel(unsigned ordinal)
             struct {ULONG type;LONG state;} info;
             g_eax=second?(uint32_t)event_nt_query(host,0,&info,sizeof(info),NULL):0xc000000du;
             if(!g_eax)memcpy(memory+second,&info,sizeof(info));
-        } else {
-            uint32_t alertable=ordinal==234?MEM32(g_esp+12):second;
-            uint32_t timeout=MEM32(g_esp+(ordinal==234?16:12));
-            if(alertable)stop("alertable event wait requires guest APC delivery",first);
-            if(ordinal==234 && second>1)stop("invalid event wait mode",second);
-            LARGE_INTEGER due;if(timeout)due.QuadPart=(int64_t)MEM64(timeout);
-            g_eax=(uint32_t)event_nt_wait(host,FALSE,timeout?&due:NULL);
         }
         if(!CloseHandle(host))stop("event operation reference close failed",first);
     }
-    g_esp+=ordinal==186?8:ordinal==233?16:ordinal==234?20:12;
+    g_esp+=ordinal==186?8:12;
 }
 static int mutant_output(uint32_t address,unsigned bytes)
 {return wait_range(address,bytes,1);}

@@ -15,8 +15,10 @@ query, creates the requested Gaussian graphics device, completes graphics
 initializer state setup, loads `default.xip`, passes the bounded random-byte
 request and begins loading ambient audio. Native mutex startup now passes and
 the native audio device opens. Its mix-bin headroom setup now passes; the
-notification-enabled ADPCM ambient buffer is created and its workers start.
-The next stop is a worker's `KeDelayExecutionThread` periodic delay. No native menu
+notification-enabled ADPCM ambient buffers are created and all three sets of
+workers issue subsequent stream reads. The periodic native delay now passes;
+the main thread opens the dashboard font and loads another section. The next
+stop is the guarded network link-state wrapper `0007e125`. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -32,8 +34,9 @@ functions execute.
 | Offline random-byte request | Passed for bounded startup use | Real host entropy, original XOR/owner/error contract; 0..64 bytes admitted, original seeded stream deferred |
 | Native mutex and mixed-wait services | Implemented; reached startup passes | Real ownership/recursion and leased host references; eight integrated checks pass; predicted worker/teardown execution remains unverified |
 | Native audio device headroom | Reached setup passes | Device/ABI/output fixture and PCM/ADPCM-versus-LLE headroom checks pass; diagnostic captures now wait for real completed frames |
-| Native ambient buffer notifications | Setup passes; sustained stream pending | PCM/ADPCM positions and real event ownership pass focused native checks; actual startup installs its list and starts the workers |
-| First rendered native menu | Current blocker | The periodic audio-service worker reaches the missing native delay API; ordinary native thread delay is required |
+| Native ambient buffer notifications | Setup and subsequent reads reached; audible QA pending | Three original ambient ADPCM buffers/workers progress; component checks cover real sample-position events and retained ownership |
+| Native worker timing and thread waits | Reached delay passes; teardown components pass | Real delay and CPU handoff, actual thread-exit waits and bounded paired signal/wait; 21 combined checks pass |
+| First rendered native menu | Current blocker | Startup reaches the guarded network link-state wrapper `0007e125`; an owned offline link-state contract is required |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -74,9 +77,9 @@ delivery burndown.
 | D3D creation and presentation surfaces | Actual native device creates the 1280x960 raster; guest surface allocation/projection setup returns. Real Gaussian pixels, optional depth and legacy visual mods pass focused GPU checks |
 | Initializer-state component and integration | Passed | Real zero raster bias, original cache roles, tracked native precision, inactive consumer bounds and Reset ownership; five combined CTests pass in 6.53 seconds |
 | Bounded random service integration | Passed | Twelve binder tests and nine original component cases; five combined network CTests pass in 0.64 seconds |
-| Latest actual native boot | Executable `07ad5396` creates the original ADPCM buffer and installs notifications; an audio worker stops at `KeDelayExecutionThread` after its first service call; no captured frame |
-| Driver incremental admission and QA launches | 31 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
-| Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
+| Latest actual native boot | Executable `cbb7ffa0` progresses beyond the periodic audio worker, creates three ambient streams, opens the font and loads another section; guarded network wrapper `0007e125`, no captured frame |
+| Driver incremental admission and QA launches | 33 authored checks pass; selected families, actual admissions, failed-bind state, content-drive owner and link policy are checked; run-only replays are frozen and captures are separate from performance measurements |
+| Incremental attribution files | All 150 staged notice files match their sources; real MSBuild/Ninja checks cover unchanged, changed, missing and newly configured files |
 | Menu rendering/input/audio/performance | Unverified |
 | Credits asset mod under native execution | Shared loader view and title-owned registry implemented/reviewed; actual native navigation remains pending |
 | Owner native dashboard preview | Not ready |
@@ -267,22 +270,29 @@ handles at this constructor, rather than fabricating completed tasks. See
 [bounded random service](NATIVE-NETWORK-RANDOM-2026-10-19.md). Actual audio
 playback, menu rendering and performance remain unverified.
 
-## Remaining service inventory
+## Retained service inventory
 
 An exact source audit of all 160 imports after empty-optical integration finds
 **87 bounded native owners, 15 imports available only through disabled LLE paths,
-and 58 absent imports**. That leaves 73 gaps: 66 functions and seven data exports.
+and 58 absent imports**. That left 73 gaps: 66 functions and seven data exports.
 This supersedes the earlier conservative 61-import subset. Source
 ownership does not establish full API conformance or that execution reached it.
 The source-hashed private audit is retained alongside the build; the older
 post-shutdown snapshot remains unchanged. A bounded source owner is distinct
 from an API reached by actual title execution.
 
+This is the earlier source-hashed snapshot, before the mutant, mixed-wait and
+worker-delay batches. It is not a current open-import count: subsequent native
+owners implement 192/213/221, mixed 235, bounded 99/230 and actual thread-handle
+wait transport. The table retains that snapshot's gaps for provenance; the
+delivery table above records the current reached blocker. Unreached capabilities
+and guarded modes are not counted as completed APIs.
+
 This inventory does not require every optional path before an owner menu preview.
 Implement coherent families when execution or a documented caller requires
 them; keep unexercised DVD, network and firmware operations deferred.
 
-| Family | Remaining imports | Foundation / required distinction |
+| Family | Imports in that gap snapshot | Foundation / required distinction |
 |---|---|---|
 | Clock and scheduling | 99, 238 | Shared clocks now exist; delay/APC semantics and ready-thread yielding remain guarded |
 | Handle synchronization | 192, 193, 221, 222, 230, 235; data 16 | Extend actual handle ownership; semaphore/mutant state and atomic signal/wait |
@@ -313,6 +323,17 @@ fault semantics and kernel-version identity are retained as LLE-D08/D09 in the
 behavior remains implementation work in `.1.137`.
 
 ## Delivery order
+
+The next worker/timing batch advances actual startup beyond the periodic audio
+delay: all three ambient ADPCM buffers/workers are created, subsequent file
+reads occur, and the main thread opens `fonts/Xbox.xtf` and loads another
+section. Executable `cbb7ffa0...` now stops at an explicitly guarded network
+consumer, `0007e125`; no first menu frame is claimed. The [worker wait
+contracts](NATIVE-WORKER-WAITS.md) retain the original component references,
+host-specific zero-delay status correction and the bounded handoff/clock
+deferrals. All 21 combined checks pass in 6.18 seconds. A source-fix rebuild
+of title and fixture took 12.50 seconds, with all 103 generated CPU objects
+reused; variable host load prevents claiming a controlled speedup ratio.
 
 The retained dashboard cache now uses the shared development
 [`ITERATIVE` link policy](NATIVE-TITLE-DRIVER.md), retaining `/O2` and all 103
