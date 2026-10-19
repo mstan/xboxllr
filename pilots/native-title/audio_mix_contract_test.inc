@@ -5,7 +5,12 @@ static void audio_test_observe(float average[32],int output)
     unsigned channels=output?6:32;
     float *samples=calloc(4096*channels,sizeof(float));CHECK(samples);
     CHECK(pilot_audio_capture_begin(samples,4096,output)==0);
-    Sleep(180);unsigned frames=pilot_audio_capture_end();CHECK(frames==4096);
+#ifdef PILOT_AUDIO_REFERENCE
+    Sleep(180);
+#else
+    CHECK(pilot_audio_capture_wait(5000)==1);
+#endif
+    unsigned frames=pilot_audio_capture_end();CHECK(frames==4096);
     memset(average,0,32*sizeof(float));
     for(unsigned n=frames-512;n<frames;++n)
         for(unsigned c=0;c<channels;++c)average[c]+=samples[n*channels+c]/512.0f;

@@ -24,6 +24,9 @@
 #define PILOT_AUDIO_HAS_DSP 0
 #endif
 #endif
+#ifndef PILOT_AUDIO_HAS_MIXBIN_HEADROOM
+#define PILOT_AUDIO_HAS_MIXBIN_HEADROOM 0
+#endif
 #ifdef PILOT_AUDIO_ADPCM
 #include "xbox_adpcm.h"
 #endif
@@ -346,6 +349,17 @@ void pilot_audio_dispatch(unsigned entry)
     } else if(entry==PILOT_AUDIO_IDirectSound_Release) {
         audio_device_check(a[0]);result=audio_ref(audio_device,0);
     } else if(entry==PILOT_AUDIO_ObjectAddRef)result=audio_ref(a[0],1);
+#if PILOT_AUDIO_HAS_MIXBIN_HEADROOM
+    else if(entry==PILOT_AUDIO_IDirectSound_SetMixBinHeadroom) {
+        audio_device_check(a[0]);
+        if(a[1]>=32)stop("mix-bin headroom index outside qualified range",a[1]);
+#ifdef PILOT_AUDIO_DSP
+        result=pilot_audio_mixbin_headroom(a[1],a[2]);
+#else
+        stop("mix-bin headroom requires native multi-bin mixer",a[1]);
+#endif
+    }
+#endif
     else if(entry==PILOT_AUDIO_IDirectSound_CreateSoundBuffer) {
         audio_device_check(a[0]);if(a[3])stop("audio buffer aggregation is unqualified",a[3]);
         result=audio_create_buffer(a[1],a[2]);

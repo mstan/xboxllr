@@ -14,8 +14,8 @@ The latest actual native run passes network startup and the cached-update
 query, creates the requested Gaussian graphics device, completes graphics
 initializer state setup, loads `default.xip`, passes the bounded random-byte
 request and begins loading ambient audio. Native mutex startup now passes and
-the native audio device opens; the next stop is an audio object ownership
-mismatch (`unowned audio buffer`). No native menu
+the native audio device opens. Its mix-bin headroom setup now passes; the
+next stop is a notification-enabled streaming buffer (`0x1a0`). No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -30,7 +30,8 @@ functions execute.
 | Graphics initialization and initial assets | Passed in actual startup | Native state setup returns and the original dashboard loads `default.xip`; exact RGBA8 dithering remains an explicit precision deferral |
 | Offline random-byte request | Passed for bounded startup use | Real host entropy, original XOR/owner/error contract; 0..64 bytes admitted, original seeded stream deferred |
 | Native mutex and mixed-wait services | Implemented; reached startup passes | Real ownership/recursion and leased host references; eight integrated checks pass; predicted worker/teardown execution remains unverified |
-| First rendered native menu | Current blocker | Native audio device opens, then an audio object ownership check stops execution |
+| Native audio device headroom | Reached setup passes | Device/ABI/output fixture and PCM/ADPCM-versus-LLE headroom checks pass; diagnostic captures now wait for real completed frames |
+| First rendered native menu | Current blocker | Ambient initialization requests notification-enabled streaming buffers; notification ownership/completion is required |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -71,7 +72,7 @@ delivery burndown.
 | D3D creation and presentation surfaces | Actual native device creates the 1280x960 raster; guest surface allocation/projection setup returns. Real Gaussian pixels, optional depth and legacy visual mods pass focused GPU checks |
 | Initializer-state component and integration | Passed | Real zero raster bias, original cache roles, tracked native precision, inactive consumer bounds and Reset ownership; five combined CTests pass in 6.53 seconds |
 | Bounded random service integration | Passed | Twelve binder tests and nine original component cases; five combined network CTests pass in 0.64 seconds |
-| Latest actual native boot | Executable `d42f2101` passes reached mutex startup and opens the native audio device; stops at `unowned audio buffer` after 193,956 native entries; no captured frame |
+| Latest actual native boot | Executable `d253eef1` passes mutex/device/mix-bin startup; stops at notification-enabled buffer flags `0x1a0` after 193,957 native entries; no captured frame |
 | Driver incremental admission and QA launches | 31 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |

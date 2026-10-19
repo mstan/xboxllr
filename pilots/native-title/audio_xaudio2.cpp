@@ -48,11 +48,14 @@ class Effects final:public IXAPO {
     uint32_t bins[1024]{},speakers[192]{};
 public:
     PilotDsp *graph=nullptr; // Changed only while XAudio2's engine is stopped.
+    std::atomic<unsigned> headroom[32]{};
+    HANDLE capture_done=nullptr;
     float *capture=nullptr;
     UINT32 capture_capacity=0,capture_frames=0;
     bool capture_output=false;
     CaptureStamp *capture_stamps=nullptr;
     UINT32 capture_stamp_count=0,capture_stamp_capacity=0,capture_next_stamp=0;
+    ~Effects(){if(capture_done)CloseHandle(capture_done);}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void **out) override {
         if(!out)return E_POINTER;*out=nullptr;
         if(id==__uuidof(IUnknown) || id==__uuidof(IXAPO)){*out=static_cast<IXAPO*>(this);AddRef();return S_OK;}
@@ -101,6 +104,8 @@ public:
             capture_stamps[capture_stamp_count++]={capture_frames,capture_clock()};
             capture_next_stamp=capture_frames+4800; /* ~10 Hz, no I/O in Process. */
         }
+        float gains[32];for(unsigned c=0;c<32;++c)
+            gains[c]=1.0f/(1u<<headroom[c].load(std::memory_order_relaxed));
         bool nonzero=false;
         for(UINT32 frame=0;frame<in->ValidFrameCount;++frame) {
             // Carry imposes a documented 32/48000-second transport latency and
@@ -112,6 +117,7 @@ public:
             for(unsigned c=0;c<32;++c) {
                 float sample=in->BufferFlags==XAPO_BUFFER_SILENT?0.0f:src[frame*32+c];
                 if(!std::isfinite(sample))fail("nonfinite mixed sample");
+                sample*=gains[c];
                 double q=sample*8388608.0;
                 bins[c*32+offset]=(uint32_t)(int32_t)(q>8388607?8388607:q< -8388608?-8388608:q)&0xffffff;
             }
@@ -120,7 +126,10 @@ public:
                 float *destination=capture+(size_t)capture_frames++*channels;
                 if(capture_output)memcpy(destination,dst+frame*6,channels*sizeof(float));
                 else if(in->BufferFlags==XAPO_BUFFER_SILENT)memset(destination,0,channels*sizeof(float));
-                else memcpy(destination,src+frame*32,channels*sizeof(float));
+                else for(unsigned c=0;c<32;++c)
+                    destination[c]=src[frame*32+c]*gains[c];
+                if(capture_frames==capture_capacity && capture_done && !SetEvent(capture_done))
+                    fail("audio capture completion event",HRESULT_FROM_WIN32(GetLastError()));
             }
             if(++offset==32) {
                 if(graph && enabled)pilot_dsp_process(graph,bins,speakers);
@@ -345,7 +354,10 @@ static int32_t audio_capture_begin(float *samples,uint32_t frames,int after_effe
                                   CaptureStamp *stamps,UINT32 stamp_capacity)
 {
     if(!engine || !effects || !samples || !frames || effects->capture)return E_INVALIDARG;
-    Guard guard;engine->StopEngine();effects->capture=samples;effects->capture_capacity=frames;
+    Guard guard;
+    if(!effects->capture_done)effects->capture_done=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    if(!effects->capture_done || !ResetEvent(effects->capture_done))return HRESULT_FROM_WIN32(GetLastError());
+    engine->StopEngine();effects->capture=samples;effects->capture_capacity=frames;
     effects->capture_frames=0;effects->capture_output=!!after_effects;
     effects->capture_stamps=stamps;effects->capture_stamp_capacity=stamp_capacity;
     effects->capture_stamp_count=effects->capture_next_stamp=0;
@@ -353,6 +365,20 @@ static int32_t audio_capture_begin(float *samples,uint32_t frames,int after_effe
 }
 int32_t pilot_audio_capture_begin(float *samples,uint32_t frames,int after_effects)
 {return audio_capture_begin(samples,frames,after_effects,nullptr,0);}
+int32_t pilot_audio_capture_wait(uint32_t milliseconds)
+{
+    HANDLE reference=nullptr;
+    {
+        Guard guard;
+        if(!effects || !effects->capture || !effects->capture_done)return E_INVALIDARG;
+        if(!DuplicateHandle(GetCurrentProcess(),effects->capture_done,GetCurrentProcess(),&reference,
+                            SYNCHRONIZE,FALSE,0))return HRESULT_FROM_WIN32(GetLastError());
+    }
+    // Never hold the feeder's lock while waiting for real device processing.
+    DWORD result=WaitForSingleObject(reference,milliseconds),error=GetLastError();
+    CloseHandle(reference);
+    return result==WAIT_OBJECT_0?1:result==WAIT_TIMEOUT?0:HRESULT_FROM_WIN32(error);
+}
 uint32_t pilot_audio_capture_end(void)
 {
     if(!engine || !effects)return 0;
@@ -518,6 +544,15 @@ static void diagnostic_capture_close(void)
         fail("audio capture shutdown");
     CloseHandle(diagnostic_thread);CloseHandle(diagnostic_stop);
     diagnostic_thread=diagnostic_stop=nullptr;
+}
+int32_t pilot_audio_mixbin_headroom(unsigned bin,uint32_t amount)
+{
+    if(bin>=32)return E_INVALIDARG;
+    Guard guard;if(!effects)return E_INVALIDARG;
+    // Original setter stores a BYTE; its hardware method consumes bits 0..2.
+    // Apply before the existing GP input quantization/clipping, including voices
+    // created later. This device control is independent of per-voice headroom.
+    effects->headroom[bin].store(amount&7,std::memory_order_relaxed);return S_OK;
 }
 int32_t pilot_audio_buffer_mixbins(void *opaque,unsigned count,const uint32_t *bins,const int32_t *volumes)
 {

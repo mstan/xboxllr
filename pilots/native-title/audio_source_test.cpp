@@ -74,6 +74,11 @@ int main() {
         CHECK(pilot_audio_buffer_loop_region(native,512*align,1024*align)==0);
         CHECK(pilot_audio_buffer_play(native,1)==0);
         for(unsigned scenario=0;scenario<4;++scenario) {
+            for(unsigned bin=0;bin<32;++bin) {
+                unsigned amount=scenario==1?bin+8:0;
+                reg(0x20200+4*bin,amount);
+                CHECK(pilot_audio_mixbin_headroom(bin,amount)==0);
+            }
             const std::vector<unsigned> bins=scenario==0?std::vector<unsigned>{0,1}:
                 scenario==1?std::vector<unsigned>{31,3,7,5,0,1,2,6}:
                 scenario==2?std::vector<unsigned>{7,7,31,2}:std::vector<unsigned>{};
@@ -109,7 +114,7 @@ int main() {
             Sleep(100);
             std::vector<float> actual(4096*32);
             CHECK(pilot_audio_capture_begin(actual.data(),4096,0)==0);
-            Sleep(180);CHECK(pilot_audio_capture_end()==4096);
+            CHECK(pilot_audio_capture_wait(5000)==1);CHECK(pilot_audio_capture_end()==4096);
             for(unsigned n=3584;n<4096;++n)for(unsigned bin=0;bin<32;++bin) {
                 const float wanted=expected[bin*32+n%32];
                 // <0.2% amplitude covers 1/64-dB quantization. The explicit
@@ -123,5 +128,5 @@ int main() {
         CHECK(pilot_audio_buffer_stop(native)==0);pilot_audio_buffer_destroy(native);
     }
     pilot_audio_close();
-    std::puts("PASS: real PCM/ADPCM source and 2D sends versus native mixer; four route/gain cases per format/channel; bounded dB quantization/mute tolerance");
+    std::puts("PASS: real PCM/ADPCM source and 2D sends versus native mixer; four route/gain cases per format/channel, all-bin headroom and live reset; bounded dB quantization/mute tolerance");
 }

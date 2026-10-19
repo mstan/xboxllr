@@ -13,6 +13,7 @@ from native_binding import Binding, validate_body
 # out-of-range values; they do not acquire a wrapper or a callable table row.
 SEMANTIC_ENTRIES = (
     'DirectSoundCreate', 'IDirectSound_CreateSoundBuffer', 'IDirectSound_DownloadEffectsImage',
+    'IDirectSound_SetMixBinHeadroom',
     'IDirectSound_Release', 'ObjectAddRef', 'IDirectSoundBuffer_Release',
     'IDirectSoundBuffer_SetBufferData', 'IDirectSoundBuffer_SetVolume',
     'IDirectSoundBuffer_SetHeadroom', 'IDirectSoundBuffer_SetPitch',
@@ -104,6 +105,7 @@ def bind(xbe,output,symbols,profile=None):
     header+=['};']
     header+=[f'#define PILOT_AUDIO_{kind}_VTABLE 0x{v["address"]:08x}u' for kind,v in tables.items()]
     header+=[f'#define PILOT_AUDIO_HAS_DSP {int(bool(dsp))}']
+    header+=[f'#define PILOT_AUDIO_HAS_MIXBIN_HEADROOM {int("IDirectSound_SetMixBinHeadroom" in proof["calls"])}']
     if dsp:
         header+=[f'#define PILOT_AUDIO_DSP_SEED UINT64_C(0x{dsp["seed"]["value"]:016x})']
     header+=[f'#define PILOT_AUDIO_{key.upper()} {value}u' for key,value in layout.items()]

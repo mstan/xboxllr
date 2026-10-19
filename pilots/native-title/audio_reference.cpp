@@ -99,6 +99,7 @@ uint64_t hash(const void*p,size_t n,uint64_t h=1469598103934665603ull){auto*b=(c
 }
 extern "C" {
 int32_t pilot_audio_open(void){if(engine)return INVALID;engine=std::make_unique<Engine>();return engine->fault.empty()?OK:FAIL;}
+int32_t pilot_audio_mixbin_headroom(unsigned bin,uint32_t amount){if(ready())return FAIL;if(bin>=32)return INVALID;engine->reg(0x20200+4*bin,amount&7);return engine->fault.empty()?OK:FAIL;}
 void pilot_audio_close(void){if(!engine||engine->busy)return;if(!engine->capture.finish()){fprintf(stderr,"[REFERENCE CAPTURE FAILURE] finalization\n");ExitProcess(2);}engine->graph=nullptr;engine->reset_carry();engine.reset();}
 int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate,unsigned bits,void**out){
  if(ready())return FAIL;int p;if(!out||!bytes||bytes>1024*1024||(channels!=1&&channels!=2)||(bits!=8&&bits!=16)||bytes%(channels*bits/8))return INVALID;if(!pitch(rate,p))return UNSUPPORTED;

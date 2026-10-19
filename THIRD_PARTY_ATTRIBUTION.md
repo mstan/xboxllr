@@ -1402,6 +1402,15 @@ The native mixer implementation is reused unchanged; documented output
 tolerances permit continuous HLE gain arithmetic. See the expanded audio
 qualification for stage boundaries and missing upstream processing.
 
+The later native device mix-bin headroom control uses the same pinned xemu
+submix method/voice-processing behavior and the maintained LLE send model as
+behavioral references. Original title-owned setter/helper bodies separately
+establish the low-byte store and low-three-bit method mask. The atomic native
+gain control and diagnostic capture completion event are independently authored;
+no source-processing body was copied. See
+[native mix-bin headroom](docs/NATIVE-AUDIO-MIXBIN-HEADROOM.md) for scope and
+actual-output validation.
+
 [libsamplerate 0.2.2](https://github.com/libsndfile/libsamplerate/tree/0.2.2),
 copyright Erik de Castro Lopo and upstream contributors, was initially consulted
 as a resampling candidate. The subsequent source-rate stage now links its
