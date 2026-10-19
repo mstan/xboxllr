@@ -246,9 +246,21 @@ Dashboard054's original ISR
 reaches this read after selecting Credits; this is a newly reached dashboard
 route, not a change to bounded Blinx qualification or its signal model.
 
+Dashboard055 then releases method mode before submitting the real RAM fence,
+while FET remains latched for later acknowledgement. In the board-owned model,
+implemented FE/VP prefix writes finish synchronously; idle-voice traps occur
+in preflight before publication. With released mode0/80 and no pending work,
+the interrupt alone therefore does not block fence admission. The existing
+independent service still performs the actual token write, preserving FET
+and IRQ state; MMIO polls and control release do not publish. Trapped modeE0,
+unknown/warm FET contexts, deferred retirement notifications, active DSP or
+publication and reentrancy remain guarded. Failed DMA retains the pending
+token and fails closed, without an automatic retry.
+
 Deferred: independent silicon confirmation of this retained transport during
 active DSP/ISR interleavings, including gating/stall effects of bit0, and any
-unmodeled dynamic bits or read side effects.
+unmodeled dynamic bits or read side effects, and exact silicon fence latency
+or ordering outside the supported serialized FE/VP prefix.
 Reopen if hardware contradicts retained storage or a supported consumer needs
 such behavior. Replay the positive/negative fence tests and original caller;
 never treat a successful control read as evidence that pending work completed.

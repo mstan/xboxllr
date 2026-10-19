@@ -134,6 +134,43 @@ int main() {
         CHECK(f.apu.service_fe_fence() && f.word(4096)==0x87654321);
         CHECK(f.writes==1 && f.apu.fe_fences_published()==1 && !f.irq_edges);
     }
+    // The board-owned ISR releases FE method mode before fencing its prefix,
+    // then acknowledges FET later. The latched IRQ is not unpublished work.
+    // Admission and polls leave both the token and interrupt untouched; only
+    // independent successful RAM service publishes, once. Failed DMA is sticky.
+    for(uint32_t mode:{8u,0x88u})for(uint32_t setup:{7u,15u})for(bool reject:{false,true}) {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());
+        f.write(0x5fffc,1);f.write(0x1100,0x88);f.write(0x2000,7);
+        f.write(0x1100,0xe0);f.write(0x1100,mode);f.write(0x2000,setup);
+        CHECK(f.error.empty() && (f.read(0x1000)&0x10));
+        const uint32_t status=f.read(0x1000);
+        const auto before=f.ram;
+        const unsigned irqs=f.irq_edges;
+        f.write(0x1510,1);f.write(0x1324,4096);f.write(0x1334,0x76543210);
+        f.write(0x1510,0);
+        CHECK(f.error.empty() && f.apu.fe_fence_pending());
+        for(unsigned poll=0;poll<16;++poll)CHECK(f.read(0x1510)==0);
+        CHECK(f.ram==before && !f.writes && !f.apu.fe_fences_published());
+        CHECK(f.read(0x1000)==status && f.irq_edges==irqs);
+        f.reject=reject;
+        CHECK(f.apu.service_fe_fence()==!reject);
+        CHECK(f.writes==1 && f.irq_edges==irqs);
+        CHECK(f.apu.RegFileMmio::mmio_read(0xfe801000,4)==status);
+        if(reject) {
+            CHECK(!f.error.empty() && f.ram==before && f.apu.fe_fence_pending());
+            CHECK(!f.apu.fe_fences_published() && f.written_addresses.empty());
+            f.reject=false;
+            CHECK(!f.apu.service_fe_fence() && f.writes==1); // no hidden retry
+        } else {
+            auto expected=before;
+            const uint32_t token=0x76543210;
+            std::memcpy(expected.data()+4096,&token,sizeof(token));
+            CHECK(f.error.empty() && f.ram==expected && !f.apu.fe_fence_pending());
+            CHECK(f.apu.fe_fences_published()==1 && f.written_addresses==std::vector<uint32_t>({4096}));
+            CHECK(f.apu.service_fe_fence() && f.writes==1);
+            CHECK(f.read(0x1000)==status && f.irq_edges==irqs);
+        }
+    }
     // Control access does not itself submit or complete a memory token.
     // Merely binding two unused CPU owners does not fabricate active work.
     for(unsigned life=0;life<3;++life) {

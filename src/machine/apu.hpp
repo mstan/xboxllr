@@ -628,7 +628,7 @@ public:
             if(off==kFeFenceControl && size==4 &&
                (board_audio_reset_ || audio_control_drained() ||
                 retirement_control_accessible() || fe_fence_context()))return reg32(off);
-            device_fault("FE notification fence/control remains unqualified");return 0;
+            fe_fence_fault("read",off,size,0);return 0;
         }
         if(off>=0x30000 && off<0x40000) {
             uint32_t* word=gp_host_word(off,size);
@@ -768,7 +768,7 @@ public:
                     set_reg32(off,value);fe_fence_pending_=true;return;
                 }
             }
-            device_fault("FE notification fence/control remains unqualified");return;
+            fe_fence_fault("write",off,size,value);return;
         }
         if(fe_fence_pending_) {device_fault("FE fence has pending publication");return;}
         // The captured observation covers these FE transactions only. Changing
@@ -1302,6 +1302,18 @@ private:
         return fe_context_known_ && reg32(kFectl)==kObservedIdleFectl &&
                reg32(kSectl)==kObservedIdleSectl && fe_work_idle();
     }
+    void fe_fence_fault(const char* operation,uint32_t off,int size,uint32_t value) {
+        // Capture retained state at the actual failing transaction; faulted
+        // MMIO reads cannot reconstruct it and must never service device work.
+        char diagnostic[384];
+        std::snprintf(diagnostic,sizeof(diagnostic),
+            "FE notification fence/control remains unqualified: %s off=%x size=%d value=%08x board=%u fectl=%08x sectl=%08x ists=%08x retirement=%u quantum=%u voice=%u mix=%u sge=%u dsp=%u pending=%u working=%u",
+            operation,off,size,value,unsigned(board_audio_reset_),reg32(kFectl),reg32(kSectl),reg32(kIsts),
+            unsigned(retirement_notify_pending_),unsigned(processing_quantum_),unsigned(processing_voice_),
+            unsigned(gp_mix_admitting_),unsigned(input_sge_publishing_),unsigned(dsp_work_active()),
+            unsigned(fe_fence_pending_),unsigned(fe_fence_working_));
+        device_fault(diagnostic);
+    }
     bool fe_fence_context()const {
         if(fe_context_idle())return true;
         // Original177E53 fences before dispatching completed voices. Supported
@@ -1310,10 +1322,14 @@ private:
         // DSP CPU is not outstanding FE work. GP/EP consume their separate MIX/
         // scratch owners; this fence neither completes nor retires those CPUs.
         // Held/queued methods and retirement NOTIFY are separate, guarded work.
+        // The board-owned ISR releases method mode before fencing its handled
+        // prefix, then acknowledges FET later. A latched IRQ alone owns no FE
+        // publication; admitting the fence must neither clear it nor execute
+        // any work. Imported warm observations do not establish this history.
         const uint32_t setup=reg32(kSectl),mode=reg32(kFectl)&kFectlMethodMode;
         return dsp_reset_context_known_ && fectl_initialized_ &&
                (setup==7 || setup==15) && (mode==0 || mode==0x80) &&
-               !(reg32(kIsts)&kIstsFet) && !retirement_notify_pending_ &&
+               (!(reg32(kIsts)&kIstsFet) || board_audio_reset_) && !retirement_notify_pending_ &&
                !processing_quantum_ && !processing_voice_ && !gp_mix_admitting_ && !input_sge_publishing_ &&
                !dsp_work_active() && !fe_fence_working_;
     }

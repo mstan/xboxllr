@@ -19,8 +19,9 @@ original author's copyright or license.
 
 The private output preserves every original archive and the base HDD image.
 Archive replacement/readback and generated controller/menu logic checks pass.
-Actual Credits positioning, text readability, XAP compilation, controller
-navigation and return to the main menu are **unverified**. The
+Retail XAP compilation, the fifth Credits item's position beneath Settings,
+and real controller selection pass. First-page readability, page/section
+navigation and return to the main menu remain **unverified**. The
 2026-10-19 modern HLE cold-boot candidate passes tiled storage, loaded draws,
 the reached nominal audio modes, SRCCOPY and semantic context SAVE, and displays
 the Xbox boot logo. The subsequent idle PGRAPH reset is implemented and passes
@@ -74,7 +75,15 @@ original ISR, before the first page. Adjacent original code immediately writes
 bit0 back; the board-reset model now admits that exact DWORD0/1 retained
 read/modify/write transport, preserving all address/token and fence-publication
 guards. Focused HLE and genuine LLE checks cover the transport separately from
-completion. The page/navigation pass must be rerun with that fix before owner handoff.
+completion. Run055 passes that transport, then stops at the original RAM
+fence submission: method mode is released, but FET remains latched until the
+ISR's later acknowledgement. The board-owned model now distinguishes that
+latched interrupt from unpublished FE/VP work. It retains trapped-mode,
+pending-retirement and in-flight publication guards and publishes the real
+token only through independent RAM service. Focused optimized HLE and genuine
+LLE tests preserve the IRQ and establish delayed publication, single-write
+completion and sticky DMA failure. The page/navigation pass must be rerun
+with that fix before owner handoff.
 The remaining hardware precision question is tracked in
 [AUDIO-D18](../pilots/native-title/LLE-DEFERRED-QUESTIONS.md#audio-d18---active-retained-fe-control-transport).
 Do not describe this prototype as installed or playable. It is not a public
