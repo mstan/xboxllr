@@ -554,6 +554,17 @@ int main(int argc,char **argv)
     EXCEPTION_RECORD diagnostic={0};EXCEPTION_POINTERS pointers={&diagnostic,NULL};
     diagnostic.ExceptionCode=0x406d1388u;
     CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
+    diagnostic.ExceptionCode=0x40010006u;
+    CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
+    diagnostic.ExceptionCode=0x4001000au;
+    CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
+    if(argc==2 && !strcmp(argv[1],"host-diagnostics")) {
+        install_fault_handler();
+        OutputDebugStringA("xboxlle host diagnostic ANSI regression\n");
+        OutputDebugStringW(L"xboxlle host diagnostic Unicode regression\n");
+        fprintf(stderr,"PASS: host debug output returns through the production exception handler\n");
+        return 0;
+    }
 #ifdef PILOT_GPU_AV_TEST_CALLBACKS
     if(argc>=2 && (!strcmp(argv[1],"gpu-av-interrupt-lle") || !strcmp(argv[1],"gpu-av-interrupt-thread-lle") ||
                   !strcmp(argv[1],"gpu-av-service-counterexample-lle"))) {

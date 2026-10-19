@@ -967,10 +967,12 @@ recomp_func_t recomp_lookup_kernel(uint32_t va)
 static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
 {
     DWORD code = exception->ExceptionRecord->ExceptionCode;
-    /* Windows libraries use this diagnostic exception to name their host
-     * threads, inside their own SEH handler. Let that handler receive it;
+    /* Windows libraries raise these diagnostic exceptions for thread names
+     * and OutputDebugStringA/W, inside their own SEH handlers. Let those
+     * handlers receive them;
      * this does not resume or hide an unhandled guest/native fault. */
-    if(code==0x406d1388u)return EXCEPTION_CONTINUE_SEARCH;
+    if(code==0x406d1388u || code==0x40010006u || code==0x4001000au)
+        return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION) {
 #ifdef PILOT_AUDIO_DEVICE_LLE
         const char *audio_error=NULL;

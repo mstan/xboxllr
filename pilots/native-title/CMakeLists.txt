@@ -620,6 +620,8 @@ include(display_lle.cmake)
 include(gpu_lle.cmake)
 include(scheduling_lle.cmake)
 pilot_add_test(NAME pilot_native_contract COMMAND pilot_contract_test)
+pilot_add_test(NAME pilot_host_diagnostics COMMAND pilot_contract_test host-diagnostics)
+set_tests_properties(pilot_host_diagnostics PROPERTIES TIMEOUT 10)
 pilot_add_test(NAME pilot_timer_contract COMMAND pilot_contract_test timers)
 pilot_add_test(NAME pilot_system_clock COMMAND pilot_contract_test system-clock)
 pilot_add_test(NAME pilot_calendar_fault_guard COMMAND "${CMAKE_COMMAND}"
