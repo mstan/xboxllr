@@ -3,7 +3,8 @@
 namespace xlle {
 bool McpxApu::prepare_2d_filter(uint16_t voice,uint32_t format,uint32_t misc,
                               uint32_t route,uint32_t control50,uint32_t control70,
-                              bool& enabled,ApuDls2Coefficients& coefficients) {
+                              bool& enabled,ApuDls2Coefficients& coefficients,int* omitted_scale) {
+    if(omitted_scale)*omitted_scale=0;
     enabled=false;
     const bool adjacent=control50 || control70 || ((format>>13)&7)!=7 ||
         (format&((1u<<21)|(1u<<22)|(1u<<24))) || (route&0x80008000);
@@ -17,13 +18,14 @@ bool McpxApu::prepare_2d_filter(uint16_t voice,uint32_t format,uint32_t misc,
        !read_voice_word(voice,0x78,b)) {
         device_fault("VP filter configuration DMA failed");return false;
     }
-    if(adjacent || mode!=1 || (format&((1u<<16)|(1u<<27))) || (envelope1>>24)) {
+    if(adjacent || mode!=1 || (format&((1u<<16)|(1u<<27)))) {
         char reason[320];std::snprintf(reason,sizeof(reason),
             "VP filter profile unsupported: voice=%u format=%08x misc=%08x route=%08x control50=%08x control70=%08x envelope1=%08x filterA=%08x filterB=%08x",
             unsigned(voice),format,misc,route,control50,control70,envelope1,a,b);
         device_fault(reason);return false;
     }
     if(!voice_filter_owned_[voice]) {device_fault("DLS2 nominal filter requires actual VOICE_ON history");return false;}
+    if(omitted_scale)*omitted_scale=int(envelope1>>24)-((envelope1&0x80000000)?256:0);
     coefficients=ApuDls2Coefficients::decode(a);enabled=true;return true;
 }
 } // namespace xlle

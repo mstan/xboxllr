@@ -29,7 +29,7 @@ bool McpxApu::step_envelopes(uint16_t voice,ApuEnvelopeStep& result) {
     bool force_release=false;
     auto history=voice_envelopes_[voice];
     // Evaluate both before writing either. Curve policy is explicitly nominal;
-    // attack overflow/zero-rate and unknown phases remain guarded.
+    // Strict zero-rate, attack overflow and unknown phases remain guarded.
     for(unsigned i=0;i<2;++i) {
         const unsigned shift=i?24:28;
         unsigned phase=(state>>shift)&15,count=(counts>>(i*16))&0xffff,level=0;
@@ -40,16 +40,19 @@ bool McpxApu::step_envelopes(uint16_t voice,ApuEnvelopeStep& result) {
         case 1:
             if(count)--count;else phase=2;
             break;
-        case 2:
-            if(!rate || count>rate) {
+        case 2: {
+            const bool instant=signal_model_==ApuSignalModel::NominalDls2LinearV1 && !rate && !count;
+            if((!rate || count>rate) && !instant) {
                 char detail[240];
                 std::snprintf(detail,sizeof(detail),"envelope zero-rate/overflow attack remains unqualified voice=%u env=%u state=%08x count=%u rate=%u cfg=%08x/%08x",voice,i,state,count,rate,configuration[i*2],configuration[i*2+1]);
                 device_fault(detail);return false;
             }
-            level=count*255/rate;
+            if(instant)std::fprintf(stderr,"[audio] nominal-dls2-linear-v1 zero-rate/count attack voice=%u env=%u -> level255/hold; silicon transient deferred\n",voice,i);
+            level=instant?255:count*255/rate;
             if(count==rate){phase=3;count=((configuration[i*2+1]>>12)&0xfff)*16;}
             else ++count;
             break;
+        }
         case 3:
             level=255;
             if(count)--count;else {phase=4;count=(configuration[i*2+1]&0xfff)*16;}
@@ -137,8 +140,8 @@ bool McpxApu::process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,b
         device_fault("2D processing configuration DMA failed");return false;
     }
     if(!(state&kVoiceActive) || (state&(1u<<18)) || voice_locked_[voice])return true;
-    bool filtered=false;ApuDls2Coefficients coefficients;
-    if(!prepare_2d_filter(voice,format,misc,route,control50,control70,filtered,coefficients))return false;
+    bool filtered=false;ApuDls2Coefficients coefficients;int omitted_scale=0;
+    if(!prepare_2d_filter(voice,format,misc,route,control50,control70,filtered,coefficients,&omitted_scale))return false;
     float samples[64];bool ended=false;ApuEnvelopeStep envelope;
     if(!source_signal_quantum(voice,samples,count,ended,envelope))return false;
     if(filtered && count) {
@@ -146,8 +149,15 @@ bool McpxApu::process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,b
             device_fault("DLS2 nominal filter non-finite input/state");return false;
         }
         dls2_filter_frames_+=count;
+        if(omitted_scale) {
+            dls2_modulation_omitted_frames_+=count;
+            if(!dls2_modulation_reported_) {
+                std::fprintf(stderr,"[audio] nominal-dls2-linear-v1 OMIT cutoff modulation signed-scale=%d; base coefficients and envelope stepping retained, silicon mapping deferred\n",omitted_scale);
+                dls2_modulation_reported_=true;
+            }
+        }
         if(!dls2_model_reported_) {
-            std::fprintf(stderr,"[audio] model=nominal-dls2-linear-v1 ordinary-mono FCscale=0 f=%a damping=%a; silicon precision/nonlinearity/gain deferred\n",
+            std::fprintf(stderr,"[audio] model=nominal-dls2-linear-v1 ordinary-mono base-f=%a damping=%a; silicon precision/nonlinearity/gain deferred\n",
                 coefficients.frequency,coefficients.damping);dls2_model_reported_=true;
         }
     }

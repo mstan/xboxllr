@@ -221,6 +221,7 @@ public:
     bool process_2d_quantum(ApuVoiceQuantum& result);
     uint64_t voice_mix_quanta()const{return voice_mix_quanta_;}
     uint64_t dls2_filter_frames()const{return dls2_filter_frames_;}
+    uint64_t dls2_modulation_omitted_frames()const{return dls2_modulation_omitted_frames_;}
     ApuSignalModel signal_model()const{return signal_model_;}
 
     // Fresh opaque descriptor reads for the later stream owner. This stages
@@ -889,10 +890,12 @@ public:
 private:
     bool process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,bool& completed,bool retire);
     bool prepare_2d_filter(uint16_t voice,uint32_t format,uint32_t misc,uint32_t route,
-                           uint32_t control50,uint32_t control70,bool& enabled,ApuDls2Coefficients& coefficients);
+                           uint32_t control50,uint32_t control70,bool& enabled,ApuDls2Coefficients& coefficients,int* omitted_scale=nullptr);
     const ApuSignalModel signal_model_;
     uint64_t dls2_filter_frames_=0;
     bool dls2_model_reported_=false;
+    uint64_t dls2_modulation_omitted_frames_=0;
+    bool dls2_modulation_reported_=false;
     uint64_t voice_mix_quanta_=0;
     bool processing_quantum_=false,processing_voice_=false;
     bool configure_ssl(uint32_t method,uint32_t value) {

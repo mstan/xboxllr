@@ -189,7 +189,7 @@ normal title execution. Actual original allocator, disk, image handoff and G05
 output/lifecycle still must pass. This extends the existing startup-profile scope;
 it adds no family waiver or new deferral ID.
 
-## AUDIO-D17 — nominal DLS2 signal projection
+## AUDIO-D17 - nominal DLS2 signal projection
 
 The explicit construction-time `nominal-dls2-linear-v1` policy supplies an
 independently authored ordinary mono LPF stage; default `Strict` still rejects
@@ -214,3 +214,14 @@ policy is selected. Retain saved authored impulse/frequency/partition/lifetime
 and preflight checks, then validate the affected actual output and compatibility
 identity. There is no new hardware probe authorization or netplay qualification.
 See [model contract](../../docs/APU-NOMINAL-DLS2.md).
+
+AUDIO-D17 follow-up: nominal zero-rate/count-zero attack uses level255 then
+normal hold publication. Exact zero-rate silicon transient/crackle is unqualified;
+strict and overflow guards remain. Reopen on audible transient evidence or a
+nonzero-count/zero-rate producer.
+
+AUDIO-D17 scope: nominal V1 omits nonzero FCSCALE modulation using unchanged base
+coefficients; first actual use logs signed scale and affected-frame counter records
+usage. Strict rejection remains. Exact scale sign/units/envelope coefficient
+mapping and audible impact remain deferred; reopen on a validated mapping,
+audible discrepancy, or modulation-dependent title requirement.

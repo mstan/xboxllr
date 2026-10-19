@@ -7,10 +7,10 @@ explicit nominal selection admits the new filter. Graphics selection does not
 choose audio policy. The full-system CLI logs this selection and rejects its
 use for unqualified netplay. Existing bounded Blinx qualification is unchanged.
 
-The reached ordinary mono profile uses FMODE1, zero cutoff-envelope scale,
-headroom7 and the already supported adjacent ownership controls. Stereo,
-ParaEQ/multifunction, spatial/multipass, nonzero cutoff modulation, unknown
-filter history and other adjacent modes remain guarded. Complete-list
+The reached ordinary mono profile uses FMODE1, explicitly omitted cutoff-envelope
+modulation, headroom7 and the already supported adjacent ownership controls.
+Stereo, ParaEQ/multifunction, spatial/multipass, unknown filter history and other
+adjacent modes remain guarded. Complete-list
 preflight validates this before source/cursor work or new GP publication.
 Bypass retains its previous reads and arithmetic.
 
@@ -53,9 +53,23 @@ Authored tests cover exact impulse fractions at f=.5/damping1, unit-coefficient
 identity, analytic frequency-response gain, partition continuity, channel
 isolation, coefficient changes without history loss, invalid blocks without
 mutation, nominal-versus-bypass GP waveform identity, pause/resume, actual
-VOICE_ON restart, strict rejection, unknown history, modulation and adjacent
+VOICE_ON restart, strict rejection, unknown history, strict modulation and adjacent
 unsupported modes before source/GP effects. These validate the declared model,
 not physical output accuracy.
 
 Open precision/projection questions and reopening triggers are recorded as
 [AUDIO-D17](../pilots/native-title/LLE-DEFERRED-QUESTIONS.md#audio-d17--nominal-dls2-signal-projection).
+
+The explicit nominal profile also admits attack rate=0 only with current count=0:
+level255 followed by the existing hold phase/count publication. This follows the
+reference emulator's instantaneous-attack policy; hardware zero-rate
+transients/crackle remain deferred. Strict rejects this case; nonzero count with
+zero rate and overflow remain rejected. No counters are reset to manufacture
+eligibility.
+
+V1 explicitly omits nonzero FCSCALE cutoff modulation, matching the consulted
+reference vp.c FIXME rather than inventing MCPX units. Signed scale is logged on
+first processed use and affected frames counted. Base FC0/FC1, raw ENV words and
+normal envelope stepping/lifetime remain authoritative. This can audibly differ
+from silicon. Reopen when a valid mapping or audible modulation requirements
+become available.

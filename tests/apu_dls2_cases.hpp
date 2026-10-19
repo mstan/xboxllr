@@ -52,6 +52,25 @@ static void dls2_math() {
 }
 
 static void dls2_device() {
+    // Nominal instantaneous attack preserves normal phase/hold publication.
+    // Strict zero-rate and any nonzero count remain side-effect-free failures.
+    for(unsigned mode=0;mode<4;++mode) {
+        Fixture attack(mode==0?xlle::ApuSignalModel::Strict:xlle::ApuSignalModel::NominalDls2LinearV1);
+        attack.add(73,1,128,true,0,4096);const unsigned v=Fixture::object(73);
+        attack.put(v+8,0);attack.put(v+0xc,2u<<12);
+        attack.put(v+0x54,(1u<<21)|0x20000000);
+        attack.put(v+0x34,mode==2?1:mode==3?17:0);
+        if(mode==3)attack.put(v+8,1);
+        const auto before=attack.ram; xlle::ApuEnvelopeStep e;
+        if(mode!=1) {CHECK(!attack.apu.step_envelopes(73,e));CHECK(attack.ram==before);}
+        else {
+            CHECK(attack.apu.step_envelopes(73,e) && e.amplitude==1);
+            CHECK((attack.word(v+0x54)>>28)==3 && (attack.word(v+0x34)&0xffff)==32);
+            CHECK(attack.apu.step_envelopes(73,e) && e.amplitude==1);
+            CHECK((attack.word(v+0x34)&0xffff)==31);
+        }
+        CHECK(!attack.source_reads);
+    }
     // Identity LPF preserves the existing bypass waveform and source lifetime.
     Fixture bypass,identity(xlle::ApuSignalModel::NominalDls2LinearV1);
     for(auto* f:{&bypass,&identity})f->add(73,1,512,true,0,4096);
@@ -79,10 +98,21 @@ static void dls2_device() {
     f.method(0x2fc,1);f.method(0x120,0x1ffff);f.method(0x124,73);f.method(0x2fc,0);
     CHECK(f.error.empty() && f.quantum(q));
     CHECK(std::equal(first.begin(),first.end(),f.apu.gp_word(0x1400)));
-    // Complete-list preflight blocks modulation/adjacent modes before source,
+    // Omitted modulation changes neither raw envelopes nor base-filter output.
+    Fixture base(xlle::ApuSignalModel::NominalDls2LinearV1),mod(xlle::ApuSignalModel::NominalDls2LinearV1);
+    for(auto* v:{&base,&mod}) {v->add(73,1,512,true,0,4096);v->put(o+0x18,0x10000);v->put(o+0x74,0x6590f148);}
+    mod.put(o+0x10,0xb0000010);base.put(o+0x10,0x00000010);
+    for(unsigned i=0;i<3;++i) {
+        xlle::ApuVoiceQuantum a,b;CHECK(base.quantum(a) && mod.quantum(b));
+        CHECK(!std::memcmp(base.apu.gp_word(0x1400),mod.apu.gp_word(0x1400),4096));
+        CHECK(mod.word(o+0x10)==0xb0000010 && mod.word(o+0x74)==0x6590f148);
+        CHECK(base.word(o+0x34)==mod.word(o+0x34) && base.word(o+0x54)==mod.word(o+0x54));
+    }
+    CHECK(mod.apu.dls2_modulation_omitted_frames()==96 && !base.apu.dls2_modulation_omitted_frames());
+    // Complete-list preflight blocks strict modulation/adjacent modes before source,
     // cursor, filter state, GP publication or completion can change.
     for(unsigned bad=0;bad<6;++bad) {
-        Fixture rejected(bad==5?xlle::ApuSignalModel::Strict:xlle::ApuSignalModel::NominalDls2LinearV1);rejected.add(73,1,128,true,0,4096);
+        Fixture rejected((bad==0 || bad==5)?xlle::ApuSignalModel::Strict:xlle::ApuSignalModel::NominalDls2LinearV1);rejected.add(73,1,128,true,0,4096);
         const unsigned v=Fixture::object(73);rejected.put(v+0x18,bad==1?0x30000:0x10000);
         rejected.put(v+0x74,0x659083e8);
         if(bad==0)rejected.put(v+0x10,0x01000000);
