@@ -31,6 +31,7 @@ DEPENDENCIES = {
     "PILOT_DSP_LIBRARY": "dsp_library", "PILOT_ADPCM_SOURCE": "adpcm_source",
     "PILOT_SDL2_DIR": "sdl2_dir",
     "PILOT_SAVE_KEYS_FILE": "save_keys",
+    "PILOT_CONSOLE_SETTINGS_FILE": "console_settings",
 }
 
 

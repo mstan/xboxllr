@@ -122,6 +122,11 @@ set(PILOT_SAVE_KEYS_FILE "${PILOT_GENERATED}/save-keys.aot-private.bin" CACHE FI
 file(TO_CMAKE_PATH "${PILOT_SAVE_KEYS_FILE}" pilot_save_keys_path)
 set_property(SOURCE runtime.c runtime_contract_test.c APPEND PROPERTY
   COMPILE_DEFINITIONS "PILOT_SAVE_KEYS_FILE=\"${pilot_save_keys_path}\"")
+set(PILOT_CONSOLE_SETTINGS_FILE "${PILOT_GENERATED}/console-settings.aot-private.bin" CACHE FILEPATH
+  "Private authenticated boot settings; prepare with native_console_settings.py")
+file(TO_CMAKE_PATH "${PILOT_CONSOLE_SETTINGS_FILE}" pilot_console_settings_path)
+set_property(SOURCE runtime.c runtime_contract_test.c APPEND PROPERTY
+  COMPILE_DEFINITIONS "PILOT_CONSOLE_SETTINGS_FILE=\"${pilot_console_settings_path}\"")
 target_compile_definitions(xlle_native_title PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(xlle_native_title PRIVATE bcrypt)
 # Keep credits current even when only a notice changes and no relink occurs.
@@ -167,6 +172,11 @@ add_executable(pilot_settings_factory_test "${CMAKE_CURRENT_SOURCE_DIR}/../../te
 target_include_directories(pilot_settings_factory_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_settings_factory COMMAND pilot_settings_factory_test)
 set_tests_properties(pilot_settings_factory PROPERTIES TIMEOUT 15)
+add_executable(pilot_settings_region_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_settings_region.c")
+target_include_directories(pilot_settings_region_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(pilot_settings_region_test PRIVATE bcrypt)
+pilot_add_test(NAME pilot_settings_region COMMAND pilot_settings_region_test)
+set_tests_properties(pilot_settings_region PROPERTIES TIMEOUT 90)
 foreach(input_mode absent absent_legacy)
   add_executable(pilot_input_${input_mode}_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_input_absent.c")
   target_include_directories(pilot_input_${input_mode}_test PRIVATE

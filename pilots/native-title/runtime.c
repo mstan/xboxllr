@@ -538,12 +538,14 @@ static void critical_section(unsigned operation,uint32_t va)
 
 #include "status_map.inc"
 #include "counted_string.inc"
+#include "settings_region.inc"
 #include "settings_factory.inc"
 
 static void query_setting(void)
 {
     uint32_t index=MEM32(g_esp+4),type=MEM32(g_esp+8),value=MEM32(g_esp+12);
     uint32_t length=MEM32(g_esp+16),result=MEM32(g_esp+20);
+    if(settings_region_query(index,type,value,length,result))return;
     if(settings_factory_query(index,type,value,length,result))return;
     /* XC_* user-settings layout from Cxbx EmuEEPROM.h/types.h. These are
      * actual file-backed settings; other factory/encrypted queries guard. */
@@ -1271,6 +1273,7 @@ int main(int argc,char **argv)
         if(eeprom_error)stop(eeprom_error,0);
 #endif
     }
+    settings_region_bind_boot();
     load_image(argv[1]);
 #ifdef PILOT_OPTICAL_EMPTY_NATIVE
     kernel_optical_initialize();

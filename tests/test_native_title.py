@@ -119,13 +119,16 @@ XLLE_PILOT_TRACE = "0"
         command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Visual Studio 17 2022', 1)
         self.assertEqual(command[command.index('-A') + 1], 'x64')
         self.assertFalse(any(x.startswith('-DCMAKE_BUILD_TYPE=') for x in command))
-        keys = self.root / 'private-save-keys.bin'
-        keys.write_bytes(b'authored fixture')
-        command = n.configure_command(self.data, {'save_keys': keys}, self.output, self.build, 'cmake', 'Ninja', 1)
-        self.assertIn('-DPILOT_SAVE_KEYS_FILE=' + str(keys), command)
-        keys.unlink()
-        with self.assertRaises(ValueError):
-            n.configure_command(self.data, {'save_keys': keys}, self.output, self.build, 'cmake', 'Ninja', 1)
+        for key, option in (('save_keys', 'PILOT_SAVE_KEYS_FILE'),
+                            ('console_settings', 'PILOT_CONSOLE_SETTINGS_FILE')):
+            with self.subTest(dependency=key):
+                private = self.root / (key + '.bin')
+                private.write_bytes(b'authored fixture')
+                command = n.configure_command(self.data, {key: private}, self.output, self.build, 'cmake', 'Ninja', 1)
+                self.assertIn('-D' + option + '=' + str(private), command)
+                private.unlink()
+                with self.assertRaises(ValueError):
+                    n.configure_command(self.data, {key: private}, self.output, self.build, 'cmake', 'Ninja', 1)
 
     def test_content_drive_namespace_owner_default_and_title(self):
         n.write_runtime_profile(self.output, self.data)

@@ -27,9 +27,10 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 | Named file metadata | Original 56-byte ABI and confined host queries tested/reviewed; actual title now takes the content-directory success branch and absent NoisyCamera result |
 | Empty optical owner | Explicit dashboard policy; original-software comparison, independent remap review and integrated CTest pass; existing media/async contracts also pass |
 | Factory setting reads | Nonencrypted `100..103`, shared first-read cache and checksum; original-software comparisons, review and integrated CTest pass; actual dashboard passes `103` |
+| Boot-derived game region | Separate authenticated EEPROM-bound input and immutable startup identity; original component checks, independent review and integrated CTest pass; actual dashboard passes `104` |
 | Content and writable drive ownership | Title creates C:/Y:/X:/T: itself; actual save-directory creation succeeds on writable partition 1 while content stays read-only on partition 2 |
 | Additional absent input classes | Exact profile-owned keyboard object; original query comparison, independent review and modern/legacy integrated CTest pass; actual dashboard passes enumeration |
-| Latest actual native boot | Reaches 1,604 entries and passes keyboard enumeration; guarded at encrypted game-region setting `104` |
+| Latest actual native boot | Reaches 1,710 entries, passes region `104` and reads the online-dashboard update header; guarded on a raw partition-0 open during network initialization |
 | Driver incremental admission and QA launches | 30 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
@@ -100,7 +101,7 @@ rendering and native frame-rate qualification remain pending. See
 [factory-setting scope](NATIVE-FACTORY-SETTINGS-2026-10-19.md) and
 [drive ownership](NATIVE-TITLE-DRIVER.md).
 
-The current optimized executable is
+The keyboard executable is
 `8f1c622f030200377206a4ba69fb74989b6daa42f9c442dd855b996de241f5b0`.
 All selected binding families were revalidated after admitting the exact absent
 keyboard object. The actual native run `20261019-114209-s4zk7ror` uses a frozen
@@ -112,6 +113,20 @@ the next guard is `ExQueryNonVolatileSetting` index `104` through
 the nonencrypted factory-read implementation does not admit it. No frame was
 captured, so menus, audio playback and frame rate remain unverified. See
 [absent input scope](NATIVE-INPUT-ABSENT-CLASSES-2026-10-19.md).
+
+The current optimized executable is
+`9c7d981d8fde952e7b1e49c09c3824f80236b039ee8755637f0bc0e0084b67fe`.
+Run `20261019-120231-_8rw7q61` passes region `104`, opens the original
+`y:\xodash\xonlinedash.xbe`, and successfully reads its two header ranges
+(376 and 464 bytes). It reaches network initialization and stops at 1,710
+entries on `\Device\Harddisk0\partition0`, access `c0100000`, options `10`,
+through `13f81c -> 130bc6`. No raw-disk or relaxed file-option admission is
+implied. The next coherent implementation is an explicitly selected, shared
+initialized-but-offline network service owner, with unadmitted original
+private-object consumers guarded before access. Original XOnline startup
+failure aborts dashboard startup, so simply returning an offline error would
+not reach menus. No menu frame or audio-playback result is available yet.
+See [boot region scope](NATIVE-CONSOLE-SETTINGS-2026-10-19.md).
 
 Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original

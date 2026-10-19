@@ -6,6 +6,12 @@ private paths resolve against their JSON file. The binding profile must select
 the exact XBE SHA256. The dashboard definition selects owned retail 5960, not an
 upstream dashboard substitute.
 
+The optional private `console_settings` path selects an authenticated,
+EEPROM-bound boot-settings artifact prepared by `native_console_settings.py`.
+It contains no signing keys, does not change the existing signing-input format,
+and is shared console input rather than title-specific behavior. A title that
+never requests the encrypted game-region setting does not require this file.
+
 Content mounts and guest DOS drive links have separate owners. The content
 device always resolves to the verified read-only image directory. With
 `content.drive_owner = "HOST"` (the default), startup also creates the declared
