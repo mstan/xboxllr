@@ -8,6 +8,32 @@ input, audio, files, memory and scheduling services used by Blinx. Exact-image
 profiles provide XDK calling conventions and layouts. The old full-machine
 dashboard runner is historical evidence and is not an owner preview fallback.
 
+## Playtest delivery burndown
+
+The latest actual native run passes network startup and stops at the cached
+dashboard-update query (`116931`), before graphics initialization. No native
+menu frame has been captured. This is implementation work; original hardware
+is not required for the current blocker. Entry counts are diagnostics, not a
+completion percentage: replacing an original subsystem changes how many
+functions execute.
+
+| Delivery milestone | Status | Evidence or remaining work |
+|---|---|---|
+| Shared native title build and CPU execution | Done for current startup | Optimized executable enters the actual dashboard and runs its title thread |
+| Reached platform startup services | Done for current startup | Clocks, shutdown registration, file metadata, drive ownership, empty optical drive, settings and absent keyboard pass actual execution |
+| Offline network initialization | Done for bounded lifecycle | Native startup passes; real host lifetime and unsupported consumer guards are retained |
+| Offline cached-update handling | Current blocker | Actual caller reaches guarded `116931`; qualify its outputs, errors and task/cache lifetime |
+| First rendered native menu | Pending | D3D creation/surface fixes are built and reviewed; actual execution has not reached them |
+| Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
+| Native Credits mod | Pending | Shared content/data-section mod seam and actual Credits navigation |
+| Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
+
+There is no reliable total ETA or percentage until startup reaches the first
+menu and exposes the remaining runtime dependencies. Do not treat the current
+guard as the last blocker. Optional online/DVD/firmware paths and public-release
+licensing remain separately deferred; not every missing kernel import is a
+prerequisite for the offline menu.
+
 ## Current evidence
 
 | Check | Status |
@@ -30,8 +56,10 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 | Boot-derived game region | Separate authenticated EEPROM-bound input and immutable startup identity; original component checks, independent review and integrated CTest pass; actual dashboard passes `104` |
 | Content and writable drive ownership | Title creates C:/Y:/X:/T: itself; actual save-directory creation succeeds on writable partition 1 while content stays read-only on partition 2 |
 | Additional absent input classes | Exact profile-owned keyboard object; original query comparison, independent review and modern/legacy integrated CTest pass; actual dashboard passes enumeration |
-| Latest actual native boot | Reaches 1,710 entries, passes region `104` and reads the online-dashboard update header; guarded on a raw partition-0 open during network initialization |
-| Driver incremental admission and QA launches | 30 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
+| Offline native network lifecycle | Startup/cleanup and real host reference ownership implemented and reviewed; actual startup now passes without entering the original NIC/raw-disk stack; other network operations remain guarded |
+| D3D creation and presentation surfaces | Distinct original/native behavior masks and owned presentation/current surface fields implemented; profile/helper tests and independent review pass; actual graphics execution is pending |
+| Latest actual native boot | Passes native network startup; stops at guarded cached-update query `116931`, 1,622 entries, before graphics; no captured frame |
+| Driver incremental admission and QA launches | 31 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
 | Credits asset mod under native execution | Pending native baseline; old full-machine evidence does not transfer automatically |
@@ -114,7 +142,7 @@ the nonencrypted factory-read implementation does not admit it. No frame was
 captured, so menus, audio playback and frame rate remain unverified. See
 [absent input scope](NATIVE-INPUT-ABSENT-CLASSES-2026-10-19.md).
 
-The current optimized executable is
+The boot-region optimized executable is
 `9c7d981d8fde952e7b1e49c09c3824f80236b039ee8755637f0bc0e0084b67fe`.
 Run `20261019-120231-_8rw7q61` passes region `104`, opens the original
 `y:\xodash\xonlinedash.xbe`, and successfully reads its two header ranges
@@ -127,6 +155,21 @@ private-object consumers guarded before access. Original XOnline startup
 failure aborts dashboard startup, so simply returning an offline error would
 not reach menus. No menu frame or audio-playback result is available yet.
 See [boot region scope](NATIVE-CONSOLE-SETTINGS-2026-10-19.md).
+
+The latest combined network/presentation executable is
+`084e712ce62ef90cf95c97017e62e74dde33b532f56fd3a00b8c13a015447ffa`.
+Run `20261019-123620-vbyqu7sz` passes native offline network startup and stops
+at the next guarded network operation, the cached dashboard-update query
+`116931`, at 1,622 entries. It exits 2 before its 20-second limit and captures
+no frame. The previous raw partition-0 startup path is no longer entered;
+raw-disk ownership and file-option guards remain unchanged. The lower entry
+count reflects replacing the original network implementation, not backwards
+progress. Both source batches passed independent review and the optimized
+combined build; six integrated lifecycle/surface/settings/input CTests pass
+in 1.24 seconds. Graphics creation and surface behavior remain unverified in
+the actual title until execution reaches them. See
+[offline network scope](NATIVE-OFFLINE-NETWORK-2026-10-19.md) and
+[presentation surfaces](NATIVE-PRESENTATION-SURFACES-2026-10-19.md).
 
 Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original
@@ -179,6 +222,16 @@ fault semantics and kernel-version identity are retained as LLE-D08/D09 in the
 behavior remains implementation work in `.1.137`.
 
 ## Delivery order
+
+Credits remain a title-owned mod. The previous private XIP transforms can be
+reused, but replacing archives alone would fail the original XIPS integrity
+table. The current native title-mod interface has no asset or section-provider
+hook. After the native baseline, implement a shared, manifest-bound content/data
+section provider (or a separately reviewed authenticated XAP transformation
+boundary), preserving original XBE identity, executable bodies, real section
+load/lifetime and hash checks. Do not adopt the old modified XBE under the
+original native-body profile. Native Credits navigation and ordinary menu
+regression remain separate acceptance checks.
 
 The framework is XboxLLR. Its eventual releases contain the recompiler tool and
 the dashboard application. Blinx remains a separate repository with a tested

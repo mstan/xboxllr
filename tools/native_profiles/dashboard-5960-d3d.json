@@ -1,6 +1,6 @@
 {
   "adapter": "xdk-d3d8-ltcg-5849-v1",
-  "native_create_behavior_mask": 16,
+  "native_create_behavior_mask": 64,
   "functions": [
     {
       "name": "D3DDevice_SetRenderState_EdgeAntiAlias",
@@ -3582,6 +3582,13 @@
       "base_vertex": 28,
       "transforms": 3168,
       "viewport": 3808
+    },
+    "presentation_fields": {
+      "count": 6672,
+      "colors": 6676,
+      "depth": 6688,
+      "current_color": 6660,
+      "current_depth": 6664
     }
   },
   "normalization": {
@@ -3591,5 +3598,6 @@
       "hFocusWindow": 0
     }
   },
-  "stateblock": false
+  "stateblock": false,
+  "original_create_driver_mask": 16
 }

@@ -130,6 +130,22 @@ XLLE_PILOT_TRACE = "0"
                 with self.assertRaises(ValueError):
                     n.configure_command(self.data, {key: private}, self.output, self.build, 'cmake', 'Ninja', 1)
 
+    def test_network_family_requires_admission_before_configuring_or_launching(self):
+        self.select_families(['cpu', 'network'])
+        self.assert_not_configurable_or_launchable()
+        symbols = self.root / 'symbols.json'
+        command = n.prepare_command(self.source, self.data,
+            dict(cpu_donor=self.root, xbe=self.xbe, xdk_symbols=symbols), self.output)
+        self.assertEqual(command[command.index('--network-symbols') + 1], str(symbols))
+        manifest = json.loads(self.manifest.read_text())
+        manifest['network_binding'] = {'authored': 'admitted offline lifecycle and consumer guards'}
+        self.manifest.write_text(json.dumps(manifest))
+        self.receipt()
+        self.assertEqual(n.admitted_bindings(manifest), ['cpu', 'network'])
+        self.data['build']['PILOT_NETWORK'] = 'OFFLINE'
+        command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Ninja', 1)
+        self.assertIn('-DPILOT_NETWORK=OFFLINE', command)
+
     def test_content_drive_namespace_owner_default_and_title(self):
         n.write_runtime_profile(self.output, self.data)
         header = self.output / 'gen/pilot_title_runtime.h'

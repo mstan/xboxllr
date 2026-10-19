@@ -650,6 +650,9 @@ static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
 #ifdef PILOT_INPUT_NATIVE
 #include "input.inc"
 #endif
+#ifdef PILOT_NETWORK_OFFLINE
+#include "network_offline.inc"
+#endif
 #ifdef PILOT_D3D_NATIVE
 #include "graphics_backend.h"
 #include "title_mod.inc"
@@ -1347,6 +1350,9 @@ int main(int argc,char **argv)
 #endif
 #if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_AUDIO_NATIVE)
     native_audio_components_bind();
+#endif
+#ifdef PILOT_NETWORK_OFFLINE
+    pilot_network_initialize();
 #endif
     recomp_func_t entry=recomp_lookup(PILOT_ENTRY);
     if (!entry) stop("entry missing from generated dispatch", PILOT_ENTRY);

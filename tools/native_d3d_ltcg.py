@@ -5,6 +5,7 @@ This adapter validates them before generating marshalling wrappers. SDK names
 alone never admit a native boundary, and original bodies remain selectable.
 """
 from __future__ import annotations
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -64,7 +65,8 @@ def inspect(context,proof):
     if proof.get('adapter')!=ADAPTER or proof.get('stateblock') is not False:
         raise ValueError('unreviewed LTCG graphics adapter/features')
     behavior_mask=proof.get('native_create_behavior_mask')
-    if type(behavior_mask) is not int or behavior_mask!=0x10:
+    driver_mask=proof.get('original_create_driver_mask')
+    if type(behavior_mask) is not int or behavior_mask!=0x40 or type(driver_mask) is not int or driver_mask!=0x10:
         raise ValueError('unreviewed LTCG graphics behavior mask')
     interface={r['name']:r for r in json.loads(INTERFACE.read_text())}
     functions={int(f['start'],16):f for f in context.functions}
@@ -121,7 +123,7 @@ def inspect(context,proof):
             raise ValueError('unreviewed LTCG layout/reference: '+name+'/'+operands)
     require('Direct3D_CreateDevice','mov',f'dword ptr [{hex(layout["device_global"])}], {hex(layout["device_object"])}')
     require('Direct3D_CreateDevice','mov',f'ecx, {hex(layout["device_bytes"]//4)}')
-    require('Direct3D_CreateDevice','and',f'eax, {hex(behavior_mask)}')
+    require('Direct3D_CreateDevice','and',f'eax, {hex(driver_mask)}')
     require('D3DDevice_SetShaderConstantMode','mov',f'dword ptr [ebx + {hex(layout["shader_mode"])}], eax')
     require('D3DDevice_Swap','mov',f'eax, dword ptr [esi + {hex(layout["swap_counter"])}]')
     require('D3DDevice_BlockUntilVerticalBlank','add',f'eax, {hex(layout["vblank_event"])}')
@@ -142,6 +144,25 @@ def inspect(context,proof):
     require('D3DDevice_SelectVertexShader','mov',f'dword ptr [esi + {hex(layout["vertex_start"])}], ebx')
     require('D3DDevice_SetTexture','mov',f'eax, dword ptr [ebx + {hex(layout["resource_fence"])}]')
     require('D3DDevice_SetTexture','mov',f'dword ptr [ebx + esi*4 + {hex(layout["texture_mode"])}], 0x80000000')
+    surfaces=layout.get('presentation_fields')
+    if (not isinstance(surfaces,dict) or set(surfaces)!={'count','colors','depth','current_color','current_depth'}
+            or any(type(v) is not int or v<0 or v%4 or v+4>layout['device_bytes'] for v in surfaces.values())
+            or surfaces['colors']+8>layout['device_bytes']
+            or len(set(surfaces.values())|{surfaces['colors']+4})!=6):
+        raise ValueError('unreviewed presentation surface fields')
+    require('reset_buffers','mov',f'dword ptr [edi + {hex(surfaces["count"])}], eax')
+    require('reset_buffers','lea',f'edx, [edi + {hex(surfaces["colors"])}]')
+    require('reset_buffers','lea',f'esi, [edi + {hex(surfaces["colors"]+4)}]')
+    require('reset_buffers','mov',f'dword ptr [edi + {hex(surfaces["depth"])}], eax')
+    count_store=next(i for i,ins in enumerate(codes['reset_buffers']) if ins.mnemonic=='mov' and
+                     ins.op_str==f'dword ptr [edi + {hex(surfaces["count"])}], eax')
+    if not any(i.mnemonic=='inc' and i.op_str=='eax' for i in codes['reset_buffers'][max(0,count_store-3):count_store]):
+        raise ValueError('unreviewed presentation buffer count increment')
+    require('device_initializer','mov',f'ecx, dword ptr [ebp + {hex(surfaces["depth"])}]')
+    require('device_initializer','mov',f'edx, dword ptr [ebp + {hex(surfaces["colors"])}]')
+    require('D3DDevice_SetRenderTarget','mov',f'eax, dword ptr [ebp + {hex(surfaces["current_color"])}]')
+    require('D3DDevice_SetRenderTarget','mov',f'dword ptr [ebp + {hex(surfaces["current_color"])}], ebx')
+    require('D3DDevice_SetRenderTarget','mov',f'dword ptr [ebp + {hex(surfaces["current_depth"])}], esi')
     variables={}
     for s in context.symbols:
         if s['library'] not in ('D3D8','D3D8LTCG') or s['kind']!='variable':continue
@@ -183,7 +204,8 @@ def inspect(context,proof):
                                 for f in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e,0x24,0x25,0x28)])
     binding=dict(xbe_sha256=context.image['sha256'],adapter=ADAPTER,device_global=layout['device_global'],
                  device_object=layout['device_object'],vertex_shader_offset=cache['vertex_object'],
-                 layout=layout,calls=calls,helpers=proof['helpers'],stateblock=False,**facts)
+                 layout=layout,calls=calls,helpers=proof['helpers'],stateblock=False,
+                 native_create_behavior_mask=behavior_mask,original_create_driver_mask=driver_mask,**facts)
     return binding,*emit_text(binding,interface,behavior_mask)
 
 
@@ -198,6 +220,8 @@ def emit_text(binding,interface,behavior_mask):
     header += [f'{{"{c["name"]}",{c["address"]}u,{c["stack_bytes"]}u,{c["bytes"]}u,"{c["function_sha256"]}"}},' for c in calls]
     header += ['};','#define PILOT_D3D_PROFILE_5849 1','#define PILOT_D3D_STATEBLOCK_AVAILABLE 0',
                f'#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x{behavior_mask:x}u']
+    if 'original_create_driver_mask' in binding:
+        header += [f'#define PILOT_D3D_CREATE_DRIVER_MASK 0x{binding["original_create_driver_mask"]:x}u']
     defines={'DEVICE_GLOBAL':layout['device_global'],'DEVICE_OBJECT':layout['device_object'],
              'DEVICE_BYTES':layout['device_bytes'],'VERTEX_SHADER_OFFSET':cache['vertex_object'],
              'RENDER_STATES':layout['render_states'],'TEXTURE_STATES':layout['texture_states'],
@@ -210,6 +234,11 @@ def emit_text(binding,interface,behavior_mask):
              'RESOURCE_TEXTURE_MODE':layout['texture_mode'],'SCREEN_BIAS':layout['screen_bias']}
     defines.update({'TRANSFORM_'+k.upper():v for k,v in layout['transform_fields'].items()})
     defines.update({'SNAPSHOT_'+k.upper():v for k,v in cache.items()})
+    if 'presentation_fields' in layout:
+        header += ['#define PILOT_D3D_SURFACE_PROJECTION_VERSION 1u']
+        defines.update({'PRESENTATION_'+k.upper():v for k,v in layout['presentation_fields'].items()
+                        if k in ('count','colors','depth')})
+        defines.update({k.upper():v for k,v in layout['presentation_fields'].items() if k.startswith('current_')})
     header += [f'#define PILOT_D3D_{name} 0x{value:x}u' for name,value in defines.items()]
     for name in ('render_defaults','texture_defaults','device_caps'):
         header += [f'static const uint32_t pilot_d3d_{name}[] = {{'+','.join(f'0x{v:x}u' for v in binding[name])+'};']
@@ -234,19 +263,33 @@ def bind(context,proof):
     generated=context.generated;record=context.output/'d3d-binding.aot-private.json'
     texts={'pilot_d3d_bindings.h':header,'pilot_d3d_binding.c':wrapper}
     if (generated/'pilot_d3d_binding.c').exists():
-        if json.loads(record.read_text())!=binding or (generated/'pilot_d3d_binding.c').read_text()!=wrapper:
+        prior_binding=copy.deepcopy(binding)
+        prior_binding.pop('native_create_behavior_mask',None);prior_binding.pop('original_create_driver_mask',None)
+        prior_binding['layout'].pop('presentation_fields',None)
+        actual_record=json.loads(record.read_text())
+        if (actual_record not in (binding,prior_binding) or context.manifest.get('d3d_binding')!=actual_record
+                or (generated/'pilot_d3d_binding.c').read_text()!=wrapper):
             raise ValueError('existing LTCG graphics binding differs')
         old_header=(generated/'pilot_d3d_bindings.h').read_text()
-        if old_header==header:return binding
-        # One exact, body-preserving header migration: the initial adapter
-        # exposed global constants as a device delta and lacked the native
-        # behavior admission mask. No other existing output difference passes.
-        prior=header.replace('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u\n','')
+        if old_header==header and actual_record==binding:return binding
+        # Only the exact previous body/layout record can gain the newly proved
+        # fields and public policy. Wrapper and retained bodies stay identical.
+        new_defines={'PILOT_D3D_CREATE_DRIVER_MASK','PILOT_D3D_SURFACE_PROJECTION_VERSION',
+                     'PILOT_D3D_PRESENTATION_COUNT','PILOT_D3D_PRESENTATION_COLORS',
+                     'PILOT_D3D_PRESENTATION_DEPTH','PILOT_D3D_CURRENT_COLOR','PILOT_D3D_CURRENT_DEPTH'}
+        prior='\n'.join(line for line in header.splitlines() if not
+                        (line.startswith('#define ') and line.split()[1] in new_defines))+'\n'
+        prior=prior.replace('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x40u\n',
+                            '#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u\n')
         delta=binding['layout']['vertex_constants']-binding['layout']['device_object']
         marker='static const uint32_t pilot_d3d_render_defaults[]'
-        prior=prior.replace(marker,f'#define PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS 0x{delta:x}u\n'+marker,1)
-        if old_header!=prior:raise ValueError('existing LTCG graphics header differs')
+        initial=prior.replace('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u\n','')
+        initial=initial.replace(marker,f'#define PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS 0x{delta:x}u\n'+marker,1)
+        if actual_record!=prior_binding or old_header not in (prior,initial):
+            raise ValueError('existing LTCG graphics header differs')
         (generated/'pilot_d3d_bindings.h').write_text(header,encoding='utf-8',newline='\n')
+        record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+        context.manifest['d3d_binding']=binding
         context.manifest['files']['pilot_d3d_bindings.h']=hashlib.sha256((generated/'pilot_d3d_bindings.h').read_bytes()).hexdigest()
         context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
         return binding

@@ -14,7 +14,7 @@ drive_owner = "TITLE"
 
 [generation]
 profile = "../../pilots/native-title/profiles/dashboard-5960.json"
-bindings = ["cache", "cpu", "input", "audio", "d3d", "startup"]
+bindings = ["cache", "cpu", "input", "audio", "d3d", "startup", "network"]
 unit_max_functions = 64
 unit_max_bytes = 524288
 
@@ -26,6 +26,7 @@ PILOT_CPU_PROBE = "NATIVE"
 PILOT_STARTUP = "NATIVE"
 PILOT_KERNEL_CLOCK = "NATIVE"
 PILOT_OPTICAL = "EMPTY"
+PILOT_NETWORK = "OFFLINE"
 PILOT_RENDERER = "D3D11"
 PILOT_D3D_DONOR = "PHOBOS"
 PILOT_AUDIO = "NATIVE"

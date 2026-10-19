@@ -24,7 +24,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "xboxllr.native-title.v1"
 BINDINGS = {name: "native_" + name + "_binding" for name in
-            ("media", "cache", "cpu", "jump", "d3d", "input", "audio", "startup")}
+            ("media", "cache", "cpu", "jump", "d3d", "input", "audio", "startup", "network")}
 INCOMPLETE_BIND = "native-title-bind-incomplete.json"
 DEPENDENCIES = {
     "PILOT_D3D_SOURCE": "d3d_source", "PILOT_DSP_SOURCE": "dsp_source",

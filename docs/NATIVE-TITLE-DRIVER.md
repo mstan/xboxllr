@@ -12,6 +12,14 @@ It contains no signing keys, does not change the existing signing-input format,
 and is shared console input rather than title-specific behavior. A title that
 never requests the encrypted game-region setting does not require this file.
 
+`PILOT_NETWORK = "OFFLINE"` selects a shared native network-service owner through
+an explicit `network` binding family. It requires native scheduling and IO/USB
+OFF, exact original entry proofs and a complete guarded boundary around
+unadmitted private-object consumers. `ORIGINAL` remains the default for existing
+titles. Offline initialization and cleanup are separate from cable state,
+signed-in users and online tasks; selecting this owner does not qualify live
+services or admit raw disk/NIC accesses.
+
 Content mounts and guest DOS drive links have separate owners. The content
 device always resolves to the verified read-only image directory. With
 `content.drive_owner = "HOST"` (the default), startup also creates the declared

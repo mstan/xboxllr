@@ -116,6 +116,24 @@ if(PILOT_STARTUP STREQUAL "NATIVE")
 elseif(NOT PILOT_STARTUP STREQUAL "ORIGINAL")
   message(FATAL_ERROR "PILOT_STARTUP must be ORIGINAL or NATIVE")
 endif()
+set(PILOT_NETWORK "ORIGINAL" CACHE STRING "Network services: ORIGINAL or OFFLINE")
+set_property(CACHE PILOT_NETWORK PROPERTY STRINGS ORIGINAL OFFLINE)
+if(PILOT_NETWORK STREQUAL "OFFLINE")
+  if(NOT PILOT_SCHEDULING STREQUAL "NATIVE" OR NOT PILOT_IO_DEVICE STREQUAL "OFF" OR
+     NOT PILOT_USB STREQUAL "OFF")
+    message(FATAL_ERROR "Offline network owner requires native scheduling and IO/USB OFF")
+  endif()
+  if(NOT EXISTS "${PILOT_GENERATED}/pilot_network_binding.c" OR
+     NOT EXISTS "${PILOT_GENERATED}/pilot_network_bindings.h")
+    message(FATAL_ERROR "Offline network requires a reviewed, image-bound complete service boundary")
+  endif()
+  target_sources(xlle_native_title PRIVATE network_offline.c network_host.c)
+  target_link_libraries(xlle_native_title PRIVATE ws2_32)
+  set_property(SOURCE runtime.c "${PILOT_GENERATED}/pilot_network_binding.c"
+    APPEND PROPERTY COMPILE_DEFINITIONS PILOT_NETWORK_OFFLINE)
+elseif(NOT PILOT_NETWORK STREQUAL "ORIGINAL")
+  message(FATAL_ERROR "PILOT_NETWORK must be ORIGINAL or OFFLINE")
+endif()
 target_include_directories(xlle_native_title PRIVATE "${PILOT_GENERATED}")
 set(PILOT_SAVE_KEYS_FILE "${PILOT_GENERATED}/save-keys.aot-private.bin" CACHE FILEPATH
   "Private original-derived title/console signing inputs; prepare with native_save_keys.py")
@@ -177,6 +195,22 @@ target_include_directories(pilot_settings_region_test PRIVATE "${CMAKE_CURRENT_S
 target_link_libraries(pilot_settings_region_test PRIVATE bcrypt)
 pilot_add_test(NAME pilot_settings_region COMMAND pilot_settings_region_test)
 set_tests_properties(pilot_settings_region PROPERTIES TIMEOUT 90)
+add_executable(pilot_network_offline_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_network_offline.c" network_offline.c)
+target_include_directories(pilot_network_offline_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/native_network" "${CMAKE_CURRENT_SOURCE_DIR}")
+pilot_add_test(NAME pilot_network_offline COMMAND pilot_network_offline_test)
+set_tests_properties(pilot_network_offline PROPERTIES TIMEOUT 60)
+add_executable(pilot_network_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_network_host.c" network_offline.c network_host.c)
+target_include_directories(pilot_network_host_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(pilot_network_host_test PRIVATE ws2_32)
+pilot_add_test(NAME pilot_network_host COMMAND pilot_network_host_test)
+set_tests_properties(pilot_network_host PROPERTIES TIMEOUT 30)
+add_executable(pilot_graphics_surfaces_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_graphics_surfaces.c")
+target_include_directories(pilot_graphics_surfaces_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+pilot_add_test(NAME pilot_graphics_surfaces COMMAND pilot_graphics_surfaces_test)
+set_tests_properties(pilot_graphics_surfaces PROPERTIES TIMEOUT 15)
 foreach(input_mode absent absent_legacy)
   add_executable(pilot_input_${input_mode}_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_input_absent.c")
   target_include_directories(pilot_input_${input_mode}_test PRIVATE

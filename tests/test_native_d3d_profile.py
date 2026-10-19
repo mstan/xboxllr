@@ -92,7 +92,14 @@ class LTCGOriginalProofTests(unittest.TestCase):
         self.assertNotIn('PILOT_D3D_PIXEL_PACKED_CONSTANTS',self.header)
         self.assertNotIn('PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS',self.header)
         self.assertIn('#define PILOT_D3D_VERTEX_CONSTANTS_GLOBAL 0x156328u',self.header)
-        self.assertIn('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u',self.header)
+        self.assertIn('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x40u',self.header)
+        self.assertIn('#define PILOT_D3D_CREATE_DRIVER_MASK 0x10u',self.header)
+        self.assertIn('#define PILOT_D3D_SURFACE_PROJECTION_VERSION 1u',self.header)
+        self.assertIn('#define PILOT_D3D_PRESENTATION_COLORS 0x1a14u',self.header)
+        self.assertIn('#define PILOT_D3D_PRESENTATION_DEPTH 0x1a20u',self.header)
+        self.assertIn('#define PILOT_D3D_CURRENT_COLOR 0x1a04u',self.header)
+        self.assertEqual(self.binding['native_create_behavior_mask'],64)
+        self.assertEqual(self.binding['original_create_driver_mask'],16)
         self.assertEqual(self.binding['layout']['device_object'],0x153bd0)
         self.assertEqual(self.binding['layout']['cache_fields']['vertex_object'],0x794)
 
@@ -122,7 +129,12 @@ class LTCGOriginalProofTests(unittest.TestCase):
                 ('body',lambda p:p['functions'][0]['body'].update(sha256='0'*64)),
                 ('inventory',lambda p:p['functions'].pop()),
                 ('layout',lambda p:p['layout'].update(device_global=0x15607c)),
-                ('behavior',lambda p:p.update(native_create_behavior_mask=64)),
+                ('behavior',lambda p:p.update(native_create_behavior_mask=16)),
+                ('driver mask',lambda p:p.update(original_create_driver_mask=64)),
+                ('presentation depth',lambda p:p['layout']['presentation_fields'].update(depth=0x1a18)),
+                ('current color',lambda p:p['layout']['presentation_fields'].update(current_color=0x1a14)),
+                ('presentation count',lambda p:p['layout']['presentation_fields'].update(count=0x1a0c)),
+                ('presentation extent',lambda p:p['layout']['presentation_fields'].update(colors=0xfffffff8)),
                 ('ret',lambda p:next(r for r in p['functions'] if r['name']=='D3DDevice_CreateTexture2')['signature'].update(stack_bytes=24))):
             proof=copy.deepcopy(self.proof);mutate(proof)
             with self.subTest(name=name),self.assertRaises(ValueError):
@@ -130,34 +142,48 @@ class LTCGOriginalProofTests(unittest.TestCase):
 
 
 class GraphicsHeaderMigrationTests(unittest.TestCase):
-    def fixture(self,directory):
+    def fixture(self,directory,initial=False):
         output=Path(directory);generated=output/'gen';generated.mkdir()
-        binding={'layout':{'vertex_constants':0x156328,'device_object':0x153bd0}}
-        header=('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u\n'
+        binding={'layout':{'vertex_constants':0x156328,'device_object':0x153bd0,
+                          'presentation_fields':dict(count=0x1a10,colors=0x1a14,depth=0x1a20,current_color=0x1a04,current_depth=0x1a08)},
+                 'native_create_behavior_mask':64,'original_create_driver_mask':16}
+        previous=copy.deepcopy(binding);previous.pop('native_create_behavior_mask');previous.pop('original_create_driver_mask');previous['layout'].pop('presentation_fields')
+        header=('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x40u\n'
+                '#define PILOT_D3D_CREATE_DRIVER_MASK 0x10u\n'
+                '#define PILOT_D3D_SURFACE_PROJECTION_VERSION 1u\n'
+                '#define PILOT_D3D_PRESENTATION_COUNT 0x1a10u\n'
+                '#define PILOT_D3D_PRESENTATION_COLORS 0x1a14u\n'
+                '#define PILOT_D3D_PRESENTATION_DEPTH 0x1a20u\n'
+                '#define PILOT_D3D_CURRENT_COLOR 0x1a04u\n'
+                '#define PILOT_D3D_CURRENT_DEPTH 0x1a08u\n'
                 '#define PILOT_D3D_VERTEX_CONSTANTS_GLOBAL 0x156328u\n'
                 'static const uint32_t pilot_d3d_render_defaults[] = {1u};\n')
-        prior=header.replace('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u\n','').replace(
-            'static const uint32_t pilot_d3d_render_defaults[]',
-            '#define PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS 0x2758u\nstatic const uint32_t pilot_d3d_render_defaults[]')
+        prior=('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u\n'
+               '#define PILOT_D3D_VERTEX_CONSTANTS_GLOBAL 0x156328u\n'
+               'static const uint32_t pilot_d3d_render_defaults[] = {1u};\n')
+        if initial:
+            prior=prior.replace('#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x10u\n','').replace(
+                'static const uint32_t pilot_d3d_render_defaults[]',
+                '#define PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS 0x2758u\nstatic const uint32_t pilot_d3d_render_defaults[]')
         wrapper='/* exact original wrapper */\n'
         (generated/'pilot_d3d_bindings.h').write_text(prior)
         (generated/'pilot_d3d_binding.c').write_text(wrapper)
-        (output/'d3d-binding.aot-private.json').write_text(json.dumps(binding))
+        (output/'d3d-binding.aot-private.json').write_text(json.dumps(previous))
         context=SimpleNamespace(output=output,generated=generated,
-            manifest={'files':{}},manifest_path=output/'generation.aot-private.json')
+            manifest={'files':{},'d3d_binding':previous},manifest_path=output/'generation.aot-private.json')
         return context,binding,header,wrapper
 
-    def test_exact_header_upgrade_preserves_body_record_and_wrapper_then_is_idempotent(self):
-        with tempfile.TemporaryDirectory() as directory:
-            context,binding,header,wrapper=self.fixture(directory)
-            record=(context.output/'d3d-binding.aot-private.json').read_bytes()
-            with patch('native_d3d_ltcg.inspect',return_value=(binding,header,wrapper)):
-                self.assertEqual(bind_ltcg(context,{}),binding)
-                self.assertEqual((context.generated/'pilot_d3d_bindings.h').read_text(),header)
-                self.assertEqual((context.output/'d3d-binding.aot-private.json').read_bytes(),record)
-                self.assertEqual((context.generated/'pilot_d3d_binding.c').read_text(),wrapper)
-                with patch.object(Path,'write_text',side_effect=AssertionError('unexpected repeated write')):
+    def test_exact_upgrade_preserves_body_wrapper_and_previous_facts_then_is_idempotent(self):
+        for initial in (False,True):
+            with self.subTest(initial=initial),tempfile.TemporaryDirectory() as directory:
+                context,binding,header,wrapper=self.fixture(directory,initial)
+                with patch('native_d3d_ltcg.inspect',return_value=(binding,header,wrapper)):
                     self.assertEqual(bind_ltcg(context,{}),binding)
+                    self.assertEqual((context.generated/'pilot_d3d_bindings.h').read_text(),header)
+                    self.assertEqual(json.loads((context.output/'d3d-binding.aot-private.json').read_text()),binding)
+                    self.assertEqual((context.generated/'pilot_d3d_binding.c').read_text(),wrapper)
+                    with patch.object(Path,'write_text',side_effect=AssertionError('unexpected repeated write')):
+                        self.assertEqual(bind_ltcg(context,{}),binding)
 
     def test_changed_header_wrapper_or_record_declines_before_any_write(self):
         for name in ('pilot_d3d_bindings.h','pilot_d3d_binding.c','record'):

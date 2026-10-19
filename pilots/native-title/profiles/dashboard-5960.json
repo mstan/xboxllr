@@ -223,6 +223,1245 @@
     },
     "startup": {
       "include": "../../../tools/native_profiles/dashboard-5960-startup.json"
+    },
+    "network": {
+      "adapter": "xonline-offline-lifecycle-v1",
+      "globals": {
+        "online_owner": 1547744,
+        "online_gate": 1547748,
+        "network_gate": 1547756,
+        "network_owner": 1547760
+      },
+      "consumer_range": [
+        1547712,
+        1547824
+      ],
+      "calls": [
+        {
+          "address": 516389,
+          "bytes": 72,
+          "sha256": "ac2115bb27a397adee57d96d1253c8a7f6c8dd4f4f15294c4dc489efbb8ec65e",
+          "returns": [
+            0
+          ],
+          "references": [
+            [
+              516399,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140736,
+          "bytes": 11,
+          "sha256": "3961e0c713063ada9d53913deaba7582f209b824d5a6ec118e3d68005e750f11",
+          "returns": [],
+          "references": [
+            [
+              1140736,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140747,
+          "bytes": 11,
+          "sha256": "4c5ebfe54f86539c91812dfae0da7b6269df705efb7bf538394366cb755c57db",
+          "returns": [],
+          "references": [
+            [
+              1140747,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140758,
+          "bytes": 11,
+          "sha256": "2476d5a724aac85ba591ec93374c30fd71588c1745126e1503d8573847eb5fc2",
+          "returns": [],
+          "references": [
+            [
+              1140758,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140769,
+          "bytes": 15,
+          "sha256": "81ce72960b2e3a127487901dfcf9597dbd0feba06621aa28075dff106a8ec195",
+          "returns": [],
+          "references": [
+            [
+              1140772,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140784,
+          "bytes": 11,
+          "sha256": "0c5707486086102aab381490ea89b8e73e1c77fa0462924db8e6982b6903a440",
+          "returns": [],
+          "references": [
+            [
+              1140784,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140795,
+          "bytes": 11,
+          "sha256": "37271a7590f7bfd31a71bc525a95cdbfbcf6728e7ead1aa80947e9bff314a58b",
+          "returns": [],
+          "references": [
+            [
+              1140795,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140806,
+          "bytes": 11,
+          "sha256": "7364b6c57fc58c88dd24136ead2623e6768582d46a4631e786f159b09e6c2cb1",
+          "returns": [],
+          "references": [
+            [
+              1140806,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140817,
+          "bytes": 36,
+          "sha256": "578573bd129732ddb1bdc0313e8558cf626bb36974a5d2eb6f96676fcee8d958",
+          "returns": [
+            24
+          ],
+          "references": [
+            [
+              1140823,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140853,
+          "bytes": 11,
+          "sha256": "17670c2dd229a28fb12f69e1b510ea71e532fd50ccec9fe1b966bc62dc5e1b65",
+          "returns": [],
+          "references": [
+            [
+              1140853,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140864,
+          "bytes": 11,
+          "sha256": "7291310b60a17ca3fe8ffc87ee4b6d2691872d4bee0c47adcf2964976cb01d02",
+          "returns": [],
+          "references": [
+            [
+              1140864,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140875,
+          "bytes": 11,
+          "sha256": "ce7ce16b71be5dda2341bbf1f05fbf445dce92e9c7c1a2f309438dc267548a02",
+          "returns": [],
+          "references": [
+            [
+              1140875,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140886,
+          "bytes": 11,
+          "sha256": "ffff2bf03d9c08d4aa0de5a9a003137574cb188bfc6d43e4ecb19f7448bff785",
+          "returns": [],
+          "references": [
+            [
+              1140886,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140897,
+          "bytes": 11,
+          "sha256": "02dcb4d7b6ed55f695985756c0e796dde4af18e9988108bf145de3c661506087",
+          "returns": [],
+          "references": [
+            [
+              1140897,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140908,
+          "bytes": 48,
+          "sha256": "d0b004cd1279a3a237911e4966603423a393f9350e6e03dbbe383f9687c8138b",
+          "returns": [
+            32
+          ],
+          "references": [
+            [
+              1140916,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140956,
+          "bytes": 15,
+          "sha256": "a67ba586bf1352364f7fd77242b5e36b695c5dfe223474e4ae13e1e975665e8b",
+          "returns": [],
+          "references": [
+            [
+              1140959,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140971,
+          "bytes": 15,
+          "sha256": "d36a1de84fabe6ddd73a7d20f0baec6d0446e549e2ab7e3af004daad49a3c494",
+          "returns": [],
+          "references": [
+            [
+              1140974,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140986,
+          "bytes": 11,
+          "sha256": "8aa5424162442feada243c9ccbe65c98c7ba3f18f284aa024532722f7baacae6",
+          "returns": [],
+          "references": [
+            [
+              1140986,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1140997,
+          "bytes": 11,
+          "sha256": "c08991d00e788cf9ee487d2c13968ddeb1f724e20ebcdfb1537e9ef82b7099c5",
+          "returns": [],
+          "references": [
+            [
+              1140997,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1141008,
+          "bytes": 11,
+          "sha256": "cabae65384e775d3b8f13cb88e8a6dc72e805f6a79834022136f4c6909247df1",
+          "returns": [],
+          "references": [
+            [
+              1141008,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1141019,
+          "bytes": 11,
+          "sha256": "b32f61260f2103bdb03e379c38c9cea9396a6e61651b5f0a25f34ad5da803f50",
+          "returns": [],
+          "references": [
+            [
+              1141019,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1141030,
+          "bytes": 11,
+          "sha256": "3bfc9296b001b4acdf7da0c00d43c94086302f8e639d29997e3370fec10bfed6",
+          "returns": [],
+          "references": [
+            [
+              1141030,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1141041,
+          "bytes": 11,
+          "sha256": "95c8f920b5ac88a41d7e61785426ba480524ba4388c17c02fde29325b11af761",
+          "returns": [],
+          "references": [
+            [
+              1141041,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1141873,
+          "bytes": 253,
+          "sha256": "1f44636baf83d9818a850ed68c9c037a525bce08840102db197558c68f35d3d2",
+          "returns": [
+            4
+          ],
+          "references": [
+            [
+              1141887,
+              1547748
+            ],
+            [
+              1141993,
+              1547744
+            ],
+            [
+              1142077,
+              1547744
+            ],
+            [
+              1142112,
+              1547748
+            ]
+          ],
+          "action": "startup"
+        },
+        {
+          "address": 1142126,
+          "bytes": 111,
+          "sha256": "15ec6b41d1ca330100e5f54e09bfceab2822c4e4f6bf3813cacf9fa8757403cb",
+          "returns": [
+            0
+          ],
+          "references": [
+            [
+              1142135,
+              1547748
+            ],
+            [
+              1142161,
+              1547744
+            ],
+            [
+              1142213,
+              1547744
+            ],
+            [
+              1142225,
+              1547748
+            ]
+          ],
+          "action": "cleanup"
+        },
+        {
+          "address": 1142237,
+          "bytes": 765,
+          "sha256": "eede07c729e3f146417a322ac2f6199c7dbe289e3097aef3f623ab014fb5da5e",
+          "returns": [
+            16
+          ],
+          "references": [
+            [
+              1142329,
+              1547744
+            ],
+            [
+              1142581,
+              1547744
+            ],
+            [
+              1142938,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1173590,
+          "bytes": 475,
+          "sha256": "616a662a7ccdec97c6264f4931a19b4f6adc056211ad1dd146f1e309f08c63e0",
+          "returns": [
+            44
+          ],
+          "references": [
+            [
+              1173835,
+              1547768
+            ],
+            [
+              1173860,
+              1547768
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1179238,
+          "bytes": 860,
+          "sha256": "e5bc99bf9d4a5b6dd97e7e50ecfe23738c52c5ef1c061d4974588a4ce1aee9a1",
+          "returns": [
+            12
+          ],
+          "references": [
+            [
+              1179804,
+              1547768
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1179666,
+          "bytes": 432,
+          "sha256": "2d0f205aaf49ab9628a216dee16d49d661c414cea9983719640b52ead71adcf6",
+          "returns": [
+            12
+          ],
+          "references": [
+            [
+              1179804,
+              1547768
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1238154,
+          "bytes": 89,
+          "sha256": "6abb257bcff5280c97551dd7786556d9aefe6649ea5f474e04a89a27e5fec1b3",
+          "returns": [
+            4
+          ],
+          "references": [
+            [
+              1238154,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1238243,
+          "bytes": 59,
+          "sha256": "8edad883a2428fffb4c7198862ce3282c4ad4146eab8450b755d926dbb7583df",
+          "returns": [
+            12
+          ],
+          "references": [
+            [
+              1238243,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1238302,
+          "bytes": 131,
+          "sha256": "dd4ae1fdb28a706307359c76625057372b2b3bf8b1f4d25c97066437c880bf0b",
+          "returns": [
+            8
+          ],
+          "references": [
+            [
+              1238308,
+              1547744
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247024,
+          "bytes": 11,
+          "sha256": "ed1c90737f7ad9bece9b8e49a929965b096a2ac652cb9836879227fd063587a2",
+          "returns": [],
+          "references": [
+            [
+              1247024,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247035,
+          "bytes": 11,
+          "sha256": "76b86fd27bbb70ac008d49ea68879d31f40805ab63646f50269a14a2d9679b6c",
+          "returns": [],
+          "references": [
+            [
+              1247035,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247046,
+          "bytes": 11,
+          "sha256": "84e1fff1c390d84787d6c469c8d2fed4f13a64acb619b7679f916e688623dec3",
+          "returns": [],
+          "references": [
+            [
+              1247046,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247057,
+          "bytes": 23,
+          "sha256": "8c99f0e2f7c8b8c6a19c2501d909f70fd71def32dc5a99f9813198e960eae627",
+          "returns": [
+            12
+          ],
+          "references": [
+            [
+              1247057,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247080,
+          "bytes": 11,
+          "sha256": "64d3a349d52b65fde08625d22869ba132c6c717f8af8cc7e64e96a5fc242bcf2",
+          "returns": [],
+          "references": [
+            [
+              1247080,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247091,
+          "bytes": 11,
+          "sha256": "af185b85bb2d9dbf6b0f98bf29629cf45d2b0a146d6f616732d6ab951f7fbe0b",
+          "returns": [],
+          "references": [
+            [
+              1247091,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247102,
+          "bytes": 11,
+          "sha256": "48fd55dfc965a4ba9f84bda8698a98b45a22b2f168c402f9b8edeae71766e064",
+          "returns": [],
+          "references": [
+            [
+              1247102,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247113,
+          "bytes": 11,
+          "sha256": "10cfc54ae6cbaf14f6a3f9b0e227898604bf5e50e70b1f5daf456c792a1f5965",
+          "returns": [],
+          "references": [
+            [
+              1247113,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247124,
+          "bytes": 11,
+          "sha256": "9bf2d589adce4a9ee13ef12154b7fe56a621f117089268c5b95b12a7a9848b3d",
+          "returns": [],
+          "references": [
+            [
+              1247124,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247135,
+          "bytes": 11,
+          "sha256": "02aa1af3216108b11e38c072319ec17978e7c08ca68305743b1a8e46b9ec91b6",
+          "returns": [],
+          "references": [
+            [
+              1247135,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247146,
+          "bytes": 11,
+          "sha256": "d6e8ae8e753b9604c4c7a42699c45dcb838da14269d27b8b4b1a4a2a37806868",
+          "returns": [],
+          "references": [
+            [
+              1247146,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247157,
+          "bytes": 15,
+          "sha256": "af198b88ea864886396d1aff8cf92ffe48f5064a71661110e00441ec3f0fb546",
+          "returns": [],
+          "references": [
+            [
+              1247160,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247172,
+          "bytes": 11,
+          "sha256": "6070f7e762b12554d8490bf233b505a94224690e4f53d7262948311343d31046",
+          "returns": [],
+          "references": [
+            [
+              1247172,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247183,
+          "bytes": 11,
+          "sha256": "0f4e1716fe1a41e25aaa1e15f596e86aea2c41fe212ea215405723e490077d01",
+          "returns": [],
+          "references": [
+            [
+              1247183,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247194,
+          "bytes": 15,
+          "sha256": "35ebb2a2ebbc019fb2c0b5690b13875e4b03621abacbd677b2fa821929951f7b",
+          "returns": [],
+          "references": [
+            [
+              1247197,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247209,
+          "bytes": 15,
+          "sha256": "8260a0745ed927efafeafae989894293613f62d7611429bdab930651a4398ddd",
+          "returns": [],
+          "references": [
+            [
+              1247212,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247224,
+          "bytes": 11,
+          "sha256": "1ebcfa6d6f366b7a34653f07046ae8d04b314979d70e580d64ad2743772bbfbc",
+          "returns": [],
+          "references": [
+            [
+              1247224,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247235,
+          "bytes": 15,
+          "sha256": "583eebff50dcb7193e1f570caf52c57f9e38b1b05e7db1aca7b3f2d4016250ee",
+          "returns": [],
+          "references": [
+            [
+              1247238,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247250,
+          "bytes": 15,
+          "sha256": "8624f84c4fd732ba1e0c69a1cd3d88a16ccd29766ff51916328d42d9eaded4ad",
+          "returns": [],
+          "references": [
+            [
+              1247253,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247265,
+          "bytes": 15,
+          "sha256": "036cfe4c5bed3896120010b49486f27530aa604b53257f57ff710162c798e763",
+          "returns": [],
+          "references": [
+            [
+              1247268,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247395,
+          "bytes": 23,
+          "sha256": "0547bbbe3a77bcc718d3e2c5e1cecbdab3195edd6f5000db9a0c06bff8380f6f",
+          "returns": [
+            12
+          ],
+          "references": [
+            [
+              1247395,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247418,
+          "bytes": 11,
+          "sha256": "89478157758f8a01d86a46463851324710fc51188ec3ecf7f0c3f52b675513f0",
+          "returns": [],
+          "references": [
+            [
+              1247418,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247429,
+          "bytes": 518,
+          "sha256": "7a1f0fe97987dce0939fea4b35cf3db6849fe99612019600068e47bee596d026",
+          "returns": [
+            24
+          ],
+          "references": [
+            [
+              1247444,
+              1547756
+            ],
+            [
+              1247913,
+              1547756
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247947,
+          "bytes": 27,
+          "sha256": "a3dee74b28d92a74a9a9a413845ccd97d63c4a8de6aa5d5110ac1a455b0a7c53",
+          "returns": [
+            8
+          ],
+          "references": [
+            [
+              1247961,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1247974,
+          "bytes": 211,
+          "sha256": "3b432a4958c5c261a359c936a34aeb4f68da761383e18a3527b28e7fe0019e36",
+          "returns": [
+            8
+          ],
+          "references": [
+            [
+              1247989,
+              1547756
+            ],
+            [
+              1248087,
+              1547756
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248185,
+          "bytes": 13,
+          "sha256": "3a5c19c30e8f38b338917e77db3a7cc1ae9b7dd77f1a6687aec3f341ed24735f",
+          "returns": [
+            0
+          ],
+          "references": [
+            [
+              1248187,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248299,
+          "bytes": 11,
+          "sha256": "ba10a65fd9c246e0cbed1f456934413fd27f8bd6237f73d1f728cfa3764d56e7",
+          "returns": [],
+          "references": [
+            [
+              1248299,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248310,
+          "bytes": 11,
+          "sha256": "3a22677809e1c447210436673b27a794d8665efdc9c760177d736e1c9fc5610d",
+          "returns": [],
+          "references": [
+            [
+              1248310,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248321,
+          "bytes": 11,
+          "sha256": "f3988070980c4d22eeaf87d8ae2d740c7ad962ab3f240855443dfaf482df5c62",
+          "returns": [],
+          "references": [
+            [
+              1248321,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248332,
+          "bytes": 11,
+          "sha256": "a5c19e0750c729cbdf4ecad15440ead4137a553d5091b33b79e0c9b948ba6f4d",
+          "returns": [],
+          "references": [
+            [
+              1248332,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248343,
+          "bytes": 11,
+          "sha256": "8b21c30f6e385286a69580b65e2742242aa9069937e27368982955fc72f0ca1a",
+          "returns": [],
+          "references": [
+            [
+              1248343,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248354,
+          "bytes": 11,
+          "sha256": "6d96b8775273eafa084db1acabca63d9985cf73c7e4df28b761d4e69eb47529b",
+          "returns": [],
+          "references": [
+            [
+              1248354,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248365,
+          "bytes": 11,
+          "sha256": "c9bf83b91ff852f5e221a22dc52af1cc7ee309a8d235debbe49081bb7d451045",
+          "returns": [],
+          "references": [
+            [
+              1248365,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248376,
+          "bytes": 15,
+          "sha256": "5bc71a1d946fc9bb445e46c4605ee7f8d8fa574c5e14d5d46df678f062fdbea7",
+          "returns": [],
+          "references": [
+            [
+              1248379,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248391,
+          "bytes": 11,
+          "sha256": "9123acebd6e2a98f96db9ee69f2fe365afb611b2081c37ad0973eb5149d72258",
+          "returns": [],
+          "references": [
+            [
+              1248391,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248402,
+          "bytes": 11,
+          "sha256": "0d198186d72f7aada39b9c5982ddc0c4484b8b9f38da5719d4149d9687ca9786",
+          "returns": [],
+          "references": [
+            [
+              1248402,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248413,
+          "bytes": 11,
+          "sha256": "3eb0d64a82837cf819d969fc1abfbcfa466f78992a97ff0154e0e5b293f762e2",
+          "returns": [],
+          "references": [
+            [
+              1248413,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248424,
+          "bytes": 11,
+          "sha256": "ce7082b7c543fd01a3abe2cb64a01a3ec695c2778544621a36dd4f5ad2f5e86d",
+          "returns": [],
+          "references": [
+            [
+              1248424,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248435,
+          "bytes": 11,
+          "sha256": "60966c0a60684dfa147d52e7d651ec58ee269dff9e011e24614384ee4bafb19d",
+          "returns": [],
+          "references": [
+            [
+              1248435,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248792,
+          "bytes": 150,
+          "sha256": "fe7f468ed84e785f58f9adfbb7e1e9710501c7a0fd566bef9697fb120f912366",
+          "returns": [
+            4
+          ],
+          "references": [
+            [
+              1248801,
+              1547760
+            ],
+            [
+              1248916,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248942,
+          "bytes": 11,
+          "sha256": "daf992c1860bc9f7ceee8c107774fe4cec3ff9249414f05f828ce9866ada9371",
+          "returns": [],
+          "references": [
+            [
+              1248942,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248953,
+          "bytes": 11,
+          "sha256": "84f02a000e7cdfad0eb86bdce695d7a4254a50f74eaa617cba88e341d2dbd90e",
+          "returns": [],
+          "references": [
+            [
+              1248953,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1248964,
+          "bytes": 154,
+          "sha256": "b7879636c890c0982a0d056b3ec070778041fca9230bae25a97ba5497693970c",
+          "returns": [
+            4
+          ],
+          "references": [
+            [
+              1248969,
+              1547760
+            ],
+            [
+              1249092,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1249118,
+          "bytes": 106,
+          "sha256": "dd95012567e34ee59f704cd083bc8836c9a6299af41acece403a1d1fe7bc1fb5",
+          "returns": [
+            8
+          ],
+          "references": [
+            [
+              1249127,
+              1547760
+            ],
+            [
+              1249166,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1249224,
+          "bytes": 78,
+          "sha256": "ed273f73aa9871f715de6aab6c526143fbd819c4399544174feb4fc76b31239c",
+          "returns": [
+            4
+          ],
+          "references": [
+            [
+              1249233,
+              1547760
+            ],
+            [
+              1249261,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1249302,
+          "bytes": 55,
+          "sha256": "e68d957ec4a67580ffdb39f72fe7f88f09d9431dd8924342d9c6b247a2d0cd95",
+          "returns": [
+            0
+          ],
+          "references": [
+            [
+              1249311,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1249357,
+          "bytes": 54,
+          "sha256": "8fc76bd3dcc078fc319d58e270e2e7f1854553626c65438e05137cd365bcd3c7",
+          "returns": [
+            8
+          ],
+          "references": [
+            [
+              1249361,
+              1547760
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1273121,
+          "bytes": 47,
+          "sha256": "4f102783eea4b650fb88f939a806d9c7973e87b363b65831b8ed5c5f3a92bd0b",
+          "returns": [
+            4
+          ],
+          "references": [],
+          "action": "guard"
+        },
+        {
+          "address": 1274357,
+          "bytes": 106,
+          "sha256": "38e4f90c1de10ec1a3c0a3cc964a0df39f5a3b72997a0df7f8133b5c6a87ba1e",
+          "returns": [],
+          "references": [
+            [
+              1274413,
+              1547808
+            ],
+            [
+              1274422,
+              1547792
+            ]
+          ],
+          "action": "guard"
+        },
+        {
+          "address": 1274707,
+          "bytes": 66,
+          "sha256": "90bc6dcba29c2c8b23cce51a7e7fc2fabcfac46317b14519d3d59396dc277a46",
+          "returns": [
+            16
+          ],
+          "references": [],
+          "action": "guard"
+        },
+        {
+          "address": 1274888,
+          "bytes": 992,
+          "sha256": "cab394d46f17797ab2b52c6018f0f9b8f13aeeee335c2094611a6dd842a1bb2c",
+          "returns": [
+            4
+          ],
+          "references": [
+            [
+              1275160,
+              1547792
+            ],
+            [
+              1275812,
+              1547792
+            ]
+          ],
+          "action": "guard"
+        }
+      ],
+      "callback_table": {
+        "address": 81816,
+        "entries": [
+          1274690,
+          1274707,
+          1274773,
+          1273121
+        ],
+        "publisher": 1247429,
+        "instruction": 1247538,
+        "owner_offset": 612
+      },
+      "untranslated_callbacks": [
+        {
+          "address": 1274690,
+          "bytes": 17,
+          "sha256": "e054ec42c5a7efe25aeb9371d58721f5f00b576736beb3b92ba04eb9eabea2f0",
+          "returns": [
+            4
+          ]
+        },
+        {
+          "address": 1274773,
+          "bytes": 11,
+          "sha256": "0515b173ef1e2caf69d5a6f9922d01b1c9ec09d5f23c452788c4698c4955cad3",
+          "returns": []
+        }
+      ],
+      "set_last_error": {
+        "sha256": "879d78abc26fa19a6731632800c57eef48c0d3ef4026ec85f3be99ff3bed4cae",
+        "bytes": 46,
+        "stack_bytes": 4
+      }
     }
   }
 }
