@@ -162,6 +162,7 @@ def prepare_command(source, data, paths, output):
 
 def configure_command(data, paths, output, build, cmake, generator, jobs):
     options = dict(data["build"])
+    options.setdefault("PILOT_NATIVE_LINK_PROFILE", "FINAL")
     options.update(XBOXLLR_BUILD_MODE="NATIVE_TITLE", PILOT_GENERATED=str(Path(output) / "gen"),
                    PILOT_EXECUTABLE_NAME=data["title"]["executable"], PILOT_COMPILE_JOBS=str(jobs),
                    PILOT_SECTION_MOD_SOURCE="")
@@ -196,6 +197,10 @@ def identity(source, data, output, paths=None):
             "profile_sha256": profile_identity(source, profile),
             "generation_sha256": digest(Path(output) / "generation.aot-private.json"),
             "generated": str(Path(output).resolve())}
+    build_policy = dict(data["build"])
+    build_policy.setdefault("PILOT_NATIVE_LINK_PROFILE", "FINAL")
+    result["build_policy_sha256"] = hashlib.sha256(
+        json.dumps(build_policy, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if paths and paths.get("section_mod_source"):
         selected = paths["section_mod_source"].resolve()
         result["section_mod"] = {"source": str(selected), "sha256": digest(selected)}
@@ -452,6 +457,8 @@ def main():
     parser.add_argument("--cmake", type=Path, default=Path("C:/Program Files/CMake/bin/cmake.exe") if os.name == "nt" else Path("cmake"))
     parser.add_argument("--generator", default="Visual Studio 17 2022" if os.name == "nt" else "Ninja")
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--link-profile", choices=("FINAL", "ITERATIVE"),
+                        help="Select build-only linking policy; ITERATIVE keeps optimized CPU code on MSVC")
     parser.add_argument("--automated", action="store_true")
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--detach", action="store_true")
@@ -463,6 +470,8 @@ def main():
     if (args.input_replay is not None or args.capture) and args.action != "run":
         parser.error("--input-replay and --capture apply only to run")
     source, data = definition(args.title)
+    if args.link_profile:
+        data["build"]["PILOT_NATIVE_LINK_PROFILE"] = args.link_profile
     paths = private_paths(args.paths)
     check_image(data["title"], paths)
     if args.action in ("prepare", "bind", "partition", "configure", "build"):

@@ -81,9 +81,33 @@ muted, and cannot detach. Only that created process is stopped at its deadline.
 The authored tests mock process creation: they do not validate dashboard boot,
 rendering, input, audio output, or native performance.
 
-Notice trees remain part of each native build. CMake 3.26 and later copy only
-changed contents; older supported CMake versions retain the original directory
-copy. This avoids rewriting unchanged notices during incremental builds.
+`--link-profile ITERATIVE` selects MSVC incremental linking for development.
+Pass the same selection to configure, build and run; the build receipt binds
+it so a different selection cannot silently launch an older artifact. It keeps
+the selected CPU optimization (including `/O2`) and existing generated objects,
+but disables linker removal/folding and can increase executable/disk size. The
+first link creates the incremental database and is still a full link. `FINAL`
+is the default and explicitly resets an existing iterative cache to full linking
+when configured without the flag. Other supported toolchains keep FINAL.
+Switching link profiles does not retranslate the guest CPU. Do final acceptance
+and delivery with FINAL; this option does not establish runtime performance.
+
+For the normal edit/build/run loop, configure once with the chosen link profile,
+then repeat only `build` and `run` while editing shared runtime sources. Those
+edits do not require prepare, bind, partition or a fresh build directory. The
+build system recompiles affected objects and reuses the rest. Configure again
+when changing the title definition, generated admissions, private build inputs
+or link policy. CMake handles ordinary build-script dependency regeneration;
+explicit configuration is useful after adding notice source files (below).
+
+Notice trees remain part of each native build. Their individual output files
+and source dependencies now drive copying, including builds with no relink.
+Unchanged inputs need no copy command or content comparison. Changed files and
+missing staged notices rebuild their affected group; content is copied
+byte-for-byte. Configure again when introducing new nested notice files so
+Visual Studio loads the refreshed dependency inventory before building.
+Removed source notices may leave surplus old
+notice files in an existing build, so release packaging should use a clean stage.
 
 If the child exits before the deadline, the command propagates its exit status.
 A planned deadline stop is recorded explicitly; it establishes only that the

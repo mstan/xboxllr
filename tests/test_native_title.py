@@ -13,6 +13,22 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_link_policy_preserves_generation_and_has_distinct_build_identity(self):
+        original = n.identity(self.source, self.data, self.output)
+        preparation = n.preparation_identity(self.source, self.data, self.output)
+        command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Ninja', 4)
+        self.assertIn('-DPILOT_NATIVE_LINK_PROFILE=FINAL', command)
+        self.data['build']['PILOT_NATIVE_LINK_PROFILE'] = 'FINAL'
+        self.assertEqual(original, n.identity(self.source, self.data, self.output))
+        self.data['build']['PILOT_NATIVE_LINK_PROFILE'] = 'ITERATIVE'
+        self.assertNotEqual(original, n.identity(self.source, self.data, self.output))
+        self.assertEqual(preparation, n.preparation_identity(self.source, self.data, self.output))
+        command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Visual Studio 17 2022', 4)
+        self.assertIn('-DPILOT_NATIVE_LINK_PROFILE=ITERATIVE', command)
+        with patch('native_title.subprocess.Popen') as child, self.assertRaises(ValueError):
+            n.launch(self.data, self.paths, self.output, self.build, source=self.source)
+        child.assert_not_called()
+
     def test_section_mod_identity_and_configuration_reset(self):
         source=self.root/'sections.aot-private.c'
         source.write_text('/* authored static registry */')

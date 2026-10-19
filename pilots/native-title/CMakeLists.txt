@@ -162,36 +162,25 @@ set_property(SOURCE runtime.c runtime_contract_test.c APPEND PROPERTY
   COMPILE_DEFINITIONS "PILOT_CONSOLE_SETTINGS_FILE=\"${pilot_console_settings_path}\"")
 target_compile_definitions(xlle_native_title PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(xlle_native_title PRIVATE bcrypt)
-# Keep credits current even when only a notice changes and no relink occurs.
-# Avoid rewriting unchanged notice trees on every incremental build. The
-# original command retains compatibility with the declared CMake minimum.
-set(pilot_notice_copy_directory copy_directory)
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.26)
-  set(pilot_notice_copy_directory copy_directory_if_different)
+# Keep the driver-owned output layout identical across single/multi-config
+# generators. Notices have real outputs/dependencies, even without a relink.
+set(pilot_native_output "${CMAKE_CURRENT_BINARY_DIR}")
+if(CMAKE_CONFIGURATION_TYPES)
+  string(APPEND pilot_native_output "/$<CONFIG>")
 endif()
-add_custom_target(pilot_notices ALL
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>")
-add_dependencies(xlle_native_title pilot_notices)
-add_custom_command(TARGET pilot_notices POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../THIRD_PARTY_ATTRIBUTION.md"
-    "$<TARGET_FILE_DIR:xlle_native_title>/THIRD_PARTY_ATTRIBUTION.md")
+set_target_properties(xlle_native_title PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${pilot_native_output}")
+include(notice_staging.cmake)
+pilot_notices_begin("${pilot_native_output}")
+pilot_notice_file("${CMAKE_CURRENT_SOURCE_DIR}/../../THIRD_PARTY_ATTRIBUTION.md" "THIRD_PARTY_ATTRIBUTION.md")
 foreach(notice LICENSE LICENSE-SCOPE.md NOTICE)
-  add_custom_command(TARGET pilot_notices POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../../${notice}"
-      "$<TARGET_FILE_DIR:xlle_native_title>/${notice}")
+  pilot_notice_file("${CMAKE_CURRENT_SOURCE_DIR}/../../${notice}" "${notice}")
 endforeach()
-add_custom_command(TARGET pilot_notices POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/sp00nznet"
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSES/sp00nznet-MIT.txt"
-    "$<TARGET_FILE_DIR:xlle_native_title>/third_party/sp00nznet/LICENSE")
+pilot_notice_file("${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSES/sp00nznet-MIT.txt" "third_party/sp00nznet/LICENSE")
 if(NOT EXISTS "${PILOT_GENERATED}/third_party/phobos-xboxrecomp/LICENSE")
   message(FATAL_ERROR "Regenerate private CPU helpers with native_pilot.py to retain their donor notices")
 endif()
 if(EXISTS "${PILOT_GENERATED}/third_party")
-  add_custom_command(TARGET pilot_notices POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_GENERATED}/third_party"
-      "$<TARGET_FILE_DIR:xlle_native_title>/third_party")
+  pilot_notice_tree("${PILOT_GENERATED}/third_party" "third_party")
 endif()
 enable_testing()
 add_executable(pilot_visual_mods_test visual_mods_test.c visual_mods.c visual_mod_plan.c)
@@ -299,12 +288,9 @@ pilot_add_test(NAME pilot_reference_clock_quantum COMMAND pilot_reference_clock_
 set_tests_properties(pilot_reference_clock_quantum PROPERTIES TIMEOUT 10)
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ApuAdpcm.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ApuRate.cmake")
-add_custom_command(TARGET pilot_notices POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dr_wav"
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/third_party/dr_wav/LICENSE"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/third_party/dr_wav/README.md"
-    "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dr_wav")
+foreach(notice LICENSE README.md)
+  pilot_notice_file("${CMAKE_CURRENT_SOURCE_DIR}/../../src/third_party/dr_wav/${notice}" "third_party/dr_wav/${notice}")
+endforeach()
 add_executable(pilot_contract_test runtime_contract_test.c)
 add_executable(pilot_frame_inputs_test frame_inputs_contract_test.c)
 target_compile_definitions(pilot_frame_inputs_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -376,12 +362,10 @@ if(pilot_audio_dsp OR pilot_audio_device_lle)
   endif()
   include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ValidateDspSource.cmake")
   xlle_validate_dsp_source("${PILOT_DSP_SOURCE}")
-  add_custom_command(TARGET pilot_notices POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_DSP_SOURCE}/LICENSE" "${PILOT_DSP_SOURCE}/donor.json"
-      "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300"
-    COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_DSP_SOURCE}/third_party"
-      "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300/dependencies")
+  foreach(notice LICENSE donor.json)
+    pilot_notice_file("${PILOT_DSP_SOURCE}/${notice}" "third_party/dsp56300/${notice}")
+  endforeach()
+  pilot_notice_tree("${PILOT_DSP_SOURCE}/third_party" "third_party/dsp56300/dependencies")
   add_library(xlle_dsp_core STATIC "${CMAKE_CURRENT_SOURCE_DIR}/../../src/machine/apu_dsp_core.c")
   target_include_directories(xlle_dsp_core PRIVATE "${PILOT_DSP_SOURCE}/crates/emu-ffi/include")
   target_link_libraries(xlle_dsp_core PUBLIC "${PILOT_DSP_LIBRARY}" ntdll userenv ws2_32 bcrypt)
@@ -538,8 +522,7 @@ if(PILOT_ADPCM_SOURCE)
   add_executable(pilot_adpcm_test audio_adpcm_test.c "${PILOT_ADPCM_SOURCE}/adpcm_lle_reference.c")
   target_link_libraries(pilot_adpcm_test PRIVATE pilot_adpcm xlle_apu_adpcm)
   pilot_add_test(NAME pilot_adpcm_reference COMMAND pilot_adpcm_test)
-  add_custom_command(TARGET pilot_notices POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_ADPCM_SOURCE}" "$<TARGET_FILE_DIR:xlle_native_title>/third_party/xbox-adpcm")
+  pilot_notice_tree("${PILOT_ADPCM_SOURCE}" "third_party/xbox-adpcm")
 endif()
 target_compile_definitions(pilot_audio_backend PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(pilot_audio_backend PUBLIC ${audio_libraries})
@@ -731,21 +714,13 @@ if(PILOT_D3D_SOURCE)
   endforeach()
   foreach(notice LICENSE LICENSE.upstream-MIT NOTICE MODIFICATIONS.md donor.json)
     if(EXISTS "${PILOT_D3D_SOURCE}/${notice}")
-      add_custom_command(TARGET pilot_notices POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/renderer"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_D3D_SOURCE}/${notice}"
-          "$<TARGET_FILE_DIR:xlle_native_title>/third_party/renderer/${notice}")
+      pilot_notice_file("${PILOT_D3D_SOURCE}/${notice}" "third_party/renderer/${notice}")
     endif()
   endforeach()
   if(EXISTS "${PILOT_D3D_SOURCE}/LICENSES")
-    add_custom_command(TARGET pilot_notices POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_D3D_SOURCE}/LICENSES"
-        "$<TARGET_FILE_DIR:xlle_native_title>/third_party/renderer/LICENSES")
+    pilot_notice_tree("${PILOT_D3D_SOURCE}/LICENSES" "third_party/renderer/LICENSES")
   endif()
-  add_custom_command(TARGET pilot_notices POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/nv2a-reference"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_D3D_SOURCE}/nv2a-reference/LICENSE"
-      "$<TARGET_FILE_DIR:xlle_native_title>/third_party/nv2a-reference/LICENSE")
+  pilot_notice_file("${PILOT_D3D_SOURCE}/nv2a-reference/LICENSE" "third_party/nv2a-reference/LICENSE")
   target_compile_definitions(pilot_d3d_backend PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_link_libraries(pilot_d3d_backend PUBLIC d3d11 dxgi dxguid d3dcompiler pilot_vsh_reference)
   add_executable(pilot_graphics_test graphics_backend_test.c)
@@ -933,6 +908,25 @@ if(pilot_compact_dispatch)
   set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS PILOT_DISPATCH_COMPACT)
 endif()
 file(SHA256 "${PILOT_GENERATED}/recomp_types.h" pilot_register_model_sha256)
+set(PILOT_NATIVE_LINK_PROFILE "FINAL" CACHE STRING "Host link policy: FINAL or MSVC ITERATIVE (CPU optimization unchanged)")
+set_property(CACHE PILOT_NATIVE_LINK_PROFILE PROPERTY STRINGS FINAL ITERATIVE)
+if(NOT PILOT_NATIVE_LINK_PROFILE MATCHES "^(FINAL|ITERATIVE)$")
+  message(FATAL_ERROR "PILOT_NATIVE_LINK_PROFILE must be FINAL or ITERATIVE")
+endif()
+if(PILOT_NATIVE_LINK_PROFILE STREQUAL "ITERATIVE")
+  if(NOT MSVC OR NOT WIN32)
+    message(FATAL_ERROR "ITERATIVE linking requires MSVC on Windows; use FINAL on other supported toolchains")
+  endif()
+  # Keep /O2 on every existing object. Disable only link-time removal/folding,
+  # which preclude incremental linking. Final delivery defaults remain FINAL.
+  target_link_options(xlle_native_title PRIVATE /INCREMENTAL /OPT:NOREF /OPT:NOICF)
+else()
+  if(MSVC)
+    target_link_options(xlle_native_title PRIVATE /INCREMENTAL:NO)
+  endif()
+endif()
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-link-profile-$<CONFIG>.aot-private.json"
+  CONTENT "{\n  \"link_profile\": \"${PILOT_NATIVE_LINK_PROFILE}\",\n  \"cpu_optimization\": \"${PILOT_NATIVE_OPTIMIZATION}\",\n  \"configuration\": \"$<CONFIG>\"\n}\n")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-build-profile-$<CONFIG>.aot-private.json"
   CONTENT "{\n  \"optimization\": \"${PILOT_NATIVE_OPTIMIZATION}\",\n  \"native_poll_wait\": \"${PILOT_NATIVE_POLL_WAIT}\",\n  \"configuration\": \"$<CONFIG>\",\n  \"compiler\": \"${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}\",\n  \"register_model_sha256\": \"${pilot_register_model_sha256}\",\n  \"scheduling\": \"${PILOT_SCHEDULING}\",\n  \"calendar\": \"${PILOT_CALENDAR}\",\n  \"io_device\": \"${PILOT_IO_DEVICE}\",\n  \"files\": \"${PILOT_FILES}\",\n  \"renderer\": \"${PILOT_RENDERER}\",\n  \"audio\": \"${PILOT_AUDIO}\"\n}\n")
 if(MSVC)
@@ -975,3 +969,6 @@ if(WIN32)
   add_test(NAME pilot_gpu_framebuffer_request COMMAND pilot_gpu_framebuffer_request_test)
   set_tests_properties(pilot_gpu_framebuffer_request PROPERTIES TIMEOUT 10)
 endif()
+
+pilot_notices_finish()
+add_dependencies(xlle_native_title pilot_notices)

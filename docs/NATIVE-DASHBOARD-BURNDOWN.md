@@ -314,6 +314,17 @@ behavior remains implementation work in `.1.137`.
 
 ## Delivery order
 
+The retained dashboard cache now uses the shared development
+[`ITERATIVE` link policy](NATIVE-TITLE-DRIVER.md), retaining `/O2` and all 103
+generated CPU objects. A no-change driver build measured 1.19 seconds without
+notice-copy commands or recompilation; the first incremental database link
+took 150.35 seconds. These are different workloads under variable host load,
+not a measured speedup ratio for an edited build. All 150 staged notice files
+match their sources. The new executable reaches the same explicit periodic
+audio-worker delay guard (99); this build change does not close that functional
+gap or establish menu performance. Final delivery still requires FINAL linking
+and the same-framework Blinx regression.
+
 Credits remain a title-owned mod. The shared, exact-image
 [section-data provider](NATIVE-SECTION-MODS.md) now supplies a separate loader
 view for the revised XIPS data while preserving original XBE identity and
