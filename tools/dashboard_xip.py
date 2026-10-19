@@ -1,4 +1,4 @@
-"""Independent, bounded XIP member overlays for an owner's dashboard assets.
+"""Independent, bounded XIP member repacking for an owner's dashboard assets.
 
 The on-disk fields are format facts checked against the owned 5960 archives.
 No Theseus implementation or dashboard script bodies are included here.
@@ -16,8 +16,8 @@ class Xip:
         self.data = data
         if len(data) < 16:
             raise ValueError("truncated XIP header")
-        magic, self.start, files, names, extent = struct.unpack_from("<IIHHI", data)
-        strings = 16 + files * 16 + names * 4
+        magic, self.start, self.files, names, extent = struct.unpack_from("<IIHHI", data)
+        strings = 16 + self.files * 16 + names * 4
         if magic != 0x30504958 or not strings <= self.start <= len(data):
             raise ValueError("invalid XIP header or directory extent")
         if extent > len(data) - self.start:
@@ -25,10 +25,10 @@ class Xip:
         self.end = self.start + extent
         self.members: dict[str, tuple[str, int]] = {}
         for i in range(names):
-            index, offset = struct.unpack_from("<HH", data, 16 + files * 16 + i * 4)
+            index, offset = struct.unpack_from("<HH", data, 16 + self.files * 16 + i * 4)
             begin = strings + offset
             end = data.find(b"\0", begin, self.start)
-            if index >= files or begin >= self.start or end < 0:
+            if index >= self.files or begin >= self.start or end < 0:
                 raise ValueError("invalid XIP member name or data index")
             name = data[begin:end].decode("ascii")
             key = name.casefold()
@@ -57,29 +57,48 @@ class Xip:
         return self.data[begin:begin + size]
 
     def replace(self, name: str, payload: bytes) -> bytes:
-        at, _, _ = self.entry(name)
+        self.entry(name)
         index = self.members[name.casefold()][1]
         if sum(member[1] == index for member in self.members.values()) != 1:
             raise ValueError("aliased member replacement requires an explicit alias policy")
-        # Append one aligned payload and change its directory record. Existing
-        # payload positions and internal references are never relocated.
-        result = bytearray(self.data)
-        result.extend(b"\0" * (-len(result) % 16))
-        offset = len(result) - self.start
-        result.extend(payload)
+        # Initial retail object loading consumes payloads in FILEDATA order,
+        # ignoring generic/texture data offsets. Repack that physical stream;
+        # changing an offset to an appended copy does not redirect the reader.
+        # Type4 is a packed mesh-buffer/first-index reference, not file bytes.
+        # Keep those words and the referenced IB/VB contents exactly intact.
+        result = bytearray(self.data[:self.start])
+        cursor = 0
+        for i in range(self.files):
+            entry = 16 + i * 16
+            old_offset, size, kind, _ = struct.unpack_from("<IIII", self.data, entry)
+            if kind == 4:
+                continue
+            if kind not in (0, 2, 3, 5, 6):
+                raise ValueError("unsupported XIP stream member type")
+            if old_offset != cursor or cursor + size > self.end - self.start:
+                raise ValueError("XIP payloads are not a bounded sequential stream")
+            contents = (payload if i == index else
+                        self.data[self.start + cursor:self.start + cursor + size])
+            offset = len(result) - self.start
+            if max(offset, len(contents)) > 0xFFFFFFFF:
+                raise ValueError("XIP replacement exceeds 32-bit extent")
+            struct.pack_into("<II", result, entry, offset, len(contents))
+            result.extend(contents)
+            cursor += size
+        if any(self.data[self.start + cursor:]):
+            raise ValueError("nonzero data outside the XIP payload stream")
         # The original buffered reader eagerly refills after exhausting a
         # block, even when the requested member has just completed. Keep a
         # full 64-KiB read-ahead block after appended data; EOF must not turn
         # a successful member read into the retail fatal-reboot path.
         result.extend(b"\0" * ((-len(result) % 65536) + 65536))
         extent = len(result) - self.start
-        if max(offset, len(payload), extent) > 0xFFFFFFFF:
-            raise ValueError("XIP overlay exceeds 32-bit extent")
-        struct.pack_into("<II", result, at, offset, len(payload))
+        if extent > 0xFFFFFFFF:
+            raise ValueError("XIP repack exceeds 32-bit extent")
         struct.pack_into("<I", result, 12, extent)
         check = Xip(bytes(result))
         if check.read(name) != payload:
-            raise ValueError("XIP overlay readback failed")
+            raise ValueError("XIP repack readback failed")
         return bytes(result)
 
 

@@ -44,7 +44,24 @@ repair alone is claimed as the cause of the earlier reboot.
 records in a new private XBE and preserves the integrity checks. The enlarged
 table uses isolated pages with fresh header reference cells; adjacent sections
 and every unrelated record remain unchanged. Authored digest/layout tests and
-private readback pass. Functional boot and Credits acceptance remain pending.
+private readback pass. Run052 still consumes the original executable: its
+captured kernel launch path is `\Device\Harddisk0\Partition2\evoXdash.xbe`,
+whereas the006 preparation changed only `/xboxdash.xbe`. Its loaded section
+headers and image extent confirm the original table, so052 does not test the
+relocated metadata. The next private image must update the actual selected
+alias after verifying its original hash, and read back both copies. Functional
+boot and Credits acceptance remain pending.
+
+Run053 uses the corrected boot alias and passes the former integrity stop.
+It then captures `Unknown class: XPR0` from `y:\default.xap`, line12698.
+Owned loader disassembly establishes another construction error: initial
+object creation reads physical payloads sequentially in FILEDATA order and
+ignores generic/texture offsets. The append-only005 overlay made it consume
+the old script using the enlarged size, continuing into texture data. The008
+repacker preserves that stream order, moves later ordinary offsets, and keeps
+packed mesh-reference fields and their backing IB/VB bytes intact. The
+authored sequential-consumer check and independent comparison of all other
+payloads pass; retail compilation, name binding and UI remain unverified.
 Do not describe this prototype as installed or playable. It is not a public
 release.
 
@@ -105,11 +122,12 @@ Capstone; authored tests contain no retail code.
 ## Asset mod construction
 
 The independently authored XIP reader bounds header, directory, name and
-payload extents. Only ordinary file members are replaceable. It appends an
-aligned replacement and changes that member's directory entry, preserving
-other original payload locations, specialized mesh records and timestamps.
-Original archives are never written. The mod builder accepts only the reviewed
-5960 `default.xip` and `mainmenu5.xip` hashes.
+payload extents. Only ordinary file members are replaceable. It repacks the
+physical FILEDATA stream in its original order and updates ordinary offsets,
+preserving all other payload bytes, packed mesh references and timestamps.
+It rejects unrecognized member types, gaps or nonzero unaccounted data rather
+than guessing their meaning. Original archives are never written. The mod
+builder accepts only the reviewed5960 `default.xip` and `mainmenu5.xip` hashes.
 
 The mod clones owned Settings geometry locally with unique DEF/USE names,
 keeps mesh URLs intact, extends selection to index 4, and uses the dashboard's
@@ -149,6 +167,8 @@ that its menu and notice pages render correctly; those checks remain pending.
 The earlier004 clone is retained as failure evidence. Its replacement members
 ended exactly at EOF;005 preserves a full64KiB read-ahead block beyond the
 appended member and includes those bytes in the archive's declared extent.
+That append-only layout is superseded by008's sequential repack, which retains
+the read-ahead block after the complete physical payload stream instead.
 The original loader can refill as soon as its current buffer is exhausted,
 including at the end of a completed member read. Reference: Theseus
 [`xip_archive.cpp`](https://github.com/MrMilenko/Theseus/blob/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965/theseus/xbox/xip_archive.cpp).
@@ -166,7 +186,8 @@ tool verifies all original XBE section digests and both original archives'
 block tables before replacing their records; other records and the sentinel
 are preserved byte for byte.
 
-The two005 archives add twelve hashes (240 bytes). The original virtual gap
+The two005 archives add twelve hashes (240 bytes); the smaller008 repack adds
+ten (200 bytes). The original virtual gap
 after `XIPS` is only sixteen bytes, so in-place growth would overlap the next
 section. For the exact hash-selected5960 layout, the tool appends the enlarged
 table at raw offset `0x1df000`, relocates it to isolated VA `0x1fe000`, rounds
@@ -197,6 +218,10 @@ Use a separate new private image containing both the modified archives and
 their matching XBE. A modified archive with the unchanged XBE fails integrity
 before the script compiler can accept or reject it. Offline hashes and layout
 checks do not establish a successful runtime menu or controller interaction.
+Determine the actual BIOS-selected executable path; the XBE's embedded debug
+name does not establish its filesystem path. Preserve that selected path and
+its verified contents in the private image receipt rather than assuming the
+retail `/xboxdash.xbe` filename is what a custom BIOS launches.
 
 ## Focused validation
 
