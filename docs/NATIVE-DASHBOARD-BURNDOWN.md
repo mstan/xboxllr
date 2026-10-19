@@ -12,8 +12,9 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 
 The latest actual native run passes network startup and the cached-update
 query, creates the requested Gaussian graphics device, completes graphics
-initializer state setup and loads the initial `default.xip` assets. The next
-guarded operation is an offline network call at `00130746`. No native menu
+initializer state setup, loads `default.xip`, passes the bounded random-byte
+request and begins loading ambient audio. The next guarded operation is the
+`NtCreateMutant` kernel mutex API. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -26,7 +27,8 @@ functions execute.
 | Offline network initialization | Done for bounded lifecycle | Native startup passes; real host lifetime and unsupported consumer guards are retained |
 | Offline cached-update handling | Passed for absent mounted cache | Actual read-only probe finds absence and query returns the original no-update result; existing cache formats remain guarded |
 | Graphics initialization and initial assets | Passed in actual startup | Native state setup returns and the original dashboard loads `default.xip`; exact RGBA8 dithering remains an explicit precision deferral |
-| First rendered native menu | Current blocker | Initial assets load; reached offline network operation `00130746` requires a bounded contract |
+| Offline random-byte request | Passed for bounded startup use | Real host entropy, original XOR/owner/error contract; 0..64 bytes admitted, original seeded stream deferred |
+| First rendered native menu | Current blocker | Initial ambient WAV loading reaches `NtCreateMutant`; native kernel mutex ownership is required |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -66,7 +68,8 @@ delivery burndown.
 | Offline native network lifecycle | Startup/cleanup and real host reference ownership implemented and reviewed; actual startup now passes without entering the original NIC/raw-disk stack; other network operations remain guarded |
 | D3D creation and presentation surfaces | Actual native device creates the 1280x960 raster; guest surface allocation/projection setup returns. Real Gaussian pixels, optional depth and legacy visual mods pass focused GPU checks |
 | Initializer-state component and integration | Passed | Real zero raster bias, original cache roles, tracked native precision, inactive consumer bounds and Reset ownership; five combined CTests pass in 6.53 seconds |
-| Latest actual native boot | Passes graphics initialization and initial `default.xip` loading; stops at offline network operation `00130746` after 186,936 native entries; no captured frame |
+| Bounded random service integration | Passed | Twelve binder tests and nine original component cases; five combined network CTests pass in 0.64 seconds |
+| Latest actual native boot | Passes graphics/assets/random request and starts ambient WAV loading; stops at `NtCreateMutant` after 193,932 native entries; no captured frame |
 | Driver incremental admission and QA launches | 31 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
@@ -246,6 +249,18 @@ CPU interpreter fallback. The initializer and existing presentation/visual
 checks pass together: five CTests, 6.53 seconds. See
 [initializer scope](NATIVE-GRAPHICS-INITIALIZER-2026-10-19.md) for the precision
 approximation and retained guards. This is still not a menu or performance pass.
+
+The random-service executable is
+`d85abb4edb389588e0160ae6b304183bbb76d1571fa8eb3be385a081ea08d069`.
+Run `20261019-144648-ci74w2ha` passes the original four-byte request, opens
+the ambient audio WAV and reads its headers, then stops at `NtCreateMutant`
+(ordinal 192) after 193,932 native entries. It exits 2 before the 20-second
+deadline with no captured frame. The new network header is the only change
+among 119 generated files; CPU bodies and wrappers are unchanged. Original
+task/notification APIs remain guarded: source lookahead observes absent task
+handles at this constructor, rather than fabricating completed tasks. See
+[bounded random service](NATIVE-NETWORK-RANDOM-2026-10-19.md). Actual audio
+playback, menu rendering and performance remain unverified.
 
 ## Remaining service inventory
 

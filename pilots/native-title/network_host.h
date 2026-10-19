@@ -3,4 +3,5 @@
 #include "network_offline.h"
 /* Deliberately no Winsock/Windows types: runtime.c already includes windows.h. */
 const PilotNetworkOps *pilot_network_host_operations(void);
+int pilot_network_host_entropy(void *,unsigned,unsigned char *);
 #endif

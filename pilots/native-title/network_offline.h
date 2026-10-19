@@ -28,13 +28,22 @@ typedef struct PilotNetworkResult {
  * qualifies an empty view. The runtime owns mounted-handle confinement. */
 typedef uint32_t (*PilotNetworkCacheProbe)(void *,unsigned,const char *);
 typedef int (*PilotNetworkOutputClear)(void *,unsigned);
+/* stage must preflight readable+writable output and snapshot without writes;
+ * commit cannot fail or call guest code after successful staging. */
+typedef int (*PilotNetworkRandomStage)(void *,unsigned,unsigned char *);
+typedef void (*PilotNetworkRandomCommit)(void *,unsigned,const unsigned char *);
+typedef int (*PilotNetworkEntropy)(void *,unsigned,unsigned char *);
 enum { PILOT_NETWORK_GUARD_UNINITIALIZED=1, PILOT_NETWORK_GUARD_PARAMETER,
        PILOT_NETWORK_GUARD_REFCOUNT, PILOT_NETWORK_GUARD_STATE,
-       PILOT_NETWORK_GUARD_OUTPUT, PILOT_NETWORK_GUARD_CACHE };
+       PILOT_NETWORK_GUARD_OUTPUT, PILOT_NETWORK_GUARD_CACHE,
+       PILOT_NETWORK_GUARD_RANDOM_SIZE, PILOT_NETWORK_GUARD_ENTROPY };
 enum { PILOT_NETWORK_CACHED_UPDATE_BYTES=156 };
+enum { PILOT_NETWORK_RANDOM_MAX_BYTES=64 };
 int pilot_network_offline_initialize(PilotNetworkOffline *, const PilotNetworkOps *);
 PilotNetworkResult pilot_network_offline_startup(PilotNetworkOffline *, uint32_t);
 PilotNetworkResult pilot_network_offline_cleanup(PilotNetworkOffline *);
 PilotNetworkResult pilot_network_offline_cached_update(PilotNetworkOffline *,PilotNetworkOutputClear,void *,
                                                       PilotNetworkCacheProbe,void *,unsigned,const char *);
+PilotNetworkResult pilot_network_offline_random(PilotNetworkOffline *,uint32_t,PilotNetworkRandomStage,
+    PilotNetworkRandomCommit,void *,PilotNetworkEntropy,void *);
 #endif

@@ -13,6 +13,8 @@ guards. The shared owner instead admits startup and cleanup and stops all other
 reviewed network-object consumers before their original reads. The later
 reached cached-update query has a separate bounded read-only empty-cache view;
 see [the cached-query contract](NATIVE-CACHED-UPDATE-QUERY-2026-10-19.md).
+The later reached [bounded random-byte operation](NATIVE-NETWORK-RANDOM-2026-10-19.md)
+uses real host entropy and preserves original XOR/output ownership.
 
 ## Admitted contract
 
@@ -61,8 +63,8 @@ decoded RET sets, global operand roles, callback-table data/publisher proof and
 the thread LastError helper proof. Shared source contains no title addresses.
 The current profile protects 83 generated entries: 81 original core/adjacent
 global consumers and two generated entries from the original four-slot Xn
-callback table. Two lifecycle entries and the reached empty-cache query are
-supported; the other 80 stop. The query retains exact original helper/RET,
+callback table. Two lifecycle entries, the reached empty-cache query and the
+bounded random-byte operation are supported; the other 79 stop. The query retains exact original helper/RET,
 locator, certificate-suffix and private-method consumer proofs.
 
 The original-byte inventory finds 74 direct CXo/CXn pointer consumers among
@@ -100,7 +102,7 @@ runtime's existing `windows.h` translation unit. The host adapter is built
 only for that supported Windows native route; the core has no OS imports.
 
 Root integration selects `PILOT_NETWORK_OFFLINE`, links the core/host files and
-`ws2_32`, includes `network_offline.inc`, and calls
+`ws2_32`/`bcrypt`, includes `network_offline.inc`, and calls
 `pilot_network_initialize(cache_probe, context)` once before guest entry.
 The injected probe owns actual mounted filesystem confinement; the lifecycle
 core and Winsock adapter have no host path knowledge. Generated wrappers use

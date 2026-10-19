@@ -5,6 +5,7 @@
 #endif
 #include <winsock2.h>
 #include <windows.h>
+#include <bcrypt.h>
 #include <stdlib.h>
 #include "network_host.h"
 
@@ -31,4 +32,10 @@ const PilotNetworkOps *pilot_network_host_operations(void)
     static const PilotNetworkOps ops={0,host_lock,host_unlock,host_startup,host_cleanup,
                                      host_create_owner,host_destroy_owner};
     return &ops;
+}
+int pilot_network_host_entropy(void *context,unsigned bytes,unsigned char *output)
+{
+    (void)context;
+    if(!output || !bytes || bytes>PILOT_NETWORK_RANDOM_MAX_BYTES)return 0;
+    return BCryptGenRandom(NULL,output,bytes,BCRYPT_USE_SYSTEM_PREFERRED_RNG)>=0;
 }

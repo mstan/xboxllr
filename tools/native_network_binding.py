@@ -123,21 +123,79 @@ def cached_update_proof(context, proof, functions, calls, begin, end, online_own
     return proof
 
 
+def random_proof(context, proof, functions, calls, begin, end, network_owner):
+    if (not isinstance(proof,dict) or set(proof)!={'entry','helpers','state_offset','crypt_import','output_limit'}
+            or type(proof['state_offset']) is not int or not 0<proof['state_offset']<=4096
+            or proof['state_offset']%4 or type(proof['output_limit']) is not int or proof['output_limit']!=64):
+        raise ValueError('unreviewed random-byte policy')
+    selected=[c for c in calls if c['action']=='random']
+    if len(selected)!=1 or selected[0]['address']!=proof['entry']:
+        raise ValueError('unreviewed random-byte entry')
+    helpers=proof['helpers'];codes={}
+    if not isinstance(helpers,dict) or set(helpers)!={'query','generate','crypt'}:
+        raise ValueError('incomplete random-byte helper proof')
+    for name,cleanup in (('query',8),('generate',8),('crypt',12)):
+        body=helpers[name];validate_body(body);function=functions.get(body['address'])
+        if (set(body)!={'address','bytes','sha256','stack_bytes'} or body['stack_bytes']!=cleanup
+                or function is None or not context.matches_body(function,body)
+                or decode(context,body['address'],body['bytes'],begin,end)[0]!=([] if name=='crypt' else [cleanup])):
+            raise ValueError('unreviewed random-byte helper body/RET')
+        codes[name]=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(original_bytes(context,body['address'],body['bytes']),body['address']))
+    selected=selected[0]
+    wrapper=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(original_bytes(context,selected['address'],selected['bytes']),selected['address']))
+    if (len(wrapper)!=2 or wrapper[0].mnemonic!='mov' or wrapper[0].op_str!=f'ecx, dword ptr [{hex(network_owner)}]'
+            or wrapper[-1].mnemonic!='jmp' or wrapper[-1].op_str!=hex(helpers['query']['address'])):
+        raise ValueError('unreviewed random-byte tail/owner')
+    def require(name,mnemonic,operands,count=1):
+        if sum(i.mnemonic==mnemonic and i.op_str==operands for i in codes[name])!=count:
+            raise ValueError('unreviewed random-byte source role: '+name+'/'+operands)
+    require('query','test','ecx, ecx');require('query','mov','eax, 0x276d')
+    require('query','push','dword ptr [esp + 8]',2)
+    require('query','call',hex(helpers['generate']['address']));require('query','xor','eax, eax')
+    require('generate','add',f'esi, {hex(proof["state_offset"])}')
+    require('generate','call',hex(helpers['crypt']['address']))
+    imported=proof['crypt_import'];validate_body(imported)
+    if (set(imported)!={'address','bytes','sha256'} or imported['bytes']!=4
+            or hashlib.sha256(original_bytes(context,imported['address'],4)).hexdigest()!=imported['sha256']
+            or original_bytes(context,imported['address'],4)!=struct.pack('<I',0x80000153)):
+        raise ValueError('unreviewed random-byte RC4 import')
+    if (len(codes['crypt'])!=1 or codes['crypt'][0].mnemonic!='jmp'
+            or codes['crypt'][0].op_str!=f'dword ptr [{hex(imported["address"])}]'):
+        raise ValueError('unreviewed random-byte crypt import role')
+    # A private entry may not bypass its replaced public owner boundary.
+    target=helpers['query']['address'];decoder=Cs(CS_ARCH_X86,CS_MODE_32)
+    decoder.detail=True;decoder.skipdata=True
+    for address,function in functions.items():
+        if function.get('section')=='.data':continue
+        for instruction in decoder.disasm(original_bytes(context,address,function['size']),address):
+            if (instruction.id and instruction.mnemonic in ('call','jmp') and instruction.operands
+                    and instruction.operands[0].type==X86_OP_IMM and instruction.operands[0].imm==target
+                    and address!=proof['entry']):
+                raise ValueError('unprotected random-byte private method consumer')
+    literal=struct.pack('<I',target)
+    if any(literal in context.blob[s['raw_offset']:s['raw_offset']+s['raw_size']] for s in context.image['sections']):
+        raise ValueError('unprotected random-byte method pointer/alias')
+    return proof
+
+
 def emit_header(binding):
     calls=binding['calls'];query=binding.get('cached_update')
     actions='PILOT_NETWORK_ACTION_GUARD, PILOT_NETWORK_ACTION_STARTUP, PILOT_NETWORK_ACTION_CLEANUP'
     if query:actions+=', PILOT_NETWORK_ACTION_CACHED_UPDATE'
+    if binding.get('random'):actions+=', PILOT_NETWORK_ACTION_RANDOM'
     header=['#pragma once','#define PILOT_NETWORK_ABI_VERSION 1u','enum { '+actions+' };','enum PilotNetworkEntry {']
     header += [f'    PILOT_NETWORK_ENTRY_{c["address"]:08X},' for c in calls]
     header += ['    PILOT_NETWORK_COUNT','};',
                'static const struct { const char *name; unsigned address, action, stack_bytes; } pilot_network_calls[] = {']
     for call in calls:
-        header.append(f'    {{"{call["symbol"]}", 0x{call["address"]:08x}u, PILOT_NETWORK_ACTION_{call["action"].upper()}, {4 if call["action"] in ("startup","cached_update") else 0}u}},')
+        size={'startup':4,'cached_update':4,'random':8}.get(call['action'],0)
+        header.append(f'    {{"{call["symbol"]}", 0x{call["address"]:08x}u, PILOT_NETWORK_ACTION_{call["action"].upper()}, {size}u}},')
     header+=['};']
     if query:
         header += ['#define PILOT_NETWORK_HAS_CACHED_UPDATE 1',
                    f'#define PILOT_NETWORK_CACHE_PARTITION {query["partition"]}u',
                    '#define PILOT_NETWORK_CACHE_RELATIVE '+json.dumps(query['relative'])]
+    if binding.get('random'):header+=['#define PILOT_NETWORK_HAS_RANDOM 1']
     return '\n'.join(header)+'\n'
 
 
@@ -145,7 +203,7 @@ def bind(xbe, output, symbols, profile=None):
     context = Binding(xbe, output, symbols)
     proof = context.require_profile('network', profile, adapter='xonline-offline-lifecycle-v1')
     required={'adapter','globals','consumer_range','calls','callback_table','untranslated_callbacks','set_last_error'}
-    if set(proof) not in (required,required|{'cached_update'}):
+    if not required<=set(proof) or set(proof)-required-{'cached_update','random'}:
         raise ValueError('unsupported network proof fields')
     globals_ = proof['globals']
     if (not isinstance(globals_, dict) or set(globals_) != {'online_owner', 'online_gate', 'network_owner', 'network_gate'}
@@ -167,7 +225,7 @@ def bind(xbe, output, symbols, profile=None):
         if set(entry) != {'address', 'bytes', 'sha256', 'returns', 'references', 'action'}:
             raise ValueError('invalid network entry proof fields')
         address = entry['address']; action = entry['action']
-        if type(address) is not int or address in seen or address not in functions or action not in ('startup', 'cleanup', 'guard','cached_update'):
+        if type(address) is not int or address in seen or address not in functions or action not in ('startup', 'cleanup', 'guard','cached_update','random'):
             raise ValueError('invalid network entry/action')
         function = functions[address]
         if function.get('section') == '.data' or not context.matches_body(function, entry):
@@ -187,6 +245,9 @@ def bind(xbe, output, symbols, profile=None):
     query=proof.get('cached_update')
     if query is not None:cached_update_proof(context,query,functions,calls,begin,end,globals_['online_owner'])
     elif any(c['action']=='cached_update' for c in calls):raise ValueError('missing cached-update proof')
+    random=proof.get('random')
+    if random is not None:random_proof(context,random,functions,calls,begin,end,globals_['network_owner'])
+    elif any(c['action']=='random' for c in calls):raise ValueError('missing random-byte proof')
     # A profile cannot omit another discovered original global consumer while
     # admitting startup. The exact image/body identity remains the proof basis.
     consumers = set()
@@ -252,6 +313,7 @@ def bind(xbe, output, symbols, profile=None):
                    globals=globals_, consumer_range=extent, callback_table=table,
                    untranslated_callbacks=proof['untranslated_callbacks'], set_last_error=proof['set_last_error'])
     if query:binding['cached_update']=query
+    if random:binding['random']=random
     wrapper = ['#include "pilot_network_bindings.h"',
                'extern void pilot_network_dispatch(unsigned, void (*)(void));', f'extern void {error["name"]}(void);']
     replacements = {}
@@ -273,10 +335,15 @@ def bind(xbe, output, symbols, profile=None):
             raise ValueError('existing network binding differs')
         header=(context.generated/'pilot_network_bindings.h').read_text()
         if actual==binding and header==texts['pilot_network_bindings.h']:return binding
-        prior=copy.deepcopy(binding);prior.pop('cached_update',None)
-        if query:
-            next(c for c in prior['calls'] if c['address']==query['entry'])['action']='guard'
-        if not query or actual!=prior or header!=emit_header(prior):
+        upgrades=[]
+        for removed in (('cached_update',),('random',),('cached_update','random')):
+            if not all(feature in binding for feature in removed):continue
+            prior=copy.deepcopy(binding)
+            for feature in removed:
+                old=prior.pop(feature)
+                next(c for c in prior['calls'] if c['address']==old['entry'])['action']='guard'
+            upgrades.append(prior)
+        if not any(actual==prior and header==emit_header(prior) for prior in upgrades):
             raise ValueError('existing network binding differs')
         (context.generated/'pilot_network_bindings.h').write_text(texts['pilot_network_bindings.h'],encoding='utf-8',newline='\n')
         record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')

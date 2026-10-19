@@ -11,6 +11,9 @@
 #ifndef PILOT_NETWORK_HAS_CACHED_UPDATE
 #define PILOT_NETWORK_HAS_CACHED_UPDATE 0
 #endif
+#ifndef PILOT_NETWORK_HAS_RANDOM
+#define PILOT_NETWORK_HAS_RANDOM 0
+#endif
 static PilotNetworkOffline network_offline;
 static PilotNetworkCacheProbe network_cached_update_probe;
 static void *network_cached_update_context;
@@ -46,6 +49,28 @@ static int network_clear_cached_update(void *context,unsigned bytes)
     memset((void*)start,0,bytes);return 1;
 }
 #endif
+#if PILOT_NETWORK_HAS_RANDOM
+static int network_random_stage(void *context,unsigned bytes,unsigned char *original)
+{
+    uint32_t address=*(const uint32_t*)context;
+    if(!address || !bytes || bytes>PILOT_NETWORK_RANDOM_MAX_BYTES ||
+       (uint64_t)address+bytes>UINT64_C(0x100000000))return 0;
+    uintptr_t start=(uintptr_t)(memory+address),end=start+bytes;
+    if(end<start)return 0;
+    for(uintptr_t at=start;at<end;) {
+        MEMORY_BASIC_INFORMATION info;
+        if(!VirtualQuery((const void*)at,&info,sizeof(info)) || info.State!=MEM_COMMIT ||
+           (info.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+           !(info.Protect&(PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)))return 0;
+        uintptr_t next=(uintptr_t)info.BaseAddress+info.RegionSize;
+        if(next<=at)return 0;
+        at=next;
+    }
+    memcpy(original,(const void*)start,bytes);return 1;
+}
+static void network_random_commit(void *context,unsigned bytes,const unsigned char *output)
+{memcpy(memory+*(const uint32_t*)context,output,bytes);}
+#endif
 void pilot_network_dispatch(unsigned entry,recomp_func_t set_last_error)
 {
     if(entry>=PILOT_NETWORK_COUNT)stop("unqualified native network entry",entry);
@@ -69,6 +94,13 @@ void pilot_network_dispatch(unsigned entry,recomp_func_t set_last_error)
         uint32_t output=MEM32(g_esp+4); /* Snapshot before an aliased clear. */
         result=pilot_network_offline_cached_update(&network_offline,network_clear_cached_update,&output,
             network_cached_update_probe,network_cached_update_context,PILOT_NETWORK_CACHE_PARTITION,PILOT_NETWORK_CACHE_RELATIVE);
+#endif
+#if PILOT_NETWORK_HAS_RANDOM
+    } else if(action==PILOT_NETWORK_ACTION_RANDOM) {
+        if(stack_bytes!=8)stop("invalid random-byte query ABI",entry);
+        uint32_t output=MEM32(g_esp+4),bytes=MEM32(g_esp+8);
+        result=pilot_network_offline_random(&network_offline,bytes,network_random_stage,
+            network_random_commit,&output,pilot_network_host_entropy,NULL);
 #endif
     } else {stop("invalid native network action",action);return;}
     if(result.guard)stop("unsupported native network lifecycle",result.guard);

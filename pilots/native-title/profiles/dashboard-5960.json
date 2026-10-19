@@ -750,7 +750,7 @@
               1547760
             ]
           ],
-          "action": "guard"
+          "action": "random"
         },
         {
           "address": 1247057,
@@ -1521,6 +1521,36 @@
         "relative": "CACHE\\LocalCache08.bin",
         "kind": 8,
         "output_bytes": 156
+      },
+      "random": {
+        "entry": 1247046,
+        "helpers": {
+          "query": {
+            "address": 1246912,
+            "bytes": 29,
+            "sha256": "85fda7caa659383696a339eaf179337c17e3f3b48165c5772c7281bcebe1b32c",
+            "stack_bytes": 8
+          },
+          "generate": {
+            "address": 1270911,
+            "bytes": 45,
+            "sha256": "de537eb7a9ad94728eeb605696c77c40a6bb2662fa551167ffb5d950b92979ed",
+            "stack_bytes": 8
+          },
+          "crypt": {
+            "address": 823822,
+            "bytes": 6,
+            "sha256": "59ceb310940eab5efd784f0a3d4bc1496cb621fff25db29c00b1daa671ec1bb4",
+            "stack_bytes": 12
+          }
+        },
+        "state_offset": 136,
+        "crypt_import": {
+          "address": 74304,
+          "bytes": 4,
+          "sha256": "6e97193c7546fa207c812ff4bcada62cf94f2babe6237a30354da311af11390b"
+        },
+        "output_limit": 64
       }
     }
   }

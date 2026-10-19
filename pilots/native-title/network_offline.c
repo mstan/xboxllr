@@ -81,3 +81,28 @@ PilotNetworkResult pilot_network_offline_cached_update(PilotNetworkOffline *stat
     }
     ops->unlock(ops->context);return result;
 }
+PilotNetworkResult pilot_network_offline_random(PilotNetworkOffline *state,uint32_t bytes,
+    PilotNetworkRandomStage stage,PilotNetworkRandomCommit commit,void *output,
+    PilotNetworkEntropy entropy,void *context)
+{
+    if(!state || !state->ops)return network_result(0,PILOT_NETWORK_GUARD_UNINITIALIZED);
+    const PilotNetworkOps *ops=state->ops;ops->lock(ops->context);
+    PilotNetworkResult result=network_result(0,0);
+    if((state->references==0)!=(state->owner==0))result.guard=PILOT_NETWORK_GUARD_STATE;
+    else if(!state->references)result.hresult=UINT32_C(0x276d);
+    /* Preserve owner-first precedence, including oversized/invalid requests.
+     * Zero length never reads a pointer or consumes an entropy source. */
+    else if(bytes>PILOT_NETWORK_RANDOM_MAX_BYTES)result.guard=PILOT_NETWORK_GUARD_RANDOM_SIZE;
+    else if(bytes) {
+        unsigned char original[PILOT_NETWORK_RANDOM_MAX_BYTES],random[PILOT_NETWORK_RANDOM_MAX_BYTES];
+        if(!stage || !commit || !stage(output,bytes,original))result.guard=PILOT_NETWORK_GUARD_OUTPUT;
+        else if(!entropy || !entropy(context,bytes,random))result.guard=PILOT_NETWORK_GUARD_ENTROPY;
+        else {
+            for(unsigned i=0;i<bytes;++i)original[i]^=random[i];
+            /* The owner lease spans preflight, staging, entropy and commit.
+             * No guest pointer, PRNG seed or stream is retained by this core. */
+            commit(output,bytes,original);
+        }
+    }
+    ops->unlock(ops->context);return result;
+}

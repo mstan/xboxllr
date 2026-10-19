@@ -1,0 +1,12 @@
+#pragma once
+/* Authored dispatcher ABI fixture, not an original/generated title header. */
+#define PILOT_NETWORK_ABI_VERSION 1u
+#define PILOT_NETWORK_HAS_RANDOM 1
+enum { PILOT_NETWORK_ACTION_GUARD, PILOT_NETWORK_ACTION_STARTUP,
+       PILOT_NETWORK_ACTION_CLEANUP, PILOT_NETWORK_ACTION_RANDOM };
+enum { PILOT_NETWORK_TEST_STARTUP,PILOT_NETWORK_TEST_CLEANUP,
+       PILOT_NETWORK_TEST_RANDOM,PILOT_NETWORK_COUNT };
+static const struct { unsigned address,action,stack_bytes; } pilot_network_calls[]={
+    {1,PILOT_NETWORK_ACTION_STARTUP,4},{2,PILOT_NETWORK_ACTION_CLEANUP,0},
+    {3,PILOT_NETWORK_ACTION_RANDOM,8}
+};

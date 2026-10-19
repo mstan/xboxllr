@@ -168,4 +168,59 @@ class NetworkBinding(unittest.TestCase):
         wrapper=self.context.generated/'pilot_network_binding.c';wrapper.write_text(wrapper.read_text()+'/*changed*/')
         self.assert_unchanged_rejection('existing network binding differs')
 
+    def add_random(self):
+        c=self.context;blob=bytearray(c.blob)
+        def function(address,body):
+            blob[address-0x1000:address-0x1000+len(body)]=body
+            f=dict(start=f'0x{address:08X}',end=f'0x{address+len(body):08X}',size=len(body),name=f'sub_{address:08X}',section='.text')
+            c.functions.append(f)
+            source=c.generated/'recomp_0000.c';source.write_text(source.read_text()+f'\nvoid {f["name"]}(void)\n{{\n/* authored random role {address:x} */\n}}\n')
+            return dict(address=address,bytes=len(body),sha256=hashlib.sha256(body).hexdigest())
+        # Authored role-test byte sequences; not copied original SDK bodies.
+        query=function(0x2100,b'\x85\xc9\xb8\x6d\x27\0\0\xff\x74\x24\x08\xff\x74\x24\x08\xe8'+struct.pack('<i',0x2200-0x2114)+b'\x31\xc0\xc2\x08\0')
+        generate=function(0x2200,b'\x81\xc6\x88\0\0\0\xe8'+struct.pack('<i',0x2300-0x220b)+b'\xc2\x08\0')
+        crypt=function(0x2300,b'\xff\x25'+struct.pack('<I',0x3210))
+        wrapper=function(0x2400,b'\x8b\x0d'+struct.pack('<I',0x300c)+b'\xe9'+struct.pack('<i',0x2100-0x240b))
+        self.proof['calls'].append(dict(wrapper,returns=[],references=[[0x2400,0x300c]],action='guard'))
+        imported=struct.pack('<I',0x80000153);blob[0x2210:0x2214]=imported;c.blob=bytes(blob)
+        return dict(entry=0x2400,helpers=dict(query=dict(query,stack_bytes=8),generate=dict(generate,stack_bytes=8),crypt=dict(crypt,stack_bytes=12)),
+                    state_offset=0x88,crypt_import=dict(address=0x3210,bytes=4,sha256=hashlib.sha256(imported).hexdigest()),output_limit=64)
+
+    def enable_random(self,proof):
+        self.proof['random']=proof
+        next(c for c in self.proof['calls'] if c['address']==proof['entry'])['action']='random'
+
+    def test_random_upgrade_preserves_actual_bodies_wrapper_and_prior_cached_query(self):
+        random=self.add_random();query=self.add_cached_query();self.enable_cached_query(query)
+        old=self.run_bind();before={p.name:p.read_bytes() for p in self.context.generated.glob('recomp_*.c')}
+        wrapper=(self.context.generated/'pilot_network_binding.c').read_bytes()
+        self.enable_random(random);new=self.run_bind()
+        self.assertEqual(old['cached_update'],new['cached_update'])
+        self.assertIn('PILOT_NETWORK_ACTION_RANDOM, 8u',(self.context.generated/'pilot_network_bindings.h').read_text())
+        self.assertEqual(before,{p.name:p.read_bytes() for p in self.context.generated.glob('recomp_*.c')})
+        self.assertEqual(wrapper,(self.context.generated/'pilot_network_binding.c').read_bytes())
+        files={p.name:p.read_bytes() for p in self.context.generated.iterdir()}
+        self.assertEqual(new,self.run_bind());self.assertEqual(files,{p.name:p.read_bytes() for p in self.context.generated.iterdir()})
+
+    def test_random_proof_body_ret_owner_offset_import_and_cap_drift_rejected(self):
+        self.enable_random(self.add_random());original=copy.deepcopy(self.proof)
+        mutations=[lambda p:p['random'].update(output_limit=4096),
+                   lambda p:p['random'].update(state_offset=0x90),
+                   lambda p:p['random']['helpers']['query'].update(stack_bytes=4),
+                   lambda p:p['random']['helpers']['generate'].update(sha256='0'*64),
+                   lambda p:p['random']['crypt_import'].update(sha256='0'*64),
+                   lambda p:p.pop('random')]
+        for mutation in mutations:
+            self.proof=copy.deepcopy(original);mutation(self.proof)
+            self.assert_unchanged_rejection('random-byte')
+
+    def test_random_private_method_pointer_alias_rejected(self):
+        self.enable_random(self.add_random());blob=bytearray(self.context.blob)
+        struct.pack_into('<I',blob,0x2500,0x2100);self.context.blob=bytes(blob)
+        self.assert_unchanged_rejection('random-byte method pointer/alias')
+        struct.pack_into('<I',blob,0x2500,0);body=b'\xe8'+struct.pack('<i',0x2100-0x2a05)+b'\xc3'
+        blob[0x1a00:0x1a00+len(body)]=body;self.context.blob=bytes(blob)
+        self.context.functions.append(dict(start='0x00002A00',end='0x00002A06',size=6,name='sub_00002A00',section='.text'))
+        self.assert_unchanged_rejection('random-byte private method consumer')
+
 if __name__=='__main__':unittest.main()

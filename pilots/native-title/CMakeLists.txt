@@ -219,7 +219,7 @@ set_tests_properties(pilot_network_offline PROPERTIES TIMEOUT 60)
 add_executable(pilot_network_host_test
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_network_host.c" network_offline.c network_host.c)
 target_include_directories(pilot_network_host_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(pilot_network_host_test PRIVATE ws2_32)
+target_link_libraries(pilot_network_host_test PRIVATE ws2_32 bcrypt)
 pilot_add_test(NAME pilot_network_host COMMAND pilot_network_host_test)
 set_tests_properties(pilot_network_host PROPERTIES TIMEOUT 30)
 add_executable(pilot_network_cache_probe_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_network_cache_probe.c")
@@ -232,6 +232,12 @@ target_include_directories(pilot_network_cached_update_test PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/native_network" "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_network_cached_update COMMAND pilot_network_cached_update_test)
 set_tests_properties(pilot_network_cached_update PROPERTIES TIMEOUT 30)
+add_executable(pilot_network_random_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_network_random.c" network_offline.c)
+target_include_directories(pilot_network_random_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/native-network-random" "${CMAKE_CURRENT_SOURCE_DIR}")
+pilot_add_test(NAME pilot_network_random COMMAND pilot_network_random_test)
+set_tests_properties(pilot_network_random PROPERTIES TIMEOUT 30)
 add_executable(pilot_graphics_surfaces_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_graphics_surfaces.c")
 target_include_directories(pilot_graphics_surfaces_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_graphics_surfaces COMMAND pilot_graphics_surfaces_test)
