@@ -47,6 +47,19 @@ stage and verifies the staged executable hash before creating the process.
 Driver mutations into a marked stage or its descendants are rejected. Future
 ordinary builds therefore do not replace a running owner's executable.
 
+`run --input-replay path.txt` copies a native controller replay into the same
+immutable stage and records its SHA256 in the stage and launch/result receipts.
+This selects the existing replay input backend for that run, without changing
+the title definition or requiring a rebuild. Lines use milliseconds since first
+poll and 36 hex digits of Xbox pad state, or `disconnected`; the backend retains
+its existing parser and connection handling. Source-file edits cannot alter an
+already staged replay. Other launches keep their selected normal input source.
+
+`run --capture` uses the existing direct GPU present readback once per second,
+saving images in the run's `captures` directory. Captures are diagnostic I/O and
+must be disabled for frame-rate measurements. Both options configure only this
+launch; the build and selected native contracts remain unchanged.
+
 Owner launches are visible, have normal audio, and have no deadline. `--detach`
 leaves the process open. Automated launches require `--automated --seconds N`
 with a finite positive duration; they remain owned by the driver, hidden and

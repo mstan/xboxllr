@@ -28,8 +28,9 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 | Empty optical owner | Explicit dashboard policy; original-software comparison, independent remap review and integrated CTest pass; existing media/async contracts also pass |
 | Factory setting reads | Nonencrypted `100..103`, shared first-read cache and checksum; original-software comparisons, review and integrated CTest pass; actual dashboard passes `103` |
 | Content and writable drive ownership | Title creates C:/Y:/X:/T: itself; actual save-directory creation succeeds on writable partition 1 while content stays read-only on partition 2 |
-| Latest actual native boot | Reaches 1,590 entries and native input initialization; guarded at an unqualified keyboard-device class |
-| Driver incremental admission | 27 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked before configure/build/run |
+| Additional absent input classes | Exact profile-owned keyboard object; original query comparison, independent review and modern/legacy integrated CTest pass; actual dashboard passes enumeration |
+| Latest actual native boot | Reaches 1,604 entries and passes keyboard enumeration; guarded at encrypted game-region setting `104` |
+| Driver incremental admission and QA launches | 30 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
 | Credits asset mod under native execution | Pending native baseline; old full-machine evidence does not transfer automatically |
@@ -86,7 +87,7 @@ It stops at the factory AV-region setting (`ExQueryNonVolatileSetting`, index
 performance result is implied.
 See [empty optical scope](NATIVE-EMPTY-OPTICAL-2026-10-19.md).
 
-The current optimized executable is
+The factory/namespace executable is
 `7a3a0545a1ed535db22ef931ea760f9d18a16dac88d51b534638225ff762b71c`.
 The shared factory-setting owner covers the original AV-region query without
 changing user-setting ownership. A declarative `content.drive_owner = "TITLE"`
@@ -98,6 +99,19 @@ object at `1592a8`; this class is outside the current input profile. Menu,
 rendering and native frame-rate qualification remain pending. See
 [factory-setting scope](NATIVE-FACTORY-SETTINGS-2026-10-19.md) and
 [drive ownership](NATIVE-TITLE-DRIVER.md).
+
+The current optimized executable is
+`8f1c622f030200377206a4ba69fb74989b6daa42f9c442dd855b996de241f5b0`.
+All selected binding families were revalidated after admitting the exact absent
+keyboard object. The actual native run `20261019-114209-s4zk7ror` uses a frozen
+neutral controller replay, passes keyboard enumeration and proceeds to temporary
+audio-file checks. Existing directories correctly return name collision on this
+subsequent run; absent temporary files return name not found. At 1,604 entries,
+the next guard is `ExQueryNonVolatileSetting` index `104` through
+`6cde8 -> 7c010`. This encrypted region setting requires its own shared owner;
+the nonencrypted factory-read implementation does not admit it. No frame was
+captured, so menus, audio playback and frame rate remain unverified. See
+[absent input scope](NATIVE-INPUT-ABSENT-CLASSES-2026-10-19.md).
 
 Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original

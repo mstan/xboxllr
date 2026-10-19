@@ -27,6 +27,11 @@
 #if PILOT_INPUT_ABI_VERSION != 1 || PILOT_INPUT_STATE_BYTES != 22
 #error Unsupported native gamepad state ABI
 #endif
+#ifndef PILOT_INPUT_ABSENT_CLASS_ABI_VERSION
+#define PILOT_INPUT_ABSENT_CLASS_COUNT 0u
+#elif PILOT_INPUT_ABSENT_CLASS_ABI_VERSION != 1 || !defined(PILOT_INPUT_ABSENT_CLASS_COUNT) || PILOT_INPUT_ABSENT_CLASS_COUNT > 16
+#error Unsupported native absent-device class ABI
+#endif
 
 struct PilotInputPort {
     uint8_t gamepad[18];
@@ -49,11 +54,26 @@ static void input_buffer(uint32_t va,unsigned size)
 {
     if (!va || (uint64_t)va+size>0x100000000ull) stop("invalid input buffer",va);
 }
+static int input_absent_class(uint32_t type)
+{
+#if PILOT_INPUT_ABSENT_CLASS_COUNT > 0
+    for(unsigned i=0;i<PILOT_INPUT_ABSENT_CLASS_COUNT;++i)
+        if(type==pilot_input_absent_classes[i].address)return 1;
+#else
+    (void)type;
+#endif
+    return 0;
+}
 static unsigned input_class(uint32_t type)
 {
     if (type==PILOT_INPUT_g_DeviceType_Gamepad) return 0;
     if (type==PILOT_INPUT_g_DeviceType_MU) return 1;
     if (type==PILOT_INPUT_g_DeviceType_IRDongle) return 2;
+    if(input_absent_class(type)) {
+        if(MEM32(type) || MEM32(type+4) || MEM32(type+8))
+            stop("absent input class state changed outside its owner",type);
+        return 3;
+    }
     stop("unqualified input device class",type);
 }
 static struct PilotInputHandle *input_handle(uint32_t id)
@@ -114,6 +134,7 @@ static void input_refresh(void)
 static uint32_t input_open(const uint32_t args[4],uint32_t *error)
 {
     uint32_t type=args[0],port=args[1],slot=args[2],poll=args[3];
+    if(input_absent_class(type))stop("absent input class open is unqualified",type);
     *error=0;
     if (type!=PILOT_INPUT_g_DeviceType_Gamepad && type!=PILOT_INPUT_g_DeviceType_IRDongle) {
         *error=ERROR_INVALID_PARAMETER; return 0;
@@ -170,13 +191,19 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
         for (unsigned i=0;i<args[0];++i) {
             uint32_t type=MEM32(args[1]+i*8),count=MEM32(args[1]+i*8+4);
             unsigned cls=input_class(type);
+            if(cls>=3)stop("absent input class preallocation is unqualified",type);
             if (seen&(1u<<cls)) stop("duplicate input preallocation class",type);
             seen|=1u<<cls;
-            if (count>(cls==1?8:cls==0?4:1)) stop("unqualified input preallocation count",count);
+            if (count>(cls==1?8u:cls==0?4u:1u)) stop("unqualified input preallocation count",count);
             if (!cls) input_capacity=count;
         }
         /* Explicit configuration: host gamepads, no attached MU or IR hardware.
          * The original 3-DWORD current/changed/previous masks stay guest-visible. */
+#if PILOT_INPUT_ABSENT_CLASS_COUNT > 0
+        /* Validate all additional owners before publishing any input state. */
+        for(unsigned i=0;i<PILOT_INPUT_ABSENT_CLASS_COUNT;++i)
+            input_class(pilot_input_absent_classes[i].address);
+#endif
         memset(memory+PILOT_INPUT_g_DeviceType_Gamepad,0,12);
         memset(memory+PILOT_INPUT_g_DeviceType_MU,0,12);
         memset(memory+PILOT_INPUT_g_DeviceType_IRDongle,0,12);
@@ -185,13 +212,19 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
                 MEM32(PILOT_INPUT_g_DeviceType_Gamepad),input_capacity);
         break;
     }
-    case PILOT_INPUT_XGetDevices:
-        input_class(args[0]); input_refresh();
+    case PILOT_INPUT_XGetDevices: {
+        unsigned cls=input_class(args[0]);if(cls<3)input_refresh();
         result=MEM32(args[0]); MEM32(args[0]+4)=0; MEM32(args[0]+8)=result;
         fprintf(stderr,"[INPUT DEVICES] type=%08x mask=%x\n",args[0],result);
         break;
+    }
     case PILOT_INPUT_XGetDeviceChanges: {
-        input_class(args[0]); input_buffer(args[1],4); input_buffer(args[2],4); input_refresh();
+        unsigned cls=input_class(args[0]); input_buffer(args[1],4); input_buffer(args[2],4);
+        if(cls>=3) {
+            /* Exact original changed==0 fast path: output stores only. */
+            MEM32(args[1])=0;MEM32(args[2])=0;result=0;break;
+        }
+        input_refresh();
         uint32_t current=MEM32(args[0]),changed=MEM32(args[0]+4),previous=MEM32(args[0]+8);
         uint32_t both=changed&previous&current;
         uint32_t insertions=(current&~previous)|both,removals=(previous&~current)|both;

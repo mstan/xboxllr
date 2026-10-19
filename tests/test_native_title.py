@@ -415,6 +415,52 @@ XLLE_PILOT_TRACE = "0"
                 n.launch(self.data, self.paths, self.output, self.build, detach=True, source=self.source)
             spawn.assert_not_called()
 
+    def test_input_replay_is_frozen_and_recorded_without_rebuilding(self):
+        source = self.root / 'controller.txt'
+        payload = b'0 000000000000000000000000000000000000\n500 disconnected\n'
+        source.write_bytes(payload)
+        build_receipt = (self.build / 'native-title-build.json').read_bytes()
+        child = Mock(pid=123, returncode=0)
+        with patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
+            result = n.launch(self.data, self.paths, self.output, self.build, automated=True,
+                              seconds=2, source=self.source, input_replay=source)
+        env = spawn.call_args.kwargs['env']
+        self.assertEqual(env['XLLE_PILOT_INPUT'], 'replay')
+        staged = Path(env['XLLE_PILOT_INPUT_REPLAY'])
+        self.assertEqual(staged.parent, Path(spawn.call_args.args[0][0]).parent)
+        source.write_bytes(b'future edit')
+        self.assertEqual(staged.read_bytes(), payload)
+        self.assertEqual(result['input_replay_sha256'], n.digest(staged))
+        marker = json.loads((staged.parent / 'native-title-stage.json').read_text())
+        self.assertEqual(marker['input_replay_sha256'], n.digest(staged))
+        self.assertEqual((self.build / 'native-title-build.json').read_bytes(), build_receipt)
+        self.assertEqual(env['XLLE_PILOT_AUDIO_OUTPUT_MUTE'], '1')
+
+    def test_invalid_input_replay_rejected_before_staging_or_spawn(self):
+        empty = self.root / 'empty.txt'
+        empty.write_bytes(b'')
+        with patch.object(n.subprocess, 'Popen') as spawn:
+            for replay in (self.root / 'missing.txt', self.root, empty):
+                with self.subTest(replay=replay), self.assertRaisesRegex(ValueError, 'input replay'):
+                    n.launch(self.data, self.paths, self.output, self.build, automated=True,
+                             seconds=2, source=self.source, input_replay=replay)
+            spawn.assert_not_called()
+        self.assertFalse((self.build / 'runs').exists())
+
+    def test_capture_uses_a_run_directory_outside_immutable_app(self):
+        child = Mock(pid=123, returncode=0)
+        with patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
+            result = n.launch(self.data, self.paths, self.output, self.build, automated=True,
+                              seconds=2, source=self.source, capture=True)
+        env = spawn.call_args.kwargs['env']
+        capture = Path(env['XLLE_PILOT_PRESENT_CAPTURE'])
+        stage = Path(spawn.call_args.args[0][0]).parent
+        self.assertTrue(capture.is_dir())
+        self.assertEqual(capture.parent, stage.parent)
+        self.assertFalse(capture.is_relative_to(stage))
+        self.assertEqual(result['captures'], str(capture))
+        self.assertEqual(env['XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS'], '1000')
+
     def test_changed_profile_cannot_be_reblessed_by_configuration(self):
         self.profile.write_text(self.profile.read_text() + '\n')
         with self.assertRaises(ValueError):

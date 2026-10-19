@@ -341,7 +341,7 @@ def require_receipt(path, expected):
         raise ValueError("native build identity changed; configure and build the selected title again")
 
 
-def launch(data, paths, output, build, automated=False, seconds=None, detach=False, source=None):
+def launch(data, paths, output, build, automated=False, seconds=None, detach=False, source=None, input_replay=None, capture=False):
     check_image(data["title"], paths)
     check_generated(output, data["title"])
     if seconds is not None and not automated:
@@ -352,6 +352,14 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         raise ValueError("run duration must be finite and positive")
     if detach and automated:
         raise ValueError("unattended runs retain their bounded process owner")
+    replay_bytes = None
+    if input_replay is not None:
+        replay_path = Path(input_replay).resolve()
+        if not replay_path.is_file():
+            raise ValueError("input replay must be an existing file")
+        replay_bytes = replay_path.read_bytes()
+        if not replay_bytes:
+            raise ValueError("input replay must not be empty")
     binary = executable(build, data["title"]["executable"])
     if not binary.is_file():
         raise ValueError("build this native title before launching")
@@ -370,7 +378,10 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
     # cannot replace a running owner's binary or force their window closed.
     stage = run / "app"
     stage.mkdir()
-    (stage / "native-title-stage.json").write_text(json.dumps(expected, indent=2) + "\n")
+    stage_identity = dict(expected)
+    if replay_bytes is not None:
+        stage_identity["input_replay_sha256"] = hashlib.sha256(replay_bytes).hexdigest()
+    (stage / "native-title-stage.json").write_text(json.dumps(stage_identity, indent=2) + "\n")
     for item in binary.parent.iterdir():
         if item.is_file() and (item == binary or item.suffix.lower() == ".dll"):
             shutil.copy2(item, stage / item.name)
@@ -378,6 +389,15 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         raise ValueError("native executable changed during staging; retry after build completes")
     environment = {k: v for k, v in os.environ.items() if not k.startswith("XLLE_PILOT_")}
     environment.update({key: str(value) for key, value in data.get("runtime", {}).items()})
+    if replay_bytes is not None:
+        replay_path = stage / "input-replay.txt"
+        replay_path.write_bytes(replay_bytes)
+        environment.update(XLLE_PILOT_INPUT="replay", XLLE_PILOT_INPUT_REPLAY=str(replay_path.resolve()))
+    if capture:
+        capture_directory = run / "captures"
+        capture_directory.mkdir()
+        environment.update(XLLE_PILOT_PRESENT_CAPTURE=str(capture_directory.resolve()),
+                           XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS="1000")
     environment["XLLE_PILOT_VISIBLE"] = "0" if automated else "1"
     environment["XLLE_PILOT_AUDIO_OUTPUT_MUTE"] = "1" if automated else "0"
     if automated:
@@ -393,6 +413,10 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         receipt = dict(title=data["title"]["id"], route="native-title", pid=child.pid,
                        executable_sha256=digest(stage / binary.name), command=command,
                        automated=automated, output=str(run))
+        if replay_bytes is not None:
+            receipt.update(input_replay=str(replay_path), input_replay_sha256=stage_identity["input_replay_sha256"])
+        if capture:
+            receipt["captures"] = str(capture_directory)
         (run / "launch.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print(json.dumps(receipt, indent=2), flush=True)
         if detach:
@@ -422,9 +446,13 @@ def main():
     parser.add_argument("--automated", action="store_true")
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--detach", action="store_true")
+    parser.add_argument("--input-replay", type=Path, help="Freeze a native controller replay into this run's staging")
+    parser.add_argument("--capture", action="store_true", help="Capture diagnostic present images; unsuitable for performance measurement")
     args = parser.parse_args()
     if not 1 <= args.jobs <= 32 or (args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds <= 0)):
         parser.error("invalid job count or run duration")
+    if (args.input_replay is not None or args.capture) and args.action != "run":
+        parser.error("--input-replay and --capture apply only to run")
     source, data = definition(args.title)
     paths = private_paths(args.paths)
     check_image(data["title"], paths)
@@ -452,7 +480,7 @@ def main():
         selected["executable_sha256"] = digest(executable(args.build_dir, data["title"]["executable"]))
         (args.build_dir / "native-title-build.json").write_text(json.dumps(selected, indent=2) + "\n")
     elif args.action == "run":
-        result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source)
+        result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source, args.input_replay, args.capture)
         if result is not None and not result["stopped_at_deadline"]:
             return result["exit_code"]
     else:

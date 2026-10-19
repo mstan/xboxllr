@@ -8,6 +8,38 @@ import re
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from native_binding import Binding
 
+def absent_classes(context, proof, variables):
+    """Admit exact original objects only under the explicit absent-host policy."""
+    entries = proof.get('known_absent_classes', [])
+    if not isinstance(entries, list) or len(entries) > 16:
+        raise ValueError('invalid absent input class table')
+    result, occupied = [], list(variables.values())
+    names = set(variables)
+    for entry in entries:
+        if (not isinstance(entry, dict) or set(entry) != {'symbol', 'address', 'bytes', 'sha256', 'policy'}
+                or entry['policy'] != 'native-host-absent-v1'
+                or not isinstance(entry['symbol'], str) or not re.fullmatch(r'g_DeviceType_[A-Za-z0-9_]+', entry['symbol'])
+                or entry['symbol'] in names or type(entry['address']) is not int
+                or not 0 < entry['address'] <= 0xfffffff4 or entry['address'] % 4
+                or type(entry['bytes']) is not int or entry['bytes'] != 12):
+            raise ValueError('unreviewed absent input class policy/object')
+        address = entry['address']
+        addresses = {s['address'] for s in context.symbols if s['name'] == entry['symbol']
+                     and s['library'] == 'XAPILIB' and s['kind'] == 'variable'}
+        if addresses != {address} or any(abs(address-other) < 12 for other in occupied):
+            raise ValueError('ambiguous/overlapping absent input object')
+        sections = [s for s in context.image['sections'] if s['address'] <= address
+                    and address+12 <= s['address']+s['raw_size']]
+        if len(sections) != 1:
+            raise ValueError('absent input object outside original stored image')
+        section = sections[0]
+        offset = section['raw_offset'] + address-section['address']
+        body = context.blob[offset:offset+12]
+        if body != bytes(12) or hashlib.sha256(body).hexdigest() != entry['sha256']:
+            raise ValueError('absent input object differs from reviewed initial state')
+        names.add(entry['symbol']); occupied.append(address); result.append(dict(entry))
+    return result
+
 def bind(xbe, output, symbols, profile=None):
     context = Binding(xbe, output, symbols)
     proof = context.require_profile('input', profile, adapter='xapi-gamepad-v1')
@@ -70,10 +102,13 @@ def bind(xbe, output, symbols, profile=None):
         variables[name] = addresses.pop()
         if variables[name] != proof['variables'][name]:
             raise ValueError('input variable differs from reviewed profile: ' + name)
+    absent_types = absent_classes(context, proof, variables)
 
     binding = dict(xbe_sha256=context.image['sha256'], calls=calls, variables=variables,
                    set_last_error=dict(symbol=last_error['name'], sha256=proof['set_last_error']['sha256']),
                    **layout)
+    if absent_types:
+        binding['known_absent_classes'] = absent_types
     header = ['#pragma once', 'enum PilotInputEntry {']
     header += [f'    PILOT_INPUT_{c["name"]},' for c in calls]
     header += ['    PILOT_INPUT_COUNT', '};',
@@ -96,6 +131,14 @@ def bind(xbe, output, symbols, profile=None):
             header.append(f'#define PILOT_INPUT_{key.upper()} {layout[key]}u')
     for i, value in enumerate(layout['default_polling']):
         header.append(f'#define PILOT_INPUT_DEFAULT_POLLING_{i} {value}u')
+    previous_header = '\n'.join(header) + '\n'
+    empty_class_header = previous_header + '#define PILOT_INPUT_ABSENT_CLASS_ABI_VERSION 1u\n#define PILOT_INPUT_ABSENT_CLASS_COUNT 0u\n'
+    header += ['#define PILOT_INPUT_ABSENT_CLASS_ABI_VERSION 1u',
+               f'#define PILOT_INPUT_ABSENT_CLASS_COUNT {len(absent_types)}u']
+    if absent_types:
+        header += ['static const struct { unsigned address; const char *name; } pilot_input_absent_classes[] = {']
+        header += [f'    {{0x{entry["address"]:08x}u, "{entry["symbol"]}"}},' for entry in absent_types]
+        header += ['};']
     wrapper = ['#include "pilot_input_bindings.h"',
                'extern void pilot_input_dispatch(unsigned, void (*)(void));',
                f'extern void {last_error["name"]}(void);']
@@ -126,11 +169,19 @@ def bind(xbe, output, symbols, profile=None):
     if (context.generated / 'pilot_input_binding.c').exists():
         without_state = texts['pilot_input_binding.c'].replace('extern void pilot_input_qualify_state(void);\n', '').replace('\n'.join(state_probe)+'\n', '')
         old_wrapper = texts['pilot_input_binding.c'].replace('\n'.join(probe_declarations)+'\n', '').replace('\n'.join(probe_call)+'\n', '').replace('\n'.join(state_probe)+'\n', '')
-        if json.loads(record.read_text()) != binding or any(
+        previous_binding = {k: v for k, v in binding.items() if k != 'known_absent_classes'}
+        prior = json.loads(record.read_text())
+        # Explicit bind may add this newly proved table to an otherwise exact
+        # prior admission. Existing bodies/layout/objects must remain identical.
+        if context.manifest.get('input_binding') != prior or prior not in (binding, previous_binding) or any(
                 (context.generated / n).read_text() not in
-                ([s, without_state, old_wrapper] if n == 'pilot_input_binding.c' else [s, old_header]) for n, s in texts.items()):
+                ([s, without_state, old_wrapper] if n == 'pilot_input_binding.c' else [s, previous_header, empty_class_header, old_header]) for n, s in texts.items()):
             raise ValueError('existing input binding differs')
         changed = False
+        if prior != binding:
+            record.write_text(json.dumps(binding, indent=2)+'\n', newline='\n')
+            context.manifest['input_binding'] = binding
+            changed = True
         for name, text in texts.items():
             path = context.generated / name
             if path.read_text() != text:

@@ -86,7 +86,16 @@
         "g_DeviceType_MU": 1413216,
         "g_DeviceType_Gamepad": 1413344,
         "g_DeviceType_IRDongle": 1413444
-      }
+      },
+      "known_absent_classes": [
+        {
+          "symbol": "g_DeviceType_Keyboard",
+          "address": 1413800,
+          "bytes": 12,
+          "sha256": "15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
+          "policy": "native-host-absent-v1"
+        }
+      ]
     },
     "audio": {
       "adapter": "dsound-objects-v1",

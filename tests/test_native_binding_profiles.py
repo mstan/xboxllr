@@ -156,6 +156,57 @@ class Profiles(unittest.TestCase):
                 self.assertEqual((context.generated / 'recomp_0.c').read_bytes(), before)
                 self.assertFalse((context.generated / 'pilot_input_binding.c').exists())
 
+    def absent_input_fixture(self, context):
+        entry = dict(symbol='g_DeviceType_Keyboard', address=0x1f00, bytes=12,
+                     sha256=hashlib.sha256(bytes(12)).hexdigest(), policy='native-host-absent-v1')
+        context.symbols.append(dict(name=entry['symbol'], address=entry['address'], library='XAPILIB', kind='variable'))
+        self.profile['bindings']['input']['known_absent_classes'] = [entry]
+        self.save()
+        return entry
+
+    def test_absent_classes_emit_exact_objects_and_upgrade_only_proved_prior_binding(self):
+        context = self.input_fixture()
+        with patch('native_input_binding.Binding', return_value=context):
+            prior = bind_input(Path('unused'), context.output, Path('unused'), self.path)
+            source = (context.generated / 'recomp_0.c').read_bytes()
+            entry = self.absent_input_fixture(context)
+            record = bind_input(Path('unused'), context.output, Path('unused'), self.path)
+            self.assertNotIn('known_absent_classes', prior)
+            self.assertEqual(record['known_absent_classes'], [entry])
+            self.assertEqual(context.manifest['input_binding'], record)
+            self.assertEqual((context.generated / 'recomp_0.c').read_bytes(), source)
+            header = (context.generated / 'pilot_input_bindings.h').read_text()
+            self.assertIn('#define PILOT_INPUT_ABSENT_CLASS_COUNT 1u', header)
+            self.assertIn('{0x00001f00u, "g_DeviceType_Keyboard"}', header)
+            self.assertEqual(bind_input(Path('unused'), context.output, Path('unused'), self.path), record)
+
+    def test_absent_class_drift_fails_before_any_generated_mutation(self):
+        for change in ('address', 'digest', 'nonzero', 'policy', 'overlap', 'duplicate', 'symbol', 'extent', 'manifest'):
+            with self.subTest(change=change):
+                if (self.root / 'out').exists():
+                    self.root = self.root / 'next'; self.root.mkdir(); self.path = self.root / 'title.json'
+                context = self.input_fixture()
+                entry = self.absent_input_fixture(context)
+                if change == 'address': entry['address'] += 4
+                elif change == 'digest': entry['sha256'] = '0' * 64
+                elif change == 'nonzero':
+                    blob = bytearray(context.blob); blob[entry['address']-0x1000] = 1; context.blob = bytes(blob)
+                elif change == 'policy': entry['policy'] = 'pretend-connected'
+                elif change == 'overlap':
+                    entry['address'] = 0x2004; context.symbols[-1]['address'] = entry['address']
+                elif change == 'duplicate': self.profile['bindings']['input']['known_absent_classes'].append(dict(entry))
+                elif change == 'symbol': entry['symbol'] = 'unproved_device'
+                elif change == 'extent': entry['bytes'] = 16
+                elif change == 'manifest':
+                    with patch('native_input_binding.Binding', return_value=context):
+                        bind_input(Path('unused'), context.output, Path('unused'), self.path)
+                    context.manifest['input_binding'] = None
+                self.save()
+                before = {p.name: p.read_bytes() for p in context.generated.iterdir()}
+                with patch('native_input_binding.Binding', return_value=context), self.assertRaises(ValueError):
+                    bind_input(Path('unused'), context.output, Path('unused'), self.path)
+                self.assertEqual({p.name: p.read_bytes() for p in context.generated.iterdir()}, before)
+
 
 if __name__ == '__main__':
     unittest.main()
