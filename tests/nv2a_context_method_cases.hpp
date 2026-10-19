@@ -73,7 +73,7 @@ static void test_loaded_context_methods() {
         f.emit(0x300,0);f.emit(0x304,0);f.emit(0x308,0x00020002);
         f.emit(0x50,0x9876);f.kick();
         bool accepted=operation_known && selectors_known && copy_case<3;
-#if defined(XLLE_RENDERER_HLE)
+#if XLLE_RENDERER_HLE
         accepted=operation_known && copy_case<3;
 #endif
         if(accepted) {

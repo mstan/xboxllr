@@ -66,7 +66,7 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
                     break;
                 }
                 if(stale_owner && !matching_owner)return reject("2D copy selector owner is stale");
-#if defined(XLLE_RENDERER_HLE)
+#if XLLE_RENDERER_HLE
                 // Existing host SRCCOPY and consulted reference dispatch do
                 // not consume these optional selectors. Do not fabricate NULL
                 // bindings or alter raw receipts; known nonnull stays rejected.
