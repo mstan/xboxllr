@@ -14,6 +14,54 @@ static SRWLOCK media_lock=SRWLOCK_INIT;
 struct MediaFile { HANDLE host,async_idle,async_signal; uint32_t id,access; unsigned partition,cacheable,asynchronous,pending; SRWLOCK io_lock; };
 static struct MediaFile media_files[256];
 static uint32_t media_next_id=0x50000001u;
+
+/* Optional sparse host-file diagnosis. These observations retain actual file
+ * calls, lock ownership and completion; slow wall time alone is not I/O cost.
+ * At most 256 records are written, after releasing the media owner lock. */
+struct MediaProfile {uint64_t begin,cpu;unsigned cpu_available;};
+static uint64_t media_profile_cpu(unsigned *available)
+{
+    *available=0;
+#ifdef _WIN32
+    FILETIME created,exited,kernel,user;
+    if(GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user)) {
+        *available=1;
+        return ((uint64_t)kernel.dwHighDateTime<<32)+kernel.dwLowDateTime+
+            ((uint64_t)user.dwHighDateTime<<32)+user.dwLowDateTime;
+    }
+#endif
+    return 0;
+}
+static struct MediaProfile media_profile_begin(void)
+{
+    static LONG enabled;
+    LONG setting=InterlockedCompareExchange(&enabled,0,0);
+    if(!setting) {
+        const char *value=getenv("XLLE_PILOT_FILE_PROFILE");
+        LONG selected=value && !strcmp(value,"1")?2:1;
+        InterlockedCompareExchange(&enabled,selected,0);setting=selected;
+    }
+    struct MediaProfile profile={0};
+    if(setting==2) {
+        profile.cpu=media_profile_cpu(&profile.cpu_available);
+        profile.begin=dispatch_monotonic();
+    }
+    return profile;
+}
+static void media_profile_end(const char *operation,unsigned ordinal,uint32_t handle,uint32_t bytes,
+    uint32_t status,struct MediaProfile profile,uint64_t owner_wait)
+{
+    if(!profile.begin)return;
+    uint64_t end=dispatch_monotonic();
+    static LONG records;
+    if(end-profile.begin<=500000 || InterlockedIncrement(&records)>256)return;
+    unsigned available;uint64_t cpu=media_profile_cpu(&available);
+    available=available && profile.cpu_available && cpu>=profile.cpu;
+    fprintf(stderr,"[FILE SLOW] thread=%lu operation=%s ordinal=%u handle=%08x bytes=%u status=%08x begin=%llu end=%llu elapsed_ms=%.3f owner_lock_ms=%.3f thread_cpu_ms=%.3f cpu_available=%u\n",
+        GetCurrentThreadId(),operation,ordinal,handle,bytes,status,
+        (unsigned long long)profile.begin,(unsigned long long)end,(end-profile.begin)/10000.0,
+        owner_wait/10000.0,available?(cpu-profile.cpu)/10000.0:0.0,available);
+}
 typedef LONG (NTAPI *MediaOpen)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
 typedef LONG (NTAPI *MediaRead)(HANDLE,HANDLE,PVOID,PVOID,PIO_STATUS_BLOCK,PVOID,ULONG,PLARGE_INTEGER,PULONG);
 typedef LONG (NTAPI *MediaInfo)(HANDLE,PIO_STATUS_BLOCK,PVOID,ULONG,ULONG);
@@ -204,8 +252,11 @@ static unsigned media_partition(uint32_t id)
 }
 static uint32_t media_close(uint32_t id)
 {
+    struct MediaProfile profile=media_profile_begin();
     uint32_t status=MEDIA_BAD_HANDLE;
+    uint64_t owner_begin=profile.begin?dispatch_monotonic():0;
     AcquireSRWLockExclusive(&media_lock);
+    uint64_t owner_wait=owner_begin?dispatch_monotonic()-owner_begin:0;
     for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].id==id) {
         if(media_files[i].async_idle) {
             if(WaitForSingleObject(media_files[i].async_idle,INFINITE)!=WAIT_OBJECT_0)stop("file close completion drain failed",id);
@@ -223,6 +274,7 @@ static uint32_t media_close(uint32_t id)
         ReleaseSRWLockExclusive(&media_files[i].io_lock);break;
     }
     ReleaseSRWLockExclusive(&media_lock);
+    media_profile_end("close",0,id,0,status,profile,owner_wait);
     return status;
 }
 static void media_iosb(uint32_t va,uint32_t status,ULONG_PTR count)
@@ -360,13 +412,16 @@ static uint32_t media_open(uint32_t *args,int create)
 #include "file_async.inc"
 static void media_kernel(unsigned ordinal)
 {
+    struct MediaProfile profile=media_profile_begin();
     fsc_ensure();
     int transfer=ordinal==219 || ordinal==236;
     unsigned count=ordinal==207 ? 10 : ordinal==190 ? 9 : ordinal==202 ? 6 : transfer ? 8 : ordinal==198 ? 2 : 5;
     uint32_t a[10]; for (unsigned i=0;i<count;++i) a[i]=MEM32(g_esp+4+i*4);
     int opening=ordinal==190 || ordinal==202;
+    uint64_t owner_begin=profile.begin?dispatch_monotonic():0;
     if (opening) AcquireSRWLockExclusive(&media_lock);
     else AcquireSRWLockShared(&media_lock);
+    uint64_t owner_wait=owner_begin?dispatch_monotonic()-owner_begin:0;
     if (opening) g_eax=media_open(a,ordinal==190);
     else {
         struct MediaFile *owned=media_owned(a[0]);
@@ -461,6 +516,8 @@ static void media_kernel(unsigned ordinal)
     }
     if (opening) ReleaseSRWLockExclusive(&media_lock);
     else ReleaseSRWLockShared(&media_lock);
+    if(profile.begin)media_profile_end("service",ordinal,opening?(!g_eax?MEM32(a[0]):0):a[0],
+        transfer?a[6]:0,g_eax,profile,owner_wait);
     if (g_eax&0x80000000u) fprintf(stderr,"[FILE FAILURE] ordinal=%u status=%08x\n",ordinal,g_eax);
     g_esp+=4+count*4;
 }

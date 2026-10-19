@@ -58,6 +58,14 @@ int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t
 /* Diagnostic raw bytes of the actual bound color/depth target, with DXGI
  * format metadata. NULL/zero queries shape only; S_FALSE means no target. */
 int32_t pilot_gfx_reference_target_readback(unsigned depth,void *data,uint32_t capacity,uint32_t metadata[3]);
+/* Capture-only native context observation. available bits: viewport=1,
+ * scissor rectangle=2, rasterizer state=4, stage-0 sampled image extent=8.
+ * Missing state remains explicitly unavailable; this never binds resources. */
+struct PilotRasterObservation {
+    uint32_t available,scissor_enabled,source_width,source_height;
+    float viewport[6];int32_t scissor[4];
+};
+int32_t pilot_gfx_reference_raster(struct PilotRasterObservation *out);
 int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle);
 int32_t pilot_gfx_texture_alias(unsigned kind,uint32_t source,uint32_t format,uint32_t *handle);
 int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,uint32_t *handle);

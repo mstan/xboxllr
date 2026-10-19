@@ -1207,6 +1207,43 @@ int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t
     }
     ID3D11Texture2D_Release(back); return status;
 }
+int32_t pilot_gfx_reference_raster(struct PilotRasterObservation *out)
+{
+    if(!out)return E_INVALIDARG;
+    memset(out,0,sizeof(*out));if(!pilot_device)return E_FAIL;
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();
+    D3D11_VIEWPORT viewport={0};UINT count=1;
+    ID3D11DeviceContext_RSGetViewports(context,&count,&viewport);
+    if(count==1) {
+        out->available|=1;out->viewport[0]=viewport.TopLeftX;out->viewport[1]=viewport.TopLeftY;
+        out->viewport[2]=viewport.Width;out->viewport[3]=viewport.Height;
+        out->viewport[4]=viewport.MinDepth;out->viewport[5]=viewport.MaxDepth;
+    }
+    D3D11_RECT rect={0};count=1;ID3D11DeviceContext_RSGetScissorRects(context,&count,&rect);
+    if(count==1) {
+        out->available|=2;out->scissor[0]=rect.left;out->scissor[1]=rect.top;
+        out->scissor[2]=rect.right;out->scissor[3]=rect.bottom;
+    }
+    ID3D11RasterizerState *raster=NULL;ID3D11DeviceContext_RSGetState(context,&raster);
+    if(raster) {
+        D3D11_RASTERIZER_DESC desc;ID3D11RasterizerState_GetDesc(raster,&desc);
+        out->available|=4;out->scissor_enabled=desc.ScissorEnable!=0;ID3D11RasterizerState_Release(raster);
+    }
+    ID3D11ShaderResourceView *view=NULL;ID3D11DeviceContext_PSGetShaderResources(context,0,1,&view);
+    if(view) {
+        ID3D11Resource *resource=NULL;ID3D11ShaderResourceView_GetResource(view,&resource);
+        ID3D11ShaderResourceView_Release(view);
+        if(resource) {
+            ID3D11Texture2D *image=NULL;
+            HRESULT result=ID3D11Resource_QueryInterface(resource,&IID_ID3D11Texture2D,(void**)&image);
+            ID3D11Resource_Release(resource);
+            if(FAILED(result))return result;
+            D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(image,&desc);ID3D11Texture2D_Release(image);
+            out->available|=8;out->source_width=desc.Width;out->source_height=desc.Height;
+        }
+    }
+    return S_OK;
+}
 int32_t pilot_gfx_reference_target_readback(unsigned depth,void *data,uint32_t capacity,uint32_t metadata[3])
 {
     if(!pilot_device || depth>1 || !metadata)return E_INVALIDARG;

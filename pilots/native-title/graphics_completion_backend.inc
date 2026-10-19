@@ -44,8 +44,26 @@ static void pilot_gpu_call_end(const char *name,uint64_t begin)
     if(!begin)return;
     LARGE_INTEGER now,frequency;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&frequency);
     double ms=(now.QuadPart-begin)*1000.0/frequency.QuadPart;
-    if(ms>50)fprintf(stderr,"[GPU CALL SLOW] thread=%lu call=%s serial=%llu queries=%u elapsed_ms=%.3f\n",
-        GetCurrentThreadId(),name,(unsigned long long)pilot_submitted,pilot_query_count,ms);
+    static LONG records;
+    if(ms<=50 || InterlockedIncrement(&records)>256)return;
+    uint64_t ticks=(uint64_t)now.QuadPart,hz=(uint64_t)frequency.QuadPart,cpu=0;
+    unsigned cpu_available=0;
+#ifdef _WIN32
+    FILETIME created,exited,kernel,user;
+    if(GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user)) {
+        cpu=((uint64_t)kernel.dwHighDateTime<<32)+kernel.dwLowDateTime+
+            ((uint64_t)user.dwHighDateTime<<32)+user.dwLowDateTime;
+        cpu_available=1;
+    }
+#endif
+    /* Absolute 100-ns QPC time shares the media/audio diagnostic clock.
+     * CPU is a cumulative end sample, not a claim about this call's CPU cost.
+     * Sampling it only for slow calls avoids another API on every bind/poll. */
+    fprintf(stderr,"[GPU CALL SLOW] thread=%lu call=%s serial=%llu queries=%u elapsed_ms=%.3f begin=%llu end=%llu thread_cpu_total_100ns=%llu cpu_available=%u\n",
+        GetCurrentThreadId(),name,(unsigned long long)pilot_submitted,pilot_query_count,ms,
+        (unsigned long long)(begin/hz*10000000ull+begin%hz*10000000ull/hz),
+        (unsigned long long)(ticks/hz*10000000ull+ticks%hz*10000000ull/hz),
+        (unsigned long long)cpu,cpu_available);
 }
 static void pilot_completion_events_init(void)
 {
