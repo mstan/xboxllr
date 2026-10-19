@@ -20,8 +20,10 @@ original author's copyright or license.
 The private output preserves every original archive and the base HDD image.
 Archive replacement/readback and generated controller/menu logic checks pass.
 Retail XAP compilation, the fifth Credits item's position beneath Settings,
-and real controller selection pass. First-page readability, page/section
-navigation and return to the main menu remain **unverified**. The
+real controller selection, first-page readability, page/section navigation
+and B return to the main menu pass in functional056. The first short B pulse
+did not close the dialog; the second did. Ordinary Memory navigation therefore
+remains **unverified**, and the complete scripted smoke is not a pass. The
 2026-10-19 modern HLE cold-boot candidate passes tiled storage, loaded draws,
 the reached nominal audio modes, SRCCOPY and semantic context SAVE, and displays
 the Xbox boot logo. The subsequent idle PGRAPH reset is implemented and passes
@@ -82,12 +84,19 @@ latched interrupt from unpublished FE/VP work. It retains trapped-mode,
 pending-retirement and in-flight publication guards and publishes the real
 token only through independent RAM service. Focused optimized HLE and genuine
 LLE tests preserve the IRQ and establish delayed publication, single-write
-completion and sticky DMA failure. The page/navigation pass must be rerun
-with that fix before owner handoff.
+completion and sticky DMA failure. Functional056 passes the former guards,
+opens Matthew Stanley first, advances to sp00nz/sp00nznet, changes sections
+to phobos665 and back, and finally returns to the main menu with B. Captures
+establish actual effects rather than only script delivery. The first short B
+pulse left the modal open, so subsequent nominal Memory checks ran inside
+Credits and cannot establish ordinary-menu behavior. Footer help overlaps
+the original OK button but remains readable; reflow is deferred cosmetic
+polish. No claim is made that every legal page was visually inspected.
 The remaining hardware precision question is tracked in
 [AUDIO-D18](../pilots/native-title/LLE-DEFERRED-QUESTIONS.md#audio-d18---active-retained-fe-control-transport).
-Do not describe this prototype as installed or playable. It is not a public
-release.
+The frozen `16eb3bd` executable and verified private008 image are now launched
+as an owner preview, with the functional receipt bound to that binary's hash.
+It is not a public release or a physical-console installation.
 
 This full-machine route has partial CPU AOT with interpreter fallback and an
 OpenGL HLE GPU. It does not yet use Blinx's complete native title CPU/service
