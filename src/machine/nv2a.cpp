@@ -1273,9 +1273,9 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
     }
     if (blk->off == 0x000000 && bo == 0x200) {
         const uint32_t changed = value ^ pmc_enable_;
-        // Initial engine availability and pristine PGRAPH reset are the
-        // currently qualified control family. An in-flight or previously
-        // used engine needs broader reset/resource qualification.
+        // Strict retains pristine engine-reset admission. HLE additionally
+        // models explicit idle context discard below; active or queued work
+        // is never consumed or completed to make the reset eligible.
         bool semantic_disable=false,semantic_enable=false;
 #if XLLE_RENDERER_HLE
         const bool idle_reset=!pgraph_fifo_access_ && !pgraph_status() && pull_queue_.empty() &&
@@ -1283,20 +1283,23 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             vertex_indices_.empty() && inline_array_words_.empty() &&
             inline_vertices_.empty() && immediate_vertices_.empty();
         semantic_disable=(changed==(1u<<12)) && !(value&(1u<<12)) &&
-            pgraph_loaded_context_ && current_context_saved() && idle_reset;
+            pgraph_loaded_context_ && idle_reset;
         semantic_enable=(changed==(1u<<12)) && (value&(1u<<12)) &&
             hle_pmc_reset_pending_ && !pgraph_loaded_context_ && idle_reset;
 #endif
         if (size != 4 || (changed & ~(1u << 12)) ||
             ((changed & (1u << 12)) && !semantic_disable && !semantic_enable &&
              (pgraph_loaded_context_ || methods_.total() || !pull_queue_.empty()))) {
-            fault_("NV2A unqualified engine reset transition"); return;
+            char reason[1000];
+            std::snprintf(reason,sizeof(reason),"NV2A unqualified engine reset transition: size=%d pmc=%08x->%08x changed=%08x loaded=%u active=%04x pointer=%04x saved=%u suspended=%u serial=%llu/%llu owner=%04x snapshots=%zu fifo=%u status=%08x pull=%zu draw=%llu/%llu fault=%u/%u primitive=%u indices=%zu inline=%zu/%zu immediate=%zu pending=%u fresh=%u control=%08x ffintfc=%08x revoke=%s/%08x/%08x",size,pmc_enable_,value,changed,unsigned(bool(pgraph_loaded_context_)),pgraph_active_context_instance_,pgraph_context_pointer_,unsigned(current_context_saved()),unsigned(pgraph_context_suspended_),static_cast<unsigned long long>(context_mutation_serial_),static_cast<unsigned long long>(saved_context_serial_),saved_live_context_instance_,saved_contexts_.size(),unsigned(pgraph_fifo_access_),pgraph_status(),pull_queue_.size(),static_cast<unsigned long long>(draw_published_),static_cast<unsigned long long>(draw_retired_),unsigned(draw_faulted_),unsigned(pgraph_method_faulted_),primitive_mode_,vertex_indices_.size(),inline_array_words_.size(),inline_vertices_.size(),immediate_vertices_.size(),unsigned(hle_pmc_reset_pending_),unsigned(hle_pmc_fresh_context_),pgraph_context_control_,pgraph_ffintfc_,first_save_revocation_?first_save_revocation_:"none",first_save_revocation_detail_,first_save_revocation_extra_);
+            fault_(reason); return;
         }
         if(semantic_disable && !storage_epoch_barrier())return;
+        if(semantic_disable)std::fprintf(stderr,"[nv2a] HLE idle-discard PMC disable active=%04x saved-owner=%04x slots=%zu revoke=%s/%08x/%08x; explicit reset, no silicon reset claim\n",pgraph_active_context_instance_,saved_live_context_instance_,saved_contexts_.size(),first_save_revocation_?first_save_revocation_:"none",first_save_revocation_detail_,first_save_revocation_extra_);
         if ((changed & (1u << 12)) && !(value & (1u << 12))) {
             if(semantic_disable) {
                 context_state_=ContextState{};context_state_changed();
-                hle_pmc_reset_pending_=true;hle_pmc_fresh_context_=true;
+                hle_pmc_reset_pending_=true;hle_pmc_fresh_context_=true;hle_context_transport_started_=true;
             }
             pgraph_intr_ = pgraph_intr_en_ = pgraph_nsource_ = 0;
             pgraph_trapped_addr_ = pgraph_trapped_data_ = patt_color0_ = 0;
@@ -1306,7 +1309,7 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
             waiting_for_nop_ = waiting_for_flip_ = false;
         }
         if(semantic_enable)hle_pmc_reset_pending_=false;
-        if(semantic_disable || semantic_enable)std::fprintf(stderr,"[nv2a] HLE saved-idle PGRAPH PMC %s; PRAMIN/capsules/storage preserved, silicon reset timing deferred\n",semantic_disable?"disable":"enable");
+        if(semantic_disable || semantic_enable)std::fprintf(stderr,"[nv2a] HLE idle-discard PGRAPH PMC %s; PRAMIN/capsules/storage preserved, silicon reset timing deferred\n",semantic_disable?"disable":"enable");
         pmc_enable_ = value; update_irq(); return;
     }
     // Interrupt plumbing (xemu nv2a.c/pcrtc.c): PMC_INTR_EN_0 gates the PCI line; PCRTC's

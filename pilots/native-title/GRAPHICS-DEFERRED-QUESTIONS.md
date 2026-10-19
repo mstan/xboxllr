@@ -371,10 +371,13 @@ Reopen exact raw mapping when an actual saved-byte consumer is reached, a
 validated mapping contradicts semantic state, or an unsupported context-local
 field becomes necessary. This adds no silicon timing or netplay claim.
 
-GFX-D25 semantic transport follow-up: the reached dashboard PMC bit12 reset is
-admitted only for an unchanged successfully saved live owner, idle disabled
-FIFO/empty queues/closed primitives and clear fault flags, with a matching
-re-enable token. PRAMIN/snapshots/raw unknowns/storage/global counters survive.
+GFX-D25 semantic transport follow-up: run046 found an idle dashboard PMC bit12
+reset after CPU writes invalidated its saved allocation, supporting intentional
+boot-context discard. HLE admits explicit discard for an owned loaded context,
+idle disabled FIFO/empty pull and draw queues/closed primitives/empty vertex
+buffers and clear fault flags, followed by matching re-enable. Unchanged SAVE
+is still required for the separately scoped saved subengine-reset path.
+PRAMIN/valid snapshots/raw unknowns/storage/tags/global counters survive.
 Exact PGRAPH reset contents and timing remain deferred; strict LLE unchanged.
 Reopen when a reached consumer requires omitted reset effects or retained
 state contradicts a validated reference.

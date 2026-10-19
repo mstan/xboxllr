@@ -301,7 +301,13 @@ static void test_pgraph_context_transfer() {
         }
         // Empty-queue reset must not drop the quarantine while leaving loaded
         // frontend state behind, even though no methods have executed yet.
+#if XLLE_RENDERER_HLE
+        write(0x400720,1); // explicit discard still requires disabled FIFO
+#endif
         write(0x200,0xffffefff);CHECK(!failure.empty());failure.clear();
+#if XLLE_RENDERER_HLE
+        write(0x400720,0);
+#endif
         CHECK(read(0x200)==0xffffffff && read(0x400148)==0x11 && read(0x400828)==0x3300);
         write(0x400080,0x70000);CHECK(!failure.empty());
     }

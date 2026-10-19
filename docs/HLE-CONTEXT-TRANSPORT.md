@@ -28,7 +28,8 @@ failure precedes saved-slot/raw-byte mutation. Repeated same-key SAVE replaces
 its slot; overlapping saved allocations invalidate the older owner. CPU writes
 of any width overlapping a saved allocation invalidate its capsule. Unrelated
 PRAMIN writes preserve it. Supported frontend resets preserve retained PRAMIN
-owners and unknown-byte provenance; the bounded saved-idle PMC cycle described below is admitted only in HLE.
+owners and unknown-byte provenance; the bounded idle-discard PMC cycle described
+below is admitted only in HLE.
 
 Raw serialization is separate. The measured36A0 prefix is marked unknown and
 its initialized bits cleared; only independently mapped surface words are
@@ -50,25 +51,32 @@ Reopen raw projection when an actual consumer needs saved bytes, a validated
 mapping contradicts the semantic state, or a title requires unsupported
 context-local fields. Implement the consumer before admitting its route.
 
-## Saved-idle PMC reset cycle
+## Idle context discard via PMC
 
-The dashboard next disables PGRAPH bit12 at9,093,661,490 after explicitly
-disabling its FIFO. HLE admits this transition only when the actual current
-context matches the last successful SAVE owner/change serial, queues are empty,
-engine is idle, primitives closed and fault flags clear. Methods, relevant
-RDI state writes and CPU descriptor/saved-image rewrites revoke eligibility.
-A historical capsule alone cannot authorize discarding newer live state.
+The dashboard disables PGRAPH bit12 at9,093,661,490 after disabling its FIFO.
+Run046 established idle engine, empty pull/draw queues, closed primitives,
+empty vertex/index buffers and clear fault flags. The zero remaining saved
+slots and mutation serial36390755 versus saved36390738 identify invalidation
+of the saved allocation by CPU writes. This supports interpreting the request
+as intentional boot-context discard. Requiring an unchanged SAVE blocked it;
+it was an overly conservative HLE admission rule, not a hardware requirement.
 
-A qualified disable resolves host residency, clears active frontend context,
-and uses existing reset control/IRQ handling while retaining PRAMIN, saved
-capsules, unknown raw bytes, storage layouts, FIFO queues and telemetry. A
-pending-cycle flag admits only the matching re-enable. The fresh-context
-preparation phase permits the original reset/FD-clear sequence before a new
-conservative LOAD. Snapshot restore retains its exact saved provenance.
-Prefetched packets are never consumed to make the reset eligible. Strict LLE
-keeps its prior PMC guard. This is an explicit semantic HLE policy; xemu's PMC
-reference does not implement this reset and no silicon reset/timing claim is
-made. Reopen on an actual consumer requiring further reset side effects.
+HLE therefore admits this explicit bit12-only reset for an owned loaded context
+with those idle/safety conditions, whether mutated, rewritten or never saved.
+Unchanged-SAVE eligibility remains mandatory for the separately scoped saved
+subengine-reset path; it is not needed to intentionally discard a live owner.
+
+A qualified disable resolves host residency, clears the active frontend, and
+uses existing reset control/IRQ handling while retaining PRAMIN, valid saved
+capsules, raw unknown bytes, storage layouts/tags, PFIFO queues and telemetry.
+A pending-cycle flag admits the matching re-enable. Fresh-context preparation
+permits the original reset/FD-clear sequence before conservative actual LOAD.
+Prefetched packets are never consumed to make reset eligible. Active/FIFO,
+open-primitive, faulted and pending-queue reset attempts remain rejected.
+
+Strict LLE keeps its prior PMC guard. This is an explicit semantic HLE policy;
+xemu's PMC reference does not implement this reset and no silicon reset/timing
+claim is made. Reopen on a consumer requiring omitted reset side effects.
 
 After semantic reset clears the active LOAD owner, queued methods (including
 reference/semaphore methods) are retained and rejected until a context LOAD

@@ -226,6 +226,7 @@ void Nv2a::pgraph_reset_setup(bool preserve_storage) {
     pgraph_context_suspended_=false; // frontend reset retains PRAMIN-backed saved owners
     // PRAMIN is memory, not reset frontend state: unknown SAVE bytes remain
     // unknown until CPU writes them. Clearing this bitmap would expose stale RAM.
+    pgraph_active_context_instance_=0;
     pgraph_setup_.fill(0);pgraph_context_switch_.fill(0);
     pgraph_object_header_cache_.fill(0);pgraph_object_header_known_=0;
     pgraph_active_header_known_=false;
@@ -332,6 +333,7 @@ bool Nv2a::pgraph_load_context() {
             hle_cold_default_w_&=uint16_t(~(1u<<slot));
     }
     hle_context_seen_=true;
+    pgraph_active_context_instance_=pgraph_context_pointer_;
     pgraph_loaded_context_=std::move(staged);hle_pmc_fresh_context_=false;
     pgraph_object_header_cache_.fill(0);pgraph_object_header_known_=0;
     pgraph_active_header_known_=false;
@@ -487,7 +489,7 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
         }
         if(value) {
             if(saved_reset) {
-                context_state_=ContextState{};pgraph_context_suspended_=false;
+                context_state_=ContextState{};pgraph_context_suspended_=false;pgraph_active_context_instance_=0;
                 pgraph_context_user_=0;hle_cold_default_w_=0;
                 current_raster_state_sample_index_=UINT32_MAX;
             }
@@ -550,7 +552,7 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
             if(address>=pgraph_fd_state_.size()*4 || value || pgraph_status()) {
                 fault_("NV2A unsupported active/nonzero FD state write");return true;
             }
-            context_state_changed();
+            context_state_changed("RDI state write",pgraph_rdi_index_,value);
             pgraph_fd_state_[address/4]=0;pgraph_fd_initialized_|=uint16_t(1u<<(address/4));
             pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);return true;
         }
@@ -558,7 +560,7 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
             if(value>1 || pgraph_status()) {
                 fault_("NV2A unsupported DXT1 noise control transition");return true;
             }
-            context_state_changed();
+            context_state_changed("RDI state write",pgraph_rdi_index_,value);
             *word=value;
             pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);
             return true;

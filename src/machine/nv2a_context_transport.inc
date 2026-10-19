@@ -30,11 +30,11 @@ void Nv2a::context_saved_image_written(uint32_t offset,size_t bytes) {
             {context_surfaces_2d_.dma_source_bound,context_surfaces_2d_.dma_source},
             {context_surfaces_2d_.dma_dest_bound,context_surfaces_2d_.dma_dest}};
         for(const auto& descriptor:descriptors)changed|=descriptor.first && overlap(descriptor.second,12);
-        if(changed)context_state_changed();
+        if(changed)context_state_changed("CPU bound descriptor write",offset,uint32_t(bytes));
     }
     if(pgraph_context_suspended_) {
         const uint64_t base=uint64_t(saved_live_context_instance_)<<4;
-        if(offset<base+Nv2aContextImage::kSourceBytes && base<end)context_state_changed();
+        if(offset<base+Nv2aContextImage::kSourceBytes && base<end)context_state_changed("CPU saved allocation write",offset,uint32_t(bytes));
     }
     saved_contexts_.erase(std::remove_if(saved_contexts_.begin(),saved_contexts_.end(),
         [&](const SavedContext& saved){const uint64_t base=uint64_t(saved.instance)<<4;
@@ -101,6 +101,7 @@ bool Nv2a::pgraph_save_context() {
             pramin_initialized_[byte/64]|=uint64_t(1)<<(byte%64);
         }
     }
+    first_save_revocation_=nullptr;first_save_revocation_detail_=first_save_revocation_extra_=0;
     pgraph_context_suspended_=true;hle_context_transport_started_=true;
     saved_live_context_instance_=pgraph_context_pointer_;saved_context_serial_=context_mutation_serial_;
     std::fprintf(stderr,"[nv2a] HLE semantic context SAVE instance=%04x; capsule preserved, unmapped raw prefix guarded, no silicon SAVE equivalence\n",pgraph_context_pointer_);
@@ -127,6 +128,7 @@ bool Nv2a::pgraph_restore_context() {
     // Fresh contexts never derive eligibility from canonical numeric defaults.
     invalidate_vsh_program_cache();
     current_raster_state_sample_index_=UINT32_MAX;
+    pgraph_active_context_instance_=pgraph_context_pointer_;
     pgraph_context_user_=0x11;pgraph_context_suspended_=false;hle_pmc_fresh_context_=false;
     std::fprintf(stderr,"[nv2a] HLE semantic context restore instance=%04x; raw projection remains independently guarded\n",pgraph_context_pointer_);
     return true;

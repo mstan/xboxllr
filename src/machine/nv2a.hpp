@@ -3458,7 +3458,15 @@ private:
     uint64_t context_mutation_serial_=0,saved_context_serial_=0;
     uint32_t saved_live_context_instance_=0;
     bool hle_pmc_reset_pending_=false,hle_pmc_fresh_context_=false;
-    void context_state_changed() {++context_mutation_serial_;pgraph_context_suspended_=false;}
+    uint32_t pgraph_active_context_instance_=0;
+    const char* first_save_revocation_=nullptr;
+    uint32_t first_save_revocation_detail_=0,first_save_revocation_extra_=0;
+    void context_state_changed(const char* reason="context state mutation",uint32_t detail=0,uint32_t extra=0) {
+        if(pgraph_context_suspended_ && !first_save_revocation_) {
+            first_save_revocation_=reason;first_save_revocation_detail_=detail;first_save_revocation_extra_=extra;
+        }
+        ++context_mutation_serial_;pgraph_context_suspended_=false;
+    }
     bool current_context_saved() const;
     bool pgraph_save_context();
     bool pgraph_restore_context();
