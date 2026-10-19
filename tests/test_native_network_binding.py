@@ -98,6 +98,69 @@ class NetworkBinding(unittest.TestCase):
         blob=bytearray(self.context.blob);struct.pack_into('<I',blob,0x1900,0x3000);self.context.blob=bytes(blob)
         self.assert_unchanged_rejection('global literal/alias')
 
+    def add_cached_query(self):
+        c=self.context;blob=bytearray(c.blob);helpers={}
+        def function(address,body):
+            blob[address-0x1000:address-0x1000+len(body)]=body
+            f=dict(start=f'0x{address:08X}',end=f'0x{address+len(body):08X}',size=len(body),name=f'sub_{address:08X}',section='.text')
+            c.functions.append(f)
+            source=c.generated/'recomp_0000.c';source.write_text(source.read_text()+f'\nvoid {f["name"]}(void)\n{{\n/* retained query {address:x} */\n}}\n')
+            return dict(address=address,bytes=len(body),sha256=hashlib.sha256(body).hexdigest())
+        wrapper=function(0x1800,b'\x8b\x0d'+struct.pack('<I',0x3000)+b'\xe9'+struct.pack('<i',0x1900-0x180b))
+        self.proof['calls'].append(dict(wrapper,returns=[],references=[[0x1800,0x3000]],action='guard'))
+        bodies={'query':(0x1900,b'\x6a\x08\x6a\x27\xe8'+struct.pack('<i',0x1a00-0x1909)+b'\xc2\x04\x00',4),
+                'enumeration':(0x1a00,b'\xc2\x18\x00',24),
+                'open_cache':(0x1b00,b'\x68'+struct.pack('<I',0x3100)+b'\x68'+struct.pack('<I',0x3160)+b'\xb8'+struct.pack('<I',0x3190)+b'\xc3',0),
+                'constructor':(0x1c00,b'\x8b\x40\x10\xc2\x04\x00',4),
+                'cache_layout':(0x1d00,b'\x0f\xb7\x86'+struct.pack('<I',0x3200-80+4)+b'\xc3',0)}
+        for name,(address,body,cleanup) in bodies.items():helpers[name]=dict(function(address,body),stack_bytes=cleanup)
+        def data(address,value):
+            blob[address-0x1000:address-0x1000+len(value)]=value
+            return dict(address=address,bytes=len(value),sha256=hashlib.sha256(value).hexdigest())
+        filename=data(0x3100,b'\\Device\\Harddisk0\\partition1\\CACHE%.4s\\LocalCache%02d.bin\0')
+        directory=data(0x3160,b'\\Device\\Harddisk0\\partition1\\CACHE%.4s\\\0')
+        suffix=data(0x3190,b'\0');table=data(0x3200,struct.pack('<5H',1,0,288,8,0))
+        struct.pack_into('<I',blob,0x118,0x3300);c.blob=bytes(blob)
+        return dict(entry=0x1800,helpers=helpers,filename=filename,directory=directory,default_suffix=suffix,
+                    type_table=table,certificate_offset=0x10,partition=1,relative='CACHE\\LocalCache08.bin',kind=8,output_bytes=156)
+
+    def enable_cached_query(self,query):
+        self.proof['cached_update']=query
+        next(c for c in self.proof['calls'] if c['address']==query['entry'])['action']='cached_update'
+
+    def test_explicit_query_admission_migrates_exact_old_record_without_body_or_wrapper_change(self):
+        query=self.add_cached_query();old=self.run_bind()
+        before={p.name:p.read_bytes() for p in self.context.generated.glob('recomp_*.c')}
+        wrapper=(self.context.generated/'pilot_network_binding.c').read_bytes()
+        self.enable_cached_query(query);result=self.run_bind()
+        self.assertEqual(len(result['calls']),len(old['calls']))
+        self.assertIn('#define PILOT_NETWORK_HAS_CACHED_UPDATE 1',(self.context.generated/'pilot_network_bindings.h').read_text())
+        self.assertEqual(before,{p.name:p.read_bytes() for p in self.context.generated.glob('recomp_*.c')})
+        self.assertEqual(wrapper,(self.context.generated/'pilot_network_binding.c').read_bytes())
+        all_files={p.name:p.read_bytes() for p in self.context.generated.iterdir()};self.assertEqual(result,self.run_bind())
+        self.assertEqual(all_files,{p.name:p.read_bytes() for p in self.context.generated.iterdir()})
+
+    def test_query_body_ret_locator_certificate_and_policy_drift_decline(self):
+        query=self.add_cached_query();self.enable_cached_query(query);original=copy.deepcopy(self.proof)
+        mutations=[lambda p:p['cached_update']['helpers']['query'].update(sha256='0'*64),
+                   lambda p:p['cached_update']['helpers']['query'].update(stack_bytes=0),
+                   lambda p:p['cached_update'].update(relative='CACHE\\other.bin'),
+                   lambda p:p['cached_update'].update(partition=2),
+                   lambda p:p['cached_update'].update(certificate_offset=4),
+                   lambda p:p['cached_update'].update(kind=7),
+                   lambda p:p['cached_update']['type_table'].update(sha256='0'*64)]
+        for mutation in mutations:
+            self.proof=copy.deepcopy(original);mutation(self.proof)
+            self.assert_unchanged_rejection('cached-update')
+
+    def test_private_query_direct_consumer_and_stored_alias_cannot_bypass_wrapper(self):
+        query=self.add_cached_query();self.enable_cached_query(query)
+        c=self.context;blob=bytearray(c.blob);struct.pack_into('<I',blob,0x2400,0x1900);c.blob=bytes(blob)
+        self.assert_unchanged_rejection('method pointer/alias')
+        struct.pack_into('<I',blob,0x2400,0);body=b'\xe8'+struct.pack('<i',0x1900-0x1e05)+b'\xc3';blob[0xe00:0xe00+len(body)]=body;c.blob=bytes(blob)
+        c.functions.append(dict(start='0x00001E00',end='0x00001E06',size=6,name='sub_00001E00',section='.text'))
+        self.assert_unchanged_rejection('private method consumer')
+
     def test_missing_original_body_and_changed_existing_wrapper_rejected(self):
         source=self.context.generated/'recomp_0000.c';source.write_text(source.read_text().replace('sub_00001200','other_00001200'))
         self.assert_unchanged_rejection('missing original')

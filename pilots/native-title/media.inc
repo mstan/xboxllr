@@ -152,7 +152,7 @@ static void storage_mount(const char *directory)
     }
     for (unsigned i=1;i<=5;++i) {
         WCHAR name[16]; swprintf(name,16,L"Partition%u",i); IO_STATUS_BLOCK io={0};
-        uint32_t status=storage_create_host(root,name,FILE_LIST_DIRECTORY|FILE_TRAVERSE|SYNCHRONIZE,
+        uint32_t status=storage_create_host(root,name,FILE_LIST_DIRECTORY|FILE_TRAVERSE|FILE_READ_ATTRIBUTES|SYNCHRONIZE,
              FILE_SHARE_READ|FILE_SHARE_WRITE,0x21,3,FILE_ATTRIBUTE_DIRECTORY,NULL,&storage_roots[i],&io);
         if (status) stop("cannot mount native HDD partition",status);
     }

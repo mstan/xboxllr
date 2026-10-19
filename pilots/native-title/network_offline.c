@@ -56,3 +56,28 @@ PilotNetworkResult pilot_network_offline_cleanup(PilotNetworkOffline *state)
     }
     ops->unlock(ops->context);return result;
 }
+PilotNetworkResult pilot_network_offline_cached_update(PilotNetworkOffline *state,
+    PilotNetworkOutputClear clear,void *output,PilotNetworkCacheProbe probe,void *context,
+    unsigned partition,const char *relative)
+{
+    if(!state || !state->ops)return network_result(0,PILOT_NETWORK_GUARD_UNINITIALIZED);
+    const PilotNetworkOps *ops=state->ops;ops->lock(ops->context);
+    PilotNetworkResult result=network_result(0,0);
+    if((state->references==0)!=(state->owner==0))result.guard=PILOT_NETWORK_GUARD_STATE;
+    else if(!state->references)result.hresult=UINT32_C(0x80150005);
+    /* The original tests owner before touching or validating the output. */
+    else if(!clear || !clear(output,PILOT_NETWORK_CACHED_UPDATE_BYTES))result.guard=PILOT_NETWORK_GUARD_OUTPUT;
+    else if(!probe || !relative || !*relative || !partition || partition>5)result.guard=PILOT_NETWORK_GUARD_CACHE;
+    else {
+        /* A transient view borrows the real owner under its lifetime lock.
+         * The synchronous probe exposes no guest enum/task objects. Cleanup
+         * cannot retire the owner until every outcome releases this lock. */
+        struct { void *owner; uint32_t status; unsigned empty; } view={state->owner,0,0};
+        view.status=probe(context,partition,relative);
+        view.empty=view.status==UINT32_C(0xc0000034) || view.status==UINT32_C(0xc000003a);
+        if(view.owner!=state->owner)result.guard=PILOT_NETWORK_GUARD_STATE;
+        else if(!view.empty)result.guard=PILOT_NETWORK_GUARD_CACHE;
+        else result.hresult=1; /* Original no-record S_FALSE; output already zero. */
+    }
+    ops->unlock(ops->context);return result;
+}

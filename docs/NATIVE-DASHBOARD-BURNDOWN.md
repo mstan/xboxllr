@@ -10,9 +10,10 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 
 ## Playtest delivery burndown
 
-The latest actual native run passes network startup and stops at the cached
-dashboard-update query (`116931`), before graphics initialization. No native
-menu frame has been captured. This is implementation work; original hardware
+The latest actual native run passes network startup and the cached-update
+query, then reaches graphics initialization. Device creation rejects the
+dashboard's presentation parameters; the original cleanup path then reaches
+guarded firmware return. No native menu frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
 functions execute.
@@ -22,8 +23,8 @@ functions execute.
 | Shared native title build and CPU execution | Done for current startup | Optimized executable enters the actual dashboard and runs its title thread |
 | Reached platform startup services | Done for current startup | Clocks, shutdown registration, file metadata, drive ownership, empty optical drive, settings and absent keyboard pass actual execution |
 | Offline network initialization | Done for bounded lifecycle | Native startup passes; real host lifetime and unsupported consumer guards are retained |
-| Offline cached-update handling | Current blocker | Actual caller reaches guarded `116931`; qualify its outputs, errors and task/cache lifetime |
-| First rendered native menu | Pending | D3D creation/surface fixes are built and reviewed; actual execution has not reached them |
+| Offline cached-update handling | Passed for absent mounted cache | Actual read-only probe finds absence and query returns the original no-update result; existing cache formats remain guarded |
+| First rendered native menu | Current blocker | Actual device creation reaches unsupported supersampling, optional-depth and presentation-flag parameters; surface rendering is not reached |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Pending | Shared content/data-section mod seam and actual Credits navigation |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -38,12 +39,13 @@ prerequisite for the offline menu.
 
 | Check | Status |
 |---|---|
-| Exact original dashboard 5960 identity and generated CPU | Prepared: 5,576 functions; missing direct targets remain explicit faults |
+| Exact original dashboard 5960 identity and generated CPU | Built: 5,582 functions; missing direct targets remain explicit faults |
 | Original D3D body/RET/layout admission | 101 methods, including register arguments; focused profile tests pass |
 | Original input/audio admission | Eight input and nineteen audio entry points; isolated service contracts pass |
 | Existing Blinx binding/header compatibility | Preserved; focused binding, syntax and input/audio/mixer checks pass |
 | Optimized native executable | Built with MSVC `/O2`, four allowed cores, Normal priority |
 | Compiler source partition | 101 units; exact function and preamble bytes retained; 64-function/512 KiB budgets |
+| Indirect CPU coverage | Optimized build has 5,582 functions and zero translation failures; six source-proved matrix-stack methods added through title-owned seeds; actual execution of those methods remains pending |
 | Shared HMAC, reader/writer locks, register bridge and core contracts | Four focused CTest cases pass |
 | Legacy graphics lifecycle fixture under this profile | Explicitly skipped: required original APIs are absent |
 | First actual native boot | Entry and title thread execute; initial attempt guarded at an original-kernel PE read |
@@ -57,8 +59,8 @@ prerequisite for the offline menu.
 | Content and writable drive ownership | Title creates C:/Y:/X:/T: itself; actual save-directory creation succeeds on writable partition 1 while content stays read-only on partition 2 |
 | Additional absent input classes | Exact profile-owned keyboard object; original query comparison, independent review and modern/legacy integrated CTest pass; actual dashboard passes enumeration |
 | Offline native network lifecycle | Startup/cleanup and real host reference ownership implemented and reviewed; actual startup now passes without entering the original NIC/raw-disk stack; other network operations remain guarded |
-| D3D creation and presentation surfaces | Distinct original/native behavior masks and owned presentation/current surface fields implemented; profile/helper tests and independent review pass; actual graphics execution is pending |
-| Latest actual native boot | Passes native network startup; stops at guarded cached-update query `116931`, 1,622 entries, before graphics; no captured frame |
+| D3D creation and presentation surfaces | Device creation now reached; backend rejects presentation parameters before surface setup. Earlier profile/helper fixes remain reviewed/tested but surface execution is pending |
+| Latest actual native boot | Passes admitted cached-update query, reaches device creation and cleanup at 1,671 entries; no captured frame |
 | Driver incremental admission and QA launches | 31 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
@@ -170,6 +172,55 @@ in 1.24 seconds. Graphics creation and surface behavior remain unverified in
 the actual title until execution reaches them. See
 [offline network scope](NATIVE-OFFLINE-NETWORK-2026-10-19.md) and
 [presentation surfaces](NATIVE-PRESENTATION-SURFACES-2026-10-19.md).
+
+Source look-ahead also resolves the original matrix-stack constructor's vtable
+at `138f0`. Six methods were absent from discovery, including the identity-load
+method called during `d04af` initialization. Title-owned
+`titles/dashboard/native-seeds.json` and its image-bound contract now retain
+these complete original method entries plus the previously qualified audio
+AddRef entry. Fresh preparation in `build/dashboard-native-cache-20261019`
+discovers 5,582 functions, preserves all seven declared extents, and reports
+zero translation failures. These are generated original CPU bodies, without
+runtime title branches or replacement success handlers. The 26 unresolved
+direct-target guards remain. This is next-candidate preparation, not a claim
+that the actual title has reached these methods or rendered a frame.
+
+The cache-query optimized candidate is
+`76f29b71faeb2b82d761cf61cbfe3538b5087433f9f3c2faa9679cefdef17770`.
+Run `20261019-130828-kyngn6_o` passes all earlier startup paths and enters the
+new query, but guards on its cache-probe result at 1,622 entries, before a
+frame. All eight integrated tests pass in 1.80 seconds and both the query and
+filesystem adapter pass independent review. A separate read-only NT probe of
+the actual mounted partition root finds ordinary, case-insensitive directory
+metadata and genuine CACHE absence, so the integration discrepancy remains
+under investigation. Do not describe the query as passed by the actual title
+or the filesystem as unsupported without further evidence. All 5,576 retained
+generated function sections match the preceding candidate after line-ending
+and trailing-whitespace normalization; only the six declared methods are new.
+
+The runtime-only diagnostic candidate `a51c8af8...` identifies the probe failure:
+parent FileCaseSensitiveInformation (71) returns `ACCESS_DENIED`. The original
+fixture and separate root check used `CreateFileW`, which did not prove the
+same granted rights as production's `NtCreateFile`. Direct NT handle tests
+reproduce the missing attribute-read permission. Mounted partition roots now
+explicitly request `FILE_READ_ATTRIBUTES`, preserving share/options/disposition
+and write permissions. The corrected fixture uses production NT creation and
+checks granted access. The filesystem probe, cached query, installed-media and
+storage regressions pass together in 0.65 seconds; the narrow fix also passes
+independent review. Earlier Win32-root evidence is retained with a private
+supersession record.
+
+The current optimized executable is
+`eb97515fe0f7da49febfd5d89d1b2920e81f18bd116e1fd13da77b953195b873`.
+Run `20261019-131757-mib9tn_r` obtains genuine CACHE absence and passes the
+cached-update query into `2ccf0` graphics initialization. Device creation receives
+`640,480,7,1,2222,1,0,0,0,0,20,0,1,0,0,0,0` (hexadecimal DWORDs except the
+first two dimensions stated in decimal). The shared backend currently admits
+only no multisampling, automatic depth and zero presentation flags, so it
+returns unsupported. Original cleanup reaches guarded `HalReturnToFirmware`
+at 1,671 entries. The next implementation boundary is coherent supersampling,
+optional-depth and presentation-flag support; firmware-return success would
+not fix the creation failure. No frame, menu, audio or FPS result is implied.
 
 Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original

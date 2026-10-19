@@ -1,0 +1,44 @@
+[
+  {
+    "start": "0x000D041E",
+    "end": "0x000D042B",
+    "size": 13,
+    "evidence": "matrix-stack AddRef; constructor table138F0 slot1"
+  },
+  {
+    "start": "0x000D042B",
+    "end": "0x000D043F",
+    "size": 20,
+    "evidence": "matrix-stack Pop; constructor table138F0 slot3"
+  },
+  {
+    "start": "0x000D043F",
+    "end": "0x000D045E",
+    "size": 31,
+    "evidence": "matrix-stack LoadMatrix; constructor table138F0 slot6"
+  },
+  {
+    "start": "0x000D045E",
+    "end": "0x000D046E",
+    "size": 16,
+    "evidence": "matrix-stack GetTop; constructor table138F0 slot17"
+  },
+  {
+    "start": "0x000D0617",
+    "end": "0x000D0630",
+    "size": 25,
+    "evidence": "matrix-stack LoadIdentity; constructor table138F0 slot5; reached by source-predicted startup D04AF"
+  },
+  {
+    "start": "0x000D0996",
+    "end": "0x000D09B0",
+    "size": 26,
+    "evidence": "matrix-stack Release; constructor table138F0 slot2"
+  },
+  {
+    "start": "0x000F53F2",
+    "end": "0x000F5439",
+    "size": 71,
+    "evidence": "DirectSound ObjectAddRef; retained original device/buffer constructor slot1"
+  }
+]

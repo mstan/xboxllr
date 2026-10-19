@@ -14,6 +14,7 @@ drive_owner = "TITLE"
 
 [generation]
 profile = "../../pilots/native-title/profiles/dashboard-5960.json"
+seeds = ["native-seeds.json"]
 bindings = ["cache", "cpu", "input", "audio", "d3d", "startup", "network"]
 unit_max_functions = 64
 unit_max_bytes = 524288

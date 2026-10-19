@@ -2,6 +2,7 @@
 """Bind a closed, exact-image offline network lifecycle and guarded consumers."""
 import argparse
 import bisect
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -16,6 +17,10 @@ def original_bytes(context, address, size):
     sections = [s for s in context.image['sections'] if s['address'] <= address
                 and address + size <= s['address'] + s['raw_size']]
     if len(sections) != 1:
+        # Source certificate extension words can reside in stored XBE headers.
+        base=context.image['base'];header_bytes=struct.unpack_from('<I',context.blob,0x108)[0]
+        if not sections and base<=address<address+size<=base+header_bytes:
+            return context.blob[address-base:address-base+size]
         raise ValueError('network proof outside stored original image')
     section = sections[0]
     offset = section['raw_offset'] + address - section['address']
@@ -44,10 +49,103 @@ def decode(context, address, size, begin, end, strict=True):
     return sorted({int(i.op_str or '0', 0) for i in instructions if i.mnemonic == 'ret'}), refs
 
 
+def cached_update_proof(context, proof, functions, calls, begin, end, online_owner):
+    if (not isinstance(proof,dict) or set(proof)!={'entry','helpers','filename','directory','default_suffix',
+            'type_table','certificate_offset','partition','relative','kind','output_bytes'}
+            or type(proof['kind']) is not int or proof['kind']!=8
+            or type(proof['output_bytes']) is not int or proof['output_bytes']!=156
+            or type(proof['partition']) is not int or not 1<=proof['partition']<=5
+            or type(proof['certificate_offset']) is not int or proof['certificate_offset']%4
+            or not 0<=proof['certificate_offset']<=4096):
+        raise ValueError('unreviewed cached-update policy')
+    selected=[c for c in calls if c['action']=='cached_update']
+    if len(selected)!=1 or selected[0]['address']!=proof['entry']:
+        raise ValueError('unreviewed cached-update entry')
+    helpers=proof['helpers'];expected={'query':4,'enumeration':24,'open_cache':0,'constructor':4,'cache_layout':0}
+    if set(helpers)!=set(expected):raise ValueError('incomplete cached-update helper proof')
+    codes={}
+    for name,cleanup in expected.items():
+        body=helpers[name];validate_body(body);function=functions.get(body['address'])
+        if (set(body)!={'address','bytes','sha256','stack_bytes'} or body['stack_bytes']!=cleanup
+                or function is None or not context.matches_body(function,body)
+                or decode(context,body['address'],body['bytes'],begin,end)[0]!=[cleanup]):
+            raise ValueError('unreviewed cached-update helper body/RET')
+        codes[name]=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(original_bytes(context,body['address'],body['bytes']),body['address']))
+    wrapper=selected[0]
+    code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(original_bytes(context,wrapper['address'],wrapper['bytes']),wrapper['address']))
+    if (len(code)!=2 or code[0].mnemonic!='mov' or code[0].op_str!=f'ecx, dword ptr [{hex(online_owner)}]'
+            or code[-1].mnemonic!='jmp' or code[-1].op_str!=hex(helpers['query']['address'])):
+        raise ValueError('unreviewed cached-update tail/ABI')
+    def require(name,mnemonic,operands):
+        if not any(i.mnemonic==mnemonic and i.op_str==operands for i in codes[name]):
+            raise ValueError('unreviewed cached-update source role: '+name+'/'+operands)
+    require('query','push',str(proof['kind']))
+    require('query','push','0x27')
+    require('query','call',hex(helpers['enumeration']['address']))
+    require('constructor','mov',f'eax, dword ptr [eax + {hex(proof["certificate_offset"])}]')
+    cert=struct.unpack_from('<I',context.blob,0x118)[0]
+    if original_bytes(context,cert+proof['certificate_offset'],4)!=bytes(4):
+        raise ValueError('cached-update namespace suffix is not qualified empty')
+    data={}
+    for name in ('filename','directory','default_suffix','type_table'):
+        item=proof[name];validate_body(item)
+        if set(item)!={'address','bytes','sha256'}:raise ValueError('invalid cached-update data proof')
+        value=original_bytes(context,item['address'],item['bytes'])
+        if hashlib.sha256(value).hexdigest()!=item['sha256']:raise ValueError('cached-update data differs')
+        data[name]=value
+    prefix=f'\\Device\\Harddisk0\\partition{proof["partition"]}\\'
+    filename=prefix+'CACHE%.4s\\LocalCache%02d.bin'
+    if (data['filename']!=(filename+'\0').encode('ascii')
+            or data['directory']!=(prefix+'CACHE%.4s\\\0').encode('ascii')
+            or data['default_suffix']!=b'\0'
+            or data['type_table']!=struct.pack('<5H',1,0,288,8,0)
+            or proof['relative']!=f'CACHE\\LocalCache{proof["kind"]:02d}.bin'):
+        raise ValueError('unreviewed cached-update locator/layout')
+    require('open_cache','push',hex(proof['filename']['address']))
+    require('open_cache','push',hex(proof['directory']['address']))
+    require('open_cache','mov',f'eax, {hex(proof["default_suffix"]["address"])}')
+    table_base=proof['type_table']['address']-proof['kind']*10
+    require('cache_layout','movzx',f'eax, word ptr [esi + {hex(table_base+4)}]')
+    # The original private method may only be entered through its replaced
+    # public wrapper. New direct/data-pointer bypasses require separate proof.
+    target=helpers['query']['address'];decoder=Cs(CS_ARCH_X86,CS_MODE_32)
+    decoder.detail=True;decoder.skipdata=True
+    for address,function in functions.items():
+        if function.get('section')=='.data':continue
+        for instruction in decoder.disasm(original_bytes(context,address,function['size']),address):
+            if (instruction.id and instruction.mnemonic in ('call','jmp') and instruction.operands
+                    and instruction.operands[0].type==X86_OP_IMM and instruction.operands[0].imm==target
+                    and address!=proof['entry']):
+                raise ValueError('unprotected cached-update private method consumer')
+    literal=struct.pack('<I',target)
+    if any(literal in context.blob[s['raw_offset']:s['raw_offset']+s['raw_size']] for s in context.image['sections']):
+        raise ValueError('unprotected cached-update method pointer/alias')
+    return proof
+
+
+def emit_header(binding):
+    calls=binding['calls'];query=binding.get('cached_update')
+    actions='PILOT_NETWORK_ACTION_GUARD, PILOT_NETWORK_ACTION_STARTUP, PILOT_NETWORK_ACTION_CLEANUP'
+    if query:actions+=', PILOT_NETWORK_ACTION_CACHED_UPDATE'
+    header=['#pragma once','#define PILOT_NETWORK_ABI_VERSION 1u','enum { '+actions+' };','enum PilotNetworkEntry {']
+    header += [f'    PILOT_NETWORK_ENTRY_{c["address"]:08X},' for c in calls]
+    header += ['    PILOT_NETWORK_COUNT','};',
+               'static const struct { const char *name; unsigned address, action, stack_bytes; } pilot_network_calls[] = {']
+    for call in calls:
+        header.append(f'    {{"{call["symbol"]}", 0x{call["address"]:08x}u, PILOT_NETWORK_ACTION_{call["action"].upper()}, {4 if call["action"] in ("startup","cached_update") else 0}u}},')
+    header+=['};']
+    if query:
+        header += ['#define PILOT_NETWORK_HAS_CACHED_UPDATE 1',
+                   f'#define PILOT_NETWORK_CACHE_PARTITION {query["partition"]}u',
+                   '#define PILOT_NETWORK_CACHE_RELATIVE '+json.dumps(query['relative'])]
+    return '\n'.join(header)+'\n'
+
+
 def bind(xbe, output, symbols, profile=None):
     context = Binding(xbe, output, symbols)
     proof = context.require_profile('network', profile, adapter='xonline-offline-lifecycle-v1')
-    if set(proof) != {'adapter', 'globals', 'consumer_range', 'calls', 'callback_table', 'untranslated_callbacks', 'set_last_error'}:
+    required={'adapter','globals','consumer_range','calls','callback_table','untranslated_callbacks','set_last_error'}
+    if set(proof) not in (required,required|{'cached_update'}):
         raise ValueError('unsupported network proof fields')
     globals_ = proof['globals']
     if (not isinstance(globals_, dict) or set(globals_) != {'online_owner', 'online_gate', 'network_owner', 'network_gate'}
@@ -69,7 +167,7 @@ def bind(xbe, output, symbols, profile=None):
         if set(entry) != {'address', 'bytes', 'sha256', 'returns', 'references', 'action'}:
             raise ValueError('invalid network entry proof fields')
         address = entry['address']; action = entry['action']
-        if type(address) is not int or address in seen or address not in functions or action not in ('startup', 'cleanup', 'guard'):
+        if type(address) is not int or address in seen or address not in functions or action not in ('startup', 'cleanup', 'guard','cached_update'):
             raise ValueError('invalid network entry/action')
         function = functions[address]
         if function.get('section') == '.data' or not context.matches_body(function, entry):
@@ -77,7 +175,7 @@ def bind(xbe, output, symbols, profile=None):
         returns, refs = decode(context, address, entry['bytes'], begin, end)
         if returns != entry['returns'] or refs != entry['references']:
             raise ValueError('network return/global operand proof differs')
-        if action != 'guard':
+        if action in ('startup','cleanup'):
             expected = [4] if action == 'startup' else [0]
             if action in lifecycle or returns != expected or not any(target == globals_['online_owner'] for _, target in refs):
                 raise ValueError('incomplete or unreviewed network lifecycle ABI')
@@ -86,6 +184,9 @@ def bind(xbe, output, symbols, profile=None):
         calls.append(dict(entry, symbol=function['name']))
     if lifecycle != {'startup', 'cleanup'}:
         raise ValueError('missing network lifecycle entry')
+    query=proof.get('cached_update')
+    if query is not None:cached_update_proof(context,query,functions,calls,begin,end,globals_['online_owner'])
+    elif any(c['action']=='cached_update' for c in calls):raise ValueError('missing cached-update proof')
     # A profile cannot omit another discovered original global consumer while
     # admitting startup. The exact image/body identity remains the proof basis.
     consumers = set()
@@ -150,16 +251,7 @@ def bind(xbe, output, symbols, profile=None):
     binding = dict(xbe_sha256=context.image['sha256'], adapter=proof['adapter'], calls=calls,
                    globals=globals_, consumer_range=extent, callback_table=table,
                    untranslated_callbacks=proof['untranslated_callbacks'], set_last_error=proof['set_last_error'])
-    header = ['#pragma once', '#define PILOT_NETWORK_ABI_VERSION 1u',
-              'enum { PILOT_NETWORK_ACTION_GUARD, PILOT_NETWORK_ACTION_STARTUP, PILOT_NETWORK_ACTION_CLEANUP };',
-              'enum PilotNetworkEntry {']
-    header += [f'    PILOT_NETWORK_ENTRY_{c["address"]:08X},' for c in calls]
-    header += ['    PILOT_NETWORK_COUNT', '};',
-               'static const struct { const char *name; unsigned address, action, stack_bytes; } pilot_network_calls[] = {']
-    for call in calls:
-        action = call['action'].upper()
-        header.append(f'    {{"{call["symbol"]}", 0x{call["address"]:08x}u, PILOT_NETWORK_ACTION_{action}, {4 if action == "STARTUP" else 0}u}},')
-    header += ['};']
+    if query:binding['cached_update']=query
     wrapper = ['#include "pilot_network_bindings.h"',
                'extern void pilot_network_dispatch(unsigned, void (*)(void));', f'extern void {error["name"]}(void);']
     replacements = {}
@@ -172,12 +264,25 @@ def bind(xbe, output, symbols, profile=None):
         wrapper += [f'extern void {original}(void);', f'void {symbol}(void) {{', '#if defined(PILOT_NETWORK_OFFLINE) && PILOT_NETWORK_OFFLINE',
                     f'    pilot_network_dispatch(PILOT_NETWORK_ENTRY_{call["address"]:08X}, {error["name"]});',
                     '#else', f'    {original}();', '#endif', '}']
-    texts = {'pilot_network_bindings.h': '\n'.join(header)+'\n', 'pilot_network_binding.c': '\n'.join(wrapper)+'\n'}
+    texts = {'pilot_network_bindings.h': emit_header(binding), 'pilot_network_binding.c': '\n'.join(wrapper)+'\n'}
     record = output / 'network-binding.aot-private.json'
     if (context.generated / 'pilot_network_binding.c').exists():
-        if (json.loads(record.read_text()) != binding or context.manifest.get('network_binding') != binding
-                or any((context.generated / name).read_text() != text for name, text in texts.items())):
+        actual=json.loads(record.read_text())
+        if (context.manifest.get('network_binding') != actual or
+                (context.generated/'pilot_network_binding.c').read_text()!=texts['pilot_network_binding.c']):
             raise ValueError('existing network binding differs')
+        header=(context.generated/'pilot_network_bindings.h').read_text()
+        if actual==binding and header==texts['pilot_network_bindings.h']:return binding
+        prior=copy.deepcopy(binding);prior.pop('cached_update',None)
+        if query:
+            next(c for c in prior['calls'] if c['address']==query['entry'])['action']='guard'
+        if not query or actual!=prior or header!=emit_header(prior):
+            raise ValueError('existing network binding differs')
+        (context.generated/'pilot_network_bindings.h').write_text(texts['pilot_network_bindings.h'],encoding='utf-8',newline='\n')
+        record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+        context.manifest['network_binding']=binding
+        context.manifest['files']['pilot_network_bindings.h']=hashlib.sha256((context.generated/'pilot_network_bindings.h').read_bytes()).hexdigest()
+        context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
         return binding
     found, edits = set(), {}
     def rename(match):

@@ -22,6 +22,7 @@ const PilotNetworkOps *pilot_network_host_operations(void){return &test_ops;}
 typedef void (*recomp_func_t)(void);
 static uint32_t g_eax,g_ebx,g_esi,g_edi,g_esp;
 static unsigned char guest[4096];
+static unsigned char *memory=guest;
 #define MEM32(a) (*(uint32_t *)(guest+(a)))
 #define PUSH32(sp,value) ((sp)-=4,MEM32(sp)=(value))
 static jmp_buf guard_jump;static unsigned expected_guard,guard_count;
@@ -57,7 +58,7 @@ static DWORD WINAPI contender(void *unused)
 }
 int main(void)
 {
-    expect_guard(PILOT_NETWORK_TEST_STARTUP,0);pilot_network_initialize();
+    expect_guard(PILOT_NETWORK_TEST_STARTUP,0);pilot_network_initialize(NULL,NULL);
     expect_guard(PILOT_NETWORK_TEST_GUARD,0);expect_guard(PILOT_NETWORK_COUNT,0);expect_guard(PILOT_NETWORK_TEST_STARTUP,1);
     invoke(PILOT_NETWORK_TEST_CLEANUP,0);check(g_eax==0x80150005u && !cleanups,"cleanup before startup");
     guest_error=0x12345678;invoke(PILOT_NETWORK_TEST_STARTUP,0);

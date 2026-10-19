@@ -540,7 +540,7 @@
               1547744
             ]
           ],
-          "action": "guard"
+          "action": "cached_update"
         },
         {
           "address": 1141873,
@@ -1461,6 +1461,66 @@
         "sha256": "879d78abc26fa19a6731632800c57eef48c0d3ef4026ec85f3be99ff3bed4cae",
         "bytes": 46,
         "stack_bytes": 4
+      },
+      "cached_update": {
+        "entry": 1141041,
+        "helpers": {
+          "query": {
+            "address": 1167866,
+            "bytes": 326,
+            "sha256": "ee40d8e0067ee104674c0cfe746d5238b39f4d802efd3ee29ddde3849eb89ddc",
+            "stack_bytes": 4
+          },
+          "enumeration": {
+            "address": 1209956,
+            "bytes": 253,
+            "sha256": "32c5665d38afdf05c1ebb9eda0669f089bb0881a0606dc004806239b504566fb",
+            "stack_bytes": 24
+          },
+          "open_cache": {
+            "address": 1204469,
+            "bytes": 364,
+            "sha256": "7082a0abaaac24ee894b18dcd6ae827e77f1a3f1f21566c22f352733e17a2577",
+            "stack_bytes": 0
+          },
+          "constructor": {
+            "address": 1141052,
+            "bytes": 402,
+            "sha256": "057c81eff3c6f8a84a6b8873849d6e26c268de9323ec4097ea5bcf3ad3f71af5",
+            "stack_bytes": 4
+          },
+          "cache_layout": {
+            "address": 1202154,
+            "bytes": 150,
+            "sha256": "4df60ec818c069d534d574a5075fc462c82f672506ccef175468c1df50f579d9",
+            "stack_bytes": 0
+          }
+        },
+        "filename": {
+          "address": 1660132,
+          "bytes": 58,
+          "sha256": "60ed658f1fa0991d953ad7aa6431b1dc26af97a1a7e97a8d9d6ebe6a41342edc"
+        },
+        "directory": {
+          "address": 1660192,
+          "bytes": 40,
+          "sha256": "ef411d7e7616cc5c2772c1363410f72eafed0b8f1a7e63e4b2ecea6bb0f804a0"
+        },
+        "default_suffix": {
+          "address": 1386696,
+          "bytes": 1,
+          "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+        },
+        "type_table": {
+          "address": 1660080,
+          "bytes": 10,
+          "sha256": "ea93de2061e1542b5d4827e882add017b311dc06ed32edf7ed29ba10d91af33d"
+        },
+        "certificate_offset": 468,
+        "partition": 1,
+        "relative": "CACHE\\LocalCache08.bin",
+        "kind": 8,
+        "output_bytes": 156
       }
     }
   }

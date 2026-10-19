@@ -10,7 +10,9 @@ The current source-bound dashboard reaches original network initialization
 after 1,710 generated entries, then attempts a raw partition-zero configuration
 open. That reached frontier does not justify weakening raw disk or file-option
 guards. The shared owner instead admits startup and cleanup and stops all other
-reviewed network-object consumers before their original reads.
+reviewed network-object consumers before their original reads. The later
+reached cached-update query has a separate bounded read-only empty-cache view;
+see [the cached-query contract](NATIVE-CACHED-UPDATE-QUERY-2026-10-19.md).
 
 ## Admitted contract
 
@@ -49,7 +51,8 @@ user, socket, receiver thread, cache task or guest kernel success stub is
 fabricated. The private owner records only the admitted immutable offline
 policy. Supported lifecycle calls need a backend reference and owner lifetime;
 they do not need a socket or actual network traffic. Unsupported link, address,
-configuration, update, task and Live APIs remain explicit stops.
+configuration, persisted update-record parsing, public task and Live APIs
+remain explicit stops.
 
 ## Boundary proof
 
@@ -58,7 +61,9 @@ decoded RET sets, global operand roles, callback-table data/publisher proof and
 the thread LastError helper proof. Shared source contains no title addresses.
 The current profile protects 83 generated entries: 81 original core/adjacent
 global consumers and two generated entries from the original four-slot Xn
-callback table. Two lifecycle entries are supported; the other 81 stop.
+callback table. Two lifecycle entries and the reached empty-cache query are
+supported; the other 80 stop. The query retains exact original helper/RET,
+locator, certificate-suffix and private-method consumer proofs.
 
 The original-byte inventory finds 74 direct CXo/CXn pointer consumers among
 those 81 functions. All 90 stored core-pointer/gate address literals, including
@@ -96,17 +101,22 @@ only for that supported Windows native route; the core has no OS imports.
 
 Root integration selects `PILOT_NETWORK_OFFLINE`, links the core/host files and
 `ws2_32`, includes `network_offline.inc`, and calls
-`pilot_network_initialize()` once before guest entry. Generated wrappers use
+`pilot_network_initialize(cache_probe, context)` once before guest entry.
+The injected probe owns actual mounted filesystem confinement; the lifecycle
+core and Winsock adapter have no host path knowledge. Generated wrappers use
 `pilot_network_dispatch(entry, original_SetLastError)`. OFFLINE requires the
 complete reviewed generated header/binding; old titles under ORIGINAL require
 none of these files or resources.
 
 Passed focused checks:
 
-- Six authored binder tests: retained original bodies, repeat-bind byte
+- Nine authored binder tests: retained original bodies, repeat-bind byte
   idempotence, missing consumer rejection, changed body/RET/global operands,
   callback-table/publisher drift, newly generated callback guard requirement,
   stored global alias rejection, missing original and changed wrapper rejection.
+- Cached-query production dispatcher/core: seven guards, exact156-byte/no-tail
+  output, aliased argument snapshot, all-page writable preflight, missing-owner
+  precedence, presence/error guards and cleanup waiting for an active view.
 - MSVC `/O2 /W4 /WX`: production dispatcher and lifecycle, seven guards,
   guest RET and LastError callback ABI, successful LastError preservation,
   repeated references, backend failure projection, allocation-failure unwind,
