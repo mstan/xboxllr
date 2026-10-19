@@ -2,12 +2,41 @@
 #include "machine/nv2a_fp_registers.hpp"
 #include "machine/nv2a.hpp"
 #include <cstdio>
+#include <cstring>
 #include <string>
 static int failures;
 #define CHECK(c) do{if(!(c)){std::printf("FAIL line%d: %s\n",__LINE__,#c);++failures;}}while(0)
 using Registers=xlle::Nv2aFpRegisters;
 static uint32_t offset(unsigned i){return i<7?0x800+i*4:0x820+(i-7)*4;}
 int main() {
+    {
+        // Cold-board reset supplies only real attribute register/phase state.
+        std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
+        CHECK(gpu.initialize_board_vga_reset());
+        CHECK(gpu.mmio_read(0xfd6013c0,1)==0 && gpu.mmio_read(0xfd6013c1,1)==0);
+        gpu.mmio_write(0xfd6013c0,1,5); // initial index phase, no INP1 prerequisite
+        CHECK(gpu.mmio_read(0xfd6013c0,1)==0); // data-phase read, not a toggle
+        CHECK(gpu.mmio_read(0xfd6013c1,1)==0);
+        gpu.mmio_write(0xfd6013c0,1,42);
+        CHECK(gpu.mmio_read(0xfd6013c0,1)==5 && gpu.mmio_read(0xfd6013c1,1)==42);
+        CHECK(!gpu.initialize_board_vga_reset());fault.clear();
+        CHECK(gpu.mmio_read(0xfd6013c1,1)==42); // retained byte survived rejected reset
+        gpu.mmio_write(0xfd6013c0,1,6); // data phase
+        gpu.mmio_write(0xfd6013c0,2,0x1234);CHECK(!fault.empty());fault.clear();
+        gpu.mmio_write(0xfd6013c0,1,33); // bad width preserved data phase
+        CHECK(gpu.mmio_read(0xfd6013c1,1)==33);
+        gpu.mmio_write(0xfd6013c0,1,7);
+        gpu.display_clock_signals(true,false,false,false);
+        CHECK(gpu.establish_display_clock_routing(0x100a0000));
+        CHECK(gpu.mmio_read(0xfd6013da,1)==0); // resets to index phase
+        gpu.mmio_write(0xfd6013c0,1,8);gpu.mmio_write(0xfd6013c0,1,17);
+        CHECK(gpu.mmio_read(0xfd6013c0,1)==8 && gpu.mmio_read(0xfd6013c1,1)==17);
+        CHECK(fault.empty() && !gpu.display_programming().known && !gpu.display_slaved());
+        xlle::Nv2aVgaRegisters warm;
+        CHECK(warm.establish_attribute_index_phase());
+        CHECK(!warm.initialize_board_attribute_reset());
+    }
+
     {
         std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
         CHECK(gpu.establish_av_idle_phase(0));gpu.mmio_write(0xfd6806a0,4,1);
@@ -32,6 +61,59 @@ int main() {
         gpu.mmio_read(0xfd680898,4);CHECK(fault=="NV2A display setup command readback remains unqualified");
     }
     {
+        // Host RGB is a separate HLE output domain. A received TV setup word
+        // cannot qualify physical scanout, and cannot hide malformed storage,
+        // partial LUT uploads or blanking in the host picture either.
+        std::string fault,error;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
+        std::vector<uint8_t> ram(256),pixels{1,2,3,4};unsigned reads=0;
+        ram[64]=17;ram[65]=29;ram[66]=43;ram[67]=99;
+        gpu.set_mem_access([&](uint32_t a,void* out,size_t n){
+            ++reads;if(uint64_t(a)+n>ram.size())return false;
+            std::memcpy(out,ram.data()+a,n);return true;
+        },{},[&](uint32_t a,size_t n)->uint8_t*{
+            return uint64_t(a)+n<=ram.size()?ram.data()+a:nullptr;
+        });
+        const auto crtc=[&](uint32_t i,uint32_t v){
+            gpu.mmio_write(0xfd6013d4,1,i);gpu.mmio_write(0xfd6013d5,1,v);
+        };
+        crtc(0x13,1);crtc(0x28,3);
+        gpu.mmio_write(0xfd680800,4,0);gpu.mmio_write(0xfd680820,4,0);
+        gpu.mmio_write(0xfd600800,4,64);gpu.mmio_write(0xfd680600,4,0x100030);
+        gpu.mmio_write(0xfd680630,4,2);
+        const auto receipt=gpu.display_setup_commands();const auto original=ram;
+        const auto timing=gpu.display_programming();
+        xlle::Nv2a::ScanoutInfo info;size_t bytes=99;
+        CHECK(!gpu.capture_scanout(pixels,info,error));
+        CHECK(!gpu.scanout_direct_bytes(info,bytes,error) && !bytes && !reads);
+#if XLLE_RENDERER_HLE
+        CHECK(gpu.capture_host_picture(pixels,info,error));
+        CHECK(pixels==std::vector<uint8_t>({43,29,17,255}) && reads==1);
+        CHECK(gpu.host_picture_direct_bytes(info,bytes,error)==ram.data()+64 && bytes==4);
+        crtc(0x13,0);const unsigned before=reads;
+        CHECK(!gpu.capture_host_picture(pixels,info,error) && reads==before);
+        CHECK(!gpu.host_picture_direct_bytes(info,bytes,error) && !bytes);
+        crtc(0x13,1);
+        gpu.mmio_write(0xfd6813c8,1,0);gpu.mmio_write(0xfd6813c9,1,7);
+        CHECK(!gpu.capture_host_picture(pixels,info,error) && reads==before);
+        CHECK(!gpu.host_picture_direct_bytes(info,bytes,error) && !bytes);
+        gpu.mmio_write(0xfd0c03c4,1,1);gpu.mmio_write(0xfd0c03c5,1,0x21);
+        CHECK(gpu.capture_host_picture(pixels,info,error));
+        CHECK(pixels==std::vector<uint8_t>({0,0,0,255}) && reads==before);
+        CHECK(!gpu.host_picture_direct_bytes(info,bytes,error) && !bytes);
+#else
+        CHECK(!gpu.capture_host_picture(pixels,info,error));
+        CHECK(!gpu.host_picture_direct_bytes(info,bytes,error) && !bytes && !reads);
+        CHECK(pixels==std::vector<uint8_t>({1,2,3,4}));
+#endif
+        CHECK(fault.empty() && ram==original);
+        CHECK(gpu.display_setup_commands().known==receipt.known &&
+              gpu.display_setup_commands().received==receipt.received);
+        CHECK(gpu.display_programming().known==timing.known &&
+              gpu.display_programming().words==timing.words &&
+              gpu.display_programming().control_known==timing.control_known &&
+              gpu.display_programming().debug_known==timing.debug_known);
+    }
+    {
         // Independently retained original VGA tables, exercised through the
         // NV mirrors. Later PRAMDAC/TV processing is not supplied by this test.
         std::string fault;xlle::Nv2a gpu([&](const std::string& why){fault=why;});
@@ -48,10 +130,10 @@ int main() {
         for(unsigned i=0;i<9;++i){write(0xfd0c03ce,i);CHECK(read(0xfd0c03cf)==gr[i]);}
         const uint8_t attr[]={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,0x4a,15,0,0};
         for(unsigned i=0;i<21;++i) {
-            write(0xfd6013c0,i);CHECK(read(0xfd6013c0)==i); // reads do not toggle
+            write(0xfd6013c0,i);CHECK(read(0xfd6013c0)==0); // data phase; reads do not toggle
             write(0xfd6013c0,attr[i]);CHECK(read(0xfd6013c1)==attr[i]);
         }
-        write(0xfd6013c0,0x20);CHECK(read(0xfd6013c0)==0x20);
+        write(0xfd6013c0,0x20);CHECK(read(0xfd6013c0)==0);
         gpu.display_clock_signals(true,true,true,false);
         CHECK(read(0xfd6013da)==9); // resets the flip-flop, not display time
         write(0xfd6013c0,5);write(0xfd6013c0,42);CHECK(read(0xfd6013c1)==42);

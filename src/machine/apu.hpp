@@ -161,10 +161,13 @@ public:
     // Establish the absolute clock phase once, before original startup work.
     // Time before this owner's creation must not be replayed as device work.
     bool prime_frame_clock(uint64_t frame) {
-        if(faulted_ || frame_clock_primed_ || !kernel_audio_control_idle()) {
+        const bool cold=board_frame_primable_ && board_audio_reset_ &&
+            reg32(kFectl)==0 && reg32(kSectl)==0 && reg32(kGpReset)==0 && reg32(kEpReset)==0 &&
+            !voice_mix_quanta_ && !gp_program_revision_ && !ep_program_revision_ && audio_transfers_drained();
+        if(faulted_ || frame_clock_primed_ || !(board_audio_reset_?cold:kernel_audio_control_idle())) {
             device_fault("APU frame clock requires a fresh stopped kernel handoff");return false;
         }
-        frame_=frame;frame_clock_primed_=true;return true;
+        frame_=frame;frame_clock_primed_=true;board_frame_primable_=false;return true;
     }
     // Internal scheduling observes the canonical controls, not a guest FECTL
     // read whose active status bits still require independent qualification.
@@ -426,6 +429,24 @@ public:
         }
         dsp_host_used_=true;set_reg32(0x5ff14,value);ep_host_status_known_=true;return true;
     }
+    // Full-system construction owns a cold register reset, unlike an imported
+    // application handoff. xemu's mcpx_apu_reset_locked clears these registers;
+    // its ordinary DWORD transport includes FE control 1510. This establishes
+    // register state, not DSP execution or notification completion.
+    bool initialize_board_audio_reset() {
+        if(faulted_)return false;
+        if(fe_state_used_ || frame_clock_primed_ || frame_ || !fe_work_idle()) {
+            device_fault("board audio reset requires a fresh device");return false;
+        }
+        board_audio_reset_=true;
+        board_frame_primable_=true;
+        dsp_reset_context_known_=true;
+        fectl_initialized_=true;
+        gp_output_base_known_=0x0f;
+        fe_state_used_=true;
+        return true;
+    }
+    bool board_audio_reset_profile()const{return board_audio_reset_;}
     // Explicit pinned-kernel application handoff, separate from board reset
     // and the captured FE notification experiment. Original init/retirement
     // establishes SECTL/IEN; retained physical idle control is exactly1.
@@ -534,6 +555,7 @@ public:
             device_fault("input SGE method has no qualified register readback");return 0;
         }
         fe_state_used_=true;
+        board_frame_primable_=false;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return 0;}
         if(touches_gp_output_base(off,size)) {
             const int index=gp_output_base_index(off);
@@ -544,19 +566,24 @@ public:
         }
         const int startup_register=ApuStartupMethods::register_index(off);
         if(startup_register>=0) {
-            if(size!=4 || !kernel_audio_control_idle() || !(startup_method_known_&(1u<<startup_register))) {
+            if(size!=4 || !kernel_audio_control_idle() ||
+               (!board_audio_reset_ && !(startup_method_known_&(1u<<startup_register)))) {
                 device_fault("APU startup method result read remains unqualified");return 0;
             }
             return reg32(off);
         }
         if(ApuStartupMappings::touches(off,size)) {
-            if(size!=4 || !kernel_audio_control_idle() || !startup_mappings_.known(off)) {
+            const bool reset_value=board_audio_reset_ && (off==0x2038 || off==0x203c);
+            if(size!=4 || !kernel_audio_control_idle() || (!reset_value && !startup_mappings_.known(off))) {
                 device_fault("APU startup mapping read context/width remains unqualified");return 0;
             }
             return reg32(off);
         }
         if(ApuStartupConfiguration::touches(off,size)) {
-            if(size!=4 || !kernel_audio_control_idle() || !startup_configuration_.known(off)) {
+            bool reset_value=false;
+            if(board_audio_reset_)for(const auto& field:ApuStartupConfiguration::registers)
+                if(off==field.offset)reset_value=true;
+            if(size!=4 || !kernel_audio_control_idle() || (!reset_value && !startup_configuration_.known(off))) {
                 device_fault("APU startup configuration read context/width remains unqualified");return 0;
             }
             return reg32(off); // one canonical register owner, including future active updates
@@ -573,6 +600,7 @@ public:
             // queued method or a pending notification. These bits are not a
             // drained-DSP acknowledgement. SE15 adds8000; actual10C=0 stops
             // SE and clears it. Reads never execute or discard pending work.
+            if(board_audio_reset_ && !board_fe_initialized_)return reg32(kFectl);
             return (reg32(kFectl)&~0x78000u)|0x70000u|
                    ((reg32(kSectl)&0x18)==8 ? 0x8000u:0u);
         }
@@ -626,6 +654,7 @@ public:
             device_fault("HRTF target publication requires the original ordinary null DWORD");return;
         }
         fe_state_used_=true;
+        board_frame_primable_=false;
         if(fe_fence_working_) {device_fault("reentrant FE fence device work");return;}
         if(touches_retirement_method(off,size)) {
             retirement_method(off,size,value);return;
@@ -678,7 +707,16 @@ public:
                 device_fault("DSP reset write context/value/width remains unqualified");return;
             }
             auto& reset=off==kGpReset?gp_reset_control_:ep_reset_control_;
-            if(!reset || !reset(reg32(off),value)) {
+            // A cold board has no executable DSP generation. Holding that
+            // already stopped core requires neither bootstrap DMA nor a CPU
+            // completion. Releasing it still requires its actual sole owner.
+            const bool cold_hold=board_audio_reset_ && !reset && value!=3 &&
+                reg32(off)!=3 && !gp_host_requested_ && !ep_frame_requested_ &&
+                !ep_control_written_ && !gp_counter_profile_touched_ && !ep_counter_profile_touched_ &&
+                !gp_program_owner_ && !ep_program_owner_ &&
+                !gp_program_revision_ && !ep_program_revision_ &&
+                audio_transfers_drained();
+            if(!cold_hold && (!reset || !reset(reg32(off),value))) {
                 device_fault("DSP reset requires its available sole CPU owner");return;
             }
             // Publish control only after the CPU accepted the transition and
@@ -828,6 +866,7 @@ public:
                 ((value^reg32(kFectl))&~(kFectlMethodMode|
                     (releases_method_trap?kFectlTrapReason:0)))==0;
             fectl_initialized_=value==0x88 || value==8 || value==0x100f || preserves;
+            if(board_audio_reset_ && fectl_initialized_)board_fe_initialized_=true;
         }
         RegFileMmio::mmio_write(addr, size, value);
         if(size==4 && (off==kVpvaddr || off==kVpsgeaddr)) {
@@ -1696,6 +1735,9 @@ private:
     ApuGpDma::ProgramWrite gp_program_guard_;
     DspResetControl gp_reset_control_,ep_reset_control_;
     bool dsp_reset_context_known_=false;
+    bool board_audio_reset_=false;
+    bool board_fe_initialized_=false;
+    bool board_frame_primable_=false;
     void* gp_frame_owner_=nullptr;
     std::function<bool()> gp_startup_clear_;
     bool gp_mix_lease_=false,gp_frame_pending_=false,gp_mix_admitting_=false;

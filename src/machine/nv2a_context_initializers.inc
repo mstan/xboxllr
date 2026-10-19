@@ -248,15 +248,45 @@ void Nv2a::context_initializer_pramin_written(uint32_t offset,size_t bytes) {
 bool Nv2a::context_initializer_draw_ready() {
     auto reject = [&](const char* why) { fault_(why); return false; };
     const auto& s = context_initializers_;
+#if XLLE_RENDERER_HLE
+    if(!vertex_batches_) {
+        std::fprintf(stderr,"[nv2a] first HLE initializer receipts write=%u/%08x clip=%u/%08x stipple=%u/%08x two-side=%u/%08x msaa=%u/%08x raster09f8=%u/%08x texture-mask=%08x/%08x\n",
+            unsigned(s.context_write_enable.known),s.context_write_enable.value,
+            unsigned(s.window_clip_type.known),s.window_clip_type.value,
+            unsigned(s.polygon_stipple.known),s.polygon_stipple.value,
+            unsigned(s.two_side_lighting.known),s.two_side_lighting.value,
+            unsigned(s.multisample.known),s.multisample.value,
+            unsigned(s.opaque_raster_09f8.known),s.opaque_raster_09f8.value,
+            context_raster_known_[kRasterTextureEnableMask],raster_state_[kRasterTextureEnableMask]);
+        for(unsigned stage=0;stage<4;++stage)
+            std::fprintf(stderr,"[nv2a] first HLE texture%u control=%08x/%08x\n",stage,
+                context_raster_known_[kRasterTextureControl0_0+stage],raster_state_[kRasterTextureControl0_0+stage]);
+    }
+#endif
     if (!s.context_write_enable.known || s.context_write_enable.value)
         return reject("NV2A loaded draw context-write profile is unknown/unsupported");
     if (!s.window_clip_type.known || s.window_clip_type.value)
         return reject("NV2A loaded draw requires explicit inclusive window clipping");
+    // The consulted xemu HLE omits polygon stipple. Our HLE likewise has no
+    // stipple consumer: absence is a cosmetic/context-projection deferral,
+    // never a fabricated receipt. A known enabled feature remains unsupported.
+#if XLLE_RENDERER_HLE
+    if (s.polygon_stipple.known && s.polygon_stipple.value)
+#else
     if (!s.polygon_stipple.known || s.polygon_stipple.value)
+#endif
         return reject("NV2A loaded draw polygon stipple is unknown/unsupported");
     if(!s.two_side_lighting.known || s.two_side_lighting.value)
         return reject("NV2A loaded draw two-sided color selection is unknown/unsupported");
-    if (!s.multisample.known || s.multisample.value != 0xffff0000u ||
+    // The HLE target has one sample when SURFACE_FORMAT AA is zero. Admit
+    // the reached MSAA-enable bit with full sample mask in that layout only;
+    // no sample replication, alpha-to-coverage or mask approximation is added.
+#if XLLE_RENDERER_HLE
+    const bool sample_control = s.multisample.value==0xffff0000u || s.multisample.value==0xffff0001u;
+#else
+    const bool sample_control = s.multisample.value==0xffff0000u;
+#endif
+    if (!s.multisample.known || !sample_control ||
         (context_raster_known_[kRasterSurfaceFormat] & 0xf000u) != 0xf000u ||
         (surface_format_ & 0xf000u))
         return reject("NV2A loaded draw multisample profile is unknown/unsupported");
@@ -279,8 +309,12 @@ bool Nv2a::context_initializer_draw_ready() {
 
 bool Nv2a::context_initializer_clear_ready(uint32_t mask) {
     if (!mask) return true;
-    if ((mask & ~0xf3u) || !context_initializers_.multisample.known ||
-        context_initializers_.multisample.value != 0xffff0000u ||
+    // CLEAR uses the surface sample layout, not raster sample enable/mask.
+    // Reference clear_surface scales the rectangle from SURFACE_FORMAT and
+    // applies the selected plane/channel mask independently of draw MSAA.
+    // Keep unknown or multisampled storage layouts guarded; no sample replicas
+    // or draw-equivalence are inferred from an absent raster-control receipt.
+    if ((mask & ~0xf3u) ||
         (context_raster_known_[kRasterSurfaceFormat] & 0xf000u) != 0xf000u ||
         (surface_format_ & 0xf000u)) {
         fault_("NV2A loaded clear single-sample profile is unknown/unsupported");

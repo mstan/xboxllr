@@ -84,6 +84,10 @@ typedef struct xlle_unicorn_restore_record {
     uint64_t pc;
     uint32_t size, total, completed;
 } xlle_unicorn_restore_record;
+// Read-only host-PC search on the pinned current translated MMIO instruction.
+// Caller must independently certify that this is an active MMIO callback.
+// No architectural restoration, clock change, TLB fill or guest access occurs.
+int xlle_unicorn_query_mmio_prefix(void* engine, xlle_unicorn_restore_record* record);
 typedef void (*xlle_unicorn_restore_callback)(void*, const xlle_unicorn_restore_record*);
 void xlle_unicorn_set_restore_callback(void* engine, xlle_unicorn_restore_callback callback,
                                         void* opaque);

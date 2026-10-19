@@ -188,6 +188,16 @@ public:
         }
         pramdac_pll_control_=value;clocked_display_=true;return true;
     }
+    // Full-system cold-board reset only. Retained initialized VGA phase and
+    // programmed bytes cannot be replaced by this initialization entry point.
+    bool initialize_board_vga_reset() {
+        if(vga_registers_.initialize_board_attribute_reset()) {
+            // HLE API initialization provenance, never NV2A VAB LOAD evidence.
+            if(!hle_context_seen_ && !methods_.total())hle_cold_default_w_=0xffff;
+            return true;
+        }
+        fault_(vga_registers_.error());return false;
+    }
     bool establish_vga_attribute_index_phase() {
         if(vga_registers_.establish_attribute_index_phase())return true;
         fault_(vga_registers_.error());return false;
@@ -1191,6 +1201,7 @@ public:
     uint32_t last_immediate_quad_fullscreen_reject_mask() const { return last_immediate_quad_fullscreen_reject_mask_; }
     uint32_t last_immediate_quad_fullscreen_raster_reject_mask() const { return last_immediate_quad_fullscreen_raster_reject_mask_; }
     uint64_t vertex_batches() const { return vertex_batches_; }
+    uint64_t hle_default_w_uses() const { return hle_default_w_uses_; }
     uint64_t submitted_vertices() const { return submitted_vertices_; }
     uint64_t vertex_attribute_fetches() const { return vertex_attribute_fetches_; }
     uint64_t immediate_methods() const { return immediate_methods_; }
@@ -2559,9 +2570,18 @@ public:
     //
     // The pointer is valid only until the guest runs again, so it must be consumed
     // (uploaded) before returning to the emulation loop. The replay path never calls
-    // this: --frame-series and --frame-dump keep capture_scanout, which is the
-    // byte-lockable capture every golden is taken with.
+    // this: --frame-series and --frame-dump use converted host-picture capture.
+    // In an LLE build that retains this strict byte-lockable scanout contract;
+    // HLE captures are explicitly digital RGB before TV processing/encoding.
     const uint8_t* scanout_direct_bytes(ScanoutInfo& info, size_t& size, std::string& error);
+    // Host-window/capture domain selected at build time. HLE presents digital
+    // RGB with blanking and DAC LUT, omitting TV matrix/filter/analog output.
+    // LLE uses the strict scanout contract above. Neither API establishes
+    // display-register readback, physical encoder output or timing evidence.
+    bool capture_host_picture(std::vector<uint8_t>& rgba, ScanoutInfo& info,
+                              std::string& error);
+    const uint8_t* host_picture_direct_bytes(ScanoutInfo& info, size_t& size,
+                                             std::string& error);
     bool debug_resolve_color_surface(uint32_t address, size_t size,
                                      const char* context) {
         return resolve_renderer_color_overlap(address, size, context);
@@ -2574,6 +2594,20 @@ public:
     }
 
 private:
+    // CPU/DMA and GPU own physical RAM in separate phases. Nested device
+    // work keeps residency for an entire burst, never across a CPU boundary.
+    unsigned gpu_phase_depth_=0;
+    bool gpu_phase_failed_=false;
+    bool storage_epoch_barrier();
+    bool begin_gpu_phase();
+    void end_gpu_phase();
+    struct GpuPhase {
+        Nv2a& owner;bool ready;
+        explicit GpuPhase(Nv2a& device):owner(device),ready(device.begin_gpu_phase()){}
+        ~GpuPhase(){owner.end_gpu_phase();}
+        GpuPhase(const GpuPhase&)=delete;
+        GpuPhase& operator=(const GpuPhase&)=delete;
+    };
     // Resolve an absolute NV2A address to its block; returns nullptr (a hole) if unmapped.
     static const Block* find_block(uint32_t rel_addr, uint32_t& block_rel);
     bool resolve_renderer_color_overlap(uint32_t address, size_t size,
@@ -2581,7 +2615,12 @@ private:
     // The validation and the resident-surface resolve shared by capture_scanout and
     // scanout_direct_bytes. ONE copy, so the byte-locked capture path and the
     // interactive presenter cannot disagree about what a valid scanout is.
-    bool prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error);
+    bool prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error,
+                         bool host_rgb);
+    bool copy_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
+                      std::string& error, bool host_rgb);
+    const uint8_t* scanout_bytes(ScanoutInfo& info, size_t& size,
+                                 std::string& error, bool host_rgb);
     // `cause` is the always-on attribution token (nv2a_invalidate_token);
     // beads-xbox.1.15.10 phase 3. Attribution only -- no behaviour reads it.
     void invalidate_renderer_color_overlap(uint32_t address, size_t size,
@@ -2765,12 +2804,16 @@ private:
     std::vector<std::array<uint8_t,16>> context_immediate_known_,context_inline_known_;
     uint8_t context_viewport_scale_known_=0, context_viewport_offset_known_=0;
     ContextInitializerState context_initializers_;
+    uint16_t hle_cold_default_w_=0,hle_default_w_reported_=0;
+    bool hle_context_seen_=false;
+    uint64_t hle_default_w_uses_=0;
     ContextInitializerResult context_initializer_method(const PushMethod& push, bool apply);
     bool context_initializer_draw_ready();
     bool context_initializer_clear_ready(uint32_t mask);
     bool context_initializer_pramin_read_ready(uint32_t offset,size_t bytes);
     void context_initializer_pramin_written(uint32_t offset,size_t bytes);
     bool context_draw_ready(std::array<uint8_t,13>& observable);
+    bool context_hle_draw_inputs_ready();
     bool context_vertex_inputs_ready(const std::array<uint8_t,16>& required);
     bool pramin_range_initialized(uint32_t offset,size_t size) const;
     bool context_method_ready(const PushMethod& push);
@@ -2789,6 +2832,11 @@ private:
     std::array<uint32_t, 2> dxt1_noise_control_{};
     uint32_t* dxt1_noise_control_word(uint32_t select, uint32_t address);
     std::array<uint32_t, 4> pgraph_context_switch_{};
+    // SET_OBJECT captures the initialized object header for each subchannel;
+    // LOAD alone does not supply these cache entries or the active header.
+    std::array<uint32_t,8> pgraph_object_header_cache_{};
+    uint8_t pgraph_object_header_known_=0;
+    bool pgraph_active_header_known_=false;
     std::array<uint32_t, 0xc00 / 4> pgraph_setup_{};
     uint16_t pgraph_setup_mode_initialized_ = 0;
     struct RamTileConfig {

@@ -42,6 +42,7 @@ public:
     void on_interrupt(IntrCb cb) override { intr_cb_ = std::move(cb); }
     void on_io(IoInCb in_cb, IoOutCb out_cb) override;
     bool map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) override;
+    bool mmio_instruction_clock(uint64_t& clock) const override;
     void request_stop(std::string reason) override;
     bool interrupts_enabled() override;
     void set_irq_pending(bool pending) override { irq_pending_ = pending; }
@@ -208,6 +209,8 @@ private:
     bool irq_window_stop_ = false;  // the last run() ended on an open IF window
     bool insn_mode_ = false;        // per-instruction hook installed and counting
     uint64_t seq_ = 0;              // retired-instruction clock; also the ring sequence
+    bool unicorn_execution_active_ = false;
+    unsigned mmio_callback_depth_ = 0;
     uint64_t run_deadline_ = 0;     // absolute seq_ value this run() may not exceed
     uint32_t deadline_tail_ = 0;   // restart the stopped TB with this instruction limit
     std::unique_ptr<IcountSlot[]> icount_;

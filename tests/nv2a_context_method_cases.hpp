@@ -10,7 +10,9 @@ struct LoadedContextFixture {
         put32(ram,put,0x40000|method);put32(ram,put+4,value);put+=8;
     }
     void kick(){write(0x800040,put);}
-    LoadedContextFixture(bool batching=true,const std::array<std::array<uint32_t,4>,192>* constants=nullptr) {
+    LoadedContextFixture(bool batching=true,const std::array<std::array<uint32_t,4>,192>* constants=nullptr,
+                         uint32_t debug7=0x0028c3ffu,bool cold_board=false) {
+        if(cold_board)CHECK(gpu.initialize_board_vga_reset());
         gpu.set_pfifo_run_batching(batching);
         gpu.set_mem_access(
             [this](uint32_t a,void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(p,ram.data()+a,n);return true;},
@@ -19,7 +21,7 @@ struct LoadedContextFixture {
         const uint32_t modes[][2]={{0x400084,0x118700},{0x40008c,0xf3de0479},{0x400090,0},
             {0x400094,4},{0x400098,0x78},{0x40009c,0x40},{0x400880,0x28c3ff},
             {0x400b80,0x45ead10e},{0x400b84,0},{0x400b88,0}};
-        for(auto& r:modes)write(r[0],r[1]);
+        for(auto& r:modes)write(r[0],r[0]==0x400880?debug7:r[1]);
         const uint32_t setup[][2]={{0x700008,1},{0x70000c,0x80010020},{0x700200,0x97},
             {0x700010,2},{0x700014,0x80010030},{0x700300,0x3d},{0x700304,16383},{0x700308,0},
             {0x700018,3},{0x70001c,0x80010040},{0x700400,0x62},
@@ -55,9 +57,12 @@ struct LoadedContextFixture {
 };
 
 static void test_loaded_context_methods() {
+    // Same already-qualified method contracts under both exact configurations.
+    // Invalid sources/draw inputs retain their queued consumer in either mode.
+    for(uint32_t debug7:{0x0028c3ffu,0x0008cfffu}) {
     for(unsigned copy_case=0;copy_case<3;++copy_case) {
         const bool operation_known=copy_case!=0, selectors_known=copy_case!=2;
-        LoadedContextFixture f;
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;
         for(unsigned y=0;y<2;++y)for(unsigned x=0;x<2;++x)
             put32(f.ram,0x1200+y*64+x*4,0x11220000+y*2+x);
         f.emit(0,3);f.emit(0x184,2);f.emit(0x188,2);f.emit(0x300,0xa);
@@ -76,7 +81,7 @@ static void test_loaded_context_methods() {
         }
     }
     for(bool batching:{false,true}) {
-        LoadedContextFixture f(batching);
+        auto fixture=std::make_unique<LoadedContextFixture>(batching,nullptr,debug7);auto& f=*fixture;
         f.color_inputs();f.emit(0x1d94,0xf0);
         f.emit(0x1a4,2);f.emit(0x1d6c,0x1200);f.emit(0x1d70,0x11223344);
         f.emit(0x50,0x87654321);f.kick();
@@ -97,7 +102,7 @@ static void test_loaded_context_methods() {
         CHECK(f.failure.empty() && (f.gpu.debug_raster_state_word(xlle::Nv2a::kRasterEnables)&3)==2);
     }
     for(int omit=0;omit<6;++omit) {
-        LoadedContextFixture f;
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;
         f.color_inputs(omit);
         // Case5 requests depth too, without its binding/value. Color must not
         // be cleared before discovering the missing second-plane inputs.
@@ -110,7 +115,7 @@ static void test_loaded_context_methods() {
         CHECK(!f.failure.empty() && f.gpu.push_methods()==count && !f.read(0x800048));
     }
     {
-        LoadedContextFixture f;
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;
         f.emit(0,1);f.emit(0x194,0xdeadbeef);f.emit(0x50,0x1234);f.kick();
         CHECK(f.failure.find("RAMHT lookup failed")!=std::string::npos);
         CHECK(!f.read(0x800048));const auto count=f.gpu.push_methods();
@@ -119,7 +124,7 @@ static void test_loaded_context_methods() {
         CHECK(f.gpu.push_methods()==count && !f.read(0x800048));
     }
     {
-        LoadedContextFixture f;f.color_inputs();
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;f.color_inputs();
         // Known handle and binding, but the depth descriptor itself has never
         // been supplied. Catch this before even the independently valid color.
         f.write(0x700020,4);f.write(0x700024,0x80010050);
@@ -128,13 +133,13 @@ static void test_loaded_context_methods() {
         CHECK(!f.gpu.color_clears() && get32(f.ram,0x1000)==0xa5a5a5a5);
     }
     for(bool missing_offset:{false,true}) {
-        LoadedContextFixture f;f.emit(0,1);f.emit(0x1a4,2);
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;f.emit(0,1);f.emit(0x1a4,2);
         if(!missing_offset)f.emit(0x1d6c,16383); // full DWORD would cross limit
         f.emit(0x1d70,0x11223344);f.emit(0x50,1);f.kick();
         CHECK(!f.failure.empty() && !f.gpu.semaphore_writes() && !f.read(0x800048));
     }
     {
-        LoadedContextFixture f;
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;
         // Active compressed RAM starts at4000; color remains in linear RAM.
         // No draw is pending while the matching three client banks are set.
         f.write(0x100240,0x4001);f.write(0x100244,0x7fff);f.write(0x100248,512);
@@ -155,19 +160,20 @@ static void test_loaded_context_methods() {
               get32(f.ram,0x4000)==0xa5a5a5a5);
     }
     {
-        LoadedContextFixture f;
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;
         f.write(0x40071c,2);CHECK(f.failure.find("unknown")!=std::string::npos);f.failure.clear();
         f.emit(0,1);f.emit(0x120,0);f.emit(0x124,1);f.emit(0x128,3);f.kick();
         CHECK(f.failure.empty());f.write(0x40071c,2);
         CHECK(f.failure.empty() && f.read(0x400710)==0x31100000);
     }
     {
-        LoadedContextFixture f;
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;
         f.emit(0,1);f.emit(0xb00,0x12345678);f.emit(0x50,1);f.kick();
         CHECK(f.failure.find("cursor is unknown")!=std::string::npos && !f.read(0x800048));
     }
     {
-        LoadedContextFixture f;f.emit(0,1);f.emit(0x1808,0);f.emit(0x50,1);f.kick();
+        auto fixture=std::make_unique<LoadedContextFixture>(true,nullptr,debug7);auto& f=*fixture;f.emit(0,1);f.emit(0x1808,0);f.emit(0x50,1);f.kick();
         CHECK(f.failure.find("outside BEGIN/END")!=std::string::npos && !f.read(0x800048));
     }
+}
 }

@@ -1,3 +1,4 @@
+include("${CMAKE_CURRENT_LIST_DIR}/WriteIfDifferent.cmake")
 # Behavioral contract: tests/test_x87_floor.cpp. No modifications to FetchContent.
 # The derived sources retain their original upstream licenses and provenance.
 file(READ "${unicorn_SOURCE_DIR}/qemu/target/i386/fpu_helper.c" _xlle_fpu_text)
@@ -14,7 +15,7 @@ foreach(_fn flds_FT0 fldl_FT0 flds_ST0 fldl_ST0 fsts_ST0 fstl_ST0
     "static inline \\1 xlle_raw_${_fn}(" _xlle_fpu_text "${_xlle_fpu_text}")
 endforeach()
 set(_xlle_fpu_derived "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/fpu_helper.c")
-file(WRITE "${_xlle_fpu_derived}" "${_xlle_fpu_text}\n#include \"x87_status.inc\"\n")
+xlle_write_if_different("${_xlle_fpu_derived}" "${_xlle_fpu_text}\n#include \"x87_status.inc\"\n")
 
 file(READ "${unicorn_SOURCE_DIR}/qemu/target/i386/helper.h" _xlle_helper_text)
 string(REPLACE "\r\n" "\n" _xlle_helper_text "${_xlle_helper_text}")
@@ -24,7 +25,7 @@ if(NOT _xlle_helper_sha STREQUAL "01e8427e0982c2c1faa13284726cf701df17f096a72b0d
 endif()
 set(_xlle_x87_headers "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/x87-headers")
 file(MAKE_DIRECTORY "${_xlle_x87_headers}")
-file(WRITE "${_xlle_x87_headers}/helper.h"
+xlle_write_if_different("${_xlle_x87_headers}/helper.h"
   "${_xlle_helper_text}\nDEF_HELPER_3(xlle_fst, void, env, tl, i32)\nDEF_HELPER_2(xlle_fmul32, void, env, i32)\nDEF_HELPER_2(xlle_fmul64, void, env, i64)\n")
 target_include_directories(x86_64-softmmu BEFORE PRIVATE "${_xlle_x87_headers}")
 

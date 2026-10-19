@@ -199,6 +199,13 @@ bool Nv2a::submit_hle_vertex_batch() {
       return false;
     if (depth && !s.address)
       return false;
+    const int tile=ram_tile_at(s.address);
+    if(depth && tile>=0 && (pgraph_tiles_.zcomp[unsigned(tile)]&0x80000000u) && bpp!=4)
+      return false;
+    if(ram_tile_overlap(s.address,size) &&
+       (s.swizzled || tile<0 ||
+        uint64_t(s.address)+size>uint64_t(pgraph_tiles_.tiles[unsigned(tile)][1])+1 ||
+        (!depth && pgraph_tiles_.zcomp[unsigned(tile)])))return false;
     const bool resident =
         depth ? renderer_->has_resident_depth_surface(s.address, size, s.pitch,
                                                       s.height, s.format)
@@ -209,7 +216,7 @@ bool Nv2a::submit_hle_vertex_batch() {
           !resolve_renderer_depth_overlap(s.address, size, "HLE target"))
         return false;
       s.bytes.resize(size);
-      if (!mem_read_ || !mem_read_(s.address, s.bytes.data(), size))
+      if (!(ram_tiles_active() ? ram_tile_transfer(s.address,s.bytes.data(),size,false) : (mem_read_ && mem_read_(s.address,s.bytes.data(),size))))
         return false;
     }
     return true;
@@ -293,6 +300,14 @@ bool Nv2a::submit_hle_vertex_batch() {
                dma_sel == 1 ? texture_dma_a_bound_ : texture_dma_b_bound_,
                p.state[kRasterTextureOffset0 + i], span, t.address))
       return fail("texture DMA range");
+    if(ram_tile_overlap(t.address,span)) {
+      const int tile=ram_tile_at(t.address);
+      if((format&~0x0000ff03u)!=0x00010028u ||
+         (t.format!=0x12 && t.format!=0x1e) || tile<0 ||
+         pgraph_tiles_.zcomp[unsigned(tile)] ||
+         uint64_t(t.address)+span>uint64_t(pgraph_tiles_.tiles[unsigned(tile)][1])+1)
+        return fail("tiled texture fetch layout/extent is not qualified");
+    }
     t.address_mode = p.state[kRasterTextureAddress0 + i];
     t.filter = p.state[kRasterTextureFilter0 + i];
     t.border = p.state[kRasterTextureBorderColor0 + i];
@@ -313,7 +328,7 @@ bool Nv2a::submit_hle_vertex_batch() {
       if (!resolve_renderer_color_overlap(t.address, span, "HLE texture"))
         return false;
       t.bytes.resize(span);
-      if (!mem_read_ || !mem_read_(t.address, t.bytes.data(), span))
+      if (!(ram_tiles_active() ? ram_tile_transfer(t.address,t.bytes.data(),span,false) : (mem_read_ && mem_read_(t.address,t.bytes.data(),span))))
         return fail("texture read");
     }
     if (t.format == 0x0b) {

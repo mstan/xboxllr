@@ -757,10 +757,7 @@ bool Nv2a::resolve_renderer_color_overlap(uint32_t address, size_t size,
         seam_anchor_drain(kSeamAnchorResolveOverlap);
         perf::record_renderer_color_resolve_context(context, resolve.data.size());
         const uint64_t write_start = perf_excl::tick_now();
-        const bool wrote =
-            mem_write_ &&
-            mem_write_(resolve.address, resolve.data.data(),
-                       resolve.data.size());
+        const bool wrote = ram_tiles_active() ? ram_tile_transfer(resolve.address,resolve.data.data(),resolve.data.size(),true) : (mem_write_ && mem_write_(resolve.address,resolve.data.data(),resolve.data.size()));
         const uint64_t write_delta = perf_excl::tick_now() - write_start;
         if (write_delta <= perf_excl::g_max_plausible_ticks)
             resolve_query_census_.color_memwrite_ticks += write_delta;
@@ -867,9 +864,7 @@ bool Nv2a::resolve_renderer_depth_overlap(uint32_t address, size_t size,
         perf::record_renderer_depth_resolve_context(context,
                                                     resolve.data.size());
         const uint64_t write_start = perf_excl::tick_now();
-        const bool depth_wrote =
-            mem_write_ && mem_write_(resolve.address, resolve.data.data(),
-                                     resolve.data.size());
+        const bool depth_wrote=ram_tiles_active() ? ram_tile_transfer(resolve.address,resolve.data.data(),resolve.data.size(),true,RamWriteClient::kZrop) : (mem_write_ && mem_write_(resolve.address,resolve.data.data(),resolve.data.size()));
         const uint64_t write_delta = perf_excl::tick_now() - write_start;
         if (write_delta <= perf_excl::g_max_plausible_ticks)
             resolve_query_census_.depth_memwrite_ticks += write_delta;
@@ -935,7 +930,42 @@ static uint64_t fnv1a_bytes(const void* data, size_t size) {
     return hash;
 }
 
+bool Nv2a::storage_epoch_barrier() {
+    if(!renderer_)return true;
+    draw_queue_drain_all();
+    renderer_->kick_pending_gpu_work();
+    if(!resolve_renderer_color_overlap(0,0x08000000u,"storage epoch") ||
+       !resolve_renderer_depth_overlap(0,0x08000000u,"storage epoch")) {
+        gpu_phase_failed_=true;return false;
+    }
+    invalidate_renderer_color_overlap(0,0x08000000u,nv2a_invalidate_token(kNv2aInvalidateOther));
+    invalidate_renderer_depth_overlap(0,0x08000000u,nv2a_invalidate_token(kNv2aInvalidateOther));
+    return true;
+}
+
+bool Nv2a::begin_gpu_phase() {
+    ++gpu_phase_depth_;
+    if(gpu_phase_failed_)return false;
+    // Previous exit resolved all dirty data. Drop clean carriers: arbitrary
+    // CPU/AOT/other-device writes since that exit require fresh GPU snapshots.
+    if(gpu_phase_depth_==1 && !storage_epoch_barrier())return false;
+    return true;
+}
+void Nv2a::end_gpu_phase() {
+    if(!gpu_phase_depth_)return;
+    if(--gpu_phase_depth_ || gpu_phase_failed_)return;
+    // Keep all copies alive inside the burst; publish real GPU results before
+    // any CPU instruction, interrupt handler or another device can run again.
+    if(renderer_) {
+        draw_queue_drain_all();renderer_->kick_pending_gpu_work();
+        if(!resolve_renderer_color_overlap(0,0x08000000u,"CPU phase exit") ||
+           !resolve_renderer_depth_overlap(0,0x08000000u,"CPU phase exit"))
+            gpu_phase_failed_=true;
+    }
+}
+
 uint32_t Nv2a::mmio_read(uint32_t addr, int size) {
+    GpuPhase phase(*this);if(!phase.ready)return 0;
     uint32_t rel = addr - kBase;
     uint32_t bo = 0;
     const Block* blk = find_block(rel, bo);
@@ -1191,6 +1221,7 @@ void Nv2a::pci_write(uint8_t reg, int size, uint32_t value) {
 }
 
 void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
+    GpuPhase phase(*this);if(!phase.ready)return;
     uint32_t rel = addr - kBase;
     uint32_t bo = 0;
     const Block* blk = find_block(rel, bo);
@@ -1596,6 +1627,10 @@ bool Nv2a::bind_object(uint8_t channel, uint8_t subchannel, uint32_t handle) {
     std::memcpy(&context, pramin_.data() + instance, 4);
     object_instance_[subchannel] = instance;
     object_class_[subchannel] = static_cast<uint8_t>(context & 0xFFu);
+    if(pgraph_loaded_context_) {
+        pgraph_object_header_cache_[subchannel]=context;
+        pgraph_object_header_known_|=uint8_t(1u<<subchannel);
+    }
     // Preserve the validated RAMHT routing in the original driver's save state.
     channels_[channel].engines=(channels_[channel].engines&~(15u<<(subchannel*4)))|
                                (engine<<(subchannel*4));
@@ -1727,7 +1762,9 @@ bool Nv2a::clear_surface_plane(uint32_t dma_instance, bool dma_bound,
         }
         if(!ram_zeta_clear(unsigned(tile),first_address,pitch,uint32_t(width),
                            uint32_t(height),clear_value,write_mask))return false;
-        // Active tiles are software-only; no resident host copy exists here.
+        // CPU codec owns the tags. A resolved clean host copy is stale now.
+        invalidate_renderer_color_overlap(first_address,resolved_span,nv2a_invalidate_token(kNv2aInvalidateClearSurface));
+        invalidate_renderer_depth_overlap(first_address,resolved_span,nv2a_invalidate_token(kNv2aInvalidateClearSurface));
         return true;
     }
     const uint32_t pixel_mask = bytes_per_pixel == 2 ? 0xFFFFu : 0xFFFFFFFFu;
@@ -1781,7 +1818,34 @@ bool Nv2a::clear_surface(uint32_t parameter) {
     // destination range as pending jobs and is ordered against them.
     seam_anchor(kSeamAnchorClearSurface, true);
     if(!ram_tile_configuration())return false;
-    if(ram_tiles_active() && renderer_) {
+    if(ram_tiles_active() && renderer_ && !gpu_phase_depth_) {
+        // Passive rejection evidence only: no MMIO reads, translation, host
+        // residency queries, memory access, packet retirement or device ticks.
+        std::fprintf(stderr,"[nv2a-tiled-clear] mask=%08x format=%08x pitch=%08x rect=%08x/%08x color-offset=%08x zeta-offset=%08x\n",
+            parameter,surface_format_,surface_pitch_,clear_rect_horizontal_,clear_rect_vertical_,
+            surface_color_offset_,surface_zeta_offset_);
+        for(unsigned plane=0;plane<2;++plane) {
+            const bool selected=(parameter&(plane?3u:0xf0u))!=0;
+            const unsigned format=(surface_format_>>(plane?4:0))&15;
+            const unsigned bpp=plane?(format==1?2:format==2?4:0):
+                (format>=1 && format<=3?2:format>=4 && format<=8?4:0);
+            uint32_t first=0;size_t span=0;
+            const bool extent=selected && clear_plane_extent(plane?zeta_dma_:color_dma_,
+                plane?zeta_dma_bound_:color_dma_bound_,plane?surface_zeta_offset_:surface_color_offset_,
+                plane?surface_pitch_>>16:surface_pitch_&0xffff,bpp,bpp==2?0xffffu:0xffffffffu,first,span);
+            std::fprintf(stderr,"[nv2a-tiled-clear] plane=%s selected=%u bound=%u dma=%08x bpp=%u extent-valid=%u first=%08x span=%zu tile=%d overlap=%u\n",
+                plane?"zeta":"color",unsigned(selected),unsigned(plane?zeta_dma_bound_:color_dma_bound_),
+                plane?zeta_dma_:color_dma_,bpp,unsigned(extent),first,span,
+                extent?ram_tile_at(first):-1,unsigned(extent && ram_tile_overlap(first,span)));
+        }
+        const RamTileConfig* banks[]={&pfb_tiles_,&pgraph_tiles_,&texture_tiles_};
+        const char* names[]={"PFB","PGRAPH","TEXTURE"};
+        for(unsigned bank=0;bank<3;++bank)for(unsigned i=0;i<8;++i) {
+            const auto& tile=banks[bank]->tiles[i];
+            if(!(tile[0]&1))continue;
+            std::fprintf(stderr,"[nv2a-tiled-clear] bank=%s slot=%u base-flags=%08x limit=%08x pitch=%08x zcomp=%08x\n",
+                names[bank],i,tile[0],tile[1],tile[2],banks[bank]->zcomp[i]);
+        }
         fault_("NV2A tiled clear requires the software RAM path");return false;
     }
     // NV2A_CLEAR: the plane fills reached from the CLEAR_SURFACE method, exclusive of the
@@ -1838,7 +1902,7 @@ bool Nv2a::clear_surface(uint32_t parameter) {
     // WITHOUT making the plane dirty. No resolve, no re-upload.
     bool resident_kept_clean_color = false;
     bool resident_kept_clean_zeta = false;
-    if (gpu_clear_enabled_ && renderer_ != nullptr) {
+    if (gpu_clear_enabled_ && renderer_ != nullptr && !ram_tiles_active()) {
         const uint32_t color_format_id = surface_format_ & 0xFu;
         const uint32_t zeta_format_id = (surface_format_ >> 4) & 0xFu;
         const bool color_is32 = color_format_id >= 4 && color_format_id <= 8;
@@ -2163,6 +2227,7 @@ bool Nv2a::fetch_vertex_attribute(uint32_t slot, uint32_t index) {
     // an instrumented run did three extra counter increments the noperf run did not.
     // Detailed telemetry is now the only switch; use --nv2a-detailed-telemetry to get
     // these counters back alongside --perf-accounting.
+    hle_cold_default_w_&=uint16_t(~(1u<<slot));
     if(pgraph_loaded_context_)context_vertex_current_known_[slot]=15;
     if (detailed_telemetry_) {
         ++vertex_attribute_fetches_;
@@ -3656,20 +3721,16 @@ bool Nv2a::submit_vertex_batch() {
         if(dxt1_noise_control_[0]!=dxt1_noise_control_[1]) {
             fault_("NV2A DXT1 noise control banks disagree");return false;
         }
-#if XLLE_RENDERER_HLE
-        if(dxt1_noise_control_[0] && !no_raster_primitives) {
-            fault_("NV2A DXT1 noise pixel behavior remains unqualified");return false;
-        }
-#endif
+        // Native HLE deliberately retains compressed GPU sampling. The small
+        // reconstruction variation is the documented, owner-accepted HLE
+        // approximation (docs/NV2A-DXT1-NOISE.md), not a register-state reset.
     }
     if(!ram_tile_configuration())return false;
-    if(ram_tiles_active() && renderer_) {
-        fault_("NV2A tiled 3D requires the software RAM path");return false;
+    if(ram_tiles_active() && renderer_ && !gpu_phase_depth_) {
+        fault_("NV2A tiled 3D requires a coherent device phase");return false;
     }
 #if XLLE_RENDERER_HLE
-    if(ram_tiles_active()) {
-        fault_("NV2A HLE tiled 3D is not qualified");return false;
-    }
+    if(!context_hle_draw_inputs_ready())return false;
     return submit_hle_vertex_batch();
 #else
     // NV2A_VERTEX: attribute fetch, vertex-shader/fixed-function transform and batch
@@ -16445,8 +16506,8 @@ bool Nv2a::execute_image_blit_srccopy() {
     // stride. Later rows overwrite the overflow, with a tile limiting the
     // destination extent. This is not an ordinary rectangular memcpy.
     if(!ram_tile_configuration())return false;
-    if(ram_tiles_active() && renderer_) {
-        fault_("NV2A tiled IMAGE_BLIT requires the software RAM path");return false;
+    if(ram_tiles_active() && renderer_ && !gpu_phase_depth_) {
+        fault_("NV2A tiled IMAGE_BLIT requires a coherent device phase");return false;
     }
     const uint64_t source_offset64 = static_cast<uint64_t>(
         context_surfaces_2d_.source_offset) +
@@ -17033,6 +17094,14 @@ void Nv2a::dispatch_method(PushMethod push) {
     } else {
         push.object_class = object_class_[subchannel];
     }
+    // Select the object cache at actual PGRAPH dispatch, after channel/FIFO
+    // admission. Prefetch, PRAMIN writes and interrupt ACK do not switch it.
+    // Only headerword1 is projected; the other loaded graph words stay unknown.
+    if(pgraph_loaded_context_ && object_bound) {
+        pgraph_active_header_known_=(pgraph_object_header_known_&(1u<<subchannel))!=0;
+        if(pgraph_active_header_known_)
+            pgraph_context_switch_[0]=pgraph_object_header_cache_[subchannel];
+    }
     // NV2A_RECORDER (beads-xbox.1.15.1 / .1.14.3): the per-method bookkeeping that
     // runs before any handler. Measured separately from NV2A_DISPATCH so the jump
     // table's A/B is attributable -- see the bucket comment in perf_excl.hpp. The
@@ -17215,10 +17284,7 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     if(ram_tiles_active() && method==0x17fc && parameter) {
         if(!ram_tile_configuration())return;
-        if(renderer_) {fault_("NV2A tiled 3D requires the software RAM path");return;}
-#if XLLE_RENDERER_HLE
-        fault_("NV2A HLE tiled 3D is not qualified");return;
-#endif
+        if(renderer_ && !gpu_phase_depth_) {fault_("NV2A tiled 3D requires a coherent device phase");return;}
     }
     dispatch_micro::mark(dispatch_micro::kDmClass);
 
@@ -17378,7 +17444,10 @@ void Nv2a::dispatch_method(PushMethod push) {
     }
     case kNv097M1D80: {
         if(parameter>1)fault_("NV2A invalid depth compression enable");
-        else compress_zbuffer_=parameter!=0;
+        else {
+            if(compress_zbuffer_!=(parameter!=0) && !storage_epoch_barrier())return;
+            compress_zbuffer_=parameter!=0;
+        }
         break;
     }
     case kNv097M1D8C: {
@@ -17930,6 +17999,7 @@ void Nv2a::dispatch_method(PushMethod push) {
     case kNv097R1518_1528: {
         const uint32_t component = (method - 0x1518) / 4;
         std::memcpy(&vertex_attributes_[0].value[component], &parameter, sizeof(parameter));
+        if(component==3)hle_cold_default_w_&=uint16_t(~1u);
         if(pgraph_loaded_context_)context_vertex_current_known_[0]|=uint8_t(1u<<component);
         ++immediate_methods_;
         if (component == 3 && !commit_immediate_vertex()) return;
@@ -17943,6 +18013,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         std::memcpy(&value[component], &parameter, sizeof(parameter));
         value[2] = 0.0f;
         value[3] = 1.0f;
+        hle_cold_default_w_&=uint16_t(~(1u<<slot));
         if(pgraph_loaded_context_)context_vertex_current_known_[slot]|=uint8_t(12u|(1u<<component));
         ++immediate_methods_;
         if (slot == 0 && component == 1 && !commit_immediate_vertex()) return;
@@ -17957,6 +18028,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[1] = static_cast<float>(y);
         value[2] = 0.0f;
         value[3] = 1.0f;
+        hle_cold_default_w_&=uint16_t(~(1u<<slot));
         if(pgraph_loaded_context_)context_vertex_current_known_[slot]=15;
         ++immediate_methods_;
         if (slot == 0 && !commit_immediate_vertex()) return;
@@ -17969,6 +18041,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         value[1] = static_cast<float>((parameter >> 8) & 0xFFu) / 255.0f;
         value[2] = static_cast<float>((parameter >> 16) & 0xFFu) / 255.0f;
         value[3] = static_cast<float>((parameter >> 24) & 0xFFu) / 255.0f;
+        hle_cold_default_w_&=uint16_t(~(1u<<slot));
         if(pgraph_loaded_context_)context_vertex_current_known_[slot]=15;
         ++immediate_methods_;
         if (slot == 0 && !commit_immediate_vertex()) return;
@@ -17983,6 +18056,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         const int16_t hi = static_cast<int16_t>((parameter >> 16) & 0xFFFFu);
         value[part * 2] = static_cast<float>(lo);
         value[part * 2 + 1] = static_cast<float>(hi);
+        if(part==1)hle_cold_default_w_&=uint16_t(~(1u<<slot));
         if(pgraph_loaded_context_)context_vertex_current_known_[slot]|=uint8_t(3u<<(part*2));
         ++immediate_methods_;
         if (slot == 0 && part == 1 && !commit_immediate_vertex()) return;
@@ -17993,6 +18067,7 @@ void Nv2a::dispatch_method(PushMethod push) {
         const uint32_t slot = word / 4;
         const uint32_t component = word & 3u;
         std::memcpy(&vertex_attributes_[slot].value[component], &parameter, sizeof(parameter));
+        if(component==3)hle_cold_default_w_&=uint16_t(~(1u<<slot));
         if(pgraph_loaded_context_)context_vertex_current_known_[slot]|=uint8_t(1u<<component);
         ++immediate_methods_;
         if (slot == 0 && component == 3 && !commit_immediate_vertex()) return;
@@ -18223,8 +18298,18 @@ bool Nv2a::drain_pull_queue() {
         }
         // Preflight before retirement; unsupported consumers retain their packet.
         if(pgraph_loaded_context_ && !context_method_ready(push))return false;
-        if(pgraph_setup_[0x880/4]==0x0008cfffu) {
-            fault_("NV2A boot DEBUG_7 command execution remains unqualified");return false;
+        // The explicit boot DEBUG_7 profile has no independently decoded
+        // functional difference in the reference. After a real qualified LOAD,
+        // use the same supported method contracts checked above. Unmanaged
+        // boot state still has no loaded-state provenance and stays guarded;
+        // cache/reserved-bit and exact silicon timing effects remain deferred.
+        if(pgraph_setup_[0x880/4]==0x0008cfffu && !pgraph_loaded_context_) {
+            char reason[256];
+            std::snprintf(reason,sizeof(reason),
+                "NV2A boot DEBUG_7 command execution remains unqualified: ch=%u sub=%u class=%02x method=%04x param=%08x get=%08x put=%08x pending=%zu",
+                push.channel,push.subchannel,push.object_class,push.method,push.parameter,
+                push.parser_get,push.parser_put,pull_queue_.size());
+            fault_(reason);return false;
         }
         pull_queue_.pop_front();
         perf::record_pfifo_queue_pop();
@@ -18845,8 +18930,9 @@ bool Nv2a::copy_digital_encoder_input(std::vector<Sd601Pixel::Ddr12>& pixels,
 // Everything capture_scanout and scanout_direct_bytes must agree on: the seam
 // drain, the geometry validation and the resident-surface
 // resolve. Extracted verbatim from capture_scanout, which keeps calling it first.
-bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error) {
-    if(display_setup_commands_.any()) {
+bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string& error,
+                           bool host_rgb) {
+    if(display_setup_commands_.any() && !host_rgb) {
         error="NV2A programmed display processing remains unqualified";return false;
     }
     info=scanout_info();
@@ -18873,9 +18959,7 @@ bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string
     if(!ram_tile_configuration()) {
         error="NV2A scanout tile configuration is unqualified";return false;
     }
-    if(ram_tiles_active() && renderer_) {
-        error="NV2A tiled scanout requires the software RAM path";return false;
-    }
+
     if (!mem_read_) {
         error = "NV2A scanout has no guest-memory reader";
         return false;
@@ -18905,10 +18989,20 @@ bool Nv2a::prepare_scanout(ScanoutInfo& info, uint64_t& source_size, std::string
 
 const uint8_t* Nv2a::scanout_direct_bytes(ScanoutInfo& info, size_t& size,
                                           std::string& error) {
+    return scanout_bytes(info,size,error,false);
+}
+
+const uint8_t* Nv2a::host_picture_direct_bytes(ScanoutInfo& info, size_t& size,
+                                              std::string& error) {
+    return scanout_bytes(info,size,error,XLLE_RENDERER_HLE);
+}
+
+const uint8_t* Nv2a::scanout_bytes(ScanoutInfo& info, size_t& size,
+                                  std::string& error, bool host_rgb) {
     perf_excl::Scope region(perf_excl::kNv2aScanout);
     size = 0;
     uint64_t source_size = 0;
-    if (!prepare_scanout(info, source_size, error)) return nullptr;
+    if (!prepare_scanout(info, source_size, error,host_rgb)) return nullptr;
     if(vga_registers_.screen_off()) {
         error="NV2A blanked scanout requires converted capture, not framebuffer bytes";return nullptr;
     }
@@ -18934,10 +19028,20 @@ const uint8_t* Nv2a::scanout_direct_bytes(ScanoutInfo& info, size_t& size,
 
 bool Nv2a::capture_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
                            std::string& error) {
+    return copy_scanout(rgba,info,error,false);
+}
+
+bool Nv2a::capture_host_picture(std::vector<uint8_t>& rgba, ScanoutInfo& info,
+                                std::string& error) {
+    return copy_scanout(rgba,info,error,XLLE_RENDERER_HLE);
+}
+
+bool Nv2a::copy_scanout(std::vector<uint8_t>& rgba, ScanoutInfo& info,
+                        std::string& error, bool host_rgb) {
     // One entry per capture attempt, including its coherence fence and resolve.
     perf_excl::Scope region(perf_excl::kNv2aScanout);
     uint64_t source_size = 0;
-    if (!prepare_scanout(info, source_size, error)) return false;
+    if (!prepare_scanout(info, source_size, error,host_rgb)) return false;
     if(vga_registers_.screen_off()) {
         rgba.assign(static_cast<size_t>(info.width)*info.height*4,0);
         for(size_t i=3;i<rgba.size();i+=4)rgba[i]=255;
@@ -19041,6 +19145,7 @@ void Nv2a::set_frame(uint64_t frame_no) {
     // FRAME BOUNDARY is the inner condition, and that is the anchor. Raising it
     // at the top would count ~2.9 M slice ticks as vblanks.
     if (frame_no > frame_no_) {
+        GpuPhase phase(*this);if(!phase.ready)return;
         // Seam anchor 4 (F12): the frame boundary, where the PPMs and the
         // scanout hash are taken. Also closes the per-vblank job window -- the
         // second, independent simulation that gives the ceiling the anchor

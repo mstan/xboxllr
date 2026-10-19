@@ -68,9 +68,22 @@ public:
                 const unsigned participants=(gp_generation_?1u:0u)|(ep_generation_?2u:0u);
                 if(restarted_ && restarted_!=participants)
                     return fail("unpaired GP/EP ring restart remains unqualified");
-                restarted_=0;generation_active_=true;
-                if(gp_.phase()!=ApuGpPhase::Yielded && gp_.phase()!=ApuGpPhase::Held)
+                restarted_=0;
+                const bool ready=gp_.phase()==ApuGpPhase::Yielded || gp_.phase()==ApuGpPhase::Held;
+                // Reset release fetches a program; it does not execute its
+                // initial ready instruction. xemu's reset/frame routes also
+                // run the initial program without requiring a prior yield.
+                // Before this cold generation has admitted any MIX work,
+                // continue actual bootstrap execution until its first C4.
+                // No input frame, notification or completed output is supplied
+                // while waiting. Warm/restarted/admitted work keeps the strict
+                // unfinished-frame check below, as does a CPU that STOPped.
+                const bool cold_initialization=apu_.board_audio_reset_profile() &&
+                    !generation_active_ && !setup_quanta_ && gp_.first_bootstrap_initializing();
+                if(!ready && !cold_initialization)
                     return fail("GP unfinished or stopped at active frame boundary; overrun remains unqualified");
+                if(ready) {
+                generation_active_=true;
                 // The original GP writes32 samples at a time into each512-
                 // sample ring; EP starts with its first256-sample half. Admit
                 // EP only after eight completed slots, while GP can fill the
@@ -97,6 +110,7 @@ public:
                     if(!gp_.start_frame(result))return fail("audio device GP frame admission failed");
                 }
                 if(apu_.setup_processing_enabled())++setup_quanta_;
+                }
             }
             if(!check_devices())return false;
             if(!(quantum_&7)) {

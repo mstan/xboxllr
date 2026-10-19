@@ -37,6 +37,72 @@ struct Fixture {
 };
 }
 int main() {
+    for(uint64_t epoch:{uint64_t(0),uint64_t(1234)}) {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());
+        int gp,ep;CHECK(f.apu.bind_gp_program_owner(&gp,[]{return true;}));
+        CHECK(f.apu.bind_ep_program_owner(&ep,[]{return true;}));
+        CHECK(f.apu.prime_frame_clock(epoch) && f.error.empty());
+        CHECK(!f.writes && !f.apu.fe_fences_published());
+        CHECK(!f.apu.prime_frame_clock(epoch));
+    }
+    for(bool read:{false,true}) {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());
+        if(read)f.read(0x1510);else f.write(0x5fffc,1);
+        CHECK(!f.apu.prime_frame_clock(1));
+    }
+    // Explicit board reset supplies cold DWORD register transport, without
+    // borrowing a warm application's retained state or completing any work.
+    for(unsigned lifetime=0;lifetime<3;++lifetime) {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());
+        CHECK(f.read(0x1510)==0 && f.read(0x1100)==0 && f.read(0x2000)==0);
+        CHECK(f.read(0x3fffc)==0 && f.read(0x5fffc)==0);
+        for(uint32_t control:{1u,0u,1u}) {
+            f.write(0x1510,control);CHECK(f.read(0x1510)==control);
+            CHECK(f.apu.service_fe_fence() && !f.writes && !f.irq_edges);
+        }
+        for(unsigned repeat=0;repeat<3;++repeat) {
+            f.write(0x3fffc,0);f.write(0x5fffc,1);
+            CHECK(f.read(0x3fffc)==0 && f.read(0x5fffc)==1);
+        }
+        f.write(0x3ff00,0);f.write(0x3ff04,0);
+        f.write(0x3fffc,1);CHECK(f.read(0x3fffc)==1 && f.error.empty());
+        CHECK(f.error.empty() && !f.writes && !f.apu.fe_fences_published());
+        f.write(0x3fffc,3); // execution still requires the real CPU owner
+        CHECK(!f.error.empty() && !f.writes && f.apu.RegFileMmio::mmio_read(0xfe83fffc,4)==1);
+    }
+    {Fixture f;f.read(0x1004);CHECK(!f.apu.initialize_board_audio_reset());}
+    {
+        Fixture cold,warm;CHECK(cold.apu.initialize_board_audio_reset());
+        CHECK(warm.apu.initialize_kernel_audio_handoff());cold.write(0x5fffc,1);
+        for(auto* fixture:{&cold,&warm}) {
+            fixture->write(0x1100,0x88);fixture->write(0x2000,7);
+            CHECK(fixture->read(0x1100)==0x70088);
+            fixture->write(0x1100,8);CHECK(fixture->read(0x1100)==0x70008);
+            CHECK(fixture->error.empty());
+        }
+    }
+    for(unsigned field:{0x201cu,0x2038u,0x203cu}) {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());f.write(0x5fffc,1);
+        CHECK(f.read(field)==0 && f.error.empty());
+        CHECK(f.apu.mmio_read(0xfe800000+field+1,4)==0 && !f.error.empty());
+    }
+    for(unsigned field:{0x1324u,0x1334u}) {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());f.write(field,4096);
+        CHECK(!f.error.empty() && !f.writes && !f.apu.fe_fence_pending());
+    }
+    // Real cold-driver initialization must feed the existing serialized fence
+    // owner. Its token becomes visible only at independent device service.
+    {
+        Fixture f;CHECK(f.apu.initialize_board_audio_reset());
+        f.write(0x1510,1);f.write(0x3fffc,0);f.write(0x5fffc,1);
+        f.write(0x1100,0x88);f.write(0x2000,7);f.write(0x1100,8);
+        f.write(0x1324,4096);f.write(0x1334,0x87654321);
+        CHECK(f.error.empty() && f.apu.fe_fence_pending());
+        CHECK(f.word(4096)==0xa5a5a5a5 && !f.writes);
+        for(unsigned poll=0;poll<8;++poll)CHECK(f.read(0x1510)==1);
+        CHECK(f.apu.service_fe_fence() && f.word(4096)==0x87654321);
+        CHECK(f.writes==1 && f.apu.fe_fences_published()==1 && !f.irq_edges);
+    }
     // Control access does not itself submit or complete a memory token.
     // Merely binding two unused CPU owners does not fabricate active work.
     for(unsigned life=0;life<3;++life) {

@@ -117,6 +117,10 @@ public:
     // Register a device MMIO region; reads/writes in [addr, addr+size) route to the callbacks
     // instead of RAM. Returns false if the region could not be mapped.
     virtual bool map_mmio(uint32_t addr, size_t size, MmioReadCb r, MmioWriteCb w) = 0;
+    // Exact number of instructions preceding the current synchronous MMIO
+    // instruction. Available only within that instruction's device callback;
+    // failure leaves clock untouched. Queries never retire work or restore CPU state.
+    virtual bool mmio_instruction_clock(uint64_t& clock) const { (void)clock; return false; }
 
     // Request a loud fault-stop from within a device/servicing callback: emulation halts and
     // `reason` is surfaced by run()'s `err`. This is how a device reports "unimplemented"

@@ -3,6 +3,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <string>
@@ -108,6 +109,12 @@ private:
     bool fail(const char* why){
         failed_=true;std::string reason(why);
         if(kind_==ApuDspKind::Ep)for(size_t at=0;(at=reason.find("GP",at))!=std::string::npos;at+=2)reason.replace(at,2,"EP");
+        if(job_) {
+            char context[120];const auto& n=job_->node;
+            std::snprintf(context,sizeof(context),": node=%06x words=%06x,%06x,%06x,%06x,%06x,%06x,%06x",
+                next_,n[0],n[1],n[2],n[3],n[4],n[5],n[6]);
+            reason.resize(reason.size()>190?190:reason.size());reason+=context;
+        }
         fault_(reason);return false;
     }
     bool admit() {
@@ -143,6 +150,11 @@ private:
             const bool ep_stereo_fifo=kind_==ApuDspKind::Ep &&
                 (node[1]==0x400403u || node[1]==0x400603u) &&
                 node[2]==0x1001u && node[3]<0xc00;
+            // Original cold GP FIFO0:32 frames, planar X C00/C20,
+            // stride32 and PCM16 stereo output. Reference interleave uses
+            // frame-major channel ordering; retain all adjacent shape guards.
+            const bool gp_stereo_fifo=kind_==ApuDspKind::Gp &&
+                node[1]==0x080403u && node[2]==0x201u && node[3]==0xc00u;
             // Physical FIFO1 control4622 copies ordinary X data. Source401F
             // instead emits zeros at counts24/1498 despite nonzero X001F.
             // Source441F also emits zero, disproving literal-value packing,
@@ -177,7 +189,7 @@ private:
                 ((node[1]==0x5be0u && ep_input_bank) ||
                  (node[1]==0x5be2u && node[3]<0xc00) || ep_stereo_fifo || ep_fifo1);
             if((node[0]&~0x7fffu) || (node[1]&0x200c) ||
-               (interleaved && !ep_stereo_fifo) ||
+               (interleaved && !ep_stereo_fifo && !gp_stereo_fifo) ||
                ((node[1]&0x200) && !qualified_bit9_profile) ||
                (linear && (node[1]&16)) ||
                (!scratch && buffer>=(output?4u:2u)) || (!interleaved && (node[1]>>14)!=1) ||
@@ -198,7 +210,14 @@ private:
             if(kind_==ApuDspKind::Gp && !output && node[3]<0x1800 && uint64_t(node[3])+count>0x1400 &&
                mix_write_ && !mix_write_())
                 return fail("GP MIX DMA publication was rejected");
-            if(circular && node[4]>=node[6]+1)return fail("unqualified GP DMA initial circular offset");
+            // xemu dsp_dma scratch_circular_copy resets an out-of-range initial
+            // cursor to zero (not offset % size). The cold dashboard reaches
+            // GP input 4BD0 with cursor FF7D80, size 2B80. Admit only that
+            // existing exact GP profile; EP/adjacent profiles stay guarded.
+            if(circular && node[4]>=node[6]+1 &&
+               !(kind_==ApuDspKind::Gp && node[1]==0x4bd0u)) {
+                return fail("unqualified GP DMA initial circular offset");
+            }
             return true;
     }
     bool transfer() {
@@ -208,6 +227,9 @@ private:
             const bool output=job.output,linear=job.linear,circular=job.circular;
             const uint32_t count=job.count,format=job.format,buffer=job.buffer;
             const uint32_t size=node[6]+1,width=format==1?2:4;uint32_t offset=node[4];
+            // Decode already qualified any initial wrap; do not mutate the
+            // descriptor until real transport/publication succeeds below.
+            if(circular && offset>=size)offset=0;
             std::array<uint8_t,4096*4> packed{};
             for(unsigned i=0;i<count;++i) {
                 uint32_t sample=output && !job.zero_source?(*words[i]&0xffffff):0;

@@ -92,8 +92,7 @@ static void test_pgraph_setup() {
     CHECK(read(0x400784)==0xffff);
     for(uint32_t command:{1u,2u,0u,3u}) {
         write(0x400788,command);
-        CHECK(failure==(command==1?"NV2A context load configuration is unsupported":
-                        command==2?"NV2A PGRAPH context save is not implemented":
+        CHECK(command==1?failure.find("NV2A context load configuration is unsupported:")==0:failure==(command==2?"NV2A PGRAPH context save is not implemented":
                                    "NV2A unsupported PGRAPH context transfer command"));
         failure.clear();
         CHECK(read(0x400784)==0xffff && read(0x400144)==0x10000100 &&
@@ -208,6 +207,9 @@ static void test_pgraph_context_transfer() {
     enum Rejection { None, FifoEnabled, NoReset, NoFd, NoInvalidate, NoPointer,
                      BadExtent, PrefixHole, TailHole, BadHeader, BadLastField,
                      ChannelValid, WrongChannel, NoInstanceProcessing, MissingZeroMode };
+    // Both reached configurations share actual data transfer; no extra
+    // provenance/idle/preparation guard is waived for kernel boot.
+    for(uint32_t debug7:{0x0028c3ffu,0x0008cfffu})
     for(int reject=None;reject<=MissingZeroMode;++reject) {
         std::string failure;
         xlle::Nv2a gpu([&](const std::string& why){failure=why;});
@@ -237,7 +239,7 @@ static void test_pgraph_context_transfer() {
         for(auto& r:modes) {
             if(reject==NoInstanceProcessing && r[0]==0x400084)continue;
             if(reject==MissingZeroMode && r[0]==0x400090)continue;
-            write(r[0],r[1]);
+            write(r[0],r[0]==0x400880?debug7:r[1]);
         }
         write(0x400720,reject==FifoEnabled?1:0);
         write(0x400144,reject==ChannelValid?0x10010100:0x10000100);
@@ -261,6 +263,7 @@ static void test_pgraph_context_transfer() {
             continue;
         }
         CHECK(failure.empty() && read(0x400148)==0x11 && !read(0x400700) && !read(0x400720));
+        CHECK(read(0x400880)==debug7); // LOAD cannot silently switch execution mode
         const auto after=gpu.first_context_diagnostic_snapshot();
         CHECK(before.pramin==after.pramin && after.context_control==0x10000100 &&
               after.pending.empty() && !gpu.push_methods() && !gpu.semaphore_writes());
@@ -406,7 +409,7 @@ static void test_pgraph_boot_configuration() {
         for(auto& r:setup)write(r[0],r[1]);
         write(0x800040,sizeof(packet));
         if(held) {CHECK(failure.empty());write(0x400720,1);}
-        CHECK(failure=="NV2A boot DEBUG_7 command execution remains unqualified");
+        CHECK(failure.find("NV2A boot DEBUG_7 command execution remains unqualified:")==0);
         CHECK(get32(ram,4096)==0xabcdef01 && gpu.push_methods()==0 && gpu.semaphore_writes()==0);
         // A rejected command was retained, not silently completed or lost.
         // Clearing the test's error string is not a production fallback.

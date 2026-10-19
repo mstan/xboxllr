@@ -1,3 +1,4 @@
+include("${CMAKE_CURRENT_LIST_DIR}/WriteIfDifferent.cmake")
 # The block scheduler must know even the very first TB's instruction count.
 # Upstream suppresses the generation callback until a previous TB exists; that
 # forced deferred bootstrap charges and allowed a cold self-loop to run without
@@ -20,4 +21,4 @@ string(REPLACE "(uc, &cur_tb, &prev_tb, hook->user_data)"
   "(uc, &cur_tb, uc->last_tb ? &prev_tb : NULL, hook->user_data)"
   _xlle_exec_text "${_xlle_exec_text}")
 set(_xlle_exec_derived "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/cpu-exec.c")
-file(WRITE "${_xlle_exec_derived}" "${_xlle_exec_text}")
+xlle_write_if_different("${_xlle_exec_derived}" "${_xlle_exec_text}")

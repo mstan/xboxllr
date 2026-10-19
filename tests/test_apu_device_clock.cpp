@@ -22,8 +22,9 @@ struct Fixture {
     std::unique_ptr<xlle::ApuGpProcessor> gp;
     std::unique_ptr<xlle::ApuEpProcessor> ep;
     std::unique_ptr<xlle::ApuDeviceClock> clock;
-    explicit Fixture(uint64_t epoch=60037) {
-        CHECK(apu.initialize_kernel_audio_handoff() && aci.initialize_kernel_audio_handoff());
+    explicit Fixture(uint64_t epoch=60037,bool cold=false) {
+        if(cold)CHECK(apu.initialize_board_audio_reset());
+        else CHECK(apu.initialize_kernel_audio_handoff() && aci.initialize_kernel_audio_handoff());
         auto read=[this](uint32_t a,void* p,size_t n) {
             if(uint64_t(a)+n>ram.size())return false;
             ++reads;std::memcpy(p,ram.data()+a,n);return true;
@@ -162,6 +163,51 @@ static void admission_and_failure() {
     CHECK(!reentrant.clock->advance(66000));
     CHECK(reentrant.error.find("reentrant audio device clock")!=std::string::npos);
     CHECK(reentrant.pcm.empty() && !reentrant.aci.consumed_pcm_words() && !reentrant.aci.completed_descriptors());
+}
+
+static void cold_first_gp_ready() {
+    constexpr uint64_t epoch=5999,first_boundary=6000,first_frame=6750;
+    for(unsigned kind=0;kind<4;++kind) {
+        const bool cold=kind!=2;
+        Fixture f(epoch,cold);
+        std::vector<uint32_t> program(300,0); // real NOP initialization >119 cycles
+        if(kind==3)program={0x87}; // STOP before the first ready is still unsupported
+        else if(kind==1)program.insert(program.end(),{0x08f485,0xfff,0x08f484,1,0x0af080,304});
+        else {
+            auto events=Fixture::event_program();events[5]+=300;events[11]+=300;
+            program.insert(program.end(),events.begin(),events.end());
+        }
+        f.reg(0x5fffc,1);f.reg(0x1100,0x88);f.reg(0x2000,7);
+        f.reg(0x2040,0x1000);f.reg(0x20d4,1);
+        f.word(0x1000,0x4000);f.word(0x1008,0x5000);
+        std::memcpy(f.ram.data()+0x4000,program.data(),program.size()*4);
+        f.reg(0x200c,0);
+        for(unsigned top:{0x2054u,0x2060u,0x206cu})f.reg(top,0xffff);
+        f.reg(0x1100,0x100f);f.reg(0x1510,0);f.reg(0x3fffc,1);f.reg(0x3fffc,3);
+        f.reg(0x2000,15);CHECK(f.error.empty());
+        if(!cold || kind==3) {
+            CHECK(!f.clock->advance(first_boundary));
+            CHECK(f.error.find("overrun remains unqualified")!=std::string::npos);
+            CHECK(!f.apu.voice_mix_quanta() && !f.apu.ep_frame_events());
+            continue;
+        }
+        CHECK(f.clock->advance(first_boundary));
+        CHECK(f.gp->phase()==xlle::ApuGpPhase::Running && f.gp->first_bootstrap_initializing());
+        CHECK(f.clock->retired(false)>0 && !f.apu.voice_mix_quanta() && !f.apu.ep_frame_events());
+        CHECK(f.aci.current_frame()==1); // independent codec cadence is not skipped
+        CHECK(f.clock->advance(first_boundary+2));
+        CHECK(f.gp->phase()==xlle::ApuGpPhase::Yielded && !f.gp->first_bootstrap_initializing());
+        CHECK(!f.apu.voice_mix_quanta()); // the real first yield supplies readiness only
+        CHECK(f.clock->advance(first_frame) && f.apu.voice_mix_quanta()==1);
+        if(kind==1) {
+            CHECK(!f.clock->advance(first_frame+750));
+            CHECK(f.error.find("overrun remains unqualified")!=std::string::npos);
+            CHECK(f.apu.voice_mix_quanta()==1 && f.apu.gp_frame_outstanding());
+        }else {
+            CHECK(f.clock->advance(first_frame+750));
+            CHECK(f.apu.voice_mix_quanta()==2 && f.error.empty());
+        }
+    }
 }
 
 static void runtime_input_sge() {
@@ -333,7 +379,7 @@ static void producer_groups() {
     }
 }
 int main() {
-    stopped_epoch();clocked_fence();partitioned_active_output();admission_and_failure();runtime_input_sge();drained_control();retirement_timeout();
+    stopped_epoch();clocked_fence();partitioned_active_output();admission_and_failure();cold_first_gp_ready();runtime_input_sge();drained_control();retirement_timeout();
     producer_groups();
     puts("PASS authored shared audio timeline: epoch, actual GP/EP events, partition-independent PCM bytes/stamps and failure retention");
 }

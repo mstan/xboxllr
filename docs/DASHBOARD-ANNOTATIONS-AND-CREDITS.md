@@ -107,6 +107,16 @@ archives, extracted scripts and annotation files stay in ignored private
 build storage. Installation should use a separate private image or a
 qualified asset overlay; never patch the owned base HDD in place.
 
+The private `dashboard-credits-004.aot-private.img` was prepared as a separate
+8 GiB clone. The base was opened read-only, and the clone matched its complete
+SHA-256 before the two XIP replacements. Reopening the clone verified both
+replacement archives and the unchanged dashboard XBE. The original image's
+size and modification time were unchanged. The clone is now marked read-only;
+runtime writes must use copy-on-write. Its adjacent private JSON manifest
+records the base/image/archive hashes and successful offline readback. This
+preparation does not establish that the retail XAP compiler accepts the mod or
+that its menu and notice pages render correctly; those checks remain pending.
+
 ## Focused validation
 
 ```powershell

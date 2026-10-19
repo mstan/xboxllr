@@ -17,8 +17,48 @@
 #include "machine/perf_excl.hpp"
 #include "machine/port61.hpp"
 #include "machine/rtc.hpp"
+#ifdef XLLE_MACHINE_DSP
+#include "machine/apu_device_clock.hpp"
+#include "machine_ep_y.aot-private.h"
+#endif
 
 namespace xlle {
+
+struct XboxMachine::AudioDspOwner {
+#ifdef XLLE_MACHINE_DSP
+    static constexpr uint64_t kClockHz=1125000;
+    ApuGpProcessor gp;
+    ApuEpProcessor ep;
+    ApuDeviceClock clock;
+    AudioDspOwner(McpxApu& apu,McpxAci& aci,FaultFn fault)
+        :gp(apu,fault),ep(apu,fault),clock(apu,gp,ep,aci,0,kClockHz,std::move(fault)) {}
+#endif
+};
+
+XboxMachine::~XboxMachine() = default;
+
+bool XboxMachine::service_audio_time(uint64_t instruction_clock) {
+#ifdef XLLE_MACHINE_DSP
+    if(audio_dsp_) {
+        // Explicit nominal device profile shared with the original-audio
+        // reference. The machine's CPU/PIT clock keeps its existing units.
+        const uint64_t ticks=(instruction_clock/kCpuHz)*AudioDspOwner::kClockHz+
+            (instruction_clock%kCpuHz)*AudioDspOwner::kClockHz/kCpuHz;
+        if(audio_dsp_->clock.advance(ticks))return true;
+        const auto& gp=audio_dsp_->clock.last(false);
+        const auto& ep=audio_dsp_->clock.last(true);
+        std::fprintf(stderr,"[audio] failed at tick=%llu CPU=%llu GP phase=%u boot=%llu pc=%06x cycles=%u EP phase=%u boot=%llu pc=%06x cycles=%u\n",
+            static_cast<unsigned long long>(audio_dsp_->clock.ticks()),
+            static_cast<unsigned long long>(instruction_clock),unsigned(audio_dsp_->gp.phase()),
+            static_cast<unsigned long long>(audio_dsp_->gp.bootstraps()),gp.pc,gp.cycles,
+            unsigned(audio_dsp_->ep.phase()),static_cast<unsigned long long>(audio_dsp_->ep.bootstraps()),ep.pc,ep.cycles);
+        return false;
+    }
+#else
+    (void)instruction_clock;
+#endif
+    return true;
+}
 
 XboxMachine::XboxMachine() : XboxMachine(Config{}) {}
 
@@ -86,7 +126,12 @@ bool XboxMachine::load_blob(uint32_t addr, const std::string& path) {
 
 void XboxMachine::init_devices() {
     // A device faults the machine by asking the CPU floor for a loud stop (PRINCIPLES §3).
-    FaultFn fault = [this](const std::string& why) { cpu_->request_stop(why); };
+    FaultFn fault = [this](const std::string& why) {
+        if(device_fault_.empty()) {
+            device_fault_=why;
+            cpu_->request_stop(why);
+        }
+    };
 
     auto pci = std::make_unique<PciHost>(fault);
     pci_ = pci.get();
@@ -175,6 +220,7 @@ void XboxMachine::init_devices() {
     // so accesses route to the device model instead of faulting as unmapped memory.
     auto nv2a = std::make_unique<Nv2a>(fault, config_.nv2a_renderer);
     nv2a_ = nv2a.get();
+    if(!nv2a_->initialize_board_vga_reset())return;
     nv2a_->set_mem_access(
         [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
         [this](uint32_t addr, const void* buf, size_t n) {
@@ -200,6 +246,10 @@ void XboxMachine::init_devices() {
     // MCPX APU at 0xFE800000 (512 KB), including timed voice-idle completion.
     auto apu = std::make_unique<McpxApu>(fault);
     apu_ = apu.get();
+    if (!apu_->initialize_board_audio_reset()) {
+        apu_=nullptr; // initializer already requested a loud CPU stop
+        return;
+    }
     apu_->set_mem_access(
         [this](uint32_t addr, void* buf, size_t n) { return cpu_->read_mem(addr, buf, n); },
         [this](uint32_t addr, const void* buf, size_t n) {
@@ -242,6 +292,14 @@ void XboxMachine::init_devices() {
     cpu_->map_mmio(cbase, csize,
                    [this](uint32_t a, int s) { return mmio_read(a, s); },
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
+#ifdef XLLE_MACHINE_DSP
+    // The immutable lookup is an explicit private input; the original kernel
+    // supplies the executable bootstrap through actual scratch DMA later.
+    if(!apu_->install_ep_y_lookup(kMachineEpYLookup,2048))return;
+    audio_dsp_=std::make_unique<AudioDspOwner>(*apu_,*aci_,fault);
+    std::printf("[audio] sole GP/EP processors; nominal clock=%lluHz; codec output=headless\n",
+                static_cast<unsigned long long>(AudioDspOwner::kClockHz));
+#endif
 
     // Two standard four-port OHCI controllers. USB0 routes to IRQ1 and carries the
     // deterministic Controller S; USB1 routes to IRQ9 and has no downstream device.
@@ -291,6 +349,13 @@ uint32_t XboxMachine::mmio_read(uint32_t addr, int size) {
         // this is the single funnel all of them pass through.
         perf_excl::ScopeIf device(perf_excl::kOtherDevice,
                                   d != static_cast<MmioDevice*>(nv2a_));
+        if(audio_dsp_ && (d==static_cast<MmioDevice*>(apu_) || d==static_cast<MmioDevice*>(aci_))) {
+            uint64_t clock;
+            if(!cpu_->mmio_instruction_clock(clock)) {
+                cpu_->request_stop("audio MMIO requires the exact synchronous instruction clock");return 0;
+            }
+            if(!service_audio_time(clock))return 0;
+        }
         val = d->mmio_read(addr, size);
     } else {
         char b[96];
@@ -313,6 +378,13 @@ void XboxMachine::mmio_write(uint32_t addr, int size, uint32_t value) {
     if (d) {
         perf_excl::ScopeIf device(perf_excl::kOtherDevice,
                                   d != static_cast<MmioDevice*>(nv2a_));
+        if(audio_dsp_ && (d==static_cast<MmioDevice*>(apu_) || d==static_cast<MmioDevice*>(aci_))) {
+            uint64_t clock;
+            if(!cpu_->mmio_instruction_clock(clock)) {
+                cpu_->request_stop("audio MMIO requires the exact synchronous instruction clock");return;
+            }
+            if(!service_audio_time(clock))return;
+        }
         d->mmio_write(addr, size, value);
     } else {
         char b[96];
@@ -422,9 +494,9 @@ static inline uint64_t insns_at_tick(uint64_t ticks, uint64_t rate_num, uint64_t
 // changes: the PIT input clock ticks every ~652 instructions and the NV2A retrace phase
 // every ~12,222, but neither is an event -- they are continuous values the guest samples by
 // MMIO, and they stay sampled at the slice cadence exactly as they were before this change
-// (making them exact needs lazy, read-time evaluation, which is a separate change). Every
-// event here is >= ~733,333 instructions away, so at the default 4096-instruction chunk the
-// chunk is always the binding term and the device cadence is unchanged.
+// (making them exact needs lazy, read-time evaluation, which is a separate change).
+// The optional sole audio processors add a boundary every651/652 instructions;
+// their execution and shared-memory ordering require that finer service cadence.
 uint64_t XboxMachine::next_device_deadline(uint64_t insns) const {
     uint64_t d = UINT64_MAX;
     const auto take = [&d, insns](uint64_t n) {
@@ -437,6 +509,11 @@ uint64_t XboxMachine::next_device_deadline(uint64_t insns) const {
     take(next_rate_boundary(insns, 60, kCpuHz));
     // APU / AC'97 256-sample frame (187.5 Hz).
     take(next_rate_boundary(insns, 375, kCpuHz * 2));
+#ifdef XLLE_MACHINE_DSP
+    // A release inside the slice can create runnable work. Bound even held
+    // slices so elapsed audio work never sees CPU stores from later quanta.
+    if(audio_dsp_)take(next_rate_boundary(insns,AudioDspOwner::kClockHz,kCpuHz));
+#endif
     // PIT channel 0's next IRQ0 edge, asked of the device because the period is whatever the
     // guest programmed (the stock dashboard runs it at ~998.7 Hz).
     if (pit_) {
@@ -657,6 +734,7 @@ bool XboxMachine::dump_det_ring(const std::string& path) const {
 }
 
 uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
+    if(!device_fault_.empty()) {err=device_fault_;return 0;}
     // Execute in short chunks so the interrupt controller can deliver external IRQs at clean
     // instruction boundaries between chunks (Unicorn has no native IRQ path — see the CPU
     // floor's inject_interrupt). The PIT clock advances with retired instructions.
@@ -696,7 +774,7 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         }
         // Slice budget = the tightest of: the configured chunk, what is left of the run, and
         // the next device event deadline. The last term is what lets the chunk grow without
-        // stepping over an interrupt edge; at the default 4096 it is never the binding term.
+        // stepping over an interrupt edge or an active audio processor quantum.
         const uint64_t deadline = next_device_deadline(total_insns_);
         uint64_t chunk = std::min(cpu_chunk_insns_, max - done);
         if (deadline > total_insns_ && deadline - total_insns_ < chunk)
@@ -765,12 +843,20 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
                 nv2a_->set_frame_phase(static_cast<uint32_t>((t60 % kCpuHz) * 1000 / kCpuHz));
             }
             // APU setup-engine frame: 256 samples / 48 kHz = 5.333 ms (187.5 Hz).
-            if (apu_) {
+            if (audio_dsp_) {
+                if(!service_audio_time(total_insns_)) {
+                    err=device_fault_.empty()?"shared audio device clock failed":device_fault_;
+                    break;
+                }
+            } else if (apu_) {
                 apu_->set_time(total_insns_,kCpuHz);
                 apu_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
             }
             // AC'97 PCM output consumes the same 256-sample frames, without host audio output.
-            if (aci_) aci_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+            if (aci_ && !audio_dsp_) {
+                aci_->set_time(total_insns_,kCpuHz);
+                aci_->set_frame(total_insns_ * 375 / (kCpuHz * 2));
+            }
             // USB OHCI start-of-frame cadence is 1 kHz.
             if (ohci0_) ohci0_->set_frame(total_insns_ * 1000 / kCpuHz);
             if (ohci1_) ohci1_->set_frame(total_insns_ * 1000 / kCpuHz);

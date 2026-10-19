@@ -361,9 +361,12 @@ static void test_loaded_context_initializers() {
 
     for (bool unsupported : {false,true}) {
         LoadedContextFixture f;
-        f.emit(0,1); f.emit(0x194,2); f.emit(0x208,0x128);
+        f.emit(0,1); f.emit(0x194,2);
+        // Actual sample layout must be known and single-sample. Raster MSAA
+        // enable/mask is not a clear dependency, unlike ordinary drawing.
+        if(unsupported)f.emit(0x208,0x1128);
         f.emit(0x1d90,0x12345678); f.emit(0x1d98,1u<<16); f.emit(0x1d9c,1u<<16);
-        if (unsupported) f.emit(0x1d7c,0xffff0001); // legal setter, unsupported consumer
+        f.emit(0x1d7c,0xffff0000);
         const auto before=f.gpu.push_methods();
         const uint32_t stopped_get=f.put+8;
         f.emit(0x1d94,0xf0); f.emit(0x50,7); f.kick();

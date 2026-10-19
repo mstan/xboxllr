@@ -1,3 +1,4 @@
+include("${CMAKE_CURRENT_LIST_DIR}/WriteIfDifferent.cmake")
 # Restore architectural EIP/condition-code metadata on Unicorn's unhandled
 # load/fetch errors. The upstream early-exit branches currently skip QEMU's
 # restore helper and report TB-entry state. Tests exercise a preceding register
@@ -24,7 +25,7 @@ set(_xlle_tlb_derived "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/cputlb.c")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn")
 # Keep the fault-corrected legacy policy available to the controlled test. It
 # compiles this copy in its own object, never into the product alongside cputlb.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/cputlb-host-timed.c" "${_xlle_tlb_text}")
+xlle_write_if_different("${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/cputlb-host-timed.c" "${_xlle_tlb_text}")
 if(NOT XLLE_HOST_TIMED_TLB)
   # The upstream 100 ms host window changes software cache residency (and thus
   # AOT eligibility) under host load. Retain adaptive growth/shrink thresholds,
@@ -46,7 +47,7 @@ if(NOT XLLE_HOST_TIMED_TLB)
     _xlle_tlb_text "${_xlle_tlb_text}")
   set(_xlle_tlb_text "#define XLLE_TLB_RESIZE_FLUSH_WINDOW 100\n${_xlle_tlb_text}")
 endif()
-file(WRITE "${_xlle_tlb_derived}" "${_xlle_tlb_text}")
+xlle_write_if_different("${_xlle_tlb_derived}" "${_xlle_tlb_text}")
 
 # QEMU already decodes the exact instruction index while restoring a fault.
 # Publish that cold-path result so our block clock can remove the unexecuted
@@ -61,10 +62,46 @@ string(REPLACE "    restore_state_to_opc(env, tb, data);"
   "    xlle_unicorn_record_restore(cpu->uc, tb->pc, tb->size, tb->icount, i, reset_icount);\n    restore_state_to_opc(env, tb, data);"
   _xlle_restore_text "${_xlle_restore_text}")
 set(_xlle_restore_derived "${CMAKE_CURRENT_BINARY_DIR}/generated/unicorn/translate-all.c")
+# The same pinned SLEB128 search table identifies a synchronous MMIO helper's
+# containing instruction. Decode it without cpu_restore_state_to_opc, icount
+# changes, block invalidation or per-instruction instrumentation.
+string(APPEND _xlle_restore_text [=[
+
+int xlle_unicorn_query_mmio_prefix(void* engine, xlle_unicorn_restore_record* out)
+{
+    struct uc_struct* uc = (struct uc_struct*)engine;
+    TranslationBlock* tb;
+    uintptr_t searched_pc, host_pc, check_offset;
+    uint8_t* p;
+    int i, j;
+    if (!uc || !out || uc->arch != UC_ARCH_X86 || uc->mode != UC_MODE_32 || !uc->cpu)
+        return 0;
+    searched_pc = uc->cpu->mem_io_pc;
+    check_offset = searched_pc - (uintptr_t)uc->tcg_ctx->code_gen_buffer;
+    if (check_offset >= uc->tcg_ctx->code_gen_buffer_size || searched_pc < GETPC_ADJ)
+        return 0;
+    tb = tcg_tb_lookup(uc->tcg_ctx, searched_pc);
+    if (!tb || !tb->icount) return 0;
+    searched_pc -= GETPC_ADJ;
+    host_pc = (uintptr_t)tb->tc.ptr;
+    if (searched_pc < host_pc || searched_pc - host_pc >= tb->tc.size) return 0;
+    p = (uint8_t*)tb->tc.ptr + tb->tc.size;
+    for (i = 0; i < tb->icount; ++i) {
+        for (j = 0; j < TARGET_INSN_START_WORDS; ++j) (void)decode_sleb128(&p);
+        host_pc += decode_sleb128(&p);
+        if (host_pc > searched_pc) {
+            xlle_unicorn_restore_record value = {tb->pc, tb->size, tb->icount, i};
+            *out = value;
+            return 1;
+        }
+    }
+    return 0;
+}
+]=])
 string(REPLACE "        tlb_reset_dirty_by_vaddr(cpu, pc & TARGET_PAGE_MASK,\n                                (pc & ~TARGET_PAGE_MASK) + tb->size);"
   "        xlle_unicorn_protect_code_aliases(cpu->uc, phys_pc, phys_page2);"
   _xlle_restore_text "${_xlle_restore_text}")
-file(WRITE "${_xlle_restore_derived}" "#include \"unicorn_aot_bridge.h\"\n${_xlle_restore_text}")
+xlle_write_if_different("${_xlle_restore_derived}" "#include \"unicorn_aot_bridge.h\"\n${_xlle_restore_text}")
 
 # A tier boundary must not change an instruction's TSC value. Publish the
 # instruction's translation-time index only at the four TSC read/write opcodes;
@@ -103,7 +140,7 @@ endif()
 string(REPLACE "${_xlle_cmpxchg_old}"
   "${_xlle_cmpxchg_old}            gen_update_cc_op(s);\n"
   _xlle_translate_text "${_xlle_translate_text}")
-file(WRITE "${_xlle_translate_derived}" "#include \"unicorn_metrics.h\"\n${_xlle_translate_text}")
+xlle_write_if_different("${_xlle_translate_derived}" "#include \"unicorn_metrics.h\"\n${_xlle_translate_text}")
 
 # The pinned Unicorn omitted IA32_TIME_STAMP_COUNTER from RDMSR/WRMSR. Bind
 # both to the same clock as RDTSC. Xbox's P6 WRMSR writes the low 32 bits and
@@ -126,7 +163,7 @@ list(LENGTH _xlle_tsc_cases _xlle_tsc_case_count)
 if(NOT _xlle_tsc_case_count EQUAL 2)
   message(FATAL_ERROR "TSC MSR integration did not install both read and write cases")
 endif()
-file(WRITE "${_xlle_misc_derived}" "${_xlle_misc_text}")
+xlle_write_if_different("${_xlle_misc_derived}" "${_xlle_misc_text}")
 include("${CMAKE_CURRENT_LIST_DIR}/UnicornDeadlines.cmake")
 get_target_property(_xlle_x86_sources x86_64-softmmu SOURCES)
 set(_xlle_x86_updated)

@@ -81,7 +81,8 @@ public:
     // Prime once before configuration or consumption, without traversing elapsed
     // frames before this codec owner's explicit initialized-kernel handoff.
     bool prime_frame_clock(uint64_t frame) {
-        if (faulted_ || !kernel_handoff_ || state_used_ || frame_clock_primed_ ||
+        const bool cold=!kernel_handoff_ && !clock_known_ && !glob_cnt_ && !glob_sta_;
+        if (faulted_ || (!kernel_handoff_ && !cold) || state_used_ || frame_clock_primed_ ||
             servicing_ || pcm_inflight_) {
             device_fault("codec frame clock requires a fresh stopped kernel handoff");return false;
         }
@@ -112,6 +113,17 @@ public:
         }
         clock_known_ = true; clock_ticks_ = ticks; clock_hz_ = hz;
         link_frame_ = (ticks/hz)*48000 + ((ticks%hz)*48000)/hz;
+        // AC_RESET# release starts the modeled link. Readiness is serviced by
+        // the shared clock, never by a GLOB_STA poll. One complete link frame is a
+        // nominal software timing policy, not a measured silicon reset delay.
+        // WM9709 Rev1.3 pp5/6/11 specifies reset/clock startup and the48kHz
+        // DAC-ready slot; Intel AC97 Rev2.3 sections4.4.1/9.2.1 describes
+        // reset release/readiness. Neither establishes this exact latency.
+        if(link_start_pending_ && ticks>=link_ready_ticks_) {
+            link_start_pending_=false;
+            glob_sta_|=kGsS0cr;
+            update_irq();
+        }
         if (nam_pending_ && link_frame_ >= nam_complete_frame_) {
             nam_pending_ = false; cas_ = 0;
         }
@@ -265,6 +277,22 @@ private:
 
         switch (off) {
             case 0x2c:
+                // The cold kernel releases AC_RESET# (bit1). This is distinct
+                // from resetting an active/warm stream, whose DMA ownership
+                // must not be discarded. xemu/QEMU establishes codec-ready
+                // independently of its unimplemented reset-control writes;
+                // retain an explicit, clocked cold-link transition here.
+                if(size==4 && !kernel_handoff_ && glob_cnt_==0 && value==2 &&
+                   clock_known_ && clock_ticks_<=UINT64_MAX-(clock_hz_/48000+(clock_hz_%48000!=0)) && !nam_pending_ &&
+                   !link_start_pending_ && !servicing_ && !pcm_inflight_) {
+                    for(const auto& stream:bm_)if(stream.bd_valid || (stream.cr&CR_RPBM)) {
+                        device_fault("cold AC97 release requires stopped descriptor owners");return;
+                    }
+                    glob_cnt_=2;link_start_pending_=true;
+                    link_ready_ticks_=clock_ticks_+clock_hz_/48000+(clock_hz_%48000!=0);
+                    return;
+                }
+                if(size==4 && glob_cnt_==2 && value==2)return;
                 // Active/cold/warm reset needs its own link/reset owner.
                 // Do not silently discard the original driver's reset write.
                 if (size != 4 || !kernel_handoff_ || value != glob_cnt_)
@@ -511,6 +539,8 @@ private:
     uint32_t spdif_control_ = 0;
     bool kernel_handoff_ = false, state_used_ = false, spdif_control_known_ = false;
     bool clock_known_ = false, nam_pending_ = false;
+    bool link_start_pending_=false;
+    uint64_t link_ready_ticks_=0;
     uint64_t clock_ticks_ = 0, clock_hz_ = 0, link_frame_ = 0, nam_complete_frame_ = 0;
     int irq_num_ = 6;
     bool irq_level_ = false, faulted_ = false;

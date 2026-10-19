@@ -2845,6 +2845,8 @@ int main(int argc, char** argv) {
         }
         nv2a_renderer_name = "hle-native";
         std::printf("[build] graphics=HLE selection=compile-time pipeline=whole-renderer\n");
+        std::printf("[host] picture-domain=HLE digital RGB with blanking/DAC LUT; "
+                    "TV matrix/filter and analog encoding omitted\n");
     }
 #else
     if (std::strcmp(nv2a_renderer_name, "software")) {
@@ -4531,7 +4533,7 @@ int main(int argc, char** argv) {
                     frame_series_prefix,
                     static_cast<unsigned long long>(sampled_at));
                 live_scanout_error.clear();
-                const bool captured = mach.nv2a()->capture_scanout(
+                const bool captured = mach.nv2a()->capture_host_picture(
                     live_rgba, live_scanout, live_scanout_error);
                 const bool written =
                     captured &&
@@ -4660,7 +4662,7 @@ int main(int argc, char** argv) {
                 const bool path_ok = path_size > 0 &&
                                      static_cast<size_t>(path_size) < sizeof(path);
                 const bool captured = path_ok && mach.nv2a() &&
-                    mach.nv2a()->capture_scanout(rgba, scanout, error);
+                    mach.nv2a()->capture_host_picture(rgba, scanout, error);
                 const bool written = captured &&
                     write_frame_ppm(path, rgba, scanout.width, scanout.height);
                 std::printf(
@@ -5055,7 +5057,7 @@ int main(int argc, char** argv) {
                                 // straight into the SDL texture in the guest's own
                                 // format (little-endian A8R8G8B8 == SDL BGRX32).
                                 size_t direct_size = 0;
-                                const uint8_t* direct = mach.nv2a()->scanout_direct_bytes(
+                                const uint8_t* direct = mach.nv2a()->host_picture_direct_bytes(
                                     live_scanout, direct_size, live_scanout_error);
                                 if (direct) {
                                     host_input.note_capture(cap_t0, direct_size, true);
@@ -5071,7 +5073,7 @@ int main(int argc, char** argv) {
                                         static_cast<size_t>(live_scanout.pitch), cap_t0);
                                 }
                             }
-                            if (!presented && mach.nv2a()->capture_scanout(
+                            if (!presented && mach.nv2a()->capture_host_picture(
                                                   live_rgba, live_scanout,
                                                   live_scanout_error)) {
                                 // Fallback / arm A: the per-pixel scalar conversion.
@@ -5520,7 +5522,7 @@ int main(int argc, char** argv) {
             std::string scanout_error;
             const bool frame_available =
                 mach.nv2a() &&
-                mach.nv2a()->capture_scanout(frame_rgba, scanout, scanout_error);
+                mach.nv2a()->capture_host_picture(frame_rgba, scanout, scanout_error);
             bool frame_output_ok = true;
             std::printf("[2bl] retired %llu instructions; final eip=0x%08x eax=0x%08x ecx=0x%08x\n",
                         (unsigned long long)n, f.eip, f.eax, f.ecx);
@@ -6193,13 +6195,15 @@ int main(int argc, char** argv) {
                             mach.nv2a()->last_immediate_quad_fullscreen_reject_mask(),
                             mach.nv2a()->last_immediate_quad_fullscreen_raster_reject_mask());
                 std::printf("[2bl] NV2A vertices: batches=%llu submitted=%llu "
-                            "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u\n",
+                            "attr-fetches=%llu primitives=%llu triangles=%llu max-index=%u "
+                            "hle-default-w-uses=%llu\n",
                             (unsigned long long)mach.nv2a()->vertex_batches(),
                             (unsigned long long)mach.nv2a()->submitted_vertices(),
                             (unsigned long long)mach.nv2a()->vertex_attribute_fetches(),
                             (unsigned long long)mach.nv2a()->assembled_primitives(),
                             (unsigned long long)mach.nv2a()->assembled_triangles(),
-                            mach.nv2a()->largest_vertex_index());
+                            mach.nv2a()->largest_vertex_index(),
+                            (unsigned long long)mach.nv2a()->hle_default_w_uses());
                 std::printf("[2bl] NV2A immediate vertices: methods=%llu vertices=%llu "
                             "batches=%llu\n",
                             (unsigned long long)mach.nv2a()->immediate_methods(),

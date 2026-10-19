@@ -713,12 +713,14 @@ uint64_t UnicornFloor::run_unicorn(uint32_t start_eip, uint64_t max_insns, std::
         // violation. Both paths bound the slice with their own hook instead.
         // `timeout` is ALWAYS 0 as well: it reads the host clock (uc.c:1097) and would make
         // the run depend on wall time (PRINCIPLES: guest time is retired instructions).
+        unicorn_execution_active_ = true;
         if (perf::g_enabled) {
             perf::ScopedAdd t(perf::g_ns_cpu, perf::g_calls_cpu);
             e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/0);
         } else {
             e = uc_emu_start(uc, start_eip, 0, /*timeout=*/0, /*count=*/0);
         }
+        unicorn_execution_active_ = false;
         if (e == UC_ERR_OK && stop_reason_.empty() && native_service_redirect_) {
             start_eip = get_regs().eip;
             native_service_redirect_ = false;
@@ -1003,15 +1005,35 @@ bool UnicornFloor::unmapped_trampoline(uc_struct*, int type, uint64_t addr, int,
 uint64_t UnicornFloor::mmio_read_trampoline(uc_struct*, uint64_t offset, unsigned size,
                                             void* user) {
     auto* reg = static_cast<MmioRegion*>(user);
+    struct Scope {unsigned& depth;Scope(unsigned& d):depth(d){++depth;}~Scope(){--depth;}} scope(reg->self->mmio_callback_depth_);
     return reg->r ? reg->r(reg->base + static_cast<uint32_t>(offset), static_cast<int>(size)) : 0;
 }
 
 void UnicornFloor::mmio_write_trampoline(uc_struct*, uint64_t offset, unsigned size,
                                          uint64_t value, void* user) {
     auto* reg = static_cast<MmioRegion*>(user);
+    struct Scope {unsigned& depth;Scope(unsigned& d):depth(d){++depth;}~Scope(){--depth;}} scope(reg->self->mmio_callback_depth_);
     if (reg->w)
         reg->w(reg->base + static_cast<uint32_t>(offset), static_cast<int>(size),
                static_cast<uint32_t>(value));
+}
+
+bool UnicornFloor::mmio_instruction_clock(uint64_t& clock) const {
+    if(!unicorn_execution_active_ || mmio_callback_depth_!=1 ||
+       !restore_charge_active_ || !stats_.tb_entries)return false;
+    xlle_unicorn_restore_record prefix{};
+    if(!xlle_unicorn_query_mmio_prefix(uc_,&prefix) || prefix.completed>=prefix.total ||
+       prefix.pc!=block_pc_ring_[(stats_.tb_entries-1)&(kBlockPcRing-1)])return false;
+    uint64_t value;
+    if(insn_mode_) {
+        if(!seq_)return false;
+        value=seq_-1;
+    } else {
+        if(prefix.size!=last_size_ || prefix.total!=last_icount_ || seq_<prefix.total)return false;
+        value=seq_-prefix.total+prefix.completed;
+    }
+    clock=value;
+    return true;
 }
 
 // Silence unused-parameter warnings for the hook handles we retain for lifetime clarity.

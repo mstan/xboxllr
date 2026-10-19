@@ -15,6 +15,56 @@ static void put32(std::vector<uint8_t>& mem, uint32_t addr, uint32_t value) {
 }
 
 int main() {
+    for(uint64_t epoch:{uint64_t(0),uint64_t(1234)}) {
+        std::string error;xlle::McpxAci cold([&](const std::string& why){error=why;});
+        CHECK(cold.prime_frame_clock(epoch) && cold.current_frame()==epoch && error.empty());
+        CHECK(!cold.completed_descriptors() && !cold.consumed_pcm_words());
+        CHECK(!cold.prime_frame_clock(epoch));
+    }
+    {
+        std::string error;xlle::McpxAci cold([&](const std::string& why){error=why;});
+        cold.set_time(0,480000);CHECK(!cold.prime_frame_clock(1));
+    }
+    // Cold AC_RESET# release is a timed link transition. Polling must not
+    // complete it, and a repeated release cannot postpone readiness.
+    for(unsigned life=0;life<3;++life) {
+        std::string error;
+        xlle::McpxAci cold([&](const std::string& why){error=why;});
+        constexpr auto b=xlle::McpxAci::kBase;
+        cold.set_time(0,480000);
+        CHECK(cold.mmio_read(b+0x12c,4)==0);
+        cold.mmio_write(b+0x12c,4,2);
+        for(unsigned poll=0;poll<16;++poll)CHECK(!(cold.mmio_read(b+0x130,4)&0x100));
+        cold.set_time(9,480000);cold.mmio_write(b+0x12c,4,2);
+        CHECK(!(cold.mmio_read(b+0x130,4)&0x100));
+        cold.set_time(10,480000);
+        CHECK(cold.mmio_read(b+0x12c,4)==2 && (cold.mmio_read(b+0x130,4)&0x100));
+        CHECK(cold.mmio_read(b+0x7c,2)==0x574d && error.empty());
+        cold.mmio_write(b+0x12c,4,6); // warm reset remains owned/guarded
+        CHECK(!error.empty() && cold.mmio_read(b+0x12c,4)==2);
+        CHECK(!cold.completed_descriptors() && !cold.consumed_pcm_words());
+    }
+    {
+        std::string error;xlle::McpxAci cold([&](const std::string& why){error=why;});
+        constexpr auto b=xlle::McpxAci::kBase;
+        cold.set_time(9,480000);cold.mmio_write(b+0x12c,4,2);
+        cold.set_time(10,480000);CHECK(!(cold.mmio_read(b+0x130,4)&0x100));
+        cold.set_time(18,480000);CHECK(!(cold.mmio_read(b+0x130,4)&0x100));
+        cold.set_time(19,480000);CHECK((cold.mmio_read(b+0x130,4)&0x100) && error.empty());
+    }
+    for(bool overflow:{false,true}) {
+        std::string error;xlle::McpxAci cold([&](const std::string& why){error=why;});
+        constexpr auto b=xlle::McpxAci::kBase;
+        cold.set_time(overflow?UINT64_MAX-1:0,480001);
+        cold.mmio_write(b+0x12c,4,2);
+        if(overflow) {
+            CHECK(!error.empty() && cold.mmio_read(b+0x12c,4)==0);
+            CHECK(!(cold.mmio_read(b+0x130,4)&0x100));
+        } else {
+            cold.set_time(10,480001);CHECK(!(cold.mmio_read(b+0x130,4)&0x100));
+            cold.set_time(11,480001);CHECK((cold.mmio_read(b+0x130,4)&0x100) && error.empty());
+        }
+    }
     constexpr uint32_t base = xlle::McpxAci::kBase;
     constexpr uint32_t bdbar = 0x1000;
     constexpr uint32_t buffer = 0x2000;

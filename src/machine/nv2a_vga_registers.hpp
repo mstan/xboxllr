@@ -13,6 +13,17 @@ public:
                port==0x3cc || port==0x3ce || port==0x3cf;
     }
     static bool attribute(uint32_t port) {return port==0x3c0 || port==0x3c1;}
+    // Explicit cold-board attribute reset, separate from unknown retained
+    // VGA state. Reference xemu vga_common_reset: index0, index phase, AR0.
+    // Does not provide display signals, clocks or other VGA mode state.
+    bool initialize_board_attribute_reset() {
+        if(phase_known_ || attribute_index_known_ || sequencer_index_known_ ||
+           graphics_index_known_ || misc_known_ || subsystem_enable_received_)
+            return reject("NV2A VGA board reset requires fresh state");
+        attribute_.fill(0);attribute_known_=(1u<<attribute_.size())-1;
+        attribute_address_=0;attribute_index_known_=true;
+        attribute_data_=false;phase_known_=true;return true;
+    }
     // An initialized-mode caller precondition, not a power-on reset value.
     // Original AV3 starts with an index write without first reading INP1.
     bool establish_attribute_index_phase() {
@@ -79,7 +90,11 @@ public:
     }
     bool read_attribute(uint32_t port,uint32_t& value) {
         if(!attribute_index_known_)return reject("NV2A attribute read without owned index");
-        if(port==0x3c0){value=attribute_address_;return true;}
+        if(port==0x3c0){
+            // VGA reference: address read during the data phase returns
+            // zero; reads never consume/toggle the write flip-flop.
+            value=attribute_data_?0:attribute_address_;return true;
+        }
         const unsigned index=attribute_address_&31;
         if(index<16 && (attribute_address_&32))return reject("NV2A palette read while display owns palette");
         if(!(attribute_known_&(1u<<index)))return reject("NV2A attribute read before register programming");

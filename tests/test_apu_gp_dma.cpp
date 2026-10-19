@@ -9,12 +9,12 @@
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"GP DMA FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 struct Fixture {
     std::vector<uint8_t> ram=std::vector<uint8_t>(0x10000,0xa5);
-    std::string error;unsigned transfers=0;
+    std::string error;unsigned transfers=0;uint32_t fail_write=~0u;
     xlle::McpxApu apu{[this](const std::string& e){error=e;}};
     Fixture() {
         apu.set_mem_access(
             [this](uint32_t a,void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(p,ram.data()+a,n);return true;},
-            [this](uint32_t a,const void* p,size_t n){if(uint64_t(a)+n>ram.size())return false;std::memcpy(ram.data()+a,p,n);++transfers;return true;});
+            [this](uint32_t a,const void* p,size_t n){if(uint64_t(a)+n>ram.size() || a==fail_write)return false;std::memcpy(ram.data()+a,p,n);++transfers;return true;});
         for(unsigned i=0;i<4;++i){const uint32_t page=0x8000-i*0x1000;std::memcpy(ram.data()+0x1000+i*8,&page,4);}
         apu.mmio_write(0xfe802040,4,0x1000);apu.mmio_write(0xfe8020d4,4,3);
     }
@@ -189,8 +189,100 @@ static void bit9_profile_boundaries() {
         CHECK(!f.apu.gp_dma_nodes() && f.ram==before && f.word(0x400)==0);
     }
 }
+static void cold_gp_circular_initial_cursor() {
+    // Authored byte transport regression for the reached 4BD0 profile.
+    // Distinguish reset-to-zero from modulo, include exact-size boundary,
+    // multiple wraps, and the original 32-word / FF7D80 cursor shape.
+    for(unsigned size:{11u,0x2b80u})for(unsigned initial:{size,size+3,0xff7d80u})
+    for(unsigned count:{4u,32u}) {
+        Fixture f;const unsigned base=0x100,bank=0x524;
+        for(unsigned i=0;i<size;++i)f.scratch(base+i)=uint8_t(i*13+7);
+        f.node(0x20,0x4020,2,false,bank,count,initial,size,base);
+        f.word(0x21)=0x4bd0;
+        for(unsigned i=0;i<count;++i)f.word(bank+i)=0xabcdef;
+        const auto before=f.ram;f.go(0x20);
+        CHECK(f.error.empty() && f.ram==before && f.transfers==0);
+        for(unsigned i=0;i<count;++i) {
+            uint32_t packed=0;
+            for(unsigned b=0;b<4;++b)packed|=uint32_t(uint8_t(((i*4+b)%size)*13+7))<<(b*8);
+            CHECK(f.word(bank+i)==packed>>8);
+        }
+        CHECK(f.word(0x24)==(count*4)%size && f.apu.gp_dma_nodes()==1);
+        uint32_t status=0;CHECK(f.apu.gp_read(0xffffc5,status) && status==0x80);
+    }
+    // A failed physical read must not publish samples, cursor or completion.
+    {
+        Fixture f;f.node(0x20,0x4020,2,false,0x524,32,0xff7d80,0x2b80,0x10000);
+        f.word(0x21)=0x4bd0;f.word(0x524)=0xabcdef;
+        CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1));
+        CHECK(!f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096));
+        CHECK(f.word(0x24)==0xff7d80 && f.word(0x524)==0xabcdef && !f.apu.gp_dma_nodes());
+    }
+    // Normalization does not qualify output, adjacent flags, or EP circular.
+    for(bool ep:{false,true})for(unsigned control:{0x4bd0u,0x49d0u,0x4bd2u,0x4bc0u}) {
+        if(!ep && control==0x4bd0)continue;
+        std::array<uint32_t,0x3800> memory{};unsigned reads=0;std::string error;
+        xlle::ApuDspDma dma([&](uint32_t a)->uint32_t*{return a<memory.size()?&memory[a]:nullptr;},
+            [&](uint32_t,void*,uint32_t,bool){++reads;return true;},
+            [](unsigned,void*,uint32_t,bool){return false;},
+            [&](const std::string& e){error=e;},{},{},ep?xlle::ApuDspKind::Ep:xlle::ApuDspKind::Gp);
+        const uint32_t node[]={0x4020,control,32,0x524,0xff7d80,0x100,0x2b7f};
+        std::copy(std::begin(node),std::end(node),memory.begin()+0x20);const auto before=memory;
+        CHECK(dma.write(0xffffd4,0x20) && dma.write(0xffffd6,1) && !dma.service(4096));
+        CHECK(!error.empty() && !reads && !dma.nodes() && memory==before);
+    }
+}
+static void cold_gp_stereo_fifo() {
+    // Literal PCM16 bytes from two distinct signed24 channels, truncating
+    // the low8 bits. Cross the real FIFO ring end after three bytes.
+    const uint32_t left[]={0x123456,0xabcdef,0x800001,0x7fffff};
+    const uint32_t right[]={0xfedcba,0x010203,0x0000ff,0xff0000};
+    const uint8_t expected_bytes[]={0x34,0x12,0xdc,0xfe,0xcd,0xab,0x02,0x01,
+                                   0x00,0x80,0x00,0x00,0xff,0x7f,0x00,0xff};
+    for(bool fail:{false,true}) {
+        Fixture f;
+        f.apu.mmio_write(0xfe802044,4,0x1000);f.apu.mmio_write(0xfe8020d8,4,3);
+        f.apu.mmio_write(0xfe803024,4,0);f.apu.mmio_write(0xfe803028,4,0x100);
+        f.apu.mmio_write(0xfe80302c,4,0xfd);
+        for(unsigned i=0;i<32;++i){f.word(0xc00+i)=left[i%4];f.word(0xc20+i)=right[i%4];}
+        // Only four descriptor words belong to FIFO; sentinels must survive.
+        const uint32_t node[]={0x4000,0x080403,0x201,0xc00,0x6abcde,0x654321,0x612345};
+        for(unsigned i=0;i<7;++i)f.word(0x20+i)=node[i];
+        const std::vector<uint32_t> banks(f.apu.gp_word(0),f.apu.gp_word(0)+0x3800);
+        auto expected=f.ram;
+        for(unsigned i=0;i<(fail?3u:128u);++i)expected[0x8000+(0xfd+i)%256]=expected_bytes[i%16];
+        if(fail)f.fail_write=0x8000;
+        CHECK(f.apu.gp_write(0xffffd4,0x20) && f.apu.gp_write(0xffffd6,1));
+        CHECK(f.apu.service_dsp_dma(xlle::ApuDspKind::Gp,4096)==!fail);
+        CHECK(f.ram==expected && std::equal(banks.begin(),banks.end(),f.apu.gp_word(0)));
+        CHECK(f.apu.RegFileMmio::mmio_read(0xfe80302c,4)==(fail?0xfdu:0x7du));
+        CHECK(f.apu.gp_dma_nodes()==(fail?0u:1u));
+        if(fail)CHECK(f.apu.faulted());
+        else {uint32_t v=0;CHECK(f.apu.gp_read(0xffffc5,v) && v==0x80);
+            CHECK(f.apu.gp_read(0xffffd6,v) && v==0);}
+    }
+    for(unsigned bad=0;bad<8;++bad) {
+        std::array<uint32_t,0x3800> memory{};unsigned calls=0;std::string error;
+        const bool ep=bad==7;
+        xlle::ApuDspDma dma([&](uint32_t a)->uint32_t*{return a<memory.size()?&memory[a]:nullptr;},
+            [](uint32_t,void*,uint32_t,bool){return false;},
+            [&](unsigned,void*,uint32_t,bool){++calls;return true;},
+            [&](const std::string& e){error=e;},{},{},ep?xlle::ApuDspKind::Ep:xlle::ApuDspKind::Gp);
+        uint32_t node[]={0x4000,0x080403,0x201,0xc00};
+        if(bad==0)node[1]|=0x20; // FIFO1
+        if(bad==1)node[1]&=~2u; // input
+        if(bad==2)node[1]|=0x200; // adjacent bit9
+        if(bad==3)node[1]+=0x4000; // stride33
+        if(bad==4)node[2]=0x211; //33 frames
+        if(bad==5)node[2]=0x202; //three channels
+        if(bad==6)node[3]=0xc01; //adjacent source
+        std::copy(std::begin(node),std::end(node),memory.begin()+0x20);const auto before=memory;
+        CHECK(dma.write(0xffffd4,0x20) && dma.write(0xffffd6,1) && !dma.service(4096));
+        CHECK(!calls && !dma.nodes() && !error.empty() && memory==before);
+    }
+}
 int main() {
-    observed_gp_idle_controls();paired_bit9_inputs();paired_bit9_circular_outputs();observed_ep_linear_inputs();bit9_profile_boundaries();
+    cold_gp_stereo_fifo();cold_gp_circular_initial_cursor();observed_gp_idle_controls();paired_bit9_inputs();paired_bit9_circular_outputs();observed_ep_linear_inputs();bit9_profile_boundaries();
     // Published hardware byte examples, independent of native/xemu packing.
     for(unsigned format:{2u,6u})for(unsigned bank:{0x80u,0x1480u,0x1880u,0x2880u}) {
         Fixture f;f.word(bank)=0x123456;f.word(bank+1)=0xabcdef;

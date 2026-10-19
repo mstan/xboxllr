@@ -65,6 +65,7 @@ bool Nv2a::ram_config_write(RamTileConfig& config,uint32_t offset,uint32_t value
     if (offset >= 0x10 && pgraph_status()) {
         fault_("NV2A tile reconfiguration while graphics busy is unqualified");return false;
     }
+    if(*word!=value && !storage_epoch_barrier())return false;
     *word=value;return true;
 }
 
@@ -75,13 +76,14 @@ bool Nv2a::ram_tiles_active() const {
 }
 
 bool Nv2a::cpu_aperture(uint32_t offset,void* data,size_t bytes,bool write) {
+    GpuPhase phase(*this);if(!phase.ready)return false;
     if(draw_faulted_)return false; // preserve the first draw fault
     if(!data || (bytes!=1 && bytes!=2 && bytes!=4 && bytes!=8) ||
        uint64_t(offset)+bytes>0x04000000u) {
         fault_("NV2A invalid CPU aperture transaction");return false;
     }
-    if(renderer_) {
-        fault_("NV2A CPU aperture renderer residency is unqualified");return false;
+    if(renderer_ && !gpu_phase_depth_) {
+        fault_("NV2A CPU aperture renderer has no coherent device phase");return false;
     }
     // Do not infer a linear CPU view from the GPU's tiled-client translator.
     // Inspect every client bank, including incomplete reconfiguration epochs.
@@ -222,6 +224,8 @@ uint32_t Nv2a::pgraph_status() const {
 
 void Nv2a::pgraph_reset_setup() {
     pgraph_setup_.fill(0);pgraph_context_switch_.fill(0);
+    pgraph_object_header_cache_.fill(0);pgraph_object_header_known_=0;
+    pgraph_active_header_known_=false;
     pgraph_setup_mode_initialized_=0;
     pgraph_context_managed_=false;
     pgraph_executing_=false;
@@ -243,13 +247,30 @@ bool Nv2a::pgraph_load_context() {
     // caches, selects its instance and loads. Prefetched packets are permitted;
     // neither their GET position nor engine idle means they were executed.
     if(pgraph_loaded_context_) {
+        hle_cold_default_w_=0;
         fault_("NV2A replacement context load requires qualified state preservation");return false;
     }
+    // Kernel boot uses the independently stored DEBUG_7=0008CFFF profile.
+    // Its unexplained execution bits do not change this bounded instance-RAM
+    // transfer; retain the separate boot-mode command-execution quarantine.
+    // This admits no draw/cache/timing equivalence between the two profiles.
+    const bool context_debug7=pgraph_setup_[0x880/4]==0x0028c3ffu ||
+                              pgraph_setup_[0x880/4]==0x0008cfffu;
     if(!(pmc_enable_&(1u<<12)) || !pgraph_context_managed_ ||
        (pgraph_context_control_&~0x100u)!=0x10000000u || pgraph_context_user_!=0 ||
-       pgraph_setup_[0x084/4]!=0x00118700u || pgraph_setup_[0x880/4]!=0x0028c3ffu ||
+       pgraph_setup_[0x084/4]!=0x00118700u || !context_debug7 ||
        pgraph_setup_mode_initialized_!=((1u<<(sizeof(pgraph_modes)/sizeof(*pgraph_modes)))-1)) {
-        fault_("NV2A context load configuration is unsupported");return false;
+        char reason[500];
+        std::snprintf(reason,sizeof(reason),
+            "NV2A context load configuration is unsupported: pmc=%08x managed=%u control=%08x user=%08x modes=%03x debug1=%08x debug7=%08x fifo=%u status=%08x drawfault=%u reset=%u debug0=%08x invalidate=%u fd=%04x pointerknown=%u pointer=%04x primitive=%x indices=%zu inlinewords=%zu inlinevertices=%zu immediate=%zu methods=%llu",
+            pmc_enable_,unsigned(pgraph_context_managed_),pgraph_context_control_,pgraph_context_user_,
+            unsigned(pgraph_setup_mode_initialized_),pgraph_setup_[0x084/4],pgraph_setup_[0x880/4],
+            unsigned(pgraph_fifo_access_),pgraph_status(),unsigned(draw_faulted_),unsigned(pgraph_context_reset_seen_),
+            pgraph_setup_[0x080/4],unsigned(pgraph_context_cache_invalidated_),unsigned(pgraph_fd_initialized_),
+            unsigned(pgraph_context_pointer_initialized_),pgraph_context_pointer_,primitive_mode_,vertex_indices_.size(),
+            inline_array_words_.size(),inline_vertices_.size(),immediate_vertices_.size(),
+            static_cast<unsigned long long>(methods_.total()));
+        fault_(reason);return false;
     }
     if(pgraph_fifo_access_ || pgraph_status() || draw_faulted_) {
         fault_("NV2A context load requires an idle engine and disabled FIFO");return false;
@@ -299,7 +320,16 @@ bool Nv2a::pgraph_load_context() {
     // Do not infer PRAMIN object identities/bound flags from resolved BASE/LIMIT.
     // The rest of the live frontend is unknown after LOAD, not reset-to-zero.
     // Its method/read consumers remain guarded until explicit provenance exists.
+    if(hle_context_seen_)hle_cold_default_w_=0;
+    else for(unsigned slot=0;slot<16;++slot) {
+        uint32_t bits;std::memcpy(&bits,&vertex_attributes_[slot].value[3],sizeof(bits));
+        if((context_vertex_current_known_[slot]&8) || bits!=0x3f800000u)
+            hle_cold_default_w_&=uint16_t(~(1u<<slot));
+    }
+    hle_context_seen_=true;
     pgraph_loaded_context_=std::move(staged);
+    pgraph_object_header_cache_.fill(0);pgraph_object_header_known_=0;
+    pgraph_active_header_known_=false;
     pgraph_method_faulted_=false;
     context_known_=0;
     context_initializers_={};
@@ -348,6 +378,11 @@ bool Nv2a::pgraph_setup_read(uint32_t offset,uint32_t& value) {
     }
     if(offset>=0x14c && offset<=0x158) {
         if(pgraph_loaded_context_) {
+            // Reference CTX_SWITCH1 follows the last actually dispatched
+            // subchannel's cached SET_OBJECT header, not current PRAMIN bytes.
+            if(offset==0x14c && pgraph_active_header_known_) {
+                value=pgraph_context_switch_[0];return true;
+            }
             fault_("NV2A loaded graph-object read requires qualified context mapping");value=0;return true;
         }
         value=pgraph_context_switch_[(offset-0x14c)/4];return true;

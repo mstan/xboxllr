@@ -38,6 +38,12 @@ public:
     bool run(uint32_t cycles,ApuGpRun& result);
     ApuGpPhase phase()const{return phase_;}
     uint64_t bootstraps()const{return bootstraps_;}
+    // Not an admitted frame completion: the first real program is still
+    // reaching its initial C4 ready/yield instruction on a cold board.
+    bool first_bootstrap_initializing()const {
+        return bootstraps_==1 && initializing_ &&
+               (phase_==ApuGpPhase::Ready || phase_==ApuGpPhase::Running);
+    }
 protected:
     ApuDspProcessor(McpxApu& apu,FaultFn fault,ApuDspKind kind,ApuDmaDispatchPolicy policy);
     ~ApuDspProcessor();

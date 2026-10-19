@@ -50,6 +50,7 @@ public:
 
     XboxMachine();
     explicit XboxMachine(Config config);
+    ~XboxMachine();
     bool ok() const;
 
     bool init_ram();                              // map 64 MB at 0x0
@@ -309,8 +310,13 @@ private:
     uint32_t mmio_read(uint32_t addr, int size);
     void mmio_write(uint32_t addr, int size, uint32_t value);
     MmioDevice* find_mmio(uint32_t addr);
+    bool service_audio_time(uint64_t instruction_clock);
+    struct AudioDspOwner;
 
     std::unique_ptr<CpuFloor> cpu_;
+    // Device teardown can fault while unbinding pending DSP work. Keep the
+    // first reason alive until all those owners have retired (CPU is last).
+    std::string device_fault_;
     const Config config_;
     std::vector<uint8_t> ram_;  // 64 MB backing, mapped at 0x0 and aliased at 0x04000000
     size_t flash_size_ = 0;
@@ -328,6 +334,8 @@ private:
     NvNet* nvnet_ = nullptr;
     McpxApu* apu_ = nullptr;
     McpxAci* aci_ = nullptr;
+    // Declared after MMIO owners so the clocks/CPUs retire before their banks.
+    std::unique_ptr<AudioDspOwner> audio_dsp_;
     Ohci* ohci0_ = nullptr;
     Ohci* ohci1_ = nullptr;
     std::function<void(const IoEvent&)> io_event_cb_;
