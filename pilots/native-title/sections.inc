@@ -101,7 +101,7 @@ static void sections_initialize(void)
         struct PilotSection *s=&sections[i];
         *s=(struct PilotSection){file32(off+4),file32(off+8),file32(off+12),file32(off+16),file32(off+28),file32(off+32),0,file32(off)};
         if (!s->size || s->address<image_base+header_bytes || (uint64_t)s->address+s->size>image_end ||
-            s->bytes>s->size || (uint64_t)s->raw+s->bytes>image_size) stop("invalid section payload/range",i);
+            s->bytes>s->size || (uint64_t)s->raw+s->bytes>image_load_size()) stop("invalid section payload/range",i);
         for (unsigned j=0;j<i;++j) if ((uint64_t)s->address+s->size>sections[j].address &&
             (uint64_t)sections[j].address+sections[j].size>s->address) stop("overlapping section byte ranges",i);
         uint32_t counters[]={s->head,s->tail};
@@ -142,7 +142,7 @@ static uint32_t section_change(uint32_t descriptor,int load)
             else {
                 status=section_commit(base,bytes);
                 if (!status) {
-                    memcpy(memory+s->address,image_bytes+s->raw,s->bytes);
+                    memcpy(memory+s->address,image_load_bytes()+s->raw,s->bytes);
                     memset(memory+s->address+s->bytes,0,s->size-s->bytes);
                     section_readonly(s);
                     for (uint32_t page=first;page<end;++page) ++section_pages[page];

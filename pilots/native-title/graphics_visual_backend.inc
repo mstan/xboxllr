@@ -27,7 +27,9 @@ void pilot_d3d_scene_size(unsigned width,unsigned height,unsigned *out_width,uns
     pilot_guest_width=width;pilot_guest_height=height;
     memset(pilot_guest_viewport,0,sizeof(pilot_guest_viewport));
     pilot_guest_viewport[2]=width;pilot_guest_viewport[3]=height;pilot_guest_viewport[5]=0x3f800000u;
-    *out_width=size[0];*out_height=size[1];
+    uint32_t axis=pilot_presentation_axis(&pilot_presentation);
+    if(size[0]>16384/axis || size[1]>16384/axis)pilot_d3d_backend_stop("guest raster dimensions exceed native capability");
+    *out_width=size[0]*axis;*out_height=size[1]*axis;
     if(size[0]!=width || size[1]!=height)
         fprintf(stderr,"[VISUAL MOD] guest=%ux%u render=%ux%u ssaa_axis=%u aa=%u aniso=%u\n",
             width,height,size[0],size[1],pilot_visual.supersample,pilot_visual.antialiasing,pilot_visual.anisotropy);

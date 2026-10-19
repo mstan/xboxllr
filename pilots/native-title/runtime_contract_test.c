@@ -225,6 +225,7 @@ static int test_write_faults(uint32_t va)
 #endif
 }
 #include "sections_contract_test.inc"
+#include "section_mods_contract_test.inc"
 #include "sections_readonly_contract_test.inc"
 #ifdef PILOT_INPUT_NATIVE
 #include "input_contract_test.inc"
@@ -784,6 +785,9 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"cache")) { test_cache(); return 0; }
         if (!strcmp(argv[1],"file-cache")) { test_file_cache(); return 0; }
         if (!strcmp(argv[1],"sections")) { test_sections(); return 0; }
+        if (!strcmp(argv[1],"section-mods")) { test_section_mods(1,0x30);return 0; }
+        if (!strcmp(argv[1],"section-mods-deferred")) { test_section_mods(0,0x30);return 0; }
+        if (!strcmp(argv[1],"section-mods-boundary")) { test_section_mods(1,0);return 0; }
         if (!strcmp(argv[1],"sections-readonly")) { CHECK(argc==3);test_sections_readonly(argv[2]);return 0; }
         if (!strcmp(argv[1],"sections-readonly-recommit")) { CHECK(argc==2);test_sections_readonly_recommit();return 0; }
         if (!strcmp(argv[1],"memory")) { test_memory(); return 0; }

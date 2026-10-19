@@ -11,9 +11,9 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 ## Playtest delivery burndown
 
 The latest actual native run passes network startup and the cached-update
-query, then reaches graphics initialization. Device creation rejects the
-dashboard's presentation parameters; the original cleanup path then reaches
-guarded firmware return. No native menu frame has been captured. This is implementation work; original hardware
+query and creates the native graphics device with the requested Gaussian raster
+and optional-depth contract. The next guarded operation is a dither-enable
+packet in original graphics setup. No native menu frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
 functions execute.
@@ -24,9 +24,9 @@ functions execute.
 | Reached platform startup services | Done for current startup | Clocks, shutdown registration, file metadata, drive ownership, empty optical drive, settings and absent keyboard pass actual execution |
 | Offline network initialization | Done for bounded lifecycle | Native startup passes; real host lifetime and unsupported consumer guards are retained |
 | Offline cached-update handling | Passed for absent mounted cache | Actual read-only probe finds absence and query returns the original no-update result; existing cache formats remain guarded |
-| First rendered native menu | Current blocker | Actual device creation reaches unsupported supersampling, optional-depth and presentation-flag parameters; surface rendering is not reached |
+| First rendered native menu | Current blocker | Actual device creation and guest surface setup pass; surrounding render-state setup needs native admission |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
-| Native Credits mod | Pending | Shared content/data-section mod seam and actual Credits navigation |
+| Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
 
 There is no reliable total ETA or percentage until startup reaches the first
@@ -59,12 +59,12 @@ prerequisite for the offline menu.
 | Content and writable drive ownership | Title creates C:/Y:/X:/T: itself; actual save-directory creation succeeds on writable partition 1 while content stays read-only on partition 2 |
 | Additional absent input classes | Exact profile-owned keyboard object; original query comparison, independent review and modern/legacy integrated CTest pass; actual dashboard passes enumeration |
 | Offline native network lifecycle | Startup/cleanup and real host reference ownership implemented and reviewed; actual startup now passes without entering the original NIC/raw-disk stack; other network operations remain guarded |
-| D3D creation and presentation surfaces | Device creation now reached; backend rejects presentation parameters before surface setup. Earlier profile/helper fixes remain reviewed/tested but surface execution is pending |
-| Latest actual native boot | Passes admitted cached-update query, reaches device creation and cleanup at 1,671 entries; no captured frame |
+| D3D creation and presentation surfaces | Actual native device creates the 1280x960 raster; guest surface allocation/projection setup returns. Real Gaussian pixels, optional depth and legacy visual mods pass focused GPU checks |
+| Latest actual native boot | Reaches guarded simple packet `00040310` inside original `2C660`, after successful graphics creation; no captured frame |
 | Driver incremental admission and QA launches | 31 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
-| Credits asset mod under native execution | Pending native baseline; old full-machine evidence does not transfer automatically |
+| Credits asset mod under native execution | Shared loader view and title-owned registry implemented/reviewed; actual native navigation remains pending |
 | Owner native dashboard preview | Not ready |
 
 The initial native executable is

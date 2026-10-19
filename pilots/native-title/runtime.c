@@ -183,11 +183,12 @@ static void gpu_lle_tick(void);
 static const char *gpu_lle_access(uint32_t address,unsigned size,int write,uint32_t *value);
 static const char *gpu_lle_port(uint16_t port,int size,int write,uint32_t *value);
 #endif
+#include "section_mods_runtime.inc"
 static uint32_t file32(size_t offset)
 {
     uint32_t value;
-    if (offset > image_size || image_size - offset < 4) stop("invalid XBE range", (uint32_t)offset);
-    memcpy(&value, image_bytes + offset, 4);
+    if (offset > image_load_size() || image_load_size() - offset < 4) stop("invalid XBE range", (uint32_t)offset);
+    memcpy(&value, image_load_bytes() + offset, 4);
     return value;
 }
 
@@ -1085,6 +1086,31 @@ static void install_fault_handler(void)
     install_native_language_exception_observer();
 }
 
+static unsigned load_image_sections(void)
+{
+    commit(image_base,header_bytes);
+    memcpy(memory+image_base,image_load_bytes(),header_bytes);
+    g_xbox_code_lo=0xffffffffu;
+    unsigned preloaded=0;
+    for(unsigned i=0;i<section_count;++i) {
+        size_t off=section_table-image_base+i*56;
+        uint32_t flags=file32(off),address=file32(off+4),size=file32(off+8);
+        uint32_t raw=file32(off+12),bytes=file32(off+16);
+        if((uint64_t)raw+bytes>image_load_size() || bytes>size)stop("invalid section payload",address);
+        if(flags&4) {
+            if(address<g_xbox_code_lo)g_xbox_code_lo=address;
+            if(address+size>g_xbox_code_hi)g_xbox_code_hi=address+size;
+        }
+        if(!(flags&2))continue;
+        commit(address,size);
+        memcpy(memory+address,image_load_bytes()+raw,bytes);
+        /* Adjacent sections can share already committed pages. */
+        memset(memory+address+bytes,0,size-bytes);
+        MEM32(section_table+i*56+24)=1;
+        ++preloaded;
+    }
+    return preloaded;
+}
 static void load_image(const char *path)
 {
     FILE *file = fopen(path, "rb");
@@ -1101,35 +1127,16 @@ static void load_image(const char *path)
     for (unsigned i=0;i<32;++i) sprintf(hex+i*2,"%02x",hash[i]);
     if (strcmp(hex, PILOT_XBE_SHA256)) stop("XBE differs from generated artifact", 0);
     fprintf(stderr, "[IMAGE] sha256=%s entry=%08x\n", hex, PILOT_ENTRY);
+    image_mod_initialize(hex);
     memory = VirtualAlloc(NULL, (SIZE_T)0x100000000ull, MEM_RESERVE, PAGE_NOACCESS);
     if (!memory) stop("cannot reserve guest address space", 0);
     g_xbox_mem_offset = (ptrdiff_t)memory;
     image_base=file32(0x104); header_bytes=file32(0x108);
     section_count=file32(0x11c); section_table=file32(0x120);
-    if (header_bytes > image_size || section_table < image_base ||
+    if (header_bytes > image_load_size() || section_table < image_base ||
         (uint64_t)section_table-image_base+(uint64_t)section_count*56>header_bytes)
         stop("invalid XBE section table", 0);
-    commit(image_base,header_bytes);
-    memcpy(memory+image_base,image_bytes,header_bytes);
-    g_xbox_code_lo=0xffffffffu;
-    unsigned preloaded=0;
-    for (unsigned i=0;i<section_count;++i) {
-        size_t off=section_table-image_base+i*56;
-        uint32_t flags=file32(off), address=file32(off+4), size=file32(off+8);
-        uint32_t raw=file32(off+12), bytes=file32(off+16);
-        if ((uint64_t)raw+bytes>image_size || bytes>size) stop("invalid section payload", address);
-        if (flags&4) {
-            if (address<g_xbox_code_lo) g_xbox_code_lo=address;
-            if (address+size>g_xbox_code_hi) g_xbox_code_hi=address+size;
-        }
-        if (!(flags&2)) continue;
-        commit(address,size);
-        memcpy(memory+address,image_bytes+raw,bytes);
-        /* Explicit zero-fill is needed on pages shared by adjacent sections. */
-        memset(memory+address+bytes,0,size-bytes);
-        MEM32(section_table+i*56+24)=1;
-        ++preloaded;
-    }
+    unsigned preloaded=load_image_sections();
     for (size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i) {
         MEM32(pilot_imports[i].address)=0xfe000000u+4*pilot_imports[i].ordinal;
 #ifdef PILOT_KERNEL_CLOCK_NATIVE

@@ -79,7 +79,8 @@ static void graphics_transform_init(void)
 {
     /* Qualified presentation has no MSAA and a 24-bit integer depth surface. */
     graphics_store_float(TRANSFORM_FIELD(DEPTH_SCALE),16777215.0f);
-    graphics_store_float(TRANSFORM_FIELD(PIXEL_SCALE),1);graphics_store_float(TRANSFORM_FIELD(PIXEL_SCALE)+4,1);
+    PilotPresentation presentation=graphics_presentation();float axis=(float)pilot_presentation_axis(&presentation);
+    graphics_store_float(TRANSFORM_FIELD(PIXEL_SCALE),axis);graphics_store_float(TRANSFORM_FIELD(PIXEL_SCALE)+4,axis);
     MEM32(TRANSFORM_FIELD(SCREEN_OFFSET))=MEM32(TRANSFORM_FIELD(SCREEN_OFFSET)+4)=PILOT_D3D_SCREEN_BIAS;
     graphics_transform_depth((const float*)(memory+TRANSFORM_STATE(TRANSFORMS)+64));
     uint32_t viewport[6];if(pilot_gfx_get_viewport(viewport)<0)stop("missing initial viewport",0);

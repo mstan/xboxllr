@@ -33,22 +33,29 @@ static inline int pilot_surface_adjust(unsigned index,uint32_t *common,unsigned 
     }
     return 0;
 }
-static inline int pilot_surface_sync_set(uint32_t common[3],unsigned tracked[3],
-                                        PilotSurfaceRef backend,void *context)
+static inline int pilot_surface_sync_mask(uint32_t common[3],unsigned tracked[3],unsigned mask,
+                                         PilotSurfaceRef backend,void *context)
 {
     /* A corrupt later header cannot cause earlier backend reference changes. */
-    for(unsigned i=0;i<3;++i){int error=pilot_surface_validate(common[i],tracked[i],0);if(error)return error;}
-    for(unsigned i=0;i<3;++i){int error=pilot_surface_adjust(i,&common[i],&tracked[i],0,backend,context);if(error)return error;}
+    if(mask!=3 && mask!=7)return PILOT_SURFACE_BAD_COUNT;
+    for(unsigned i=0;i<3;++i) {
+        if(!(mask&(1u<<i))){if(common[i] || tracked[i])return PILOT_SURFACE_BAD_COMMON;continue;}
+        int error=pilot_surface_validate(common[i],tracked[i],0);if(error)return error;
+    }
+    for(unsigned i=0;i<3;++i)if(mask&(1u<<i)){int error=pilot_surface_adjust(i,&common[i],&tracked[i],0,backend,context);if(error)return error;}
     return 0;
 }
+static inline int pilot_surface_sync_set(uint32_t common[3],unsigned tracked[3],PilotSurfaceRef backend,void *context)
+{return pilot_surface_sync_mask(common,tracked,7,backend,context);}
+
 typedef struct PilotSurfaceLayout {
     uint32_t count,colors,depth,current_color,current_depth;
 } PilotSurfaceLayout;
 enum { PILOT_SURFACE_CLEAR, PILOT_SURFACE_PUBLISH, PILOT_SURFACE_CURRENT };
-static inline int pilot_surface_project(uint32_t *device,uint32_t device_bytes,const PilotSurfaceLayout *layout,
-                                       uint32_t headers,uint32_t color,uint32_t depth,unsigned mode)
+static inline int pilot_surface_project_mask(uint32_t *device,uint32_t device_bytes,const PilotSurfaceLayout *layout,
+                                            uint32_t headers,uint32_t color,uint32_t depth,unsigned mode,unsigned mask)
 {
-    if(!layout)return 0;
+    if(!layout || (mask!=3 && mask!=7))return 0;
     uint32_t offsets[6]={layout->count,layout->colors,layout->colors+4,layout->depth,layout->current_color,layout->current_depth};
     if(!device || mode>PILOT_SURFACE_CURRENT)return 0;
     for(unsigned i=0;i<6;++i) {
@@ -63,10 +70,13 @@ static inline int pilot_surface_project(uint32_t *device,uint32_t device_bytes,c
             /* Existing native presentation owner accepts one back buffer:
              * two real color allocations, followed by its depth allocation. */
             device[layout->count/4]=2;device[layout->colors/4]=headers;
-            device[layout->colors/4+1]=headers+32;device[layout->depth/4]=headers+64;
+            device[layout->colors/4+1]=headers+32;device[layout->depth/4]=(mask&4)?headers+64:0;
         }
         device[layout->current_color/4]=color;device[layout->current_depth/4]=depth;
     }
     return 1;
 }
+static inline int pilot_surface_project(uint32_t *device,uint32_t device_bytes,const PilotSurfaceLayout *layout,
+                                       uint32_t headers,uint32_t color,uint32_t depth,unsigned mode)
+{return pilot_surface_project_mask(device,device_bytes,layout,headers,color,depth,mode,7);}
 #endif

@@ -3538,6 +3538,11 @@
       "address": 1363936,
       "sha256": "9e6b1c4ad201eb23dc5a37af8dd814d610329c2fbed231f112bd256faf2b967a",
       "bytes": 214
+    },
+    "resolve_setup": {
+      "address": 1335664,
+      "bytes": 567,
+      "sha256": "5e3460192a1e830261df03128a2c351810b11598c337e6368402400395ed80d4"
     }
   },
   "layout": {
@@ -3599,5 +3604,20 @@
     }
   },
   "stateblock": false,
-  "original_create_driver_mask": 16
+  "original_create_driver_mask": 16,
+  "guest_presentation": {
+    "version": 1,
+    "sample_types": [
+      17,
+      8738
+    ],
+    "gaussian_filter": 5,
+    "aa_state": 152,
+    "mask_state": 153,
+    "filter_global": 1401472,
+    "aa_enable_global": 1401576,
+    "aa_mask_global": 1401580,
+    "mode_global": 1401584,
+    "rt_mode_global": 1401588
+  }
 }

@@ -163,6 +163,34 @@ def inspect(context,proof):
     require('D3DDevice_SetRenderTarget','mov',f'eax, dword ptr [ebp + {hex(surfaces["current_color"])}]')
     require('D3DDevice_SetRenderTarget','mov',f'dword ptr [ebp + {hex(surfaces["current_color"])}], ebx')
     require('D3DDevice_SetRenderTarget','mov',f'dword ptr [ebp + {hex(surfaces["current_depth"])}], esi')
+    presentation=proof.get('guest_presentation')
+    if presentation is not None:
+        required={'version','sample_types','gaussian_filter','aa_state','mask_state','filter_global',
+                  'aa_enable_global','aa_mask_global','mode_global','rt_mode_global'}
+        if (not isinstance(presentation,dict) or set(presentation)!=required or
+                presentation['sample_types']!=[0x11,0x2222] or
+                any(type(presentation[k]) is not int for k in required-{'sample_types'}) or
+                presentation['version']!=1 or presentation['gaussian_filter']!=5 or
+                presentation['aa_state']!=152 or presentation['mask_state']!=153):
+            raise ValueError('unreviewed guest presentation contract')
+        for k in ('filter_global','aa_enable_global','aa_mask_global','mode_global','rt_mode_global'):
+            if presentation[k]%4 or not any(s['address']<=presentation[k] and presentation[k]+4<=s['address']+s['size'] for s in context.image['sections']):
+                raise ValueError('guest presentation globals outside image')
+        require('reset_buffers','test','ch, 0x30')
+        require('reset_buffers','mov','esi, 5')
+        require('reset_buffers','mov',f'dword ptr [{hex(presentation["filter_global"])}], esi')
+        require('resolve_setup','mov',f'eax, dword ptr [{hex(presentation["filter_global"])}]')
+        require('reset_buffers','mov','eax, dword ptr [ebp + 0x20]')
+        require('Get2DSurfaceDesc','mov','ecx, dword ptr [edi + 4]')
+        require('Get2DSurfaceDesc','cmp','ecx, dword ptr [edx + 4]')
+        require('Get2DSurfaceDesc','mov','dword ptr [esi + 0x10], 0x11')
+        for name,field,reg in (('D3DDevice_SetRenderState_MultiSampleAntiAlias','aa_enable_global','eax'),
+                               ('D3DDevice_SetRenderState_MultiSampleMask','aa_mask_global','eax'),
+                               ('D3DDevice_SetRenderState_MultiSampleMode','mode_global','ecx'),
+                               ('D3DDevice_SetRenderState_MultiSampleRenderTargetMode','rt_mode_global','ecx')):
+            require(name,'mov',f'dword ptr [{hex(presentation[field])}], {reg}')
+        if layout['render_states']+4*presentation['aa_state']!=presentation['aa_enable_global'] or layout['render_states']+4*presentation['mask_state']!=presentation['aa_mask_global']:
+            raise ValueError('guest sample state/cache role mismatch')
     variables={}
     for s in context.symbols:
         if s['library'] not in ('D3D8','D3D8LTCG') or s['kind']!='variable':continue
@@ -206,6 +234,7 @@ def inspect(context,proof):
                  device_object=layout['device_object'],vertex_shader_offset=cache['vertex_object'],
                  layout=layout,calls=calls,helpers=proof['helpers'],stateblock=False,
                  native_create_behavior_mask=behavior_mask,original_create_driver_mask=driver_mask,**facts)
+    if presentation is not None:binding["guest_presentation"]=presentation
     return binding,*emit_text(binding,interface,behavior_mask)
 
 
@@ -220,7 +249,12 @@ def emit_text(binding,interface,behavior_mask):
     header += [f'{{"{c["name"]}",{c["address"]}u,{c["stack_bytes"]}u,{c["bytes"]}u,"{c["function_sha256"]}"}},' for c in calls]
     header += ['};','#define PILOT_D3D_PROFILE_5849 1','#define PILOT_D3D_STATEBLOCK_AVAILABLE 0',
                f'#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x{behavior_mask:x}u']
+    if 'guest_presentation' in binding:
+        header += ['#define PILOT_D3D_GUEST_PRESENTATION_VERSION 1u',
+                   f'#define PILOT_D3D_SAMPLE_AA_STATE {binding["guest_presentation"]["aa_state"]}u',
+                   f'#define PILOT_D3D_SAMPLE_MASK_STATE {binding["guest_presentation"]["mask_state"]}u']
     if 'original_create_driver_mask' in binding:
+
         header += [f'#define PILOT_D3D_CREATE_DRIVER_MASK 0x{binding["original_create_driver_mask"]:x}u']
     defines={'DEVICE_GLOBAL':layout['device_global'],'DEVICE_OBJECT':layout['device_object'],
              'DEVICE_BYTES':layout['device_bytes'],'VERTEX_SHADER_OFFSET':cache['vertex_object'],
@@ -263,18 +297,31 @@ def bind(context,proof):
     generated=context.generated;record=context.output/'d3d-binding.aot-private.json'
     texts={'pilot_d3d_bindings.h':header,'pilot_d3d_binding.c':wrapper}
     if (generated/'pilot_d3d_binding.c').exists():
-        prior_binding=copy.deepcopy(binding)
+        previous_presentation=copy.deepcopy(binding)
+        previous_presentation.pop('guest_presentation',None)
+        previous_presentation.get('helpers',{}).pop('resolve_setup',None)
+        prior_binding=copy.deepcopy(previous_presentation)
         prior_binding.pop('native_create_behavior_mask',None);prior_binding.pop('original_create_driver_mask',None)
         prior_binding['layout'].pop('presentation_fields',None)
         actual_record=json.loads(record.read_text())
-        if (actual_record not in (binding,prior_binding) or context.manifest.get('d3d_binding')!=actual_record
+        if (actual_record not in (binding,previous_presentation,prior_binding) or context.manifest.get('d3d_binding')!=actual_record
                 or (generated/'pilot_d3d_binding.c').read_text()!=wrapper):
             raise ValueError('existing LTCG graphics binding differs')
         old_header=(generated/'pilot_d3d_bindings.h').read_text()
         if old_header==header and actual_record==binding:return binding
+        presentation_defines={'PILOT_D3D_GUEST_PRESENTATION_VERSION','PILOT_D3D_SAMPLE_AA_STATE','PILOT_D3D_SAMPLE_MASK_STATE'}
+        preceding_header='\n'.join(line for line in header.splitlines() if not
+            (line.startswith('#define ') and line.split()[1] in presentation_defines))+'\n'
+        if actual_record==previous_presentation and old_header==preceding_header:
+            (generated/'pilot_d3d_bindings.h').write_text(header,encoding='utf-8',newline='\n')
+            record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+            context.manifest['d3d_binding']=binding
+            context.manifest['files']['pilot_d3d_bindings.h']=hashlib.sha256((generated/'pilot_d3d_bindings.h').read_bytes()).hexdigest()
+            context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+            return binding
         # Only the exact previous body/layout record can gain the newly proved
         # fields and public policy. Wrapper and retained bodies stay identical.
-        new_defines={'PILOT_D3D_CREATE_DRIVER_MASK','PILOT_D3D_SURFACE_PROJECTION_VERSION',
+        new_defines=presentation_defines|{'PILOT_D3D_CREATE_DRIVER_MASK','PILOT_D3D_SURFACE_PROJECTION_VERSION',
                      'PILOT_D3D_PRESENTATION_COUNT','PILOT_D3D_PRESENTATION_COLORS',
                      'PILOT_D3D_PRESENTATION_DEPTH','PILOT_D3D_CURRENT_COLOR','PILOT_D3D_CURRENT_DEPTH'}
         prior='\n'.join(line for line in header.splitlines() if not

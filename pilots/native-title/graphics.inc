@@ -43,6 +43,27 @@ static int graphics_active;
 static uint32_t graphics_parameters[17];
 static uint32_t graphics_headers,graphics_data[3],graphics_target,graphics_depth;
 static unsigned graphics_surface_refs[3];
+static int32_t graphics_parameters_check(const uint32_t parameters[17])
+{
+    int32_t status=pilot_gfx_parameters(parameters);if(status<0)return status;
+#ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
+    const unsigned version=PILOT_D3D_GUEST_PRESENTATION_VERSION;
+#else
+    const unsigned version=0;
+#endif
+    if(!pilot_presentation_profile_admits(parameters,version))return (int32_t)0x80004001u;
+    return status;
+}
+static PilotPresentation graphics_presentation(void)
+{
+    PilotPresentation result;if(!pilot_presentation_parse(graphics_parameters,&result))stop("invalid guest presentation descriptor",0);
+    return result;
+}
+static unsigned graphics_surface_mask(void)
+{PilotPresentation p=graphics_presentation();return pilot_presentation_mask(&p);}
+static int graphics_surface_owned(unsigned index)
+{return index<3 && (graphics_surface_mask()&(1u<<index))!=0;}
+
 #include "graphics_surfaces.h"
 static void graphics_surfaces_project(unsigned mode)
 {
@@ -52,8 +73,8 @@ static void graphics_surfaces_project(unsigned mode)
 #endif
     const PilotSurfaceLayout layout={PILOT_D3D_PRESENTATION_COUNT,PILOT_D3D_PRESENTATION_COLORS,
         PILOT_D3D_PRESENTATION_DEPTH,PILOT_D3D_CURRENT_COLOR,PILOT_D3D_CURRENT_DEPTH};
-    if(graphics_parameters[3]!=1 || !pilot_surface_project((uint32_t*)(memory+PILOT_D3D_DEVICE_OBJECT),
-            PILOT_D3D_DEVICE_BYTES,&layout,graphics_headers,graphics_target,graphics_depth,mode))
+    if(graphics_parameters[3]!=1 || !pilot_surface_project_mask((uint32_t*)(memory+PILOT_D3D_DEVICE_OBJECT),
+            PILOT_D3D_DEVICE_BYTES,&layout,graphics_headers,graphics_target,graphics_depth,mode,graphics_surface_mask()))
         stop("invalid presentation surface projection",mode);
 #else
     (void)mode;
@@ -67,7 +88,7 @@ static void graphics_surfaces_reconcile(void)
 {
 #ifdef PILOT_D3D_SURFACE_PROJECTION_VERSION
     uint32_t common[3];for(unsigned i=0;i<3;++i)common[i]=MEM32(graphics_headers+i*32);
-    int error=pilot_surface_sync_set(common,graphics_surface_refs,graphics_surface_backend_ref,NULL);
+    int error=pilot_surface_sync_mask(common,graphics_surface_refs,graphics_surface_mask(),graphics_surface_backend_ref,NULL);
     if(error)stop("invalid inline surface ownership",(uint32_t)error);
 #endif
 }
@@ -83,33 +104,33 @@ static void graphics_surfaces_create(void)
     uint32_t bytes=4096;
     if (vm_allocate(&graphics_headers,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))
         stop("graphics surface header allocation failed",0);
-    uint32_t width=graphics_parameters[0],height=graphics_parameters[1];
-    uint32_t pitch=(width*4+63)&~63u;
+    PilotPresentation presentation=graphics_presentation();
     uint32_t format=(graphics_parameters[2]==6 || graphics_parameters[2]==0x12)?0x12:0x1e;
     for (unsigned i=0;i<3;++i) {
-        bytes=pitch*height;
-        /* GPU residence has an owned guest VA but no direct CPU mapping.
-         * Lock/readback must explicitly synchronize actual GPU contents. */
+        uint32_t *header=(uint32_t*)(memory+graphics_headers+i*32),extent[3];
+        if(!pilot_presentation_surface(&presentation,i,extent)){memset(header,0,24);continue;}
+        uint32_t width=extent[0],height=extent[1],pitch=extent[2];bytes=pitch*height;
+        /* GPU residence has an owned guest VA but no direct CPU mapping. */
         if (vm_allocate(&graphics_data[i],0,&bytes,MEM_RESERVE,PAGE_NOACCESS))
             stop("graphics surface address reservation failed",i);
-        uint32_t *header=(uint32_t*)(memory+graphics_headers+i*32);
-        header[0]=0x010d0000u; header[1]=graphics_data[i]; header[2]=0;
+        header[0]=0x010d0000u;header[1]=graphics_data[i];header[2]=0;
         header[3]=0x10021u|((i==2?0x2e:format)<<8);
-        header[4]=(width-1)|((height-1)<<12)|((pitch/64-1)<<24); header[5]=0;
+        header[4]=(width-1)|((height-1)<<12)|((pitch/64-1)<<24);header[5]=0;
     }
-    graphics_target=graphics_headers;graphics_depth=graphics_headers+64;
+    graphics_target=graphics_headers;graphics_depth=presentation.depth?graphics_headers+64:0;
     graphics_surfaces_project(PILOT_SURFACE_PUBLISH);
 }
 static unsigned graphics_surface_index(uint32_t address)
 {
     if (address!=graphics_headers && address!=graphics_headers+32 && address!=graphics_headers+64)
         stop("unowned graphics surface",address);
-    return (address-graphics_headers)/32;
+    unsigned index=(address-graphics_headers)/32;
+    if(!graphics_surface_owned(index))stop("absent presentation surface",address);return index;
 }
 static unsigned graphics_surface_ref(unsigned index,int acquire)
 {
 #ifdef PILOT_D3D_SURFACE_PROJECTION_VERSION
-    if(index>=3)stop("invalid owned surface index",index);
+    if(!graphics_surface_owned(index))stop("invalid owned surface index",index);
     uint32_t common=MEM32(graphics_headers+32*index);
     int error=pilot_surface_adjust(index,&common,&graphics_surface_refs[index],acquire?1:-1,
                                   graphics_surface_backend_ref,NULL);
@@ -198,6 +219,9 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
     if(graphics_target!=graphics_headers)graphics_target_ref(graphics_target,0);
     if(graphics_depth && graphics_depth!=graphics_headers+64)graphics_target_ref(graphics_depth,0);
     graphics_target=color;graphics_depth=depth;
+    PilotPresentation presentation=graphics_presentation();
+    float axis=color==graphics_headers?(float)pilot_presentation_axis(&presentation):1.0f;
+    graphics_store_float(TRANSFORM_FIELD(PIXEL_SCALE),axis);graphics_store_float(TRANSFORM_FIELD(PIXEL_SCALE)+4,axis);
     graphics_surfaces_project(PILOT_SURFACE_CURRENT);
     uint32_t viewport[]={0,0,width,height,0,0x3f800000};
     if(pilot_gfx_viewport(viewport)<0)stop("target viewport reset failed",color);
@@ -285,6 +309,9 @@ static void graphics_dispatch_impl(unsigned entry)
         uint32_t mode[5]={graphics_parameters[0],graphics_parameters[1],
             graphics_parameters[11]?graphics_parameters[11]:60,0x40,
             (MEM32(graphics_headers+12)>>8)&255};
+#ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
+        mode[3]=graphics_parameters[10];
+#endif
         memcpy(graphics_pointer(arguments[0],sizeof(mode)),mode,sizeof(mode)); break;
     }
     case PILOT_D3D_D3DDevice_GetDeviceCaps:
@@ -301,7 +328,8 @@ static void graphics_dispatch_impl(unsigned entry)
         fprintf(stderr,"[D3D PARAMETERS]");
         for (unsigned i=0;i<17;i++) fprintf(stderr," %08x",staged[i]);
         fprintf(stderr,"\n");
-        g_eax=(uint32_t)pilot_gfx_create(staged);
+        g_eax=(uint32_t)graphics_parameters_check(staged);
+        if(!(g_eax&0x80000000u))g_eax=(uint32_t)pilot_gfx_create(staged);
         if (!(g_eax&0x80000000u)) {
             graphics_persistence_clear();
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
@@ -330,6 +358,14 @@ static void graphics_dispatch_impl(unsigned entry)
         }
         break;
     }
+#ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
+    case PILOT_D3D_D3DDevice_SetRenderState_MultiSampleAntiAlias:
+        if(!pilot_gfx_multisample(arguments[0],UINT32_MAX))stop("unqualified multisample enable",arguments[0]);
+        MEM32(PILOT_D3D_RENDER_STATES+PILOT_D3D_SAMPLE_AA_STATE*4)=arguments[0];break;
+    case PILOT_D3D_D3DDevice_SetRenderState_MultiSampleMask:
+        if(!pilot_gfx_multisample(1,arguments[0]))stop("unqualified multisample mask",arguments[0]);
+        MEM32(PILOT_D3D_RENDER_STATES+PILOT_D3D_SAMPLE_MASK_STATE*4)=arguments[0];break;
+#endif
     case PILOT_D3D_D3DDevice_SetRenderState_Simple:
         if(pilot_verbose)fprintf(stderr,"[D3D SIMPLE] method=%08x value=%08x\n",g_ecx,g_edx);
         graphics_simple_state(g_ecx,g_edx); break;
@@ -416,7 +452,7 @@ static void graphics_dispatch_impl(unsigned entry)
         graphics_clock_close();
         graphics_gpu_close();
         if(graphics_target!=graphics_headers || (graphics_depth && graphics_depth!=graphics_headers+64))
-            graphics_set_targets(graphics_headers,graphics_headers+64);
+            graphics_set_targets(graphics_headers,graphics_parameters[8]?graphics_headers+64:0);
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding surface ownership",entry);
         graphics_surfaces_project(PILOT_SURFACE_CLEAR);
@@ -425,7 +461,7 @@ static void graphics_dispatch_impl(unsigned entry)
         uint32_t bytes;
         for (unsigned i=0;i<3;++i) {
             bytes=0;
-            if (vm_free(&graphics_data[i],&bytes,MEM_RELEASE)) stop("surface VA release failed",i);
+            if (graphics_data[i] && vm_free(&graphics_data[i],&bytes,MEM_RELEASE)) stop("surface VA release failed",i);
             graphics_data[i]=0;
         }
         bytes=0;

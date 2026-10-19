@@ -227,6 +227,8 @@ def main() -> None:
     parser.add_argument("--credits", type=Path, default=ROOT / "pilots/dashboard/credits.json")
     parser.add_argument("--notice", type=Path, action="append", default=[])
     parser.add_argument("--notice-tree", type=Path, action="append", default=[])
+    parser.add_argument("--native-xbe", type=Path,
+                        help="Generate a native section-data registry from the unchanged owned XBE")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("choose a new output directory; originals are never changed")
@@ -250,6 +252,17 @@ def main() -> None:
         "default.xip": inputs["default.xip"].replace("default.xap", script.encode("utf-8")),
         "mainmenu5.xip": inputs["mainmenu5.xip"].replace("default.xap", geometry.encode("utf-8")),
     }
+    native = None
+    if args.native_xbe:
+        from dashboard_integrity import XBE_SHA256, Xbe, replace_records
+        from native_section_mod import section_registry
+        original_xbe = args.native_xbe.read_bytes()
+        if hashlib.sha256(original_xbe).hexdigest() != XBE_SHA256:
+            parser.error("native XBE differs from the reviewed original dashboard")
+        section = Xbe(original_xbe).named("XIPS")
+        table = replace_records(original_xbe[section.raw:section.raw+section.length],
+            {name: ((args.assets/name).read_bytes(), payload) for name,payload in outputs.items()})
+        native = section_registry(original_xbe, [("XIPS", table, 0x1ffc)], "xboxllr.dashboard.credits")
     args.output.mkdir(parents=True)
     records = []
     for name, data in outputs.items():
@@ -277,6 +290,13 @@ def main() -> None:
                     source_reference=dict(repository="https://github.com/MrMilenko/Theseus",
                                           revision="5fc7ddddd03b4b5a7e6233769ad6a8fe46009965",
                                           role="external behavior/reference; no implementation incorporated"))
+    if native:
+        source, receipt = native
+        registry = args.output / "sections.aot-private.c"
+        registry.write_text(source, encoding="utf-8", newline="\n")
+        (args.output / "sections.aot-private.json").write_text(json.dumps(receipt, indent=2)+"\n", encoding="utf-8")
+        manifest["native_section_mod"] = dict(registry=registry.name,sha256=receipt["registry_sha256"],
+                                              original_xbe_sha256=receipt["source_xbe_sha256"])
     (args.output / "mod.aot-private.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Generated private Credits mod: {len(pages)} pages; dashboard validation pending")
 

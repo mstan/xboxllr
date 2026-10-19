@@ -1,5 +1,10 @@
 # Native presentation surface projection
 
+This records the initial projection/reference batch. The subsequent
+[guest presentation contract](NATIVE-GUEST-PRESENTATION-2026-10-19.md) adds
+Gaussian raster/resolved dimensions and optional depth; its ownership mask
+supersedes the three-mandatory-surface assumption below.
+
 This fixes two source-proved gaps in the reviewed LTCG graphics adapter before
 the first frame. It adds no renderer methods or GPU algorithms. The retained
 original caller supplies public CreateDevice behavior `0x40`; the original

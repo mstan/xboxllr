@@ -98,6 +98,8 @@ class LTCGOriginalProofTests(unittest.TestCase):
         self.assertIn('#define PILOT_D3D_PRESENTATION_COLORS 0x1a14u',self.header)
         self.assertIn('#define PILOT_D3D_PRESENTATION_DEPTH 0x1a20u',self.header)
         self.assertIn('#define PILOT_D3D_CURRENT_COLOR 0x1a04u',self.header)
+        self.assertIn('#define PILOT_D3D_GUEST_PRESENTATION_VERSION 1u',self.header)
+        self.assertEqual(self.binding['guest_presentation']['sample_types'],[0x11,0x2222])
         self.assertEqual(self.binding['native_create_behavior_mask'],64)
         self.assertEqual(self.binding['original_create_driver_mask'],16)
         self.assertEqual(self.binding['layout']['device_object'],0x153bd0)
@@ -135,6 +137,11 @@ class LTCGOriginalProofTests(unittest.TestCase):
                 ('current color',lambda p:p['layout']['presentation_fields'].update(current_color=0x1a14)),
                 ('presentation count',lambda p:p['layout']['presentation_fields'].update(count=0x1a0c)),
                 ('presentation extent',lambda p:p['layout']['presentation_fields'].update(colors=0xfffffff8)),
+                ('sample mode',lambda p:p['guest_presentation'].update(sample_types=[0x11,0x1222])),
+                ('sample flag type',lambda p:p['guest_presentation'].update(version=True)),
+                ('filter role',lambda p:p['guest_presentation'].update(filter_global=p['guest_presentation']['mode_global'])),
+                ('AA cache role',lambda p:p['guest_presentation'].update(aa_state=153)),
+                ('resolve body',lambda p:p['helpers']['resolve_setup'].update(sha256='0'*64)),
                 ('ret',lambda p:next(r for r in p['functions'] if r['name']=='D3DDevice_CreateTexture2')['signature'].update(stack_bytes=24))):
             proof=copy.deepcopy(self.proof);mutate(proof)
             with self.subTest(name=name),self.assertRaises(ValueError):
@@ -142,6 +149,27 @@ class LTCGOriginalProofTests(unittest.TestCase):
 
 
 class GraphicsHeaderMigrationTests(unittest.TestCase):
+    def test_exact_presentation_upgrade_from_projected_record_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory);generated=output/'gen';generated.mkdir()
+            previous={'layout':{},'helpers':{'retained':{'sha256':'1'*64}}}
+            binding=copy.deepcopy(previous);binding['guest_presentation']={'version':1}
+            binding['helpers']['resolve_setup']={'sha256':'2'*64}
+            wrapper='/* retained wrapper and original bodies */\n'
+            old='#pragma once\n#define PILOT_D3D_SURFACE_PROJECTION_VERSION 1u\n'
+            header=old+'#define PILOT_D3D_GUEST_PRESENTATION_VERSION 1u\n#define PILOT_D3D_SAMPLE_AA_STATE 152u\n#define PILOT_D3D_SAMPLE_MASK_STATE 153u\n'
+            (generated/'pilot_d3d_bindings.h').write_text(old)
+            (generated/'pilot_d3d_binding.c').write_text(wrapper)
+            (output/'d3d-binding.aot-private.json').write_text(json.dumps(previous))
+            context=SimpleNamespace(output=output,generated=generated,manifest={'files':{},'d3d_binding':previous},
+                                    manifest_path=output/'generation.aot-private.json')
+            with patch('native_d3d_ltcg.inspect',return_value=(binding,header,wrapper)):
+                self.assertEqual(bind_ltcg(context,{}),binding)
+                self.assertEqual((generated/'pilot_d3d_bindings.h').read_text(),header)
+                self.assertEqual((generated/'pilot_d3d_binding.c').read_text(),wrapper)
+                with patch.object(Path,'write_text',side_effect=AssertionError('repeat mutation')):
+                    self.assertEqual(bind_ltcg(context,{}),binding)
+
     def fixture(self,directory,initial=False):
         output=Path(directory);generated=output/'gen';generated.mkdir()
         binding={'layout':{'vertex_constants':0x156328,'device_object':0x153bd0,

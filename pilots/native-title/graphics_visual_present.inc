@@ -1,6 +1,7 @@
 #ifdef PILOT_D3D_PHOBOS
 #include "d3d8_display.h"
 #include "graphics_visual_state.inc"
+#include "graphics_guest_resolve.inc"
 /* Independently written approximate AA, using local contrast, curvature,
  * bounded edge-end search and subpixel filtering. Algorithm reference:
  * Timothy Lottes, NVIDIA FXAA white paper, 2011:
@@ -126,6 +127,9 @@ static HRESULT pilot_visual_resolve_image(RhiView *scene,unsigned width,unsigned
 HRESULT pilot_d3d_visual_resolve(RhiView *scene,unsigned width,unsigned height,RhiView *output,D3D8DisplayFit fit,unsigned output_width,unsigned output_height)
 {
     if(!scene || !output || !fit.w || !fit.h || !output_width || !output_height)return E_INVALIDARG;
+    if(pilot_presentation.sample_type==0x2222) {
+        scene=pilot_guest_resolved.sample;width=pilot_presentation.width;height=pilot_presentation.height;
+    }
     int interpolate=pilot_visual.frame_mode==PILOT_FRAMES_INTERPOLATED && pilot_visual_scope && pilot_visual_real_present;
     if(!pilot_visual.antialiasing && !interpolate)return d3d8_display_resolve(scene,width,height,output,fit);
     struct PilotVisualState saved;pilot_visual_state_save(&saved);

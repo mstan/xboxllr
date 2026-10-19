@@ -143,6 +143,18 @@ def prepare(donor, output, reference):
                 code=once(code,'        state->tss[s][D3DTSS_TEXCOORDINDEX] = (DWORD)s;',
                     '        state->tss[s][D3DTSS_TEXCOORDINDEX] = (DWORD)s;\n'
                     '        state->tss[s][D3DTSS_RESULTARG] = D3DTA_CURRENT;')
+                # Optional depth is an actual allocation/owner choice, not a
+                # NULL guest header over a hidden mandatory native surface.
+                code=once(code,'    /* Create depth stencil */',
+                    '    if(!pilot_d3d_has_auto_depth()) {\n'
+                    '        rhi_set_render_target(state->rhi_default_rtv,NULL);return S_OK;\n'
+                    '    }\n    /* Create depth stencil */')
+                code=once(code,'    g_auto_ds = (D3D8Surface *)d3d8_surface_create',
+                    '    if(pilot_d3d_has_auto_depth()) {\n'
+                    '    g_auto_ds = (D3D8Surface *)d3d8_surface_create')
+                code=once(code,'    rhi_set_render_target(g_device_state.rhi_default_rtv, g_auto_ds->dsv);',
+                    '    rhi_set_render_target(g_device_state.rhi_default_rtv, g_auto_ds->dsv);\n    }')
+                code='int pilot_d3d_has_auto_depth(void);\n'+code
                 code=prepare_feedback(code)
                 code=once(code,'        d3d8_display_output_shape(s->width, s->height, &shape_w, &shape_h);',
                     '        d3d8_display_output_shape(s->width, s->height, &shape_w, &shape_h);\n'

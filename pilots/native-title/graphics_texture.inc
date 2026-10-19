@@ -307,7 +307,15 @@ static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destin
     if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64) {
         if(level)stop("display surface has no mip levels",level);
         uint32_t size=MEM32(header+16),width=(size&0xfff)+1,height=((size>>12)&0xfff)+1,pitch=((size>>24)+1)*64;
-        uint32_t description[]={format,1,usage,pitch*height,graphics_parameters[4],width,height};
+        unsigned index=graphics_surface_index(header);
+        PilotPresentation presentation=graphics_presentation();
+        uint32_t samples=graphics_parameters[4];
+#ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
+        samples=pilot_presentation_samples(&presentation,index);
+#else
+        (void)presentation;(void)index;
+#endif
+        uint32_t description[]={format,1,usage,pitch*height,samples,width,height};
         memcpy(graphics_pointer(destination,sizeof(description)),description,sizeof(description));return;
     }
     struct GraphicsTextureObject *object=&graphics_textures[graphics_texture_slot(header)];

@@ -13,6 +13,22 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_section_mod_identity_and_configuration_reset(self):
+        source=self.root/'sections.aot-private.c'
+        source.write_text('/* authored static registry */')
+        self.paths['section_mod_source']=source
+        plain=n.identity(self.source,self.data,self.output)
+        selected=n.identity(self.source,self.data,self.output,self.paths)
+        self.assertNotEqual(plain,selected)
+        self.assertEqual(selected['section_mod']['sha256'],n.digest(source))
+        source.write_text('/* changed registry */')
+        self.assertNotEqual(selected,n.identity(self.source,self.data,self.output,self.paths))
+        cmd=n.configure_command(self.data,self.paths,self.output,self.build,'cmake','Ninja',4)
+        self.assertIn('-DPILOT_SECTION_MOD_SOURCE='+str(source),cmd)
+        del self.paths['section_mod_source']
+        cmd=n.configure_command(self.data,self.paths,self.output,self.build,'cmake','Ninja',4)
+        self.assertIn('-DPILOT_SECTION_MOD_SOURCE=',cmd)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
