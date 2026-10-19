@@ -524,3 +524,12 @@ an independently supplied library's compilation provenance; retain the actual
 Cargo command, source manifest and resulting archive hashes. No DSP guard or
 signal behavior is relaxed by this repair. Blinx's tested private build stays
 on its existing dependency and framework identities.
+
+The fresh GNU archive passes the existing actual single/block SEN guard suite
+and positive empty transitions; the coherent machine-audio test also passes
+in1.24s. Archive SHA256 is
+`e3badb8363c786e92f3b62674d8fa311129655b700f6c6f0d37e3bd246cda20e`.
+Stock COW boot048 now logs the actual idle-discard disable/re-enable, then
+advances to9,362,225,883 instructions and stops normally at the loaded draw's
+opaque09F8 profile guard. First SAVE revocation is confirmed as a CPU bound
+descriptor write. No DSP panic, menu/input or frame-rate result is claimed.

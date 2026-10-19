@@ -2411,6 +2411,10 @@ public:
     uint32_t debug_raster_state_word(RasterStateWord word) const {
         return word < kRasterStateWords ? raster_state_[word] : 0;
     }
+    bool debug_context_opaque09f8(uint32_t& value) const {
+        if(!context_initializers_.opaque_raster_09f8.known)return false;
+        value=context_initializers_.opaque_raster_09f8.value;return true;
+    }
     // Passive command receipt, deliberately distinct from hardware readback.
     bool debug_context_eye_vector(unsigned lane,uint32_t& value) const {
         if(lane>=3 || !context_initializers_.eye_vector[lane].known)return false;
@@ -2814,6 +2818,7 @@ private:
     uint8_t& context_viewport_offset_known_=context_state_.context_viewport_offset_known_;
     ContextInitializerState& context_initializers_=context_state_.context_initializers_;
     bool hle_blit_selectors_reported_=false;
+    bool hle_opaque_09f8_reported_=false;
     uint16_t& hle_cold_default_w_=context_state_.hle_cold_default_w_;
     uint16_t& hle_default_w_reported_=context_state_.hle_default_w_reported_;
     bool hle_context_seen_=false;

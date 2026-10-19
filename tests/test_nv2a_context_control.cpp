@@ -95,6 +95,7 @@ static void test_tiled_clear_phase_uses_cpu_codec() {
     }
 }
 int main() {
+    test_opaque09f8_consumer_policy();
     test_hle_context_transport();
     test_gpu_phase_ownership();
     test_tiled_clear_phase_uses_cpu_codec();test_single_sample_clear_raster_independence();test_loaded_object_header_switch();test_pgraph_setup();test_pgraph_context_transfer();test_loaded_context_methods();

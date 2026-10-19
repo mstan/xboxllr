@@ -292,8 +292,17 @@ bool Nv2a::context_initializer_draw_ready() {
         (context_raster_known_[kRasterSurfaceFormat] & 0xf000u) != 0xf000u ||
         (surface_format_ & 0xf000u))
         return reject("NV2A loaded draw multisample profile is unknown/unsupported");
+#if XLLE_RENDERER_HLE
+    // UNK09F8 has no consumer in this host renderer or the consulted xemu
+    // draw path. Preserve the receipt; omit unknown raster effects explicitly.
+    if((!s.opaque_raster_09f8.known || s.opaque_raster_09f8.value!=4) && !hle_opaque_09f8_reported_) {
+        std::fprintf(stderr,"[nv2a] HLE omission: opaque09F8 known=%u value=%08x; raw receipt retained, raster effects deferred\n",unsigned(s.opaque_raster_09f8.known),s.opaque_raster_09f8.value);
+        hle_opaque_09f8_reported_=true;
+    }
+#else
     if (!s.opaque_raster_09f8.known || s.opaque_raster_09f8.value != 4)
         return reject("NV2A loaded draw opaque raster profile differs from reached value4");
+#endif
     // First7 disable depth; draw8 enables LESS without depth writes. Keep the
     // existing mathematical depth/stencil operations and their storage owner.
     // Opaque1D84 is not evidence of a different comparison result. Its exact

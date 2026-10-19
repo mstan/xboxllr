@@ -246,3 +246,27 @@ static void test_gpu_phase_ownership() {
     }
 #endif
 }
+
+static void test_opaque09f8_consumer_policy() {
+    for(int value:{-1,0,1,2,3,4,15,5}) {
+#if !XLLE_RENDERER_HLE
+        if(value==4)continue; // existing strict positive profile is unchanged
+#endif
+        PhaseRenderer renderer;auto fixture=std::make_unique<LoadedDrawFixture>();auto& f=*fixture;
+        f.gpu.set_renderer(&renderer);f.state(0x9f8);f.shader();f.color();
+        if(value>=0)f.emit(0x9f8,uint32_t(value));
+        f.triangle();f.kick();uint32_t raw=0xdeadbeef;
+        const bool known=f.gpu.debug_context_opaque09f8(raw);
+        if(value==5) {
+            CHECK(f.failure.find("opaque raster encoding")!=std::string::npos && !renderer.draws);
+            CHECK(!known && !f.read(0x800048));continue;
+        }
+        CHECK(known==(value>=0));if(known)CHECK(raw==uint32_t(value));
+#if XLLE_RENDERER_HLE
+        CHECK(f.failure.empty() && renderer.draws==1 && f.read(0x800048)==0x1234);
+        CHECK(get32(f.ram,0x1000)==0xa5a5a5a6 && get32(f.ram,0x1044)==0xa5a5a5a5);
+#else
+        CHECK(f.failure.find("opaque raster profile")!=std::string::npos && !renderer.draws && !f.read(0x800048));
+#endif
+    }
+}

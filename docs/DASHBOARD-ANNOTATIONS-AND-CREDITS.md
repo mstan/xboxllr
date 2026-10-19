@@ -24,10 +24,11 @@ controller navigation and return to the main menu are **unverified**. The
 2026-10-19 modern HLE cold-boot candidate passes tiled storage, loaded draws,
 the reached nominal audio modes, SRCCOPY and semantic context SAVE, and displays
 the Xbox boot logo. The subsequent idle PGRAPH reset is implemented and passes
-focused HLE/strict-boundary checks. Boot047 aborts on an older DSP dependency
-that lacks the framework's maintained resident SEN stack support. A fresh
-isolated dependency is being built; no modern menu/input result follows from
-these component checks.
+focused HLE/strict-boundary checks. Boot047 exposed an older DSP dependency
+that lacked the framework's maintained resident SEN stack support. Boot048
+uses a fresh isolated dependency, passes both idle reset and SEN, then stops
+at 9,362,225,883 instructions on the loaded-draw opaque09F8 state guard. Menu
+and input validation still require passing that consumer.
 Do not describe this prototype as installed or playable. It is not a public
 release.
 

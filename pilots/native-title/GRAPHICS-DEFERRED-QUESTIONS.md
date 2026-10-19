@@ -381,3 +381,19 @@ PRAMIN/valid snapshots/raw unknowns/storage/tags/global counters survive.
 Exact PGRAPH reset contents and timing remain deferred; strict LLE unchanged.
 Reopen when a reached consumer requires omitted reset effects or retained
 state contradicts a validated reference.
+
+## GFX-D02 addendum: opaque09F8 HLE raster omission
+
+Dashboard boot048 reaches a loaded draw that does not satisfy the earlier
+known-value4 receipt restriction. Envytools still names this method UNK09F8;
+the current host renderer and inspected xemu renderer have no effect consumer.
+HLE preserves absent/known raw receipts, validates setters (0..4 or15), logs
+first omitted use and proceeds under an explicit raster-effect omission.
+Strict LLE retains its known-value4 restriction. No reset/LOAD default or
+physical pixel equivalence is inferred. See the
+[consumer policy](../../docs/HLE-OPAQUE-INITIALIZERS.md).
+
+Reopen when physical evidence or visible output identifies a required effect,
+or a supported renderer adds a consumer. Clipping, depth, multisample storage,
+shader and texture requirements remain implemented or guarded; this defers
+only the unidentified method's raster effects.
