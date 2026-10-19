@@ -6,6 +6,14 @@ private paths resolve against their JSON file. The binding profile must select
 the exact XBE SHA256. The dashboard definition selects owned retail 5960, not an
 upstream dashboard substitute.
 
+Content mounts and guest DOS drive links have separate owners. The content
+device always resolves to the verified read-only image directory. With
+`content.drive_owner = "HOST"` (the default), startup also creates the declared
+`content.drive` link. `"TITLE"` leaves guest links for original title code to
+create. The dashboard selects TITLE because it maps C: to writable partition 1
+and Y: to its read-only content on partition 2; pre-seeding C: for content would
+make its original C: creation collide. Older generated headers retain HOST.
+
 Use `prepare`, `configure`, `build`, then `run`. Preparation records the selected
 profile hash, selected binding families, canonical generation-proof fingerprint
 and complete generated-file hashes. Selected families must match nonempty actual
@@ -45,6 +53,10 @@ with a finite positive duration; they remain owned by the driver, hidden and
 muted, and cannot detach. Only that created process is stopped at its deadline.
 The authored tests mock process creation: they do not validate dashboard boot,
 rendering, input, audio output, or native performance.
+
+Notice trees remain part of each native build. CMake 3.26 and later copy only
+changed contents; older supported CMake versions retain the original directory
+copy. This avoids rewriting unchanged notices during incremental builds.
 
 If the child exits before the deadline, the command propagates its exit status.
 A planned deadline stop is recorded explicitly; it establishes only that the

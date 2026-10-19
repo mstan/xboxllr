@@ -127,6 +127,26 @@ XLLE_PILOT_TRACE = "0"
         with self.assertRaises(ValueError):
             n.configure_command(self.data, {'save_keys': keys}, self.output, self.build, 'cmake', 'Ninja', 1)
 
+    def test_content_drive_namespace_owner_default_and_title(self):
+        n.write_runtime_profile(self.output, self.data)
+        header = self.output / 'gen/pilot_title_runtime.h'
+        self.assertIn('#define PILOT_TITLE_DRIVE_OWNER "HOST"', header.read_text())
+        self.source.write_text(self.source.read_text() + '\n[content]\ndrive_owner = "TITLE"\n')
+        _, self.data = n.definition(self.source)
+        n.write_runtime_profile(self.output, self.data)
+        self.assertIn('#define PILOT_TITLE_DRIVE_OWNER "TITLE"', header.read_text())
+        manifest = n.check_generated(self.output, self.data['title'])
+        self.assertEqual(manifest['title_runtime']['drive_owner'], 'TITLE')
+        self.assertEqual(manifest['files'][header.name], n.digest(header))
+
+    def test_unknown_content_drive_namespace_owner_rejected(self):
+        original = self.source.read_text()
+        for owner in ('"UNKNOWN"', '""', 'false', '1'):
+            with self.subTest(owner=owner):
+                self.source.write_text(original + '\n[content]\ndrive_owner = ' + owner + '\n')
+                with self.assertRaisesRegex(ValueError, 'drive_owner'):
+                    n.definition(self.source)
+
     def test_partition_keeps_proofs_and_invalidates_the_previous_binary(self):
         from native_unit_budget import parse_unit
         prefix = (b'/**\n * Authored generated unit\n */\n\n#define RECOMP_GENERATED_CODE\n'

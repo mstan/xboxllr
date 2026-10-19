@@ -125,6 +125,12 @@ set_property(SOURCE runtime.c runtime_contract_test.c APPEND PROPERTY
 target_compile_definitions(xlle_native_title PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(xlle_native_title PRIVATE bcrypt)
 # Keep credits current even when only a notice changes and no relink occurs.
+# Avoid rewriting unchanged notice trees on every incremental build. The
+# original command retains compatibility with the declared CMake minimum.
+set(pilot_notice_copy_directory copy_directory)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.26)
+  set(pilot_notice_copy_directory copy_directory_if_different)
+endif()
 add_custom_target(pilot_notices ALL
   COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>")
 add_dependencies(xlle_native_title pilot_notices)
@@ -146,7 +152,7 @@ if(NOT EXISTS "${PILOT_GENERATED}/third_party/phobos-xboxrecomp/LICENSE")
 endif()
 if(EXISTS "${PILOT_GENERATED}/third_party")
   add_custom_command(TARGET pilot_notices POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_GENERATED}/third_party"
+    COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_GENERATED}/third_party"
       "$<TARGET_FILE_DIR:xlle_native_title>/third_party")
 endif()
 enable_testing()
@@ -157,6 +163,10 @@ add_executable(pilot_optical_empty_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests
 target_include_directories(pilot_optical_empty_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_optical_empty COMMAND pilot_optical_empty_test)
 set_tests_properties(pilot_optical_empty PROPERTIES TIMEOUT 15)
+add_executable(pilot_settings_factory_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_settings_factory.c")
+target_include_directories(pilot_settings_factory_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+pilot_add_test(NAME pilot_settings_factory COMMAND pilot_settings_factory_test)
+set_tests_properties(pilot_settings_factory PROPERTIES TIMEOUT 15)
 add_executable(pilot_kernel_clock_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_kernel_clock.c")
 target_include_directories(pilot_kernel_clock_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_kernel_clock COMMAND pilot_kernel_clock_test)
@@ -270,7 +280,7 @@ if(pilot_audio_dsp OR pilot_audio_device_lle)
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PILOT_DSP_SOURCE}/LICENSE" "${PILOT_DSP_SOURCE}/donor.json"
       "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300"
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_DSP_SOURCE}/third_party"
+    COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_DSP_SOURCE}/third_party"
       "$<TARGET_FILE_DIR:xlle_native_title>/third_party/dsp56300/dependencies")
   add_library(xlle_dsp_core STATIC "${CMAKE_CURRENT_SOURCE_DIR}/../../src/machine/apu_dsp_core.c")
   target_include_directories(xlle_dsp_core PRIVATE "${PILOT_DSP_SOURCE}/crates/emu-ffi/include")
@@ -429,7 +439,7 @@ if(PILOT_ADPCM_SOURCE)
   target_link_libraries(pilot_adpcm_test PRIVATE pilot_adpcm xlle_apu_adpcm)
   pilot_add_test(NAME pilot_adpcm_reference COMMAND pilot_adpcm_test)
   add_custom_command(TARGET pilot_notices POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_ADPCM_SOURCE}" "$<TARGET_FILE_DIR:xlle_native_title>/third_party/xbox-adpcm")
+    COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_ADPCM_SOURCE}" "$<TARGET_FILE_DIR:xlle_native_title>/third_party/xbox-adpcm")
 endif()
 target_compile_definitions(pilot_audio_backend PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(pilot_audio_backend PUBLIC ${audio_libraries})
@@ -617,7 +627,7 @@ if(PILOT_D3D_SOURCE)
   endforeach()
   if(EXISTS "${PILOT_D3D_SOURCE}/LICENSES")
     add_custom_command(TARGET pilot_notices POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PILOT_D3D_SOURCE}/LICENSES"
+      COMMAND "${CMAKE_COMMAND}" -E ${pilot_notice_copy_directory} "${PILOT_D3D_SOURCE}/LICENSES"
         "$<TARGET_FILE_DIR:xlle_native_title>/third_party/renderer/LICENSES")
   endif()
   add_custom_command(TARGET pilot_notices POST_BUILD

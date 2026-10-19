@@ -10,6 +10,7 @@ xbe_sha256 = "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d"
 image = "xboxdash.xbe"
 device = '\Device\Harddisk0\Partition2'
 drive = "C:"
+drive_owner = "TITLE"
 
 [generation]
 profile = "../../pilots/native-title/profiles/dashboard-5960.json"

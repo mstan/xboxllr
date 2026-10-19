@@ -66,6 +66,8 @@ def definition(path):
     drive = content.get("drive", "D:")
     if not re.fullmatch(r"[A-Z]:", drive):
         raise ValueError("invalid content drive")
+    if content.get("drive_owner", "HOST") not in ("HOST", "TITLE"):
+        raise ValueError("content drive_owner must be HOST or TITLE")
     profile = data.get("generation", {}).get("profile")
     if profile:
         selected = json.loads((path.parent / profile).resolve().read_text(encoding="utf-8"))
@@ -119,6 +121,7 @@ def write_runtime_profile(output, data):
         "image": content.get("image", "default.xbe"),
         "device": content.get("device", "\\Device\\Cdrom0"),
         "drive": content.get("drive", "D:"),
+        "drive_owner": content.get("drive_owner", "HOST"),
     }
     header = "/* Generated title policy; service implementations are shared. */\n"
     for key, value in runtime.items():

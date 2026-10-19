@@ -24,10 +24,13 @@ dashboard runner is historical evidence and is not an owner preview fallback.
 | Native startup compatibility adapter | Reviewed original component/ABI, six binder checks and integrated CTest pass; actual native boot now passes this component |
 | Native shutdown registration | Original list comparison, independent review and optimized integrated CTest pass; actual boot now passes ordinal 47 |
 | Native kernel clock | Tick data, PM performance queries and native TSC share one epoch; integrated clock CTest passes and actual boot now passes CRT constructors |
-| Named file metadata | Original 56-byte ABI, confined host queries and failure preservation tested/reviewed; native-only dispatch integrated; actual title call not yet reached |
+| Named file metadata | Original 56-byte ABI and confined host queries tested/reviewed; actual title now takes the content-directory success branch and absent NoisyCamera result |
 | Empty optical owner | Explicit dashboard policy; original-software comparison, independent remap review and integrated CTest pass; existing media/async contracts also pass |
-| Latest actual native boot | Passes drive initialization and reaches 1,517 entries; guarded at factory AV-region setting index `0x103` |
-| Driver incremental admission | 25 authored checks pass; selected families, actual admissions and failed-bind state are checked before configure/build/run |
+| Factory setting reads | Nonencrypted `100..103`, shared first-read cache and checksum; original-software comparisons, review and integrated CTest pass; actual dashboard passes `103` |
+| Content and writable drive ownership | Title creates C:/Y:/X:/T: itself; actual save-directory creation succeeds on writable partition 1 while content stays read-only on partition 2 |
+| Latest actual native boot | Reaches 1,590 entries and native input initialization; guarded at an unqualified keyboard-device class |
+| Driver incremental admission | 27 authored checks pass; selected families, actual admissions, failed-bind state and content-drive owner policy are checked before configure/build/run |
+| Incremental attribution files | All 146 existing notice files retain their contents and timestamps after the new copy-if-different build path |
 | Menu rendering/input/audio/performance | Unverified |
 | Credits asset mod under native execution | Pending native baseline; old full-machine evidence does not transfer automatically |
 | Owner native dashboard preview | Not ready |
@@ -68,7 +71,7 @@ reaches dashboard main initialization and stops at `IoDismountVolumeByName`
 [clock scope](NATIVE-KERNEL-CLOCK.md) and
 [metadata scope](NATIVE-FILE-METADATA-2026-10-19.md).
 
-The current optimized executable is
+The completed optical executable is
 `4b42152c913603d4bb70dc8f0461bdcdbe338bbe2072a4b152f77b528ca098a8`.
 It selects the shared immutable empty-drive policy: tray state `0x10`, change
 count zero, and an absent optical-volume error for dismount. Integrated optical,
@@ -82,6 +85,19 @@ It stops at the factory AV-region setting (`ExQueryNonVolatileSetting`, index
 `0x103`), outside the existing user-setting implementation. No menu or
 performance result is implied.
 See [empty optical scope](NATIVE-EMPTY-OPTICAL-2026-10-19.md).
+
+The current optimized executable is
+`7a3a0545a1ed535db22ef931ea760f9d18a16dac88d51b534638225ff762b71c`.
+The shared factory-setting owner covers the original AV-region query without
+changing user-setting ownership. A declarative `content.drive_owner = "TITLE"`
+also lets the original dashboard create its DOS links instead of colliding
+with an initial host C: link. Actual execution requests 256 cache pages,
+creates C:/Y:/X:/T:, creates its three save/music directories, and reaches
+native input initialization. The next guard is the original keyboard-device
+object at `1592a8`; this class is outside the current input profile. Menu,
+rendering and native frame-rate qualification remain pending. See
+[factory-setting scope](NATIVE-FACTORY-SETTINGS-2026-10-19.md) and
+[drive ownership](NATIVE-TITLE-DRIVER.md).
 
 Private logs and source-bound receipts are retained under
 `build/dashboard-native-driver-20261019`; failed compiler inputs and the original

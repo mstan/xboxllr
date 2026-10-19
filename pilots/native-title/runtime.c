@@ -538,13 +538,15 @@ static void critical_section(unsigned operation,uint32_t va)
 
 #include "status_map.inc"
 #include "counted_string.inc"
+#include "settings_factory.inc"
 
 static void query_setting(void)
 {
     uint32_t index=MEM32(g_esp+4),type=MEM32(g_esp+8),value=MEM32(g_esp+12);
     uint32_t length=MEM32(g_esp+16),result=MEM32(g_esp+20);
+    if(settings_factory_query(index,type,value,length,result))return;
     /* XC_* user-settings layout from Cxbx EmuEEPROM.h/types.h. These are
-     * actual file-backed settings; encrypted/factory queries remain explicit. */
+     * actual file-backed settings; other factory/encrypted queries guard. */
     static const unsigned char offsets[]={4,8,24,40,12,28,44,48,52,56,60,64,68,72,76,80,84,88,92};
     if (index>0xff) stop("EEPROM index outside pilot scope",index);
     if (index>=sizeof(offsets) && index!=0xff) { g_eax=0xc0000034u; return; }
@@ -1294,10 +1296,15 @@ int main(int argc,char **argv)
 #ifdef PILOT_MEDIA_HOST
     uint32_t content_status=media_verify(PILOT_XBE_SHA256);
     if(content_status)stop("native title content identity/mount failed",content_status);
-    content_status=namespace_create("\\??\\" PILOT_TITLE_DRIVE,PILOT_TITLE_DEVICE);
-    if(content_status)stop("native title content drive mount failed",content_status);
-    fprintf(stderr,"[CONTENT] %s -> %s; verified image=%s; read-only\n",
-        PILOT_TITLE_DRIVE,PILOT_TITLE_DEVICE,PILOT_TITLE_IMAGE);
+    if(!strcmp(PILOT_TITLE_DRIVE_OWNER,"HOST")) {
+        content_status=namespace_create("\\??\\" PILOT_TITLE_DRIVE,PILOT_TITLE_DEVICE);
+        if(content_status)stop("native title content drive mount failed",content_status);
+        fprintf(stderr,"[CONTENT] %s -> %s; verified image=%s; read-only\n",
+            PILOT_TITLE_DRIVE,PILOT_TITLE_DEVICE,PILOT_TITLE_IMAGE);
+    } else if(!strcmp(PILOT_TITLE_DRIVE_OWNER,"TITLE")) {
+        fprintf(stderr,"[CONTENT] %s; drive links owned by title; verified image=%s; read-only\n",
+            PILOT_TITLE_DEVICE,PILOT_TITLE_IMAGE);
+    } else stop("invalid native title content drive owner",0);
 #endif
 #endif
 #ifdef PILOT_SCHEDULING_LLE
