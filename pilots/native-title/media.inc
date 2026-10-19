@@ -205,7 +205,10 @@ static uint32_t media_verify(const char *expected)
             CloseHandle(root); return 0xc0000103u;
         }
         IO_STATUS_BLOCK io={0};
-        status=media_open_host(root,L"default.xbe",GENERIC_READ|SYNCHRONIZE,FILE_SHARE_READ,0x60,&identity,&io);
+        WCHAR image_name[256];
+        if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,PILOT_TITLE_IMAGE,-1,image_name,256))
+            stop("invalid title content image name",0);
+        status=media_open_host(root,image_name,GENERIC_READ|SYNCHRONIZE,FILE_SHARE_READ,0x60,&identity,&io);
     }
     char hex[65];
     if (!status) status=media_hash(identity,hex);
@@ -319,6 +322,16 @@ static uint32_t media_path(uint32_t attributes,WCHAR path[1024],HANDLE *parent,u
         if (status) return status;
         part=resolved;
         *parent=media_root;
+#ifdef PILOT_MEDIA_HOST
+        const size_t content_prefix=strlen(PILOT_TITLE_DEVICE);
+        if(!_strnicmp(part,PILOT_TITLE_DEVICE,content_prefix) &&
+           (!part[content_prefix] || part[content_prefix]=='\\')) {
+            part+=content_prefix;if(*part=='\\')++part;
+            /* Installed content is read-only, independently of writable save
+             * partitions. A drive letter is profile data, not a title branch. */
+            *partition=0;
+        } else
+#endif
         if (!_strnicmp(part,"\\Device\\CdRom0\\",15)) part+=15;
         else if (!_strnicmp(part,"\\Device\\Harddisk0\\Partition",27)) {
             unsigned number=(unsigned)(part[27]-'0');
@@ -367,7 +380,7 @@ static uint32_t media_open(uint32_t *args,int create)
     WCHAR path[1024]; HANDLE parent=NULL,handle=NULL; IO_STATUS_BLOCK io={0};
     unsigned partition=0;
     uint32_t status=media_path(attr,path,&parent,&partition);
-    if (!status && !partition && ((access&(GENERIC_WRITE|GENERIC_ALL|DELETE|WRITE_DAC|WRITE_OWNER|0x116u)) ||
+    if (!status && !partition && ((access&(GENERIC_WRITE|GENERIC_ALL|MAXIMUM_ALLOWED|DELETE|WRITE_DAC|WRITE_OWNER|0x116u)) ||
         (options&0x1000) || (create && args[7]!=1))) status=0xc00000a2u;
     if (!status && !partition && create && args[4] && MEM64(args[4])) stop("allocation size on read-only FILE_OPEN",190);
     unsigned slot=0;

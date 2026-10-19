@@ -1,0 +1,15 @@
+{
+  "xbe": "PRIVATE/xboxdash.xbe",
+  "eeprom": "PRIVATE/eeprom.bin",
+  "media_root": "PRIVATE/dashboard-content",
+  "state_dir": "PRIVATE/dashboard-state",
+  "save_keys": "PRIVATE/save-keys.aot-private.bin",
+  "cpu_donor": "PRIVATE/prepared-cpu-tools",
+  "xdk_symbols": "PRIVATE/xboxdash_xdk_symbols.json",
+  "seed_functions": "PRIVATE/native-boundary-seeds.aot-private.json",
+  "d3d_source": "PRIVATE/prepared-renderer",
+  "dsp_source": "PRIVATE/prepared-dsp",
+  "dsp_library": "PRIVATE/dsp56300_emu_ffi.lib",
+  "adpcm_source": "PRIVATE/prepared-adpcm",
+  "sdl2_dir": "PRIVATE/SDL2/cmake"
+}

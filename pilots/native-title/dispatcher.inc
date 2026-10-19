@@ -277,6 +277,7 @@ static void dispatch_gpu_quiesce(void)
 }
 static void dispatch_initialize(uint32_t va,unsigned type)
 {
+    if(kernel_rwlock_dispatcher_object(va))stop("read/write lock owns embedded dispatcher object",va);
     dispatch_ensure();
     AcquireSRWLockExclusive(&dispatch_lock);
     if (type==8 || type==9) {
@@ -327,6 +328,7 @@ static unsigned dispatch_cancel_timer(uint32_t va)
 }
 static unsigned dispatch_event(uint32_t va,int signal)
 {
+    if(kernel_rwlock_dispatcher_object(va))stop("read/write lock owns embedded dispatcher object",va);
     AcquireSRWLockExclusive(&dispatch_lock);
     if (MEM8(va)>1) stop("invalid event object",va);
     unsigned previous=MEM32(va+4); MEM32(va+4)=signal;
@@ -348,6 +350,9 @@ static unsigned dispatch_queue(uint32_t va,uint32_t a,uint32_t b,int remove)
 static uint32_t dispatch_wait(const uint32_t *objects,unsigned count,int all,int alertable,uint32_t timeout)
 {
     if (!count || count>64) return 0xc000000du;
+    for(unsigned i=0;i<count;++i)
+        if(kernel_rwlock_dispatcher_object(objects[i]))
+            stop("independent wait on read/write lock dispatcher object",objects[i]);
     if (alertable) stop("alertable guest wait requires APC delivery",objects[0]);
     int64_t due=timeout ? (int64_t)MEM64(timeout) : 0;
     if (dispatch_in_dpc && (!timeout || due)) stop("blocking wait in DPC",objects[0]);

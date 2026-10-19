@@ -1,5 +1,6 @@
 static void graphics_test_shader_call(unsigned entry,const uint32_t *args)
 {
+    CHECK(entry<PILOT_D3D_COUNT);
     /* Offline original-x86 oracle inputs. Never enabled by title execution. */
     const char *capture=getenv("XLLE_PILOT_VERTEX_STATE_CAPTURE");FILE *file=NULL;
     uint32_t bytes=PILOT_D3D_VERTEX_PROGRAM_CACHE+136*16;
@@ -24,7 +25,10 @@ static void graphics_test_shader_call(unsigned entry,const uint32_t *args)
 }
 static void test_graphics_shader_binding(uint32_t handle,const struct PilotVertexProbeStream streams[16])
 {
-    uint32_t base=handle-1,cache=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS;
+    GRAPHICS_TEST_REQUIRE("shader query/generic constant fixture",PILOT_D3D_D3DDevice_GetVertexShader,
+        PILOT_D3D_D3DDevice_GetVertexShaderConstant,PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInline,
+        PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInlineFast);
+    uint32_t base=handle-1,cache=graphics_vertex_constants_address();
     uint32_t flags=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_RECORD_FLAGS;
     uint32_t original_flags=MEM32(flags);MEM32(flags)&=~PILOT_D3D_VERTEX_RECORD_DISABLE;
     graphics_test_shader_call(PILOT_D3D_D3DDevice_SetVertexShader,&handle);
@@ -115,6 +119,7 @@ static void test_graphics_shaders(void)
 
 static void test_graphics_pixels(void)
 {
+    GRAPHICS_TEST_REQUIRE("pixel shader creation fixture",PILOT_D3D_D3DDevice_CreatePixelShader);
     uint32_t definition[60];
     for(unsigned i=0;i<60;++i)definition[i]=0x10203040u+i;
     memcpy(memory+0x19800,definition,sizeof(definition));
@@ -134,6 +139,9 @@ static void test_graphics_pixels(void)
     CHECK(vm_committed(0,0x100000000ull)==resident);
     fprintf(stderr,"PASS: pixel definition stdcall/HRESULT, independent owned copy, guest descriptor and OOM output preservation\n");
 #ifdef PILOT_D3D_PHOBOS
+    GRAPHICS_TEST_REQUIRE("pixel shader query/constant fixture",PILOT_D3D_D3DDevice_GetPixelShader,
+        PILOT_D3D_D3DDevice_SetPixelShaderConstant);
+#ifdef PILOT_D3D_PIXEL_PACKED_CONSTANTS
     memset(definition,0,sizeof(definition));definition[8]=1;definition[9]=0x1100;definition[43]=0xff204060;
     definition[57]=0x32103210;definition[58]=0x10101010;definition[59]=0x10;
     memcpy(memory+0x19800,definition,sizeof(definition));
@@ -186,5 +194,8 @@ static void test_graphics_pixels(void)
     uint32_t fixed=0;call_graphics(PILOT_D3D_D3DDevice_SetPixelShader,&fixed);
     fprintf(stderr,"PASS: mapped pixel constants, packed original-query cache, eye vector and changing real GPU pixels\n");
     fprintf(stderr,"PASS: pixel shader query follows real binding, zero/unbind/rebind, borrowed lifetime and four-byte output\n");
+#else
+    fprintf(stderr,"SKIP: pixel shader query/constant fixture requires a qualified packed constant cache\n");
+#endif
 #endif
 }

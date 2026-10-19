@@ -5,6 +5,7 @@ static uint32_t graphics_pixels[256];
 static float graphics_pixel_eye_vector[3];
 static void graphics_pixel_constants(const uint32_t *args)
 {
+#ifdef PILOT_D3D_PIXEL_PACKED_CONSTANTS
     uint32_t first=args[0],count=args[2];
     if(first>=16 || count>16-first)stop("pixel constant range",first);
     uint32_t handle=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER);
@@ -35,6 +36,9 @@ static void graphics_pixel_constants(const uint32_t *args)
     /* Draw submission already forwards this state to the real donor constant
      * buffer. Constant changes need no shader recompilation or GPU wait here.
      * Constant-eye reflection (mode0x12) remains explicitly unsupported. */
+#else
+    (void)args;stop("pixel constant cache is unqualified for this profile",0);
+#endif
 }
 static void graphics_pixel_bind(uint32_t handle)
 {

@@ -19,6 +19,11 @@ static void graphics_scene_target(FILE *file,unsigned depth)
 }
 static FILE *graphics_scene_begin(const char *capture,unsigned sequence,const uint32_t args[3])
 {
+#ifndef PILOT_D3D_PIXEL_PACKED_CONSTANTS
+    (void)capture;(void)sequence;(void)args;
+    stop("complete scene capture requires a qualified pixel constant cache",0);
+    return NULL;
+#else
     char path[1024];
     if(snprintf(path,sizeof(path),"%s/scene-%u.bin",capture,sequence)>=(int)sizeof(path))stop("scene capture path",0);
     FILE *file=fopen(path,"wb");if(!file)stop("scene capture open",0);
@@ -55,6 +60,7 @@ static FILE *graphics_scene_begin(const char *capture,unsigned sequence,const ui
         }
     }
     return file;
+#endif
 }
 static void graphics_scene_finish(FILE *file)
 {

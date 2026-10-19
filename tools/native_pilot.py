@@ -92,6 +92,9 @@ def retire_recovered_entry_units(directory, records):
 
 
 def prepare(args):
+    for key in ('unit_max_functions', 'unit_max_bytes'):
+        if getattr(args, key, 0) < 0:
+            raise ValueError('generated C unit budgets cannot be negative')
     donor = args.donor.resolve()
     git = "C:/Program Files/Git/cmd/git.exe" if sys.platform == "win32" else "git"
     pin = subprocess.check_output([git, "-C", str(donor), "rev-parse", "HEAD"], text=True).strip()
@@ -166,8 +169,16 @@ def prepare(args):
                  "--abi-dir", str(out / "abi"), "-o", str(out / "lift"),
                  "--hle-impl", str(ROOT / "pilots/native-title/runtime.c"),
                  "--gen-dir", str(out / "gen"), "--trace-all-entries"])
+    unit_budget = None
+    if getattr(args, 'unit_max_bytes', 0) or getattr(args, 'unit_max_functions', 0):
+        from native_unit_budget import apply as partition_units
+        unit_budget = partition_units(out/'gen',
+            max_functions=getattr(args, 'unit_max_functions', 0) or 250,
+            max_bytes=getattr(args, 'unit_max_bytes', 0) or 524288)
     retire_recovered_entry_units(out/'gen',extent_records)
     counts = harden_generated(out / "gen")
+    if unit_budget is not None:
+        counts['unit_budget'] = unit_budget
     from native_dispatch import apply as compact_dispatch
     counts['compact_dispatch'] = compact_dispatch(out/'gen')
     from native_interrupt_lowering import apply as lower_interrupts
@@ -239,6 +250,10 @@ if __name__ == "__main__":
     parser.add_argument("--profile", type=Path,
                         help="Validated title/XDK binding profile; exact legacy identity selection is retained")
     parser.add_argument("--data-sections", default="")
+    parser.add_argument("--unit-max-functions", type=int, default=0,
+                        help="Optional generated C unit function budget; zero preserves donor grouping")
+    parser.add_argument("--unit-max-bytes", type=int, default=0,
+                        help="Optional generated C unit source-byte budget; functions remain indivisible")
     parser.add_argument("--reuse-discovery", action="store_true")
     parser.add_argument('--diagnostic-continuations', action='store_true',
                         help='Restricted continuation research output; requires a separate diagnostic harness')

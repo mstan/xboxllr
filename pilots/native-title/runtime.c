@@ -13,6 +13,7 @@
 #define RECOMP_GENERATED_CODE
 #include "recomp_types.h"
 #include "pilot_image.h"
+#include "title_profile.h"
 #include "guest_cpu_config.h"
 #ifdef PILOT_AUDIO_DEVICE_LLE
 #include "audio_device_lle.h"
@@ -153,6 +154,7 @@ static void graphics_original_callback_dpc(void);
 static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 #endif
 #include "thread_scheduler.inc"
+#include "kernel_rwlock.inc"
 #ifdef PILOT_DISPLAY_LLE
 static void display_lle_tick(void);
 static const char *display_lle_access(uint32_t address,unsigned size,int write,uint32_t *value);
@@ -294,8 +296,14 @@ void pilot_thread_checkpoint(void)
     }
     ReleaseSRWLockExclusive(&thread_lock);
 }
+#ifdef PILOT_D3D_NATIVE
+static void graphics_abi_thread_retire(void);
+#endif
 static void thread_finished(void)
 {
+#ifdef PILOT_D3D_NATIVE
+    graphics_abi_thread_retire();
+#endif
     scheduler_retire();
     AcquireSRWLockExclusive(&thread_lock);
     threads[current_thread_slot].finished=1;
@@ -564,6 +572,7 @@ static void query_setting(void)
 #include "physical_memory.inc"
 #include "pool_memory.inc"
 #include "save_crypto.inc"
+#include "kernel_hmac.inc"
 #ifdef PILOT_SCHEDULING_LLE
 #include "component_owner.inc"
 static void scheduling_lle_bootstrap(void);
@@ -757,6 +766,7 @@ static void kernel_dispatch_impl(void)
 #ifdef PILOT_FILES_LLE
     if(files_lle_kernel(next_kernel_ordinal))return;
 #endif
+    if(kernel_rwlock_dispatch(next_kernel_ordinal))return;
     const char *name = "unknown ordinal";
     for (size_t i=0; i<sizeof(pilot_imports)/sizeof(pilot_imports[0]); ++i)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
@@ -825,6 +835,7 @@ static void kernel_dispatch_impl(void)
 #endif
     case 304:case 305:system_time_fields(next_kernel_ordinal);return;
     case 335:case 336:case 337:save_crypto_kernel(next_kernel_ordinal);return;
+    case 340:kernel_hmac_dispatch(next_kernel_ordinal);return;
     case 124: case 143: case 144: case 224: case 231: case 246: case 250:
         thread_object_kernel(next_kernel_ordinal);return;
     case 14:case 15:case 17:case 23:pool_kernel(next_kernel_ordinal);return;
@@ -1103,6 +1114,16 @@ static void load_image(const char *path)
             MEM32(pilot_imports[i].address)=data;
             fprintf(stderr,"[CONFIG] HalBootSMCVideoMode=6 (composite AV pack)\n");
         }
+        if(pilot_imports[i].ordinal==326) {
+            /* XeImageFileName is an ANSI_STRING data export. The selected
+             * title's device/path is declarative loader policy. */
+            const uint32_t data=PILOT_KERNEL_DATA_BASE+0x7000u;
+            const char name[]=PILOT_TITLE_DEVICE "\\" PILOT_TITLE_IMAGE;
+            if(sizeof(name)>4096-8)stop("title image name exceeds kernel export",326);
+            commit(data,4096);MEM16(data)=(uint16_t)(sizeof(name)-1);
+            MEM16(data+2)=(uint16_t)sizeof(name);MEM32(data+4)=data+8;
+            memcpy(memory+data+8,name,sizeof(name));MEM32(pilot_imports[i].address)=data;
+        }
         if (pilot_imports[i].ordinal==322 || pilot_imports[i].ordinal==324) {
             const uint32_t data=PILOT_KERNEL_DATA_BASE+0x1000u*(pilot_imports[i].ordinal-322);
             commit(data,4096);
@@ -1165,6 +1186,7 @@ static void load_image(const char *path)
 
 int main(int argc,char **argv)
 {
+    fprintf(stderr,"[TITLE] id=%s name=%s route=native-title\n",PILOT_TITLE_ID,PILOT_TITLE_NAME);
 #ifdef PILOT_NATIVE_OPTIMIZATION
     fprintf(stderr,"[PILOT BUILD] native_optimization=%s\n",PILOT_NATIVE_OPTIMIZATION);
 #endif
@@ -1208,6 +1230,14 @@ int main(int argc,char **argv)
     if (argc>=4) media_content_path=argv[3];
     if (argc==5) storage_mount(argv[4]);
     fsc_ensure();
+#ifdef PILOT_MEDIA_HOST
+    uint32_t content_status=media_verify(PILOT_XBE_SHA256);
+    if(content_status)stop("native title content identity/mount failed",content_status);
+    content_status=namespace_create("\\??\\" PILOT_TITLE_DRIVE,PILOT_TITLE_DEVICE);
+    if(content_status)stop("native title content drive mount failed",content_status);
+    fprintf(stderr,"[CONTENT] %s -> %s; verified image=%s; read-only\n",
+        PILOT_TITLE_DRIVE,PILOT_TITLE_DEVICE,PILOT_TITLE_IMAGE);
+#endif
 #endif
 #ifdef PILOT_SCHEDULING_LLE
     scheduling_lle_finalize_imports();
@@ -1224,6 +1254,8 @@ int main(int argc,char **argv)
 #endif
 #ifdef PILOT_MEDIA_INSTALLED
     fprintf(stderr,"[MEDIA POLICY] installed-title HLE; optical authentication is not asserted\n");
+#elif defined(PILOT_MEDIA_HOST)
+    fprintf(stderr,"[MEDIA POLICY] profile-selected native content; independent writable save partitions\n");
 #else
     fprintf(stderr,"[MEDIA POLICY] original optical verification routine\n");
 #endif
@@ -1327,6 +1359,9 @@ int main(int argc,char **argv)
     thread_guest_cpu_enter();
     scheduler_publish(0,0,0);scheduler_enter(0);
     entry();
+#ifdef PILOT_D3D_NATIVE
+    graphics_abi_thread_retire();
+#endif
     scheduler_retire();
     AcquireSRWLockShared(&thread_lock);
     unsigned launched=thread_count;

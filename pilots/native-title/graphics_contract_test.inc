@@ -1,5 +1,19 @@
+static int graphics_test_has_entries(const char *fixture,const unsigned *entries,unsigned count)
+{
+    for(unsigned i=0;i<count;++i)if(entries[i]>=PILOT_D3D_COUNT) {
+        fprintf(stderr,"SKIP: %s requires an unavailable graphics boundary (entry=%u profile_device=%08x bindings=%u)\n",
+            fixture,entries[i],PILOT_D3D_DEVICE_OBJECT,(unsigned)PILOT_D3D_COUNT);
+        return 0;
+    }
+    return 1;
+}
+#define GRAPHICS_TEST_REQUIRE(fixture,...) do { \
+    const unsigned required_entries[]={__VA_ARGS__}; \
+    if(!graphics_test_has_entries((fixture),required_entries,sizeof(required_entries)/sizeof(*required_entries)))exit(77); \
+} while(0)
 static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 {
+    CHECK(entry<PILOT_D3D_COUNT);
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     unsigned bytes=pilot_d3d_calls[entry].stack_bytes;
     if (bytes) memcpy(memory+g_esp+4,args,bytes);
@@ -27,6 +41,8 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_present_contract_test.inc"
 static void test_graphics_guest_scheduler(void)
 {
+    GRAPHICS_TEST_REQUIRE("graphics scheduler callbacks/fences",PILOT_D3D_D3DDevice_InsertCallback,
+        PILOT_D3D_D3DDevice_InsertFence,PILOT_D3D_D3DDevice_BlockOnFence);
     vm_ensure();dispatch_ensure();
     uint32_t page=PILOT_D3D_DEVICE_GLOBAL&~4095u;
     uint32_t bytes=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-page;
@@ -34,7 +50,7 @@ static void test_graphics_guest_scheduler(void)
     const uint32_t parameters[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};
     memcpy(memory+0x19000,parameters,sizeof(parameters));
     scheduler_enabled=1;scheduler_publish(0,0,0);scheduler_enter(0);
-    uint32_t create[]={0,1,0,0x40,0x19000,0x19100};
+    uint32_t create[]={0,1,0,PILOT_D3D_CREATE_BEHAVIOR_MASK,0x19000,0x19100};
     CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)==0);
     gpu_test_caller=GetCurrentThreadId();gpu_test_count=0;
     gpu_test_entered=CreateEventW(NULL,TRUE,FALSE,NULL);
@@ -58,6 +74,8 @@ static void test_graphics_guest_scheduler(void)
 }
 static void test_graphics(int focused_fixture)
 {
+    GRAPHICS_TEST_REQUIRE("graphics lifecycle/front-back/fence fixture",PILOT_D3D_D3DDevice_GetBackBuffer2,
+        PILOT_D3D_D3DDevice_InsertCallback,PILOT_D3D_D3DDevice_InsertFence,PILOT_D3D_D3DDevice_BlockOnFence);
     vm_ensure();
     dispatch_ensure(); /* Persistent shared callback stack precedes allocation baseline. */
     uint32_t global_page=PILOT_D3D_DEVICE_GLOBAL&~4095u;
@@ -65,7 +83,7 @@ static void test_graphics(int focused_fixture)
     commit(global_page,state_bytes); vm_fixed_region(global_page,state_bytes);
     uint32_t *parameters=(uint32_t*)(memory+0x19000);
     const uint32_t valid[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};
-    uint32_t create[]={0,1,0,0x40,0x19000,0x19100};
+    uint32_t create[]={0,1,0,PILOT_D3D_CREATE_BEHAVIOR_MASK,0x19000,0x19100};
     memcpy(parameters,valid,sizeof(valid)); parameters[0]=0;
     MEM32(0x19100)=0xdeadbeef;
     CHECK(call_graphics(PILOT_D3D_Direct3D_CreateDevice,create)&0x80000000u);

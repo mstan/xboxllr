@@ -6,6 +6,14 @@ struct GraphicsShader {
     uint32_t program[136][4];
 };
 static struct GraphicsShader graphics_shaders[256];
+static uint32_t graphics_vertex_constants_address(void)
+{
+#ifdef PILOT_D3D_VERTEX_CONSTANTS_GLOBAL
+    return PILOT_D3D_VERTEX_CONSTANTS_GLOBAL;
+#else
+    return PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS;
+#endif
+}
 static struct GraphicsShader *graphics_shader(uint32_t handle)
 {
     if(handle&1)for(unsigned i=0;i<256;++i)
@@ -22,7 +30,7 @@ static void graphics_shader_constants(uint32_t first,uint32_t data,uint32_t word
         stop("unqualified vertex constant range",first);
     const void *source=graphics_pointer(data,words*4);
     pilot_gfx_shader_constants(first,words/4,source);
-    if(record)memmove(memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS+first*16,source,words*4);
+    if(record)memmove(memory+graphics_vertex_constants_address()+first*16,source,words*4);
 }
 static void graphics_shader_get_constants(const uint32_t *args)
 {
@@ -30,7 +38,7 @@ static void graphics_shader_get_constants(const uint32_t *args)
     if(first<0 || first>=192 || !args[2] || args[2]>192-(uint32_t)first)
         stop("unqualified vertex constant query",args[0]);
     memmove(graphics_pointer(args[1],args[2]*16),
-        memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS+(uint32_t)first*16,args[2]*16);
+        memory+graphics_vertex_constants_address()+(uint32_t)first*16,args[2]*16);
 }
 static void graphics_shader_bind(uint32_t handle)
 {
@@ -73,7 +81,7 @@ static void graphics_shader_bind(uint32_t handle)
     int record=graphics_shader_records();
     for(unsigned i=0;i<192;++i)if(shader->constant_mask[i/32]&(1u<<(i%32))) {
         pilot_gfx_shader_constants(i,1,shader->constants[i]);
-        if(record)memcpy(memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS+i*16,shader->constants[i],16);
+        if(record)memcpy(memory+graphics_vertex_constants_address()+i*16,shader->constants[i],16);
     }
     if(record)memcpy(memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_PROGRAM_CACHE,
         shader->program,MEM32(shader->header+8)*16);

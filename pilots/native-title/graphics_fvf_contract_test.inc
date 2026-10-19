@@ -1,7 +1,8 @@
 static void test_graphics_fvf(void)
 {
+    GRAPHICS_TEST_REQUIRE("FVF query/restore fixture",PILOT_D3D_D3DDevice_GetVertexShader);
     uint32_t previous=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
-    uint32_t constants[192][4];memcpy(constants,memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS,sizeof(constants));
+    uint32_t constants[192][4];memcpy(constants,memory+graphics_vertex_constants_address(),sizeof(constants));
     /* Sequential calls also expose stale format/offset fields. Descriptor
      * captures are checked against the complete original decoder offline. */
     const uint32_t formats[]={0x144,0,0x344,0x3c4,0x30144,0x10144,0x20144,0x444,4,0xc4,0,0x144};
@@ -16,7 +17,7 @@ static void test_graphics_fvf(void)
             CHECK(MEM32(PILOT_D3D_FVF_OBJECT+4)==0 && MEM32(PILOT_D3D_FVF_OBJECT+0x10)==0);
             for(unsigned reg=0;reg<16;++reg)CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0x1c+reg*16)==2);
         }
-        CHECK(!memcmp(constants,memory+PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS,sizeof(constants)));
+        CHECK(!memcmp(constants,memory+graphics_vertex_constants_address(),sizeof(constants)));
     }
     call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&previous);
     CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_OBJECT)==previous-1);

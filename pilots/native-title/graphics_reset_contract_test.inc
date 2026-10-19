@@ -1,6 +1,7 @@
 static void test_graphics_reset(void)
 {
 #ifdef PILOT_D3D_PHOBOS
+    GRAPHICS_TEST_REQUIRE("reset retained front/back resource fixture",PILOT_D3D_D3DDevice_GetBackBuffer2);
     uint64_t resident=vm_committed(0,0x100000000ull);
     uint32_t saved_parameters[17];memcpy(saved_parameters,graphics_parameters,sizeof(saved_parameters));
     uint32_t headers=graphics_headers,create[]={4,4,1,1,0,6,3},length=64;
@@ -16,9 +17,11 @@ static void test_graphics_reset(void)
     pilot_gfx_vertex_upload(graphics_vertex(vertex)->native,
         memory+graphics_vertex(vertex)->data,length);
     uint32_t rs[166];memcpy(rs,memory+PILOT_D3D_RENDER_STATES,sizeof(rs));
+#if PILOT_D3D_STATEBLOCK_AVAILABLE
     uint32_t block_args[]={1,0x19984};
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateStateBlock,block_args)==0);
     uint32_t block=MEM32(block_args[1]),block_header[15];memcpy(block_header,memory+block,sizeof(block_header));
+#endif
     unsigned texture_refs=MEM32(texture),vertex_refs=MEM32(vertex);
     uint64_t populated=vm_committed(0,0x100000000ull);
     uint32_t pointer=0x19000,*p=(uint32_t*)(memory+pointer);
@@ -36,7 +39,9 @@ static void test_graphics_reset(void)
         CHECK(graphics_target==headers && graphics_depth==headers+64 && !av_saved_data);
         rs[(PILOT_D3D_PRESENT_INTERVAL-PILOT_D3D_RENDER_STATES)/4]=p[12];
         CHECK(!memcmp(rs,memory+PILOT_D3D_RENDER_STATES,sizeof(rs)));
+#if PILOT_D3D_STATEBLOCK_AVAILABLE
         CHECK(!memcmp(block_header,memory+block,sizeof(block_header)));
+#endif
         CHECK(MEM32(texture)==texture_refs && MEM32(vertex)==vertex_refs);
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES)==texture);
         CHECK(MEM32(PILOT_D3D_STREAMS+15*12+8)==vertex);
@@ -64,14 +69,21 @@ static void test_graphics_reset(void)
         CHECK(vm_committed(0,0x100000000ull)==populated);
     }
     /* State-block resource references survive all resets and release normally. */
+#if PILOT_D3D_STATEBLOCK_AVAILABLE
     unsigned slot=0;while(slot<128 && graphics_blocks[slot].header!=block)++slot;
     CHECK(slot<128);graphics_block_release(slot);
+#endif
     bind[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);
     stream[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&texture)==0);
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&vertex)==0);
     CHECK(vm_committed(0,0x100000000ull)==resident);
     memcpy(p,saved_parameters,sizeof(saved_parameters));
-    fprintf(stderr,"PASS: repeated real display reset/resize, retained texture/vertex/state-block ownership, pixels, ABI and immediate swaps\n");
+    fprintf(stderr,"PASS: repeated real display reset/resize, retained texture/vertex ownership, pixels, ABI and immediate swaps\n");
+#if PILOT_D3D_STATEBLOCK_AVAILABLE
+    fprintf(stderr,"PASS: state-block references/bytes survive display reset\n");
+#else
+    fprintf(stderr,"SKIP: state-block ownership across reset is unavailable in the selected graphics profile\n");
+#endif
 #endif
 }

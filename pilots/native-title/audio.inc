@@ -4,6 +4,26 @@
 #include <math.h>
 #include "audio_backend.h"
 #include "pilot_audio_bindings.h"
+/* Previously generated headers use this same qualified object adapter without
+ * named layout constants. Partial new metadata must not silently inherit it. */
+#if !defined(PILOT_AUDIO_DEVICE_INTERFACE_OFFSET) && !defined(PILOT_AUDIO_BUFFER_INTERFACE_OFFSET) && !defined(PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES)
+#define PILOT_AUDIO_DEVICE_INTERFACE_OFFSET 8u
+#define PILOT_AUDIO_BUFFER_INTERFACE_OFFSET 28u
+#define PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES 24u
+#endif
+#if !defined(PILOT_AUDIO_DEVICE_INTERFACE_OFFSET) || !defined(PILOT_AUDIO_BUFFER_INTERFACE_OFFSET) || !defined(PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES)
+#error Incomplete native audio object layout
+#endif
+#if PILOT_AUDIO_DEVICE_INTERFACE_OFFSET != 8 || PILOT_AUDIO_BUFFER_INTERFACE_OFFSET != 28 || PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES != 24
+#error Unsupported native audio object adapter
+#endif
+#ifndef PILOT_AUDIO_HAS_DSP
+#ifdef PILOT_AUDIO_DSP_SEED
+#define PILOT_AUDIO_HAS_DSP 1
+#else
+#define PILOT_AUDIO_HAS_DSP 0
+#endif
+#endif
 #ifdef PILOT_AUDIO_ADPCM
 #include "xbox_adpcm.h"
 #endif
@@ -65,17 +85,17 @@ static void *audio_pointer(uint32_t address,uint32_t bytes)
 }
 static void audio_device_check(uint32_t iface)
 {
-    if(!audio_device || iface!=audio_device+8)stop("unowned audio device",iface);
+    if(!audio_device || iface!=audio_device+PILOT_AUDIO_DEVICE_INTERFACE_OFFSET)stop("unowned audio device",iface);
 }
 static struct PilotAudioBuffer *audio_buffer(uint32_t iface)
 {
-    for(unsigned i=0;i<256;++i)if(audio_buffers[i].base && iface==audio_buffers[i].base+28)return &audio_buffers[i];
+    for(unsigned i=0;i<256;++i)if(audio_buffers[i].base && iface==audio_buffers[i].base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET)return &audio_buffers[i];
     stop("unowned audio buffer",iface);
 }
 static uint32_t audio_ref(uint32_t base,int acquire)
 {
     struct PilotAudioBuffer *b=NULL;
-    if(base!=audio_device || !base)b=audio_buffer(base+28);
+    if(base!=audio_device || !base)b=audio_buffer(base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET);
     uint32_t refs=MEM32(base+4);
     if(!refs || (acquire && refs==UINT32_MAX))stop("invalid audio reference lifetime",base);
     refs=acquire?refs+1:refs-1;MEM32(base+4)=refs;
@@ -182,7 +202,7 @@ static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_
          * the guest object, format, gain and routing survive for rebinding. */
         static unsigned reported;
         if(reported++<8 || pilot_verbose)
-            fprintf(stderr,"[AUDIO DETACH] iface=%08x data=%08x bytes=%u owned=%u\n",b->base+28,b->data,b->bytes,b->owned);
+            fprintf(stderr,"[AUDIO DETACH] iface=%08x data=%08x bytes=%u owned=%u\n",b->base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET,b->data,b->bytes,b->owned);
         pilot_audio_buffer_destroy(b->host);
         if(b->owned){uint32_t zero=0;if(vm_free(&b->data,&zero,MEM_RELEASE))stop("audio detach release failed",b->data);}
         b->host=NULL;b->data=b->bytes=b->owned=0;
@@ -216,8 +236,8 @@ static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_
 }
 static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
 {
-    const uint32_t *desc=audio_pointer(descriptor,24);audio_pointer(output,4);
-    if(desc[0]!=24 || desc[1]&~(0x20u|0x80u|0x40000u) || desc[5])
+    const uint32_t *desc=audio_pointer(descriptor,PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES);audio_pointer(output,4);
+    if(desc[0]!=PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES || desc[1]&~(0x20u|0x80u|0x40000u) || desc[5])
         stop("unqualified sound buffer flags/mix bins",desc[1]);
     uint32_t format=desc[3];audio_pointer(format,18);
     unsigned tag=MEM16(format),channels=MEM16(format+2),rate=MEM32(format+4),bits=MEM16(format+14),align=MEM16(format+12);
@@ -249,11 +269,11 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     int32_t hr=0;
     if(desc[2])hr=audio_set_data(&buffer,0,desc[2]);
     if(hr<0){pool_free(buffer.base);return hr;}
-    audio_buffers[slot]=buffer;audio_ref(audio_device,1);MEM32(output)=buffer.base+28;
-    fprintf(stderr,"[AUDIO BUFFER] iface=%08x bytes=%u format=%s%u channels=%u rate=%u\n",buffer.base+28,desc[2],tag==0x69?"XBOX_ADPCM":"PCM",bits,channels,rate);
+    audio_buffers[slot]=buffer;audio_ref(audio_device,1);MEM32(output)=buffer.base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET;
+    fprintf(stderr,"[AUDIO BUFFER] iface=%08x bytes=%u format=%s%u channels=%u rate=%u\n",buffer.base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET,desc[2],tag==0x69?"XBOX_ADPCM":"PCM",bits,channels,rate);
     return 0;
 }
-#ifdef PILOT_AUDIO_DSP
+#if defined(PILOT_AUDIO_DSP) && PILOT_AUDIO_HAS_DSP
 static int32_t audio_download_effects(const uint32_t *a)
 {
     audio_device_check(a[0]);
@@ -316,7 +336,7 @@ void pilot_audio_dispatch(unsigned entry)
                 else {audio_device=base;memset(memory+base,0,44);MEM32(base)=PILOT_AUDIO_DEVICE_VTABLE;MEM32(base+4)=1;}
             }
         }
-        if(result>=0){MEM32(a[1])=audio_device+8;
+        if(result>=0){MEM32(a[1])=audio_device+PILOT_AUDIO_DEVICE_INTERFACE_OFFSET;
 #ifdef PILOT_AUDIO_REFERENCE
             fprintf(stderr,"[AUDIO DEVICE] caller-driven reference APU/GP; 48000 Hz software output\n");
 #else
@@ -330,7 +350,7 @@ void pilot_audio_dispatch(unsigned entry)
         audio_device_check(a[0]);if(a[3])stop("audio buffer aggregation is unqualified",a[3]);
         result=audio_create_buffer(a[1],a[2]);
     } else if(entry==PILOT_AUDIO_IDirectSound_DownloadEffectsImage) {
-#ifdef PILOT_AUDIO_DSP
+#if defined(PILOT_AUDIO_DSP) && PILOT_AUDIO_HAS_DSP
         result=audio_download_effects(a);
 #else
         stop("Xbox DSP effects image needs a real native effect implementation",a[2]);

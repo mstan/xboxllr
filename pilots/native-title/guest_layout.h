@@ -4,4 +4,4 @@
  * E5000000/E6000000 original-kernel/clock transport stacks and E8000000
  * bounded guarded service frames. */
 #define PILOT_KERNEL_DATA_BASE 0xe7000000u
-#define PILOT_KERNEL_DATA_BYTES 0x6000u
+#define PILOT_KERNEL_DATA_BYTES 0x8000u

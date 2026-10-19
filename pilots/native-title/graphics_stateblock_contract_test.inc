@@ -1,5 +1,6 @@
 static void test_graphics_blocks(void)
 {
+#if PILOT_D3D_STATEBLOCK_AVAILABLE
     uint64_t resident=vm_committed(0,0x100000000ull);
     uint32_t output=0x19984,args[]={1,output};
     /* Empty bindings remain meaningful records, rather than discarded work. */
@@ -29,7 +30,7 @@ static void test_graphics_blocks(void)
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER)=shader|1;
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_OBJECT)=shader;
     for(unsigned i=0;i<16*4;++i)MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_CONSTANTS+i*4)=0x3f000000+i;
-    for(unsigned i=0;i<192*4;++i)MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_CONSTANTS+i*4)=0x3e000000+i;
+    for(unsigned i=0;i<192*4;++i)MEM32(graphics_vertex_constants_address()+i*4)=0x3e000000+i;
     uint64_t populated=vm_committed(0,0x100000000ull);
     for(unsigned type=1;type<=3;++type) {
         args[0]=type;CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateStateBlock,args)==0);token=MEM32(output);
@@ -61,4 +62,7 @@ static void test_graphics_blocks(void)
     /* Leave one real block for outer device release/recreation to reclaim. */
     CHECK(call_graphics(PILOT_D3D_D3DDevice_CreateStateBlock,args)==0);
     fprintf(stderr,"PASS: actual state snapshots, membership, independent bytes, owned resources, OOM and device cleanup\n");
+#else
+    fprintf(stderr,"SKIP: state-block snapshot fixture is unavailable in the selected graphics profile\n");
+#endif
 }

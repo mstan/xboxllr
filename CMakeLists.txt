@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
-project(xlle CXX C)
+project(xboxllr CXX C)
+
+# The same repository builds native title applications and the full-machine
+# correctness reference. Native titles do not configure the emulated CPU floor.
+set(XBOXLLR_BUILD_MODE "REFERENCE" CACHE STRING "Build REFERENCE or NATIVE_TITLE")
+set_property(CACHE XBOXLLR_BUILD_MODE PROPERTY STRINGS REFERENCE NATIVE_TITLE)
+if(XBOXLLR_BUILD_MODE STREQUAL "NATIVE_TITLE")
+  add_subdirectory(pilots/native-title native-title)
+  return()
+elseif(NOT XBOXLLR_BUILD_MODE STREQUAL "REFERENCE")
+  message(FATAL_ERROR "XBOXLLR_BUILD_MODE must be REFERENCE or NATIVE_TITLE")
+endif()
 
 # ---- xlle: LLE-first original-Xbox platform. A0 foundations. ----
 # Harvest strategy (DESIGN §3): CPU floor from Unicorn (QEMU x86 core), host layer from

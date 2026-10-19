@@ -3,6 +3,10 @@
  * stop before executing against a device owned by the native renderer. */
 #include "graphics_backend.h"
 #include "pilot_d3d_bindings.h"
+#ifndef PILOT_D3D_CREATE_BEHAVIOR_MASK
+/* Compatibility with already generated headers for the original adapter. */
+#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x40u
+#endif
 #include "graphics_profile.inc"
 static SRWLOCK graphics_lock=SRWLOCK_INIT;
 #include "graphics_interpolation.inc"
@@ -32,6 +36,8 @@ static const char *graphics_original_leave(void)
     return error;
 }
 #endif
+
+#include "graphics_abi.inc"
 static int graphics_active;
 #include "graphics_diagnostics.inc"
 static uint32_t graphics_parameters[17];
@@ -248,7 +254,8 @@ static void graphics_dispatch_impl(unsigned entry)
                pilot_d3d_device_caps,sizeof(pilot_d3d_device_caps)); break;
     case PILOT_D3D_Direct3D_CreateDevice: {
         if (graphics_active) stop("second native device creation",entry);
-        if (arguments[0] || arguments[1]!=1 || arguments[2] || (arguments[3]&~0x40u))
+        if (arguments[0] || arguments[1]!=1 || arguments[2] ||
+            (arguments[3]&~PILOT_D3D_CREATE_BEHAVIOR_MASK))
             stop("unqualified graphics creation options",entry);
         uint32_t staged[17]; memcpy(staged,graphics_pointer(arguments[4],sizeof(staged)),sizeof(staged));
         fprintf(stderr,"[D3D PARAMETERS]");

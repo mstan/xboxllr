@@ -1,0 +1,44 @@
+schema = "xboxllr.native-title.v1"
+
+[title]
+id = "xbox-dashboard-5960"
+name = "Xbox Dashboard"
+executable = "XboxDashboard"
+xbe_sha256 = "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d"
+
+[content]
+image = "xboxdash.xbe"
+device = '\Device\Harddisk0\Partition2'
+drive = "C:"
+
+[generation]
+profile = "../../pilots/native-title/profiles/dashboard-5960.json"
+bindings = ["cache", "cpu", "input", "audio", "d3d"]
+unit_max_functions = 64
+unit_max_bytes = 524288
+
+[build]
+PILOT_NATIVE_OPTIMIZATION = "OPTIMIZED"
+PILOT_MEDIA = "HOST"
+PILOT_CACHE = "NATIVE"
+PILOT_CPU_PROBE = "NATIVE"
+PILOT_RENDERER = "D3D11"
+PILOT_D3D_DONOR = "PHOBOS"
+PILOT_AUDIO = "NATIVE"
+PILOT_AUDIO_BACKEND = "XAUDIO2_DSP"
+PILOT_CALENDAR = "HLE"
+PILOT_IO_DEVICE = "OFF"
+PILOT_USB = "OFF"
+PILOT_DISPLAY = "NATIVE"
+PILOT_MEMORY = "NATIVE"
+PILOT_FILES = "NATIVE"
+PILOT_INPUT = "NATIVE"
+PILOT_SCHEDULING = "NATIVE"
+
+[runtime]
+XLLE_PILOT_GUEST_SCHEDULER = "1"
+XLLE_PILOT_DEFER_STREAM_UPLOAD = "1"
+XLLE_PILOT_TEXTURE_EXPOSURE_CACHE = "1"
+XLLE_PILOT_GPU_EVENTS = "1"
+XLLE_PILOT_EVENT_TRACE = "0"
+XLLE_PILOT_TRACE = "0"

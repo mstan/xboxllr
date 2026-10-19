@@ -1,10 +1,10 @@
 /* Xbox state blocks are owned CPU snapshots, not native GPU command lists.
  * Serialize the original record layout, including resource references. The
  * native renderer does not execute the original driver to capture state. */
-struct GraphicsStateBlock {
-    uint32_t header,bytes,refs[23],kinds[23],count;
-};
-static struct GraphicsStateBlock graphics_blocks[128];
+#ifndef PILOT_D3D_STATEBLOCK_AVAILABLE
+/* Previously emitted headers describe the complete reviewed state-block ABI. */
+#define PILOT_D3D_STATEBLOCK_AVAILABLE 1
+#endif
 #define SNAPSHOT_FIELD(name) (PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_##name)
 
 static void graphics_snapshot_init(void)
@@ -15,15 +15,29 @@ static void graphics_snapshot_init(void)
     MEM32(SNAPSHOT_FIELD(PIXEL_SHADER))=0;MEM32(SNAPSHOT_FIELD(VERTEX_SHADER))=2;
     MEM32(SNAPSHOT_FIELD(VERTEX_OBJECT))=0;
     MEM32(SNAPSHOT_FIELD(INDICES))=0;MEM32(SNAPSHOT_FIELD(BASE_VERTEX))=0;
-    MEM32(SNAPSHOT_FIELD(LIGHTS))=0;MEM32(SNAPSHOT_FIELD(LIGHT_COUNT))=0;
+#ifdef PILOT_D3D_SNAPSHOT_LIGHTS
+    MEM32(SNAPSHOT_FIELD(LIGHTS))=0;
+#endif
+#ifdef PILOT_D3D_SNAPSHOT_LIGHT_COUNT
+    MEM32(SNAPSHOT_FIELD(LIGHT_COUNT))=0;
+#endif
     memset(memory+PILOT_D3D_STREAMS,0,16*12);
+#ifdef PILOT_D3D_SNAPSHOT_PIXEL_CONSTANTS
     memset(memory+SNAPSHOT_FIELD(PIXEL_CONSTANTS),0,16*16);
-    memset(memory+SNAPSHOT_FIELD(VERTEX_CONSTANTS),0,192*16);
+#endif
+    memset(memory+graphics_vertex_constants_address(),0,192*16);
+#ifdef PILOT_D3D_SNAPSHOT_MATERIALS
     memset(memory+SNAPSHOT_FIELD(MATERIALS),0,2*68);
+#endif
     uint32_t *transforms=graphics_pointer(SNAPSHOT_FIELD(TRANSFORMS),10*64);
     memset(transforms,0,10*64);
     for(unsigned i=0;i<10;++i)for(unsigned j=0;j<4;++j)transforms[i*16+j*5]=0x3f800000;
 }
+#if PILOT_D3D_STATEBLOCK_AVAILABLE
+struct GraphicsStateBlock {
+    uint32_t header,bytes,refs[23],kinds[23],count;
+};
+static struct GraphicsStateBlock graphics_blocks[128];
 static void graphics_block_ref(uint32_t kind,uint32_t header,int acquire)
 {
     if(kind==0)graphics_texture_ref(graphics_texture_slot(header),acquire);
@@ -128,4 +142,13 @@ static uint32_t graphics_block_create(const uint32_t *args)
     fprintf(stderr,"[STATE BLOCK] type=%u token=%08x bytes=%u refs=%u\n",type,block.header,block.bytes,block.count);
     return 0;
 }
+#else
+/* No state-block resources can be created through an unavailable boundary. */
+static void graphics_blocks_release(void) {}
+static uint32_t graphics_block_create(const uint32_t *args)
+{
+    (void)args;stop("state-block binding is unqualified for this profile",0);
+    return 0;
+}
+#endif
 #undef SNAPSHOT_FIELD

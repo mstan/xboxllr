@@ -7,6 +7,27 @@
 #include "pilot_input_bindings.h"
 #include "input_host.h"
 
+/* Legacy generated headers describe the original packed XAPI ABI but predate
+ * explicit layout metadata. New profiles must supply their own proved fields;
+ * an absent API never inherits this legacy layout. */
+#ifndef PILOT_INPUT_ABI_VERSION
+#define PILOT_INPUT_ABI_VERSION 1u
+#define PILOT_INPUT_STATE_BYTES 22u
+#define PILOT_INPUT_CAPABILITIES_BYTES 25u
+#define PILOT_INPUT_FEEDBACK_MOTOR_OFFSET 66u
+#define PILOT_INPUT_DEFAULT_POLLING_0 1u
+#define PILOT_INPUT_DEFAULT_POLLING_1 8u
+#define PILOT_INPUT_DEFAULT_POLLING_2 0u
+#define PILOT_INPUT_DEFAULT_POLLING_3 0u
+#define PILOT_INPUT_HAS_CAPABILITIES 1
+#define PILOT_INPUT_HAS_FEEDBACK 1
+#define PILOT_INPUT_HAS_ENUMERATION_STATUS 0
+#define PILOT_INPUT_HAS_DEVICE_DESCRIPTION 0
+#endif
+#if PILOT_INPUT_ABI_VERSION != 1 || PILOT_INPUT_STATE_BYTES != 22
+#error Unsupported native gamepad state ABI
+#endif
+
 struct PilotInputPort {
     uint8_t gamepad[18];
     uint32_t packet,generation;
@@ -59,7 +80,7 @@ static void input_sample(unsigned port,uint64_t now,int force)
     if (!force && now<p->next_poll) return;
     uint8_t state[18]; uint32_t status=pilot_input_host_state(port,state);
     if (status && status!=ERROR_DEVICE_NOT_CONNECTED) stop("host controller poll failed",status);
-    unsigned interval=8;
+    unsigned interval=PILOT_INPUT_DEFAULT_POLLING_1 ? PILOT_INPUT_DEFAULT_POLLING_1 : 1;
     if (status) {
         input_disconnect(port); interval=250; /* bounded hotplug latency, no busy empty-slot polling */
     } else {
@@ -110,7 +131,8 @@ static uint32_t input_open(const uint32_t args[4],uint32_t *error)
         if (h->port==port && input_connected(h)) { *error=ERROR_SHARING_VIOLATION; return 0; }
     }
     if (!free_slot || used>=input_capacity) { *error=ERROR_OUTOFMEMORY; return 0; }
-    uint8_t polling[4]={1,8,0,0};
+    uint8_t polling[4]={PILOT_INPUT_DEFAULT_POLLING_0,PILOT_INPUT_DEFAULT_POLLING_1,
+                        PILOT_INPUT_DEFAULT_POLLING_2,PILOT_INPUT_DEFAULT_POLLING_3};
     if (poll) { input_buffer(poll,4); memcpy(polling,memory+poll,4); }
     if (!(polling[0]&1) || (polling[0]&~3) || polling[3])
         stop("unqualified manual/reserved input polling mode",poll);
@@ -188,42 +210,58 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
         memset(h,0,sizeof(*h)); break;
     }
     case PILOT_INPUT_XInputGetState: {
-        input_buffer(args[1],22);
+        input_buffer(args[1],PILOT_INPUT_STATE_BYTES);
         struct PilotInputHandle *h=input_handle(args[0]);
         input_sample(h->port,dispatch_monotonic(),0);
-        MEM32(args[1])=h->packet; memcpy(memory+args[1]+4,h->gamepad,18);
+        MEM32(args[1])=h->packet; memcpy(memory+args[1]+4,h->gamepad,PILOT_INPUT_STATE_BYTES-4);
         result=input_connected(h)?ERROR_SUCCESS:ERROR_DEVICE_NOT_CONNECTED; break;
     }
+#if PILOT_INPUT_HAS_CAPABILITIES
     case PILOT_INPUT_XInputGetCapabilities: {
-        input_buffer(args[1],25);
+        input_buffer(args[1],PILOT_INPUT_CAPABILITIES_BYTES);
         struct PilotInputHandle *h=input_handle(args[0]);
         input_sample(h->port,dispatch_monotonic(),0);
         if (!input_connected(h)) result=ERROR_DEVICE_NOT_CONNECTED;
         else {
-            uint8_t caps[25]={2,0,0}; /* Controller S subtype, reserved WORD */
-            memset(memory+args[1],0,25); MEM8(args[1])=2;
+            uint8_t caps[PILOT_INPUT_CAPABILITIES_BYTES]={2,0,0}; /* subtype, reserved WORD */
+            memset(memory+args[1],0,PILOT_INPUT_CAPABILITIES_BYTES); MEM8(args[1])=2;
             result=pilot_input_host_caps(h->port,caps+3,caps+21);
             if (result==ERROR_NOT_SUPPORTED) stop("unqualified host controller capabilities",h->port);
-            if (!result) memcpy(memory+args[1],caps,25);
+            if (!result) memcpy(memory+args[1],caps,PILOT_INPUT_CAPABILITIES_BYTES);
             else if (result==ERROR_DEVICE_NOT_CONNECTED) input_disconnect(h->port);
         }
         MEM16(args[1]+1)=0; /* Original clears reserved even on disconnection. */
         break;
     }
+#endif
+#if PILOT_INPUT_HAS_FEEDBACK
     case PILOT_INPUT_XInputSetState: {
-        input_buffer(args[1],70);
+        input_buffer(args[1],PILOT_INPUT_FEEDBACK_MOTOR_OFFSET+4);
         struct PilotInputHandle *h=input_handle(args[0]);
         /* Event-backed async feedback needs real guest handle resolution first;
          * never confuse a guest event handle with a dispatcher-object address. */
         if (MEM32(args[1]+4)) stop("input feedback event handles are unqualified",MEM32(args[1]+4));
         input_sample(h->port,dispatch_monotonic(),0);
-        MEM8(args[1]+64)=0; MEM8(args[1]+65)=6;
-        result=input_connected(h) ? pilot_input_host_rumble(h->port,MEM16(args[1]+66),MEM16(args[1]+68))
+        MEM8(args[1]+PILOT_INPUT_FEEDBACK_MOTOR_OFFSET-2)=0;
+        MEM8(args[1]+PILOT_INPUT_FEEDBACK_MOTOR_OFFSET-1)=6;
+        result=input_connected(h) ? pilot_input_host_rumble(h->port,MEM16(args[1]+PILOT_INPUT_FEEDBACK_MOTOR_OFFSET),MEM16(args[1]+PILOT_INPUT_FEEDBACK_MOTOR_OFFSET+2))
                                   : ERROR_DEVICE_NOT_CONNECTED;
         if (result==ERROR_DEVICE_NOT_CONNECTED) input_disconnect(h->port);
         MEM32(args[1])=result; /* Completed only after the real host operation. */
         break;
     }
+#endif
+#if PILOT_INPUT_HAS_ENUMERATION_STATUS
+    case PILOT_INPUT_XGetDeviceEnumerationStatus:
+        /* Native host polling completes synchronously and has no pending USB
+         * enumeration request. Initialization is checked before this switch. */
+        input_refresh(); result=0; break;
+#endif
+#if PILOT_INPUT_HAS_DEVICE_DESCRIPTION
+    case PILOT_INPUT_XInputGetDeviceDescription:
+        stop("native IR device description requires its original hardware response",args[0]);
+        break;
+#endif
     default: stop("unqualified input operation",entry);
     }
     ReleaseSRWLockExclusive(&input_lock);
