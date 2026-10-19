@@ -1775,6 +1775,19 @@ this assessment; the external checkout is research material only. This entry
 records consultation, not permission to incorporate GPL code into the intended
 non-GPL product.
 
+The 2026-10-18 dashboard tools additionally consult Theseus's XIP layout,
+FND script-method descriptor documentation and original-menu/VM interfaces.
+`dashboard_xip.py`, `dashboard_symbols.py` and `dashboard_credits_mod.py` are
+independently authored format readers/transformations, not ports of Theseus
+implementation bodies. Method names, pointers and fingerprints are recovered
+from the owner's hash-selected XBE; static constructor candidates are not
+claims of runtime initialization or complete function boundaries. The Credits
+mod transforms the owner's original XAP/geometry locally and preserves the
+original archives and unrelated payloads. No retail scripts, assets, XDK
+headers or private annotation output are committed. See
+[the dashboard mod notes](docs/DASHBOARD-ANNOTATIONS-AND-CREDITS.md) for the
+source/version boundary and still-pending dashboard validation.
+
 ## Actual AC97 PCM payload consumer (2026-10-11)
 
 The authored maintained ACI consumer follows the [Intel AC97 programmer
