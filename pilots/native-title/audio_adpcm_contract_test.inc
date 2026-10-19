@@ -1,10 +1,10 @@
 /* Real device, compressed guest storage and PCM host samples. The separate
  * codec fixture compares the borrowed decoder to the full APU reference. */
 #if defined(PILOT_AUDIO_ADPCM) && defined(PILOT_AUDIO_DSP)
-static uint32_t adpcm_test_buffer(uint32_t device,unsigned channels,unsigned extension)
+static uint32_t adpcm_test_buffer_flags(uint32_t device,unsigned channels,unsigned extension,uint32_t flags)
 {
     uint32_t desc=0x19100,fmt=0x19200,out=0x19010;
-    memset(memory+desc,0,24);MEM32(desc)=24;MEM32(desc+12)=fmt;
+    memset(memory+desc,0,24);MEM32(desc)=24;MEM32(desc+4)=flags;MEM32(desc+12)=fmt;
     memset(memory+fmt,0,20);MEM16(fmt)=0x69;MEM16(fmt+2)=(uint16_t)channels;
     MEM32(fmt+4)=44100;MEM32(fmt+8)=44100*36*channels/64;
     MEM16(fmt+12)=(uint16_t)(36*channels);MEM16(fmt+14)=4;MEM16(fmt+16)=2;MEM16(fmt+18)=(uint16_t)extension;
@@ -12,6 +12,8 @@ static uint32_t adpcm_test_buffer(uint32_t device,unsigned channels,unsigned ext
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_CreateSoundBuffer,a)==0);
     return MEM32(out);
 }
+static uint32_t adpcm_test_buffer(uint32_t device,unsigned channels,unsigned extension)
+{return adpcm_test_buffer_flags(device,channels,extension,0);}
 static void adpcm_test_readback(struct PilotAudioBuffer *b)
 {
     int16_t actual[8*64*2],expected[8*64*2];

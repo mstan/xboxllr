@@ -27,6 +27,9 @@
 #ifndef PILOT_AUDIO_HAS_MIXBIN_HEADROOM
 #define PILOT_AUDIO_HAS_MIXBIN_HEADROOM 0
 #endif
+#ifndef PILOT_AUDIO_HAS_NOTIFICATIONS
+#define PILOT_AUDIO_HAS_NOTIFICATIONS 0
+#endif
 #ifdef PILOT_AUDIO_ADPCM
 #include "xbox_adpcm.h"
 #endif
@@ -78,6 +81,10 @@ struct PilotAudioBuffer {
     uint32_t mix_count,mix_bins[8];
     int32_t mix_volumes[32];
     int locked;
+#if PILOT_AUDIO_HAS_NOTIFICATIONS
+    unsigned notification_enabled,notification_count;
+    struct PilotAudioNotification notifications[64];
+#endif
 };
 static struct PilotAudioBuffer audio_buffers[256];
 #include "audio_configuration_capture.inc"
@@ -106,6 +113,10 @@ static uint32_t audio_ref(uint32_t base,int acquire)
     if(b) {
         if(b->locked)stop("releasing locked audio buffer",base);
         pilot_audio_buffer_destroy(b->host);
+#if PILOT_AUDIO_HAS_NOTIFICATIONS
+        for(unsigned i=0;i<b->notification_count;++i)
+            if(!CloseHandle(b->notifications[i].event))stop("audio notification owner close failed",base);
+#endif
         if(b->owned){uint32_t bytes=0;if(vm_free(&b->data,&bytes,MEM_RELEASE))stop("audio data release failed",base);}
         pool_free(base);memset(b,0,sizeof(*b));audio_ref(audio_device,0);
     } else {
@@ -227,6 +238,9 @@ static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_
     }
     if(hr>=0)hr=pilot_audio_buffer_frequency(host,b->frequency);
     if(hr>=0)hr=audio_route_host(b,host);
+#if PILOT_AUDIO_HAS_NOTIFICATIONS && defined(PILOT_AUDIO_DSP) && !defined(PILOT_AUDIO_REFERENCE)
+    if(hr>=0 && b->notification_count)hr=pilot_audio_buffer_notifications(host,b->notification_count,b->notifications);
+#endif
     if(hr<0) {
         pilot_audio_buffer_destroy(host);
         if(!source){uint32_t zero=0;if(vm_free(&data,&zero,MEM_RELEASE))stop("audio allocation cleanup failed",data);}
@@ -240,7 +254,11 @@ static int32_t audio_set_data(struct PilotAudioBuffer *b,uint32_t source,uint32_
 static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
 {
     const uint32_t *desc=audio_pointer(descriptor,PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES);audio_pointer(output,4);
-    if(desc[0]!=PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES || desc[1]&~(0x20u|0x80u|0x40000u) || desc[5])
+    uint32_t allowed=0x20u|0x80u|0x40000u;
+#if PILOT_AUDIO_HAS_NOTIFICATIONS && defined(PILOT_AUDIO_DSP) && !defined(PILOT_AUDIO_REFERENCE)
+    allowed|=0x100u;
+#endif
+    if(desc[0]!=PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES || desc[1]&~allowed || desc[5])
         stop("unqualified sound buffer flags/mix bins",desc[1]);
     uint32_t format=desc[3];audio_pointer(format,18);
     unsigned tag=MEM16(format),channels=MEM16(format+2),rate=MEM32(format+4),bits=MEM16(format+14),align=MEM16(format+12);
@@ -262,6 +280,9 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     unsigned slot;for(slot=0;slot<256 && audio_buffers[slot].base;++slot){}
     if(slot==256)return (int32_t)0x8007000e;
     struct PilotAudioBuffer buffer={0};buffer.channels=channels;buffer.rate=rate;buffer.bits=bits;buffer.frequency=rate;
+#if PILOT_AUDIO_HAS_NOTIFICATIONS
+    buffer.notification_enabled=(desc[1]&0x100)!=0;
+#endif
     buffer.format=tag;buffer.block_align=align;
     buffer.mix_count=2;buffer.mix_bins[1]=1;
     if(desc[4]) {int32_t hr=audio_set_mix(&buffer,desc[4],0);if(hr<0)return hr;}
@@ -276,6 +297,7 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     fprintf(stderr,"[AUDIO BUFFER] iface=%08x bytes=%u format=%s%u channels=%u rate=%u\n",buffer.base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET,desc[2],tag==0x69?"XBOX_ADPCM":"PCM",bits,channels,rate);
     return 0;
 }
+#include "audio_notification_owner.inc"
 #if defined(PILOT_AUDIO_DSP) && PILOT_AUDIO_HAS_DSP
 static int32_t audio_download_effects(const uint32_t *a)
 {
@@ -375,6 +397,9 @@ void pilot_audio_dispatch(unsigned entry)
             before_release=*b;configuration_slot=(unsigned)(b-audio_buffers);
         }
         if(entry==PILOT_AUDIO_IDirectSoundBuffer_Release)result=audio_ref(b->base,0);
+#if PILOT_AUDIO_HAS_NOTIFICATIONS
+        else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetNotificationPositions)result=audio_set_notifications(b,a[1],a[2]);
+#endif
         else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetBufferData)result=audio_set_data(b,a[1],a[2]);
         else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetMixBins)result=audio_set_mix(b,a[1],0);
         else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetMixBinVolumes_8)result=audio_set_mix(b,a[1],1);

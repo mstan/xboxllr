@@ -10,8 +10,12 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
 void pilot_audio_buffer_destroy(void *buffer);
 int32_t pilot_audio_buffer_copy(void *buffer,uint32_t offset,void *data,uint32_t bytes,int readback);
 int32_t pilot_audio_buffer_play(void *buffer,int looping);
+struct PilotAudioNotification {uint32_t offset;void *event;};
 #ifdef PILOT_AUDIO_DSP
 int32_t pilot_audio_mixbin_headroom(unsigned bin,uint32_t amount);
+/* Borrows input references during the call; successful configuration owns
+ * independent references until replaced or the voice is destroyed. */
+int32_t pilot_audio_buffer_notifications(void *buffer,unsigned count,const struct PilotAudioNotification *positions);
 int32_t pilot_audio_buffer_loop_region(void *buffer,uint32_t start,uint32_t bytes);
 int32_t pilot_audio_buffer_mixbins(void *buffer,unsigned count,const uint32_t *bins,const int32_t *volumes);
 /* Diagnostic tap of actual mixer input (32 channels) or GP output

@@ -17,10 +17,10 @@ static uint32_t audio_test_device(void)
     uint32_t iface=MEM32(0x19000);CHECK(iface==audio_device+8 && MEM32(audio_device+4)==1);
     return iface;
 }
-static uint32_t audio_test_buffer_format(uint32_t device,uint32_t bytes,unsigned channels,unsigned bits,unsigned rate,uint32_t mixbins)
+static uint32_t audio_test_buffer_format_flags(uint32_t device,uint32_t bytes,unsigned channels,unsigned bits,unsigned rate,uint32_t mixbins,uint32_t flags)
 {
     uint32_t desc=0x19100,fmt=0x19200,out=0x19010;
-    memset(memory+desc,0,24);MEM32(desc)=24;MEM32(desc+4)=0xa0;MEM32(desc+8)=bytes;MEM32(desc+12)=fmt;
+    memset(memory+desc,0,24);MEM32(desc)=24;MEM32(desc+4)=flags;MEM32(desc+8)=bytes;MEM32(desc+12)=fmt;
     MEM32(desc+16)=mixbins;
     memset(memory+fmt,0,18);MEM16(fmt)=1;MEM16(fmt+2)=(uint16_t)channels;MEM32(fmt+4)=rate;
     MEM32(fmt+8)=rate*channels*(bits/8);MEM16(fmt+12)=(uint16_t)(channels*(bits/8));MEM16(fmt+14)=(uint16_t)bits;
@@ -30,6 +30,8 @@ static uint32_t audio_test_buffer_format(uint32_t device,uint32_t bytes,unsigned
     CHECK(MEM32(out) && MEM32(out-4)==0xaabbccdd && MEM32(out+4)==0x11223344);
     return MEM32(out);
 }
+static uint32_t audio_test_buffer_format(uint32_t device,uint32_t bytes,unsigned channels,unsigned bits,unsigned rate,uint32_t mixbins)
+{return audio_test_buffer_format_flags(device,bytes,channels,bits,rate,mixbins,0xa0);}
 static uint32_t audio_test_buffer(uint32_t device,uint32_t bytes)
 {return audio_test_buffer_format(device,bytes,1,16,48000,0);}
 static void test_audio(void)

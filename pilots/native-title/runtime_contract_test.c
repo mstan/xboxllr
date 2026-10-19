@@ -254,6 +254,7 @@ static int test_write_faults(uint32_t va)
 #include "audio_headroom_contract_test.inc"
 #include "audio_detach_contract_test.inc"
 #include "audio_adpcm_contract_test.inc"
+#include "audio_notification_contract_test.inc"
 #endif
 static void test_memory(void)
 {
@@ -632,6 +633,9 @@ int main(int argc,char **argv)
     if(argc==2 && !strcmp(argv[1],"audio-mix")){test_audio_mix();return 0;}
 #if PILOT_AUDIO_HAS_MIXBIN_HEADROOM
     if(argc==2 && !strcmp(argv[1],"audio-headroom")){test_audio_mixbin_headroom();return 0;}
+#endif
+#if PILOT_AUDIO_HAS_NOTIFICATIONS && !defined(PILOT_AUDIO_REFERENCE)
+    if(argc==2 && !strcmp(argv[1],"audio-notifications")){test_audio_notifications();return 0;}
 #endif
     if(argc==2 && !strcmp(argv[1],"audio-detach")){test_audio_detach();return 0;}
 #ifdef PILOT_AUDIO_ADPCM

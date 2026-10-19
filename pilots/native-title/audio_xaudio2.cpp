@@ -166,6 +166,9 @@ struct Buffer final:public IXAudio2VoiceCallback {
     UINT64 baseline=0;
     UINT64 capture_id=0;
     bool playing=false,looping=false,submitted_end=false;
+    PilotAudioNotification notifications[64]{};
+    unsigned notification_count=0;
+    UINT64 notification_bytes=0;
     std::atomic<HRESULT> error{S_OK};
     Chunk chunks[32];
     void STDMETHODCALLTYPE OnVoiceProcessingPassStart(UINT32) override {}
@@ -177,6 +180,7 @@ struct Buffer final:public IXAudio2VoiceCallback {
     void STDMETHODCALLTYPE OnVoiceError(void*,HRESULT hr) override {error=hr;SetEvent(wake);}
 };
 static Buffer *buffers[256];
+#include "audio_xaudio2_notifications.hpp"
 static LONG64 audio_capture_next_id;
 static void diagnostic_capture_start(void);
 static void diagnostic_capture_close(void);
@@ -261,7 +265,9 @@ static void audio_stream_record(Buffer *b,const char *operation,UINT32 offset=0,
 static HRESULT fill(Buffer *b)
 {
     if(FAILED(b->error))return b->error;
-    if(!b->playing || b->submitted_end)return S_OK;
+    if(!b->playing)return S_OK;
+    notifications_progress(b);
+    if(b->submitted_end)return S_OK;
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s,XAUDIO2_VOICE_NOSAMPLESPLAYED);
     if(!s.BuffersQueued)audio_stream_record(b,"empty");
     UINT32 frames=b->frequency/100;if(!frames)frames=1;if(frames>512)frames=512;
@@ -602,7 +608,8 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
 void pilot_audio_buffer_destroy(void *opaque)
 {
     auto *b=static_cast<Buffer*>(opaque);if(!b)return;
-    {Guard guard;audio_stream_record(b,"destroy");audio_ingress_record(b,5,0,nullptr,0);for(auto &p:buffers)if(p==b)p=nullptr;}
+    {Guard guard;audio_stream_record(b,"destroy");audio_ingress_record(b,5,0,nullptr,0);for(auto &p:buffers)if(p==b)p=nullptr;
+     notifications_progress(b);notifications_close(b);}
     b->voice->DestroyVoice();delete[] b->data;delete b;
 }
 int32_t pilot_audio_buffer_copy(void *opaque,uint32_t offset,void *data,uint32_t bytes,int readback)
@@ -619,8 +626,9 @@ int32_t pilot_audio_buffer_copy(void *opaque,uint32_t offset,void *data,uint32_t
 static HRESULT seek(Buffer *b,UINT32 at,bool play);
 static XAUDIO2_VOICE_STATE refresh(Buffer *b)
 {
+    notifications_progress(b);
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
-    if(b->playing && b->submitted_end && !s.BuffersQueued){b->playing=false;b->origin=b->next=0;b->baseline=s.SamplesPlayed;b->submitted_end=false;audio_ingress_record(b,4,0,nullptr,0);}
+    if(b->playing && b->submitted_end && !s.BuffersQueued){b->playing=false;b->origin=b->next=0;b->baseline=s.SamplesPlayed;b->notification_bytes=0;b->submitted_end=false;audio_ingress_record(b,4,0,nullptr,0);}
     return s;
 }
 int32_t pilot_audio_buffer_play(void *opaque,int looping)
@@ -636,10 +644,11 @@ int32_t pilot_audio_buffer_play(void *opaque,int looping)
 }
 static HRESULT seek(Buffer *b,UINT32 at,bool play)
 {
+    notifications_progress(b);
     HRESULT hr=b->voice->Stop();if(SUCCEEDED(hr))hr=b->voice->FlushSourceBuffers();
     if(FAILED(hr))return hr;
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
-    b->origin=b->next=at;b->baseline=s.SamplesPlayed;b->submitted_end=false;b->playing=play;
+    b->origin=b->next=at;b->baseline=s.SamplesPlayed;b->notification_bytes=0;b->submitted_end=false;b->playing=play;
     audio_ingress_record(b,4,0,nullptr,0);
     if(play){hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();SetEvent(wake);}
     audio_stream_record(b,play?"seek-playing":"seek-stopped",at);

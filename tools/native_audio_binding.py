@@ -22,6 +22,7 @@ SEMANTIC_ENTRIES = (
     'IDirectSoundBuffer_Play', 'IDirectSoundBuffer_Stop', 'IDirectSoundBuffer_GetStatus',
     'IDirectSoundBuffer_GetCurrentPosition', 'IDirectSoundBuffer_SetCurrentPosition',
     'IDirectSoundBuffer_Lock', 'IDirectSoundBuffer_Unlock',
+    'IDirectSoundBuffer_SetNotificationPositions',
 )
 
 def bind(xbe,output,symbols,profile=None):
@@ -106,6 +107,7 @@ def bind(xbe,output,symbols,profile=None):
     header+=[f'#define PILOT_AUDIO_{kind}_VTABLE 0x{v["address"]:08x}u' for kind,v in tables.items()]
     header+=[f'#define PILOT_AUDIO_HAS_DSP {int(bool(dsp))}']
     header+=[f'#define PILOT_AUDIO_HAS_MIXBIN_HEADROOM {int("IDirectSound_SetMixBinHeadroom" in proof["calls"])}']
+    header+=[f'#define PILOT_AUDIO_HAS_NOTIFICATIONS {int("IDirectSoundBuffer_SetNotificationPositions" in proof["calls"])}']
     if dsp:
         header+=[f'#define PILOT_AUDIO_DSP_SEED UINT64_C(0x{dsp["seed"]["value"]:016x})']
     header+=[f'#define PILOT_AUDIO_{key.upper()} {value}u' for key,value in layout.items()]

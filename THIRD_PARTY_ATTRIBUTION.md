@@ -1411,6 +1411,14 @@ no source-processing body was copied. See
 [native mix-bin headroom](docs/NATIVE-AUDIO-MIXBIN-HEADROOM.md) for scope and
 actual-output validation.
 
+The native notification extension additionally checked Cxbx-Reloaded's
+`XbDSoundTypes.h` and `DirectSoundBuffer.cpp` as behavioral references for the
+position-notification capability and public API role. Actual owned original
+wrapper/caller code independently establishes the copied position/handle list
+and ADPCM block offsets. The retained host references, decoded-position
+adapter and consumed-sample observer are independently authored; no Cxbx body
+was copied. See [notification scope](docs/NATIVE-AUDIO-NOTIFICATIONS.md).
+
 [libsamplerate 0.2.2](https://github.com/libsndfile/libsamplerate/tree/0.2.2),
 copyright Erik de Castro Lopo and upstream contributors, was initially consulted
 as a resampling candidate. The subsequent source-rate stage now links its
