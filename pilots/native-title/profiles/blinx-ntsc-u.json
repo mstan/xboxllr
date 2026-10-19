@@ -1,0 +1,248 @@
+{
+  "schema": "native-title-profile.v1",
+  "id": "blinx-ntsc-u",
+  "xbe_sha256": "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249",
+  "bindings": {
+    "media": {
+      "adapter": "xapi-installed-media-v1",
+      "body": {
+        "sha256": "8879c24c18ccf32c675c2c1e3130c4c8e3007d1e2d70b388d3632d5a463a2f24"
+      },
+      "caller": "XapiInitProcess"
+    },
+    "cache": {
+      "adapter": "xapi-utility-cache-v1",
+      "body": {
+        "sha256": "36718604554b7c1ad0cbdf1acf611dd46124ce447d3e425b295feb90ec74809f",
+        "stack_bytes": 4
+      },
+      "error_helper": {
+        "sha256": "6931e553a99293e195882b3341c126d12dbff5ff994c05a967fe338d86c0b5b2",
+        "stack_bytes": 4
+      }
+    },
+    "cpu": {
+      "adapter": "x86-mmx-cdecl-v1",
+      "body": {
+        "sha256": "46171d02670c8e7bef5125047135fb769ee152787dfa9a411146f54cbe3e2aef",
+        "bytes": 50
+      }
+    },
+    "input": {
+      "adapter": "xapi-gamepad-v1",
+      "calls": {
+        "XInitDevices": {
+          "sha256": "4a88597b418d0b7805b55033a499f5ba42c1b3d4618ab137822f941edc8572a6",
+          "stack_bytes": 8
+        },
+        "XGetDevices": {
+          "sha256": "a66f3c95c357eaa27eaf85e9a2a563a7fa1dda3ba4841df773b5b95d54b8c29f",
+          "stack_bytes": 4
+        },
+        "XGetDeviceChanges": {
+          "sha256": "00843c1d6b7e7094fcc024e51e477d888d546f829d0d43c2853a0c3baf32d9e4",
+          "stack_bytes": 12
+        },
+        "XInputOpen": {
+          "sha256": "8447e7cbf75ebf05a111e7d9066b20b302dfc62a2444cc52b1cc06377c191e09",
+          "stack_bytes": 16
+        },
+        "XInputClose": {
+          "sha256": "e764297b82caa4ba15f4e5165fba6f2c8fdf6624777ae940f3dc89c34cd73643",
+          "stack_bytes": 4
+        },
+        "XInputGetCapabilities": {
+          "sha256": "e3fe8b687db930a2198e51927df8a4a030082ddcc13341f63f1c6dbde36fd521",
+          "stack_bytes": 8
+        },
+        "XInputGetState": {
+          "sha256": "5706c20aae6e7e5b8f80116260bc1cff23701c3fb6e9134644983dac955e9cb5",
+          "stack_bytes": 8
+        },
+        "XInputSetState": {
+          "sha256": "98c3978b7d7467a26d99174fa9951b30101dbcd8a39e21c69a2c548485ac7152",
+          "stack_bytes": 8
+        }
+      },
+      "set_last_error": {
+        "sha256": "1f297a4f8228adc6af4f404c12430e9738a6fbadf4e7185745f123b6216d38e7",
+        "stack_bytes": 4
+      },
+      "layout": {
+        "state_bytes": 22,
+        "capabilities_bytes": 25,
+        "feedback_motor_offset": 66,
+        "default_polling": [
+          1,
+          8,
+          0,
+          0
+        ]
+      },
+      "variables": {
+        "g_DeviceType_Gamepad": 1582828,
+        "g_DeviceType_MU": 1582704,
+        "g_DeviceType_IRDongle": 1582928
+      }
+    },
+    "audio": {
+      "adapter": "dsound-objects-v1",
+      "calls": {
+        "IDirectSound_Release": {
+          "sha256": "0a72b625b8e9e1a301ddf3c84ec304eded77fc8886c86f41f03efd6fa1fac2b5",
+          "stack_bytes": 4
+        },
+        "IDirectSoundBuffer_Unlock": {
+          "sha256": "e123f60e9fc6e974d1381f2f15fb19e7960628cc8925d65e344c2f2bdc64f424",
+          "stack_bytes": 20
+        },
+        "IDirectSoundBuffer_Release": {
+          "sha256": "d3270be9d4962cdcdb62ef4c3242b41b960c1f0cb7621e035393e8b7607de92c",
+          "stack_bytes": 4
+        },
+        "IDirectSound_DownloadEffectsImage": {
+          "sha256": "4244ef36f181c72b6bc6045e22a053a2bcf5ab57cf391cd565c6e9bd02bf0e35",
+          "stack_bytes": 20
+        },
+        "IDirectSoundBuffer_SetVolume": {
+          "sha256": "46614aa469b3ce9e6882857358ba9acbb31c34fe5f859ddaa45ec0db9f23afec",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_SetPitch": {
+          "sha256": "9f7d344a498e717a5bbf79ebe721091064bcd8887627e67012aa4ac0cab7a9af",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_SetHeadroom": {
+          "sha256": "6e2fd1e5da5befcbe22e5acc2b573e8d0ce028fa60b2f67fee2f67ec0d886786",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_SetMixBins": {
+          "sha256": "09fcf4427cd67d9cba7a64a66a95400cfa11e05add8813bb5e1979517191bf7e",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_SetMixBinVolumes_8": {
+          "sha256": "ddbafb1479c149aac55df9492c158d2e20093b07fbb8306c631d781669215ce1",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_Play": {
+          "sha256": "3eea4d89765a7e84cb550892f2c9fe859c00a41c84afae1ea48a31128a708577",
+          "stack_bytes": 16
+        },
+        "IDirectSoundBuffer_Stop": {
+          "sha256": "4ce53df6847abfa6076895dc1cb314bd2818ed23432c27cc215bbc8bc115e73d",
+          "stack_bytes": 4
+        },
+        "IDirectSoundBuffer_SetLoopRegion": {
+          "sha256": "06d123aa7bad2dd1253b2a6aef06c7785735d5a46d608cf29ee248a733159c52",
+          "stack_bytes": 12
+        },
+        "IDirectSoundBuffer_GetStatus": {
+          "sha256": "f5621260d82ea8ca08e2f182e613d629e95113a562ec329b060ef1cefefb628d",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_GetCurrentPosition": {
+          "sha256": "68a400c6820454462cf312e7e0a4fe84ced83ddc5c7ad7ce8f973a295604bded",
+          "stack_bytes": 12
+        },
+        "IDirectSoundBuffer_SetCurrentPosition": {
+          "sha256": "f5be4203164df6234fc41e067ca1e2d0de6a33e0a3d22b45f5e75c2a45e7b1f0",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_Lock": {
+          "sha256": "a65da5cf689af28b9d524fd6a06c5a5dfab0d8b808a4a180e4c47f066a90b4ae",
+          "stack_bytes": 32
+        },
+        "IDirectSoundBuffer_SetFrequency": {
+          "sha256": "280ce16ad912ec54b8a562baf10b8b2e7111407e27172d6143e8901a063b61d4",
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_SetBufferData": {
+          "sha256": "31c25f5655418bf387cffc2ee99c515211c73af1da009726a9df0c84b94145c8",
+          "stack_bytes": 12
+        },
+        "IDirectSound_CreateSoundBuffer": {
+          "sha256": "03b0fdff70199320a2db605a34283edfb2714eec2213f0d8374beaf9eaa3f345",
+          "stack_bytes": 16
+        },
+        "DirectSoundCreate": {
+          "sha256": "1bfa530c267f68a7c0f593f20d8c23a51f2311fc0300f26ca72483645b834ca3",
+          "stack_bytes": 12
+        },
+        "ObjectAddRef": {
+          "sha256": "e683ffe809612832ed3454d2c9b13c8f2172e58e9c2a076c640b08c7caa8ff70",
+          "stack_bytes": 4
+        }
+      },
+      "constructors": {
+        "DEVICE": {
+          "sha256": "c5d1fa21da86b5c90669fb8216650c2c081b61518125b7302a89812ac9f3a98e"
+        },
+        "BUFFER": {
+          "sha256": "745bf616d305cc7d2d37072af4cf998c7268047dda66a0f6571a7b3deb968d7d"
+        }
+      },
+      "addref": {
+        "sha256": "e683ffe809612832ed3454d2c9b13c8f2172e58e9c2a076c640b08c7caa8ff70",
+        "bytes": 71,
+        "stack_bytes": 4
+      },
+      "dsp_helpers": {
+        "step": {
+          "sha256": "e8b808e809a4166ce0b51bae7d5acb29e2f105eaeb00f4424a6f37d7c76dcc29",
+          "bytes": 121
+        },
+        "seed": {
+          "sha256": "d6fbcf36fd435ef8992eb4c8a025a6037604441f2acca02094e056fd5a6831c7",
+          "bytes": 45
+        },
+        "decode": {
+          "sha256": "68bb004f6f6e3425b301652056b1e62eec935a43d1adab4c5cf61cc0a0000ba2",
+          "bytes": 207
+        },
+        "location": {
+          "sha256": "fdbfe8d8b720fe60daf1f383e0145206c7628364a40514e141374ded3cb1f84d",
+          "bytes": 34
+        }
+      },
+      "layout": {
+        "device_interface_offset": 8,
+        "buffer_interface_offset": 28,
+        "buffer_descriptor_bytes": 24
+      },
+      "seed_push_prefix": [
+        0,
+        0
+      ],
+      "seed_push_suffix": [
+        80,
+        8,
+        0,
+        0
+      ]
+    },
+    "jump": {
+      "adapter": "crt-native-transfer-v1",
+      "bodies": {
+        "setjmp": {
+          "sha256": "c24e8aaed4de58907df11c265260404d68e8b92e1a6373d11e2db8e73238e755",
+          "bytes": 123
+        },
+        "longjmp": {
+          "sha256": "200a7e51a21f7d1bd2b2fdb5992b2d61c44b78626312aabb1abe96a4e880590b",
+          "bytes": 120
+        }
+      },
+      "lowering_counts": {
+        "setjmp": 3,
+        "longjmp": 2,
+        "tail": 1
+      }
+    },
+    "d3d": {
+      "include": "../../../tools/native_profiles/blinx-ntsc-u-d3d.json"
+    },
+    "display": {
+      "include": "../../../tools/native_profiles/blinx-ntsc-u-display.json"
+    }
+  }
+}

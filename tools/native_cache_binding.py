@@ -6,18 +6,17 @@ import json
 from pathlib import Path
 from native_binding import Binding
 
-REVIEWED = {("36718604554b7c1ad0cbdf1acf611dd46124ce447d3e425b295feb90ec74809f",
-             "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249")}
-
-
-def bind(xbe: Path, output: Path, symbols: Path):
+def bind(xbe: Path, output: Path, symbols: Path, profile=None):
     context = Binding(xbe, output, symbols)
+    proof = context.require_profile('cache', profile, adapter='xapi-utility-cache-v1')
+    if proof['body'].get('stack_bytes') != 4 or proof['error_helper'].get('stack_bytes') != 4:
+        raise ValueError('unsupported utility cache ABI')
     function = context.symbol("XMountUtilityDrive", 4)
     error = context.symbol("XapiSetLastNTError", 4)
     digest = context.digest(function)
-    if (digest, context.image["sha256"]) not in REVIEWED:
+    if not context.matches_body(function, proof['body']):
         raise ValueError("unreviewed cache boundary/image")
-    if context.digest(error) != "6931e553a99293e195882b3341c126d12dbff5ff994c05a967fe338d86c0b5b2":
+    if not context.matches_body(error, proof['error_helper']):
         raise ValueError("unreviewed LastError helper")
     if error["start"] not in function["calls_to"]:
         raise ValueError("cache boundary does not call identified LastError helper")
@@ -45,5 +44,6 @@ if __name__ == "__main__":
     parser.add_argument("--xbe", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--symbols", type=Path, required=True)
+    parser.add_argument("--profile", type=Path)
     args = parser.parse_args()
-    print(json.dumps(bind(args.xbe, args.output, args.symbols), indent=2))
+    print(json.dumps(bind(args.xbe, args.output, args.symbols, args.profile), indent=2))

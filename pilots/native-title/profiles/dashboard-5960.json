@@ -1,0 +1,216 @@
+{
+  "schema": "native-title-profile.v1",
+  "id": "dashboard-5960",
+  "xbe_sha256": "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d",
+  "bindings": {
+    "cpu": {
+      "adapter": "x86-mmx-cdecl-v1",
+      "body": {
+        "sha256": "46171d02670c8e7bef5125047135fb769ee152787dfa9a411146f54cbe3e2aef",
+        "bytes": 50
+      }
+    },
+    "cache": {
+      "adapter": "xapi-utility-cache-v1",
+      "body": {
+        "sha256": "e3d588496661be9abebf2c5e298544b038e5bfec347449de1bd58640fe4b61ac",
+        "bytes": 261,
+        "stack_bytes": 4
+      },
+      "error_helper": {
+        "sha256": "a5a4082c446d7daff3874ad2baa5e9ec8474148b159fe6eaba3170da6f3dfc0e",
+        "bytes": 23,
+        "stack_bytes": 4
+      }
+    },
+    "input": {
+      "adapter": "xapi-gamepad-v1",
+      "calls": {
+        "XInitDevices": {
+          "sha256": "a947ee674c775d18aa9e7a0d39994848bb307f1a4ab49b07f7968ea3091075c4",
+          "bytes": 121,
+          "stack_bytes": 8
+        },
+        "XGetDevices": {
+          "sha256": "ff71ace48aab0643c7b54ce79e84df083b3045e27de6db7f0b7d7efcc7bfbe8c",
+          "bytes": 34,
+          "stack_bytes": 4
+        },
+        "XGetDeviceChanges": {
+          "sha256": "0d38023c6a399bf6f45091e3800be18068f5495f24a6d630f88c29114af78a00",
+          "bytes": 109,
+          "stack_bytes": 12
+        },
+        "XInputOpen": {
+          "sha256": "3573577f9e830a9674f1bbe828fa7d58e8f1b95dce4dccce18ce7a2c35073f94",
+          "bytes": 86,
+          "stack_bytes": 16
+        },
+        "XInputClose": {
+          "sha256": "6b5809b170c5a5ee04d91dc6bcf51596ab9ad312896e3b68e29d5ce29232c98c",
+          "bytes": 12,
+          "stack_bytes": 4
+        },
+        "XInputGetState": {
+          "sha256": "f7921d54e5823c77d16c0c3fb6cff7425e1b82a8405a4b164c7e9d726690835f",
+          "bytes": 115,
+          "stack_bytes": 8
+        },
+        "XGetDeviceEnumerationStatus": {
+          "sha256": "eecfa11ab8af6bacc4f88212a4e51c31daca972a8ec1033adb79e1e4bcec7d23",
+          "bytes": 41,
+          "stack_bytes": 0
+        },
+        "XInputGetDeviceDescription": {
+          "sha256": "39592e6c6dc6cb0c93c81873092572810c0f1772e20e3ae2fcd983e4239b4b7f",
+          "bytes": 241,
+          "stack_bytes": 4,
+          "symbol_stack_bytes": 8
+        }
+      },
+      "set_last_error": {
+        "sha256": "879d78abc26fa19a6731632800c57eef48c0d3ef4026ec85f3be99ff3bed4cae",
+        "bytes": 46,
+        "stack_bytes": 4
+      },
+      "layout": {
+        "state_bytes": 22,
+        "default_polling": [
+          1,
+          8,
+          0,
+          0
+        ]
+      },
+      "variables": {
+        "g_DeviceType_MU": 1413216,
+        "g_DeviceType_Gamepad": 1413344,
+        "g_DeviceType_IRDongle": 1413444
+      }
+    },
+    "audio": {
+      "adapter": "dsound-objects-v1",
+      "calls": {
+        "IDirectSound_Release": {
+          "sha256": "0a72b625b8e9e1a301ddf3c84ec304eded77fc8886c86f41f03efd6fa1fac2b5",
+          "bytes": 22,
+          "stack_bytes": 4
+        },
+        "IDirectSoundBuffer_Unlock": {
+          "sha256": "e123f60e9fc6e974d1381f2f15fb19e7960628cc8925d65e344c2f2bdc64f424",
+          "bytes": 5,
+          "stack_bytes": 20
+        },
+        "IDirectSoundBuffer_Release": {
+          "sha256": "d3270be9d4962cdcdb62ef4c3242b41b960c1f0cb7621e035393e8b7607de92c",
+          "bytes": 22,
+          "stack_bytes": 4
+        },
+        "IDirectSound_SetMixBinHeadroom": {
+          "sha256": "130bf9efa478a189df6bab6d70d49c251eab46b95cdf65037517cf3547fb97a7",
+          "bytes": 32,
+          "stack_bytes": 12
+        },
+        "IDirectSoundBuffer_SetVolume": {
+          "sha256": "fcb6c3fa630a8a19ef70ad56ae5052964a1c549133ef064db942d245862df1ea",
+          "bytes": 28,
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_SetHeadroom": {
+          "sha256": "5b0099ba9c1041fb6818adfdb59db10b0889a658695cdb4d98796f1e1f3be04d",
+          "bytes": 28,
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_Play": {
+          "sha256": "c303aef6f4a50c5a1f49fb67ca807fe471df63191f8db815d3d3e75819a28a20",
+          "bytes": 36,
+          "stack_bytes": 16
+        },
+        "IDirectSoundBuffer_Stop": {
+          "sha256": "7d422dd75496cbe3e0d72aee174c60aaafd1ee7e02f1ccce4bbdf919ed7a1f1d",
+          "bytes": 24,
+          "stack_bytes": 4
+        },
+        "IDirectSoundBuffer_Pause": {
+          "sha256": "cca9190668fd14051c65cd00235e25e5466baea8bdb1d1f48a3298b94fda9457",
+          "bytes": 28,
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_GetStatus": {
+          "sha256": "8305eddf04a8b1fc8a42a4f30b3cd517f6d1da1bd320d09a4cbf39cdde9d2305",
+          "bytes": 28,
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_GetCurrentPosition": {
+          "sha256": "5a8608a3d3a2c8917661fc2e07c640b119c9e47785bb52bbd3de6828880ef5d3",
+          "bytes": 32,
+          "stack_bytes": 12
+        },
+        "IDirectSoundBuffer_SetCurrentPosition": {
+          "sha256": "7f95ede3f67bee00752172387ace97b6c36d6015d5c3f61cfbef67c2f96909a0",
+          "bytes": 28,
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_Lock": {
+          "sha256": "e3b350841d00339670eff52877ebf9622ccbc87ecee780651f68222146a1101e",
+          "bytes": 48,
+          "stack_bytes": 32
+        },
+        "IDirectSoundBuffer_SetNotificationPositions": {
+          "sha256": "e7ab44697f951671e87c6707264bb082e2107a0f7434c2886d88e95e73d3380d",
+          "bytes": 32,
+          "stack_bytes": 12
+        },
+        "IDirectSoundBuffer_SetFrequency": {
+          "sha256": "280ce16ad912ec54b8a562baf10b8b2e7111407e27172d6143e8901a063b61d4",
+          "bytes": 28,
+          "stack_bytes": 8
+        },
+        "IDirectSoundBuffer_SetBufferData": {
+          "sha256": "ed7c29c44b16b943d9f4a328e679686940d44a88f498e7a9b14bbaec5edb3984",
+          "bytes": 32,
+          "stack_bytes": 12
+        },
+        "IDirectSound_CreateSoundBuffer": {
+          "sha256": "03b0fdff70199320a2db605a34283edfb2714eec2213f0d8374beaf9eaa3f345",
+          "bytes": 36,
+          "stack_bytes": 16
+        },
+        "DirectSoundCreate": {
+          "sha256": "071ad4a809daa6742ef46407475f1d9603fc355003fc6896d4f945537e0d85cc",
+          "bytes": 71,
+          "stack_bytes": 12
+        },
+        "ObjectAddRef": {
+          "sha256": "2a8170b61c41a06663d8a4876de5c52ccee8164f3ac1b99b56868011a03fd316",
+          "bytes": 71,
+          "stack_bytes": 4
+        }
+      },
+      "constructors": {
+        "DEVICE": {
+          "sha256": "5db878ac3cb32e6b3485f7b8cb6f048b8ccf4a990b8b013c85369f6e41e6c30c",
+          "bytes": 29
+        },
+        "BUFFER": {
+          "sha256": "a31c4a3ad312503f197e1c4188c1b404355fe2e5cca7dc14f2846536f3eb3ee7",
+          "bytes": 24
+        }
+      },
+      "addref": {
+        "sha256": "2a8170b61c41a06663d8a4876de5c52ccee8164f3ac1b99b56868011a03fd316",
+        "bytes": 71,
+        "stack_bytes": 4
+      },
+      "dsp_helpers": {},
+      "layout": {
+        "device_interface_offset": 8,
+        "buffer_interface_offset": 28,
+        "buffer_descriptor_bytes": 24
+      }
+    },
+    "d3d": {
+      "include": "../../../tools/native_profiles/dashboard-5960-d3d.json"
+    }
+  }
+}

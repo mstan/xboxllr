@@ -1,0 +1,1621 @@
+[
+  {
+    "name": "D3DDevice_GetDeviceCaps",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pCaps"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderTarget",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pRenderTarget"
+      },
+      {
+        "type": "psh",
+        "name": "pNewZStencil"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetTransform",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "State"
+      },
+      {
+        "type": "psh",
+        "name": "pMatrix"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetLightEnable",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Index"
+      },
+      {
+        "type": "psh",
+        "name": "pEnable"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_Release",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_BlockOnFence",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Fence"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetVisibilityTestResult",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Index"
+      },
+      {
+        "type": "psh",
+        "name": "pResult"
+      },
+      {
+        "type": "psh",
+        "name": "pTimeStamp"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVerticalBlankCallback",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pCallback"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_BlockUntilVerticalBlank",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_SetFlickerFilter",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Filter"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetSoftDisplayFilter",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Enable"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_InsertFence",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_GetDisplayMode",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pModes"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_Reset",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pPresentationParameters"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetBackBuffer2",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "BackBuffer"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_CopyRects",
+    "stack_bytes": 20,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pSourceSurface"
+      },
+      {
+        "type": "psh",
+        "name": "pSourceRectsArray"
+      },
+      {
+        "type": "psh",
+        "name": "cRects"
+      },
+      {
+        "type": "psh",
+        "name": "pDestinationSurface"
+      },
+      {
+        "type": "psh",
+        "name": "pDestPointsArray"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetRenderTarget2",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_GetDepthStencilSurface2",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_SetViewport",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pViewport"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetTexture",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Stage"
+      },
+      {
+        "type": "psh",
+        "name": "pTexture"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_IsBusy",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_BeginVisibilityTest",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_EndVisibilityTest",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Index"
+      }
+    ]
+  },
+  {
+    "name": "D3D_SetTileNoWait",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Index"
+      },
+      {
+        "type": "psh",
+        "name": "pTile"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetScissors",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Count"
+      },
+      {
+        "type": "psh",
+        "name": "Exclusive"
+      },
+      {
+        "type": "psh",
+        "name": "pRects"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_PersistDisplay",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_SetScreenSpaceOffset",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "x"
+      },
+      {
+        "type": "psh",
+        "name": "y"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_PSTextureModes",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_Simple",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "Method"
+      },
+      {
+        "type": "edx",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderStateNotInline",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "State"
+      },
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetViewportOffsetAndScale",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pOffset"
+      },
+      {
+        "type": "psh",
+        "name": "pScale"
+      }
+    ]
+  },
+  {
+    "name": "D3D_UpdateProjectionViewportTransform",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_SetRenderState_EdgeAntiAlias",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_ShadowFunc",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_FogColor",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_CullMode",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_FrontFace",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_NormalizeNormals",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_TextureFactor",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_LineWidth",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_Dxt1NoiseEnable",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_ZBias",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_LogicOp",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_FillMode",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_BackFillMode",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_TwoSidedLighting",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_VertexBlend",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetTextureState_TexCoordIndex",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Stage"
+      },
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetTextureState_BumpEnv",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Stage"
+      },
+      {
+        "type": "psh",
+        "name": "Type"
+      },
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetTextureState_BorderColor",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Stage"
+      },
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetTextureState_ColorKeyColor",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Stage"
+      },
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetTextureStageStateNotInline",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Stage"
+      },
+      {
+        "type": "psh",
+        "name": "Type"
+      },
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3D_CommonSetDebugRegisters",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3D_CommonSetRenderTarget",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pRenderTarget"
+      },
+      {
+        "type": "psh",
+        "name": "pNewZStencil"
+      },
+      {
+        "type": "psh",
+        "name": "pUnknown3"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_ZEnable",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_StencilEnable",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_StencilFail",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_YuvEnable",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_OcclusionCullEnable",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_StencilCullEnable",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_RopZCmpAlwaysRead",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_RopZRead",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_DoNotCullUncompressed",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_MultiSampleMode",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_MultiSampleRenderTargetMode",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_MultiSampleAntiAlias",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_MultiSampleMask",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetRenderState_SampleAlpha",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Value"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_CreateTexture2",
+    "stack_bytes": 28,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Width"
+      },
+      {
+        "type": "psh",
+        "name": "Height"
+      },
+      {
+        "type": "psh",
+        "name": "Depth"
+      },
+      {
+        "type": "psh",
+        "name": "Levels"
+      },
+      {
+        "type": "psh",
+        "name": "Usage"
+      },
+      {
+        "type": "psh",
+        "name": "Format"
+      },
+      {
+        "type": "psh",
+        "name": "D3DResource"
+      }
+    ]
+  },
+  {
+    "name": "D3DBaseTexture_GetLevelCount",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      }
+    ]
+  },
+  {
+    "name": "D3DTexture_GetSurfaceLevel2",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      },
+      {
+        "type": "psh",
+        "name": "Level"
+      }
+    ]
+  },
+  {
+    "name": "D3DTexture_LockRect",
+    "stack_bytes": 20,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      },
+      {
+        "type": "psh",
+        "name": "Level"
+      },
+      {
+        "type": "psh",
+        "name": "pLockedRect"
+      },
+      {
+        "type": "psh",
+        "name": "pRect"
+      },
+      {
+        "type": "psh",
+        "name": "Flags"
+      }
+    ]
+  },
+  {
+    "name": "D3DSurface_GetDesc",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      },
+      {
+        "type": "psh",
+        "name": "pDesc"
+      }
+    ]
+  },
+  {
+    "name": "D3DSurface_LockRect",
+    "stack_bytes": 16,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      },
+      {
+        "type": "psh",
+        "name": "pLockedRect"
+      },
+      {
+        "type": "psh",
+        "name": "pRect"
+      },
+      {
+        "type": "psh",
+        "name": "Flags"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_CreateVertexShader",
+    "stack_bytes": 16,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pDeclaration"
+      },
+      {
+        "type": "psh",
+        "name": "pFunction"
+      },
+      {
+        "type": "psh",
+        "name": "pHandle"
+      },
+      {
+        "type": "psh",
+        "name": "Usage"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetVertexShader",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pHandle"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVertexShaderConstant1",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "Register"
+      },
+      {
+        "type": "edx",
+        "name": "pConstantData"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVertexShaderConstant4",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "Register"
+      },
+      {
+        "type": "edx",
+        "name": "pConstantData"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVertexShaderConstantNotInlineFast",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "Register"
+      },
+      {
+        "type": "edx",
+        "name": "pConstantData"
+      },
+      {
+        "type": "psh",
+        "name": "ConstantCount"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVertexShaderConstantNotInline",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "Register"
+      },
+      {
+        "type": "edx",
+        "name": "pConstantData"
+      },
+      {
+        "type": "psh",
+        "name": "ConstantCount"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetVertexShaderConstant",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Register"
+      },
+      {
+        "type": "psh",
+        "name": "pConstantData"
+      },
+      {
+        "type": "psh",
+        "name": "ConstantCount"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetStreamSource",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "StreamNumber"
+      },
+      {
+        "type": "psh",
+        "name": "pStreamData"
+      },
+      {
+        "type": "psh",
+        "name": "Stride"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_LoadVertexShader",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Handle"
+      },
+      {
+        "type": "psh",
+        "name": "Address"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SelectVertexShader",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Handle"
+      },
+      {
+        "type": "psh",
+        "name": "Address"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetShaderConstantMode",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Mode"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVertexShader",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Handle"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_Clear",
+    "stack_bytes": 24,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Count"
+      },
+      {
+        "type": "psh",
+        "name": "pRects"
+      },
+      {
+        "type": "psh",
+        "name": "Flags"
+      },
+      {
+        "type": "psh",
+        "name": "Color"
+      },
+      {
+        "type": "psh",
+        "name": "Z"
+      },
+      {
+        "type": "psh",
+        "name": "Stencil"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_DrawVerticesUP",
+    "stack_bytes": 16,
+    "params": [
+      {
+        "type": "psh",
+        "name": "PrimitiveType"
+      },
+      {
+        "type": "psh",
+        "name": "VertexCount"
+      },
+      {
+        "type": "psh",
+        "name": "pVertexStreamZeroData"
+      },
+      {
+        "type": "psh",
+        "name": "VertexStreamZeroStride"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_DrawVertices",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "PrimitiveType"
+      },
+      {
+        "type": "psh",
+        "name": "StartVertex"
+      },
+      {
+        "type": "psh",
+        "name": "VertexCount"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVertexData2f",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Register"
+      },
+      {
+        "type": "psh",
+        "name": "a"
+      },
+      {
+        "type": "psh",
+        "name": "b"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetVertexData4f",
+    "stack_bytes": 20,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Register"
+      },
+      {
+        "type": "psh",
+        "name": "a"
+      },
+      {
+        "type": "psh",
+        "name": "b"
+      },
+      {
+        "type": "psh",
+        "name": "c"
+      },
+      {
+        "type": "psh",
+        "name": "d"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_Begin",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "PrimitiveType"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_End",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3DDevice_CreatePixelShader",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pPSDef"
+      },
+      {
+        "type": "psh",
+        "name": "pHandle"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_GetPixelShader",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pHandle"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetPixelShader",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Handle"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_SetPixelShaderConstant",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Register"
+      },
+      {
+        "type": "psh",
+        "name": "pConstantData"
+      },
+      {
+        "type": "psh",
+        "name": "ConstantCount"
+      }
+    ]
+  },
+  {
+    "name": "D3D_DestroyResource",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pResource"
+      }
+    ]
+  },
+  {
+    "name": "D3DResource_AddRef",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      }
+    ]
+  },
+  {
+    "name": "D3DResource_Release",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      }
+    ]
+  },
+  {
+    "name": "D3DResource_GetType",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      }
+    ]
+  },
+  {
+    "name": "D3DResource_IsBusy",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      }
+    ]
+  },
+  {
+    "name": "D3DResource_Register",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pThis"
+      },
+      {
+        "type": "psh",
+        "name": "pBase"
+      }
+    ]
+  },
+  {
+    "name": "Direct3D_CreateDevice",
+    "stack_bytes": 24,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Adapter"
+      },
+      {
+        "type": "psh",
+        "name": "DeviceType"
+      },
+      {
+        "type": "psh",
+        "name": "hFocusWindow"
+      },
+      {
+        "type": "psh",
+        "name": "BehaviorFlags"
+      },
+      {
+        "type": "psh",
+        "name": "pPresentationParameters"
+      },
+      {
+        "type": "psh",
+        "name": "ppReturnedDeviceInterface"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_Swap",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Flags"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_CreateVertexBuffer2",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Length"
+      }
+    ]
+  },
+  {
+    "name": "D3DVertexBuffer_Lock2",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pVertexBuffer"
+      },
+      {
+        "type": "psh",
+        "name": "Flags"
+      }
+    ]
+  },
+  {
+    "name": "D3D_ClearStateBlockFlags",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3D_RecordStateBlock",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pToken"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_CreateStateBlock",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Type"
+      },
+      {
+        "type": "psh",
+        "name": "pToken"
+      }
+    ]
+  },
+  {
+    "name": "CDevice_KickOff",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      }
+    ]
+  },
+  {
+    "name": "D3D_SetFence",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Flags"
+      }
+    ]
+  },
+  {
+    "name": "D3D_BlockOnTime",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "unknown1"
+      },
+      {
+        "type": "psh",
+        "name": "unknown2"
+      }
+    ]
+  },
+  {
+    "name": "D3D_MakeRequestedSpace_8",
+    "stack_bytes": 8,
+    "params": [
+      {
+        "type": "psh",
+        "name": "MinimumSpace"
+      },
+      {
+        "type": "psh",
+        "name": "RequestedSpace"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_MakeSpace",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3D_KickOffAndWaitForIdle",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "D3D_BlockOnResource",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pResource"
+      }
+    ]
+  },
+  {
+    "name": "D3DDevice_InsertCallback",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Type"
+      },
+      {
+        "type": "psh",
+        "name": "pCallback"
+      },
+      {
+        "type": "psh",
+        "name": "Context"
+      }
+    ]
+  },
+  {
+    "name": "CDevice_FreeFrameBuffers",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      }
+    ]
+  },
+  {
+    "name": "CDevice_InitializeFrameBuffers",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      },
+      {
+        "type": "psh",
+        "name": "pPresentationParams"
+      }
+    ]
+  },
+  {
+    "name": "Get2DSurfaceDesc",
+    "stack_bytes": 12,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pPixelContainer"
+      },
+      {
+        "type": "psh",
+        "name": "dwLevel"
+      },
+      {
+        "type": "psh",
+        "name": "pDesc"
+      }
+    ]
+  },
+  {
+    "name": "Lock2DSurface",
+    "stack_bytes": 24,
+    "params": [
+      {
+        "type": "psh",
+        "name": "pPixelContainer"
+      },
+      {
+        "type": "psh",
+        "name": "FaceType"
+      },
+      {
+        "type": "psh",
+        "name": "Level"
+      },
+      {
+        "type": "psh",
+        "name": "pLockedRect"
+      },
+      {
+        "type": "psh",
+        "name": "pRect"
+      },
+      {
+        "type": "psh",
+        "name": "Flags"
+      }
+    ]
+  },
+  {
+    "name": "CMiniport_GetDisplayCapabilities",
+    "stack_bytes": 0,
+    "params": []
+  },
+  {
+    "name": "CMiniport_IsFlipPending",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      }
+    ]
+  },
+  {
+    "name": "CMiniport_CreateCtxDmaObject",
+    "stack_bytes": 20,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      },
+      {
+        "type": "psh",
+        "name": "unknown1"
+      },
+      {
+        "type": "psh",
+        "name": "unknown2"
+      },
+      {
+        "type": "psh",
+        "name": "unknown3"
+      },
+      {
+        "type": "psh",
+        "name": "unknown4"
+      },
+      {
+        "type": "psh",
+        "name": "unknown5"
+      }
+    ]
+  },
+  {
+    "name": "CMiniport_InitHardware",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      }
+    ]
+  },
+  {
+    "name": "D3D_LazySetPointParams",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Device"
+      }
+    ]
+  },
+  {
+    "name": "CDevice_SetStateVB",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      },
+      {
+        "type": "psh",
+        "name": "unknown2"
+      }
+    ]
+  },
+  {
+    "name": "CDevice_SetStateUP",
+    "stack_bytes": 0,
+    "params": [
+      {
+        "type": "ecx",
+        "name": "this"
+      }
+    ]
+  }
+]

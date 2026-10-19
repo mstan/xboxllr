@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind the reviewed original NTSC graphics family; unknown methods stop.
+"""Bind a reviewed title/XDK graphics profile; unknown methods stop.
 
 Only the qualified subset is dispatched natively. Every identified D3D8 body
 retains an ORIGINAL build selection, avoiding accidental guest-driver fallback
@@ -14,26 +14,61 @@ import re
 import struct
 from native_binding import Binding
 
-IMAGE = "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"
-CREATE = "4111b2a1ca25c2bf8e4cc1cad05ab2142ec17d48b54f2f7457951977d5bce564"
-DEFAULTS = "ab0f752eebe3bb6ce6296909b6f90b604f58eafe877032f64006f6c33f21ccb8"
-CAPS = "a2e598588a3b18aff4ac64b396716e58ca211384f86f5ef757c7ce3aec3caa22"
-VBLANK = "3671f3eb0feef60a9001693f28fbd102d209e1c072a2a486aa34f60429a7eaf0"
-STATEBLOCK = "9a3cc11b88c617614da8725cfb996ab8c30ad3ae9e5477b3ae9734753afc5a31"
-CREATE_STATEBLOCK = "63f71d88c14fae20c1ca8bcee60ab04a308b8bae93ae75d56527d44881cc2dce"
-RESET = "dc1d8ec53f1a120166e0643ecae39ec9f0fa8e3d6878cea98752df72d8377090"
-RESET_BUFFERS = "c996d86a23946bb611a75114b7e4322bfe059ab5b63d5b1da4fa03502bdea9bc"
-VISIBILITY = {
-    "D3DDevice_BeginVisibilityTest": (0, "4f540a8de4fbb9fed9c35005ac859550010a3eec200068e70c6d695b86e4cc86"),
-    "D3DDevice_EndVisibilityTest": (4, "f4fa023fa33a53bf63b4cdc5a5a53f849263bd0fca5d1ccfd7f5c96eece8b294"),
-    "D3DDevice_GetVisibilityTestResult": (12, "a0db88fb849af504b749eadc5dfa1f2979eab762209bfec592f12680156bbefc"),
-}
+ADAPTER = 'xdk-d3d8-state-cache-v1'
+HASH_KEYS = {'CREATE','DEFAULTS','CAPS','VBLANK','STATEBLOCK','CREATE_STATEBLOCK',
+             'RESET','RESET_BUFFERS','PIXEL_QUERY','GPU_CALLBACK','YUV_ENABLE','YUV_CONTROL'}
+TRANSFORM_FIELDS = {'projection_depth','depth_scale','pixel_scale','projection_viewport','screen_offset'}
+STATEBLOCK_FIELDS = {'textures','pixel_shader','vertex_shader','vertex_object','indices',
+                    'base_vertex','pixel_constants','vertex_constants','transforms','viewport',
+                    'materials','lights','light_count'}
 
 
-def bind(xbe: Path, output: Path, symbols: Path):
+def validate_profile(proof):
+    """Validate profile data before inspecting or mutating generated artifacts.
+
+    These offsets are per-title evidence. Reference-pattern and whole-routine
+    checks below remain the adapter's admission criteria; a profile is not a
+    request to skip a proof or use another driver's device layout.
+    """
+    if not isinstance(proof,dict) or proof.get('adapter') != ADAPTER or not isinstance(proof.get('hashes'),dict) or set(proof['hashes']) != HASH_KEYS:
+        raise ValueError('incomplete graphics profile hashes/adapter')
+    if any(not isinstance(v, str) or not re.fullmatch('[0-9a-f]{64}', v)
+           for v in proof['hashes'].values()):
+        raise ValueError('invalid graphics profile hash')
+    # Preserve the established native admission policy for this adapter. It
+    # is not the original driver's internal AND mask (which is 0x10).
+    if type(proof.get('native_create_behavior_mask')) is not int or proof['native_create_behavior_mask']!=0x40:
+        raise ValueError('unreviewed native graphics behavior mask')
+    visibility = proof.get('visibility', {})
+    expected = {'D3DDevice_BeginVisibilityTest':0,'D3DDevice_EndVisibilityTest':4,
+                'D3DDevice_GetVisibilityTestResult':12}
+    if not isinstance(visibility,dict) or set(visibility) != set(expected):
+        raise ValueError('incomplete graphics visibility proof')
+    for name, stack in expected.items():
+        row = visibility[name]
+        if not isinstance(row,dict) or type(row.get('stack_bytes')) is not int or row['stack_bytes'] != stack or not re.fullmatch('[0-9a-f]{64}', str(row.get('sha256', ''))):
+            raise ValueError('invalid graphics visibility proof')
+    layout = proof.get('layout', {})
+    if not isinstance(layout,dict):
+        raise ValueError('invalid graphics profile layout')
+    for name, fields in (('transform_fields',TRANSFORM_FIELDS),('stateblock_fields',STATEBLOCK_FIELDS)):
+        values = layout.get(name, {})
+        if not isinstance(values,dict) or set(values) != fields or any(type(v) is not int or v < 0 or v >= 0x10000 or v % 4 for v in values.values()):
+            raise ValueError('invalid graphics profile layout: '+name)
+    return proof
+
+
+def bind(xbe: Path, output: Path, symbols: Path, profile: Path | None = None):
     context=Binding(xbe,output,symbols)
-    if context.image["sha256"] != IMAGE:
-        raise ValueError("unreviewed graphics image")
+    from native_d3d_ltcg import ADAPTER as LTCG_ADAPTER
+    proof=context.require_profile('d3d',profile,adapter=(ADAPTER,LTCG_ADAPTER))
+    if proof.get('adapter')==LTCG_ADAPTER:
+        from native_d3d_ltcg import bind as bind_ltcg
+        return bind_ltcg(context,proof)
+    proof=validate_profile(proof)
+    CREATE,DEFAULTS,CAPS,VBLANK,STATEBLOCK,CREATE_STATEBLOCK,RESET,RESET_BUFFERS=(
+        proof['hashes'][k] for k in ('CREATE','DEFAULTS','CAPS','VBLANK','STATEBLOCK','CREATE_STATEBLOCK','RESET','RESET_BUFFERS'))
+    VISIBILITY={name:(row['stack_bytes'],row['sha256']) for name,row in proof['visibility'].items()}
     functions={int(f["start"],16):f for f in context.functions}
     identified=[s for s in context.symbols if s["library"]=="D3D8" and s["kind"]=="function"]
     variables={s["name"]:s["address"] for s in context.symbols if s["library"]=="D3D8" and s["kind"]=="variable"}
@@ -58,7 +93,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     # Donor signatures are discovery hints, not authority for this revision's
     # cleanup. Its GetPixelShader metadata includes an extra Name parameter.
     pixel_query=next(s for s in identified if s['name']=='D3DDevice_GetPixelShader')
-    if context.digest(functions[pixel_query['address']])!='f9137db3439237176ab1427da2b24f92a2eca9a4aeb6a348a3a8955e0c0234ba':
+    if context.digest(functions[pixel_query['address']])!=proof['hashes']['PIXEL_QUERY']:
         raise ValueError('unreviewed pixel query boundary')
     query_source=dict(stack_bytes=pixel_query['stack_bytes'],params=pixel_query['params'])
     pixel_query['stack_bytes']=4
@@ -113,12 +148,12 @@ def bind(xbe: Path, output: Path, symbols: Path):
         visibility[name]=dict(stack_bytes=stack,function_sha256=digest)
     state_defaults['visibility_binding']=visibility
     callback=next(s for s in identified if s['name']=='D3DDevice_InsertCallback')
-    callback_digest='211618541a98c764ab3699e33ac78aaedcb903cb4dcea35798aca404c492f84c'
+    callback_digest=proof['hashes']['GPU_CALLBACK']
     if callback['stack_bytes']!=12 or context.digest(functions[callback['address']])!=callback_digest:
         raise ValueError('unreviewed GPU callback boundary')
     state_defaults['gpu_callback_binding']=dict(stack_bytes=12,function_sha256=callback_digest)
     yuv=next(s for s in identified if s['name']=='D3DDevice_SetRenderState_YuvEnable')
-    yuv_digest='e5ab53bdbf1e07132159879721754c3e0ab3f1d901dff8bdd62b81e35aa0c5ed'
+    yuv_digest=proof['hashes']['YUV_ENABLE']
     if yuv['stack_bytes']!=4 or context.digest(functions[yuv['address']])!=yuv_digest:
         raise ValueError('unreviewed YUV enable boundary')
     yuv_code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(yuv['address'],43),yuv['address']))
@@ -131,7 +166,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     state_defaults['yuv_state_index']=yuv_index
     helpers=[int(i.op_str,0) for i in yuv_code if i.mnemonic=='call']
     if len(helpers)!=2 or \
-        context.digest(functions[helpers[1]])!='d6c4f59d3a7655450861131f02c09f18672ed84140e2604ddbab50d0c4f01322':
+        context.digest(functions[helpers[1]])!=proof['hashes']['YUV_CONTROL']:
         raise ValueError('unreviewed YUV cache/control packet')
     state_defaults['yuv_enable_binding']=dict(stack_bytes=4,function_sha256=yuv_digest,state_index=yuv_index,control0_enable_bit=28)
     # Reviewed programmable-shader load/select path. Cache offsets stay in the
@@ -185,8 +220,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
           (m:=re.fullmatch(r'dword ptr \[(0x[0-9a-f]+)\]',i.op_str))]
     if len(bias)!=2 or bias[0]!=bias[1]:raise ValueError('unreviewed screen-space bias')
     state_defaults['transform_binding']=dict(setter_sha256=context.digest(functions[transform['address']]),
-        fields=dict(projection_depth=0x504,depth_scale=0x510,pixel_scale=0x518,
-                    projection_viewport=0x530,screen_offset=0xaa8),
+        fields=proof['layout']['transform_fields'],
         screen_bias=struct.unpack('<I',data(bias[0],4))[0])
     caps=next(s for s in identified if s['name']=='D3DDevice_GetDeviceCaps')
     if caps['stack_bytes']!=4 or context.digest(functions[caps['address']])!=CAPS:
@@ -240,9 +274,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     if len(block_tables)!=4: raise ValueError('unreviewed state-block membership tables')
     state_defaults['stateblock']=dict(recorder_sha256=STATEBLOCK,create_sha256=CREATE_STATEBLOCK,
         streams=variables['D3D_g_Stream'],
-        fields=dict(textures=0xb38,pixel_shader=0x370,vertex_shader=0x384,vertex_object=0x380,
-                    indices=0x38c,base_vertex=0x1c,pixel_constants=0xb58,vertex_constants=0xc58,
-                    transforms=0x810,viewport=0xa90,materials=0xab0,lights=0x390,light_count=0x394),
+        fields=proof['layout']['stateblock_fields'],
         pixel_render=list(data(block_tables[0],32)),pixel_texture=list(data(block_tables[1],27)),
         vertex_render=list(data(block_tables[2],33)),vertex_texture=list(data(block_tables[3],2)))
     pixel_setter=next(s for s in identified if s['name']=='D3DDevice_SetPixelShaderConstant')
@@ -261,7 +293,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
         calls.append(dict(name=symbol["name"],symbol=original["name"],address=original["start"],
                           function_sha256=context.digest(original),call=symbol["call"],
                           stack_bytes=symbol["stack_bytes"],params=symbol["params"]))
-    binding=dict(xbe_sha256=IMAGE,device_global=variables["D3D_g_pDevice"],device_object=devices[0],
+    binding=dict(xbe_sha256=context.image['sha256'],device_global=variables["D3D_g_pDevice"],device_object=devices[0],
                  vertex_shader_offset=variables["D3DDevice__m_VertexShader_OFFSET"],calls=calls,**state_defaults)
     header=['#pragma once', '#include <stdint.h>', 'enum PilotD3DEntry {']
     header += [f'    PILOT_D3D_{c["name"]},' for c in calls]
@@ -291,6 +323,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     header += [f'#define PILOT_D3D_RESOURCE_{name.upper()} {offset}u' for name,offset in binding['resource_binding'].items()]
     header += [f'#define PILOT_D3D_TRANSFORM_{name.upper()} {offset}u' for name,offset in binding['transform_binding']['fields'].items()]
     header += [f'#define PILOT_D3D_SCREEN_BIAS 0x{binding["transform_binding"]["screen_bias"]:x}u']
+    header += [f'#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x{proof["native_create_behavior_mask"]:x}u']
     header += [f'#define PILOT_D3D_SNAPSHOT_{name.upper()} {offset}u' for name,offset in block['fields'].items()]
     header += ['static const uint8_t pilot_d3d_block_'+name+'[] = {'+', '.join(str(x) for x in block[name])+'};'
                for name in ('pixel_render','pixel_texture','vertex_render','vertex_texture')]
@@ -344,6 +377,8 @@ def bind(xbe: Path, output: Path, symbols: Path):
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xbe",type=Path,required=True); parser.add_argument("--output",type=Path,required=True)
-    parser.add_argument("--symbols",type=Path,required=True); args=parser.parse_args()
-    result=bind(args.xbe,args.output,args.symbols)
+    parser.add_argument("--symbols",type=Path,required=True)
+    parser.add_argument('--profile',type=Path,help='Reviewed native-title profile; exact known-image default when omitted')
+    args=parser.parse_args()
+    result=bind(args.xbe,args.output,args.symbols,args.profile)
     print(json.dumps(dict(xbe_sha256=result["xbe_sha256"],identified=len(result["calls"]),device_global=result["device_global"],device_object=result["device_object"])))

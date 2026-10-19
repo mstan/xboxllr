@@ -139,8 +139,13 @@ def prepare(args):
                            stderr=subprocess.STDOUT, check=True)
 
     xbe = str(args.xbe.resolve())
+    # Discovery consumes the parser's metadata. Keep both outputs private and
+    # pass the path explicitly; fresh titles need no sidecar beside their XBE.
+    analysis_path = out / "analysis.aot-private.json"
+    run("parse", ["-m", "tools.xbe_parser", xbe, "--json", str(analysis_path)])
     if not args.reuse_discovery:
-        cmd = ["-m", "tools.disasm", xbe, "-o", str(out / "disasm")]
+        cmd = ["-m", "tools.disasm", xbe, "--analysis-json", str(analysis_path),
+               "-o", str(out / "disasm")]
         if args.data_sections:
             cmd += ["--data-sections", args.data_sections]
         for seed in args.seed_functions:
@@ -156,7 +161,6 @@ def prepare(args):
         extent_records=record['extents'];functions_path=out/'disasm/functions.json'
         updated=apply_extents(args.xbe.read_bytes(),image,json.loads(functions_path.read_text()),extent_records)
         functions_path.write_text(json.dumps(updated,indent=2)+'\n',newline='\n')
-    run("parse", ["-m", "tools.xbe_parser", xbe, "--json", str(out / "analysis.aot-private.json")])
     run("lift", ["-m", "tools.recomp", xbe, "--all", "--split", "250",
                  "--disasm-dir", str(out / "disasm"), "--func-id-dir", str(out / "classification"),
                  "--abi-dir", str(out / "abi"), "-o", str(out / "lift"),
@@ -189,29 +193,32 @@ def prepare(args):
                     files={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                            for p in sorted((out / "gen").iterdir()) if p.is_file()})
     (out / "generation.aot-private.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    profile = getattr(args, 'profile', None)
     if args.media_symbols:
         from native_media_binding import bind
-        bind(args.xbe, out, args.media_symbols)
+        bind(args.xbe, out, args.media_symbols, profile=profile)
     if args.cache_symbols:
         from native_cache_binding import bind
-        bind(args.xbe, out, args.cache_symbols)
+        bind(args.xbe, out, args.cache_symbols, profile=profile)
     if args.d3d_symbols:
         from native_d3d_binding import bind
-        bind(args.xbe, out, args.d3d_symbols)
-        from native_display_binding import bind
-        bind(args.xbe, out, args.d3d_symbols)
+        bind(args.xbe, out, args.d3d_symbols, profile=profile)
+        from native_binding import has_profile_binding
+        if has_profile_binding(image['sha256'], 'display', profile):
+            from native_display_binding import bind
+            bind(args.xbe, out, args.d3d_symbols, profile=profile)
     if args.jump_symbols:
         from native_jump_binding import bind
-        bind(args.xbe, out, args.jump_symbols)
+        bind(args.xbe, out, args.jump_symbols, profile=profile)
     if args.cpu_symbols:
         from native_cpu_binding import bind
-        bind(args.xbe, out, args.cpu_symbols)
+        bind(args.xbe, out, args.cpu_symbols, profile=profile)
     if args.input_symbols:
         from native_input_binding import bind
-        bind(args.xbe, out, args.input_symbols)
+        bind(args.xbe, out, args.input_symbols, profile=profile)
     if args.audio_symbols:
         from native_audio_binding import bind
-        bind(args.xbe, out, args.audio_symbols)
+        bind(args.xbe, out, args.audio_symbols, profile=profile)
     if getattr(args, 'poll_waits', None):
         from native_poll_waits import apply as bind_poll_waits
         path = out / 'generation.aot-private.json'
@@ -229,6 +236,8 @@ if __name__ == "__main__":
     parser.add_argument("--donor", type=Path, required=True)
     parser.add_argument("--xbe", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--profile", type=Path,
+                        help="Validated title/XDK binding profile; exact legacy identity selection is retained")
     parser.add_argument("--data-sections", default="")
     parser.add_argument("--reuse-discovery", action="store_true")
     parser.add_argument('--diagnostic-continuations', action='store_true',

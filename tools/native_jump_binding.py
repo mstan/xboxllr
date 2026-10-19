@@ -12,11 +12,6 @@ from pathlib import Path
 import re
 from native_binding import Binding
 
-IMAGE = "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"
-BODIES = {
-    "setjmp": (123, "c24e8aaed4de58907df11c265260404d68e8b92e1a6373d11e2db8e73238e755"),
-    "longjmp": (120, "200a7e51a21f7d1bd2b2fdb5992b2d61c44b78626312aabb1abe96a4e880590b"),
-}
 HEADER = '''#pragma once
 #include <stdint.h>
 #include <setjmp.h>
@@ -26,15 +21,19 @@ extern void pilot_longjmp_begin(uint32_t);
 '''
 
 
-def bind(xbe: Path, output: Path, symbols: Path):
+def bind(xbe: Path, output: Path, symbols: Path, profile=None):
     context=Binding(xbe,output,symbols)
-    if context.image['sha256']!=IMAGE: raise ValueError('unreviewed CRT image')
+    proof=context.require_profile('jump',profile,adapter='crt-native-transfer-v1')
+    if set(proof['bodies'])!={'setjmp','longjmp'} or set(proof['lowering_counts'])!={'setjmp','longjmp','tail'}:
+        raise ValueError('incomplete CRT transfer proof')
+    if any(type(n) is not int or n<1 for n in proof['lowering_counts'].values()) or proof['lowering_counts']['tail']!=1:
+        raise ValueError('invalid CRT lowering counts')
     selected={}
-    for kind,(size,digest) in BODIES.items():
-        matches=[f for f in context.functions if f['size']==size and context.digest(f)==digest]
+    for kind,body in proof['bodies'].items():
+        matches=[f for f in context.functions if context.matches_body(f,body)]
         if len(matches)!=1: raise ValueError(f'expected one reviewed {kind} body')
         selected[kind]=matches[0]
-    binding=dict(xbe_sha256=IMAGE,functions=selected,version=1)
+    binding=dict(xbe_sha256=context.image['sha256'],functions=selected,version=1)
     record=output/'jump-binding.aot-private.json'
     header=context.generated/'pilot_jump_bindings.h'
     if header.exists():
@@ -71,7 +70,7 @@ def bind(xbe: Path, output: Path, symbols: Path):
     for path in context.generated.glob('recomp_*.c'):
         original=path.read_text(); updated=function.sub(rewrite,original)
         if original!=updated: edits[path]='#include "pilot_jump_bindings.h"\n'+updated
-    if counts!={'setjmp':3,'longjmp':2,'tail':1}: raise ValueError(f'unreviewed jump lowering: {counts}')
+    if counts!=proof['lowering_counts']: raise ValueError(f'unreviewed jump lowering: {counts}')
     for path,code in edits.items(): path.write_text(code,newline='\n')
     header.write_text(HEADER,newline='\n')
     record.write_text(json.dumps(binding,indent=2)+'\n',newline='\n')
@@ -86,4 +85,5 @@ if __name__=='__main__':
     parser.add_argument('--xbe',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--symbols',type=Path,required=True)
-    args=parser.parse_args(); print(json.dumps(bind(args.xbe,args.output,args.symbols)))
+    parser.add_argument('--profile',type=Path)
+    args=parser.parse_args(); print(json.dumps(bind(args.xbe,args.output,args.symbols,args.profile)))

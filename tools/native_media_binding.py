@@ -11,21 +11,17 @@ import json
 from pathlib import Path
 from native_binding import Binding
 
-# Reviewed complete 4831 helper: no args, EAX=NTSTATUS, RET 0, callee saves,
-# stack-local IO packet, closes its handle; no escaped guest state. Matching
-# byte hashes are revision-specific bindings, not a general XDK signature.
-REVIEWED = {("8879c24c18ccf32c675c2c1e3130c4c8e3007d1e2d70b388d3632d5a463a2f24",
-             "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249")}
-
-
-def bind(xbe: Path, output: Path, symbols: Path):
+def bind(xbe: Path, output: Path, symbols: Path, profile=None):
     context = Binding(xbe, output, symbols)
+    proof = context.require_profile('media', profile, adapter='xapi-installed-media-v1')
+    if proof.get('caller') != 'XapiInitProcess':
+        raise ValueError('unsupported media caller contract')
     parents = {int(s["address"]) for s in context.symbols
                if s["name"] == "XapiInitProcess" and s["library"] == "XAPILIB"}
     matches = []
     for function in context.functions:
         digest = context.digest(function)
-        if (digest, context.image["sha256"]) in REVIEWED:
+        if context.matches_body(function, proof['body']):
             callers = {int(v, 16) for v in function["called_by"]}
             if not callers.intersection(parents):
                 raise ValueError("reviewed media helper has no identified XapiInitProcess caller")
@@ -74,5 +70,6 @@ if __name__ == "__main__":
     parser.add_argument("--xbe", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--symbols", type=Path, required=True)
+    parser.add_argument("--profile", type=Path)
     args = parser.parse_args()
-    print(json.dumps(bind(args.xbe, args.output, args.symbols), indent=2))
+    print(json.dumps(bind(args.xbe, args.output, args.symbols, args.profile), indent=2))

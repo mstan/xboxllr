@@ -1,0 +1,45 @@
+{
+  "xbe_sha256": "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249",
+  "entries": {
+    "ISR": {
+      "address": 1290768,
+      "sha256": "864dbc3e8a57dfeec2a0f311f59af7942d99974e75f013cb830c3de6e7196915",
+      "end": 1291047
+    },
+    "DPC": {
+      "address": 1293248,
+      "sha256": "e3a4931d7db50af30812be8ab5ac6441781b5ab0a78cc411726cc123cd50a459",
+      "end": 1293463
+    },
+    "SUBMIT": {
+      "address": 1291968,
+      "sha256": "74b5ba059761da3d62667d9f0afadf4a698239bcb17e32cf0df843211ff56037",
+      "end": 1292468
+    },
+    "ENABLE": {
+      "address": 1306656,
+      "sha256": "b83b80097166f0a54cd8af28711b57e12e7fe082c00ee2606a115e9ef4bad496",
+      "end": 1306674
+    },
+    "VBLANK": {
+      "address": 1291264,
+      "sha256": "83b41fbc82544402c2f683f741e189863269ba6a42cc8e3cb20777ab84679ac9",
+      "end": 1291530
+    }
+  },
+  "miniport_offset": 9152,
+  "miniport_bytes": 2108,
+  "offsets": {
+    "INTERRUPT": 20,
+    "DPC_OBJECT": 132,
+    "CONNECTED": 160,
+    "PMC_ENABLE": 180,
+    "CALLBACK": 400,
+    "EVENT": 404,
+    "MODE": 436,
+    "COMPLETED": 444,
+    "FRAME": 448,
+    "SUBMITTED": 460
+  },
+  "adapter": "xdk-original-display-v1"
+}

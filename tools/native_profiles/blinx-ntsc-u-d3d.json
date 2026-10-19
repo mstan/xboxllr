@@ -1,0 +1,56 @@
+{
+  "adapter": "xdk-d3d8-state-cache-v1",
+  "native_create_behavior_mask": 64,
+  "hashes": {
+    "CREATE": "4111b2a1ca25c2bf8e4cc1cad05ab2142ec17d48b54f2f7457951977d5bce564",
+    "DEFAULTS": "ab0f752eebe3bb6ce6296909b6f90b604f58eafe877032f64006f6c33f21ccb8",
+    "CAPS": "a2e598588a3b18aff4ac64b396716e58ca211384f86f5ef757c7ce3aec3caa22",
+    "VBLANK": "3671f3eb0feef60a9001693f28fbd102d209e1c072a2a486aa34f60429a7eaf0",
+    "STATEBLOCK": "9a3cc11b88c617614da8725cfb996ab8c30ad3ae9e5477b3ae9734753afc5a31",
+    "CREATE_STATEBLOCK": "63f71d88c14fae20c1ca8bcee60ab04a308b8bae93ae75d56527d44881cc2dce",
+    "RESET": "dc1d8ec53f1a120166e0643ecae39ec9f0fa8e3d6878cea98752df72d8377090",
+    "RESET_BUFFERS": "c996d86a23946bb611a75114b7e4322bfe059ab5b63d5b1da4fa03502bdea9bc",
+    "PIXEL_QUERY": "f9137db3439237176ab1427da2b24f92a2eca9a4aeb6a348a3a8955e0c0234ba",
+    "GPU_CALLBACK": "211618541a98c764ab3699e33ac78aaedcb903cb4dcea35798aca404c492f84c",
+    "YUV_ENABLE": "e5ab53bdbf1e07132159879721754c3e0ab3f1d901dff8bdd62b81e35aa0c5ed",
+    "YUV_CONTROL": "d6c4f59d3a7655450861131f02c09f18672ed84140e2604ddbab50d0c4f01322"
+  },
+  "visibility": {
+    "D3DDevice_BeginVisibilityTest": {
+      "stack_bytes": 0,
+      "sha256": "4f540a8de4fbb9fed9c35005ac859550010a3eec200068e70c6d695b86e4cc86"
+    },
+    "D3DDevice_EndVisibilityTest": {
+      "stack_bytes": 4,
+      "sha256": "f4fa023fa33a53bf63b4cdc5a5a53f849263bd0fca5d1ccfd7f5c96eece8b294"
+    },
+    "D3DDevice_GetVisibilityTestResult": {
+      "stack_bytes": 12,
+      "sha256": "a0db88fb849af504b749eadc5dfa1f2979eab762209bfec592f12680156bbefc"
+    }
+  },
+  "layout": {
+    "transform_fields": {
+      "projection_depth": 1284,
+      "depth_scale": 1296,
+      "pixel_scale": 1304,
+      "projection_viewport": 1328,
+      "screen_offset": 2728
+    },
+    "stateblock_fields": {
+      "textures": 2872,
+      "pixel_shader": 880,
+      "vertex_shader": 900,
+      "vertex_object": 896,
+      "indices": 908,
+      "base_vertex": 28,
+      "pixel_constants": 2904,
+      "vertex_constants": 3160,
+      "transforms": 2064,
+      "viewport": 2704,
+      "materials": 2736,
+      "lights": 912,
+      "light_count": 916
+    }
+  }
+}

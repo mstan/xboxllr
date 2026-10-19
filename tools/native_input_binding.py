@@ -5,50 +5,75 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from native_binding import Binding
 
-IMAGE = 'e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249'
-REVIEWED = {
-    'XInitDevices': (8, '4a88597b418d0b7805b55033a499f5ba42c1b3d4618ab137822f941edc8572a6'),
-    'XGetDevices': (4, 'a66f3c95c357eaa27eaf85e9a2a563a7fa1dda3ba4841df773b5b95d54b8c29f'),
-    'XGetDeviceChanges': (12, '00843c1d6b7e7094fcc024e51e477d888d546f829d0d43c2853a0c3baf32d9e4'),
-    'XInputOpen': (16, '8447e7cbf75ebf05a111e7d9066b20b302dfc62a2444cc52b1cc06377c191e09'),
-    'XInputClose': (4, 'e764297b82caa4ba15f4e5165fba6f2c8fdf6624777ae940f3dc89c34cd73643'),
-    'XInputGetCapabilities': (8, 'e3fe8b687db930a2198e51927df8a4a030082ddcc13341f63f1c6dbde36fd521'),
-    'XInputGetState': (8, '5706c20aae6e7e5b8f80116260bc1cff23701c3fb6e9134644983dac955e9cb5'),
-    'XInputSetState': (8, '98c3978b7d7467a26d99174fa9951b30101dbcd8a39e21c69a2c548485ac7152'),
-}
-LAST_ERROR = '1f297a4f8228adc6af4f404c12430e9738a6fbadf4e7185745f123b6216d38e7'
-
-
-def bind(xbe, output, symbols):
+def bind(xbe, output, symbols, profile=None):
     context = Binding(xbe, output, symbols)
-    if context.image['sha256'] != IMAGE:
-        raise ValueError('unreviewed XAPI input image')
+    proof = context.require_profile('input', profile, adapter='xapi-gamepad-v1')
+    required = {'XInitDevices': 8, 'XGetDevices': 4, 'XGetDeviceChanges': 12,
+                'XInputOpen': 16, 'XInputClose': 4, 'XInputGetCapabilities': 8,
+                'XInputGetState': 8, 'XInputSetState': 8,
+                'XGetDeviceEnumerationStatus': 0, 'XInputGetDeviceDescription': 4}
+    core = {'XInitDevices', 'XGetDevices', 'XGetDeviceChanges', 'XInputOpen', 'XInputClose', 'XInputGetState'}
+    if not core <= set(proof['calls']) <= set(required):
+        raise ValueError('incomplete or unsupported input family proof')
+    layout = proof['layout']
+    layout_fields = {'state_bytes', 'default_polling'}
+    if 'XInputGetCapabilities' in proof['calls']:
+        layout_fields.add('capabilities_bytes')
+    if 'XInputSetState' in proof['calls']:
+        layout_fields.add('feedback_motor_offset')
+    if set(layout) != layout_fields:
+        raise ValueError('unsupported input layout fields')
+    for key in layout_fields - {'default_polling'}:
+        if type(layout.get(key)) is not int or not 1 <= layout[key] <= 4096:
+            raise ValueError('invalid input layout: ' + key)
+    if (layout['state_bytes'] != 22 or ('capabilities_bytes' in layout and layout['capabilities_bytes'] != 25)
+            or ('feedback_motor_offset' in layout and layout['feedback_motor_offset'] != 66)
+            or len(layout.get('default_polling', [])) != 4
+            or any(type(n) is not int or not 0 <= n <= 255 for n in layout['default_polling'])):
+        raise ValueError('unsupported gamepad ABI layout')
     calls = []
-    for name, (stack_bytes, digest) in REVIEWED.items():
-        f = context.symbol(name, stack_bytes)
-        if context.digest(f) != digest:
+    for name, stack_bytes in required.items():
+        if name not in proof['calls']:
+            continue
+        body = proof['calls'][name]
+        if body.get('stack_bytes') != stack_bytes:
+            raise ValueError('unsupported input cleanup: ' + name)
+        digest = body['sha256']
+        # Some database labels have an incorrect prototype. An explicit profile
+        # records both that label and the actual decoded RET cleanup separately.
+        f = context.symbol(name, body.get('symbol_stack_bytes', stack_bytes))
+        if not context.matches_body(f, body):
             raise ValueError('unreviewed input body: ' + name)
+        start = int(f['start'], 16)
+        section = next(s for s in context.image['sections'] if s['address'] <= start and start+f['size'] <= s['address']+s['raw_size'])
+        offset = section['raw_offset'] + start - section['address']
+        code = Cs(CS_ARCH_X86, CS_MODE_32).disasm(context.blob[offset:offset+f['size']], start)
+        if {int(i.op_str or '0', 0) for i in code if i.mnemonic == 'ret'} != {stack_bytes}:
+            raise ValueError('input return disagrees with reviewed cleanup: ' + name)
         calls.append(dict(name=name, symbol=f['name'], address=int(f['start'], 16),
                           stack_bytes=stack_bytes, sha256=digest))
     last_error = context.symbol('SetLastError', 4)
-    if context.digest(last_error) != LAST_ERROR:
+    if proof['set_last_error'].get('stack_bytes') != 4 or not context.matches_body(last_error, proof['set_last_error']):
         raise ValueError('unreviewed thread error helper')
     variables = {}
+    variable_names = {'g_DeviceType_Gamepad', 'g_DeviceType_MU', 'g_DeviceType_IRDongle'}
+    if set(proof['variables']) != variable_names or any(type(v) is not int or not 0 < v <= 0xffffffff for v in proof['variables'].values()):
+        raise ValueError('invalid input device variable proof')
     for name in ('g_DeviceType_Gamepad', 'g_DeviceType_MU', 'g_DeviceType_IRDongle'):
         addresses = {s['address'] for s in context.symbols
                      if s['name'] == name and s['library'] == 'XAPILIB' and s['kind'] == 'variable'}
         if len(addresses) != 1:
             raise ValueError('ambiguous input variable: ' + name)
         variables[name] = addresses.pop()
+        if variables[name] != proof['variables'][name]:
+            raise ValueError('input variable differs from reviewed profile: ' + name)
 
-    # XDK4831: packed subtype + reserved WORD + 18-byte gamepad + 4-byte rumble.
-    # Later donor layouts containing Type/SubType are not this ABI.
-    binding = dict(xbe_sha256=IMAGE, calls=calls, variables=variables,
-                   set_last_error=dict(symbol=last_error['name'], sha256=LAST_ERROR),
-                   state_bytes=22, capabilities_bytes=25,
-                   feedback_motor_offset=66, default_polling=[1, 8, 0, 0])
+    binding = dict(xbe_sha256=context.image['sha256'], calls=calls, variables=variables,
+                   set_last_error=dict(symbol=last_error['name'], sha256=proof['set_last_error']['sha256']),
+                   **layout)
     header = ['#pragma once', 'enum PilotInputEntry {']
     header += [f'    PILOT_INPUT_{c["name"]},' for c in calls]
     header += ['    PILOT_INPUT_COUNT', '};',
@@ -57,18 +82,33 @@ def bind(xbe, output, symbols):
     header += ['};']
     for name, address in variables.items():
         header.append(f'#define PILOT_INPUT_{name} 0x{address:08x}u')
+    old_header = '\n'.join(header) + '\n'
+    absent = [name for name in required if name not in proof['calls']]
+    header += ['enum PilotInputAbsentEntry {'] + [f'    PILOT_INPUT_{name} = PILOT_INPUT_COUNT + {i+1},' for i, name in enumerate(absent)] + ['};'] if absent else []
+    header += [f'#define PILOT_INPUT_HAS_ENUMERATION_STATUS {int("XGetDeviceEnumerationStatus" in proof["calls"])}',
+               f'#define PILOT_INPUT_HAS_DEVICE_DESCRIPTION {int("XInputGetDeviceDescription" in proof["calls"])}',
+               f'#define PILOT_INPUT_HAS_CAPABILITIES {int("XInputGetCapabilities" in proof["calls"])}',
+               f'#define PILOT_INPUT_HAS_FEEDBACK {int("XInputSetState" in proof["calls"])}',
+               '#define PILOT_INPUT_ABI_VERSION 1u',
+               f'#define PILOT_INPUT_PROFILE_SHA256 "{context.image["sha256"]}"']
+    for key in ('state_bytes', 'capabilities_bytes', 'feedback_motor_offset'):
+        if key in layout:
+            header.append(f'#define PILOT_INPUT_{key.upper()} {layout[key]}u')
+    for i, value in enumerate(layout['default_polling']):
+        header.append(f'#define PILOT_INPUT_DEFAULT_POLLING_{i} {value}u')
     wrapper = ['#include "pilot_input_bindings.h"',
                'extern void pilot_input_dispatch(unsigned, void (*)(void));',
                f'extern void {last_error["name"]}(void);']
     symbols_by_name = {c['name']: c['symbol'] for c in calls}
+    qualify = {'XInputGetCapabilities', 'XInputSetState'} <= set(symbols_by_name)
     probe_declarations = ['#ifdef PILOT_INPUT_QUALIFICATION',
         'extern void pilot_input_qualify_open(void (*)(void), void (*)(void));',
         'extern void pilot_input_qualify_state(void);',
-        f'extern void {symbols_by_name["XInputGetCapabilities"]}(void);',
-        f'extern void {symbols_by_name["XInputSetState"]}(void);', '#endif']
+        f'extern void {symbols_by_name.get("XInputGetCapabilities", "pilot_absent_input_capabilities")}(void);',
+        f'extern void {symbols_by_name.get("XInputSetState", "pilot_absent_input_feedback")}(void);', '#endif'] if qualify else []
     wrapper += probe_declarations
     probe_call = ['#ifdef PILOT_INPUT_QUALIFICATION',
-        f'    pilot_input_qualify_open({symbols_by_name["XInputGetCapabilities"]}, {symbols_by_name["XInputSetState"]});', '#endif']
+        f'    pilot_input_qualify_open({symbols_by_name.get("XInputGetCapabilities", "pilot_absent_input_capabilities")}, {symbols_by_name.get("XInputSetState", "pilot_absent_input_feedback")});', '#endif'] if qualify else []
     state_probe = ['#ifdef PILOT_INPUT_QUALIFICATION', '    pilot_input_qualify_state();', '#endif']
     for c in calls:
         wrapper += [f'extern void pilot_original_input_{c["name"]}(void);',
@@ -88,12 +128,16 @@ def bind(xbe, output, symbols):
         old_wrapper = texts['pilot_input_binding.c'].replace('\n'.join(probe_declarations)+'\n', '').replace('\n'.join(probe_call)+'\n', '').replace('\n'.join(state_probe)+'\n', '')
         if json.loads(record.read_text()) != binding or any(
                 (context.generated / n).read_text() not in
-                ([s, without_state, old_wrapper] if n == 'pilot_input_binding.c' else [s]) for n, s in texts.items()):
+                ([s, without_state, old_wrapper] if n == 'pilot_input_binding.c' else [s, old_header]) for n, s in texts.items()):
             raise ValueError('existing input binding differs')
-        path = context.generated / 'pilot_input_binding.c'
-        if path.read_text() != texts[path.name]:
-            path.write_text(texts[path.name], encoding='utf-8', newline='\n')
-            context.manifest['files'][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        changed = False
+        for name, text in texts.items():
+            path = context.generated / name
+            if path.read_text() != text:
+                path.write_text(text, encoding='utf-8', newline='\n')
+                context.manifest['files'][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                changed = True
+        if changed:
             context.manifest_path.write_text(json.dumps(context.manifest, indent=2)+'\n', newline='\n')
         return binding
     replacements = {c['symbol']: 'pilot_original_input_' + c['name'] for c in calls}
@@ -130,6 +174,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('xbe', 'output', 'symbols'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument("--profile", type=Path)
     args = parser.parse_args()
-    result = bind(args.xbe, args.output, args.symbols)
+    result = bind(args.xbe, args.output, args.symbols, args.profile)
     print(json.dumps(dict(xbe_sha256=result['xbe_sha256'], bound=len(result['calls']))))
