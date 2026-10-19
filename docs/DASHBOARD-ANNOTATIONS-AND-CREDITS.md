@@ -34,9 +34,17 @@ not steady performance or Credits/input acceptance.
 Credits image004 takes a fatal reboot before any input in050b. The generator
 has two repaired incompatibilities: top-level class variables now use bare
 declarations and initialize under the original menu onLoad; appended XIP data
-keeps a full read-ahead block for the retail buffered reader. The new005 clone
-passes offline readback and is ready for a corrected functional run. The prior
-fatal caller was not captured, so neither defect alone is claimed as its cause.
+keeps a full read-ahead block for the retail buffered reader. The005 functional
+run captures the fatal entry and proves an earlier blocker: the original XBE
+still contains the original archives' block hashes. The first modified block
+fails the retail integrity comparison before XAP parsing. Neither generator
+repair alone is claimed as the cause of the earlier reboot.
+
+`tools/dashboard_integrity.py` independently regenerates the two affected
+records in a new private XBE and preserves the integrity checks. The enlarged
+table uses isolated pages with fresh header reference cells; adjacent sections
+and every unrelated record remain unchanged. Authored digest/layout tests and
+private readback pass. Functional boot and Credits acceptance remain pending.
 Do not describe this prototype as installed or playable. It is not a public
 release.
 
@@ -148,12 +156,55 @@ Its class compiler also explicitly rejects class-member initializers; this
 differs from local variables inside functions. Reference:
 [`CClassCompiler::ParseMemberVar`](https://github.com/MrMilenko/Theseus/blob/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965/theseus/engine/xap_compile.cpp).
 
+### Matching private integrity metadata
+
+The captured005 failure establishes the actual owned binary's hash contract:
+each at-most-64KiB archive block has `SHA1(le32(actual_length) + block)` in its
+XBE `XIPS` record. A short final block uses its actual length. The section
+itself uses the same length-prefixed hash over its complete raw bytes. The
+tool verifies all original XBE section digests and both original archives'
+block tables before replacing their records; other records and the sentinel
+are preserved byte for byte.
+
+The two005 archives add twelve hashes (240 bytes). The original virtual gap
+after `XIPS` is only sixteen bytes, so in-place growth would overlap the next
+section. For the exact hash-selected5960 layout, the tool appends the enlarged
+table at raw offset `0x1df000`, relocates it to isolated VA `0x1fe000`, rounds
+its virtual extent to complete pages, and updates its digest and image extent.
+It preserves flags `0xa` and reserves two zero16-bit reference cells in the
+reviewed embedded-PE header padding at file offsets `0x1ffc/0x1ffe`. The owned
+kernel increments/decrements both head and tail counters, so retaining the old
+cells shared with adjacent sections would be incorrect. Existing adjacent
+sections and their cells remain untouched. The consumer resolves `XIPS` by
+name; the original table VA appears only in its section header.
+
+This is deliberately a pinned-layout mod recipe, not an arbitrary XBE
+rewriter. Changed header metadata invalidates the original RSA signature;
+the output requires a boot environment that accepts private unsigned mods.
+It does not remove any retail archive/section check, establish redistribution
+rights, or include original dashboard payloads in the repository.
+
+```powershell
+py -3 tools/dashboard_integrity.py `
+  --xbe ../machine/hdd/C/xboxdash.xbe `
+  --assets ../machine/hdd/C/xboxdashdata.185ead00 `
+  --mod build/dashboard-owner-20261018/credits-private/mod-005 `
+  --output build/dashboard-owner-20261018/credits-private/next.aot-private.xbe `
+  --manifest build/dashboard-owner-20261018/credits-private/next.aot-private.json
+```
+
+Use a separate new private image containing both the modified archives and
+their matching XBE. A modified archive with the unchanged XBE fails integrity
+before the script compiler can accept or reject it. Offline hashes and layout
+checks do not establish a successful runtime menu or controller interaction.
+
 ## Focused validation
 
 ```powershell
 py -3 tests/test_dashboard_xip.py
 py -3 tests/test_dashboard_symbols.py
 py -3 tests/test_dashboard_credits.py
+py -3 tests/test_dashboard_integrity.py
 ```
 
 The Credits test uses an authored menu and optional Node execution to check
