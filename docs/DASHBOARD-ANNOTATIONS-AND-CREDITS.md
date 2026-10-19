@@ -19,16 +19,24 @@ original author's copyright or license.
 
 The private output preserves every original archive and the base HDD image.
 Archive replacement/readback and generated controller/menu logic checks pass.
-Actual dashboard rendering, positioning, text readability, XAP compilation,
-controller navigation and return to the main menu are **unverified**. The
+Actual Credits positioning, text readability, XAP compilation, controller
+navigation and return to the main menu are **unverified**. The
 2026-10-19 modern HLE cold-boot candidate passes tiled storage, loaded draws,
 the reached nominal audio modes, SRCCOPY and semantic context SAVE, and displays
 the Xbox boot logo. The subsequent idle PGRAPH reset is implemented and passes
 focused HLE/strict-boundary checks. Boot047 exposed an older DSP dependency
 that lacked the framework's maintained resident SEN stack support. Boot048
-uses a fresh isolated dependency, passes both idle reset and SEN, then stops
-at 9,362,225,883 instructions on the loaded-draw opaque09F8 state guard. Menu
-and input validation still require passing that consumer.
+uses a fresh isolated dependency and passes both idle reset and SEN. After
+the explicit opaque09F8 HLE omission, stock boot049 visually reaches the main
+menu at 10,000,466,663 instructions. This establishes stock menu rendering,
+not steady performance or Credits/input acceptance.
+
+Credits image004 takes a fatal reboot before any input in050b. The generator
+has two repaired incompatibilities: top-level class variables now use bare
+declarations and initialize under the original menu onLoad; appended XIP data
+keeps a full read-ahead block for the retail buffered reader. The new005 clone
+passes offline readback and is ready for a corrected functional run. The prior
+fatal caller was not captured, so neither defect alone is claimed as its cause.
 Do not describe this prototype as installed or playable. It is not a public
 release.
 
@@ -121,7 +129,7 @@ archives, extracted scripts and annotation files stay in ignored private
 build storage. Installation should use a separate private image or a
 qualified asset overlay; never patch the owned base HDD in place.
 
-The private `dashboard-credits-004.aot-private.img` was prepared as a separate
+The private `dashboard-credits-005.aot-private.img` was prepared as a separate
 8 GiB clone. The base was opened read-only, and the clone matched its complete
 SHA-256 before the two XIP replacements. Reopening the clone verified both
 replacement archives and the unchanged dashboard XBE. The original image's
@@ -130,6 +138,15 @@ runtime writes must use copy-on-write. Its adjacent private JSON manifest
 records the base/image/archive hashes and successful offline readback. This
 preparation does not establish that the retail XAP compiler accepts the mod or
 that its menu and notice pages render correctly; those checks remain pending.
+The earlier004 clone is retained as failure evidence. Its replacement members
+ended exactly at EOF;005 preserves a full64KiB read-ahead block beyond the
+appended member and includes those bytes in the archive's declared extent.
+The original loader can refill as soon as its current buffer is exhausted,
+including at the end of a completed member read. Reference: Theseus
+[`xip_archive.cpp`](https://github.com/MrMilenko/Theseus/blob/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965/theseus/xbox/xip_archive.cpp).
+Its class compiler also explicitly rejects class-member initializers; this
+differs from local variables inside functions. Reference:
+[`CClassCompiler::ParseMemberVar`](https://github.com/MrMilenko/Theseus/blob/5fc7ddddd03b4b5a7e6233769ad6a8fe46009965/theseus/engine/xap_compile.cpp).
 
 ## Focused validation
 

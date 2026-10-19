@@ -44,6 +44,17 @@ def function(source, marker):
 
 
 class CreditsTests(unittest.TestCase):
+    def test_modal_state_uses_onload_not_class_member_initializers(self):
+        _, names = menu_geometry(GEOMETRY)
+        generated = menu_script(SCRIPT, names, ['Credits'], [0])
+        self.assertIn('var xllrCreditsActive;', generated)
+        self.assertIn('var xllrCreditsPage;', generated)
+        self.assertNotIn('var xllrCreditsActive =', generated)
+        self.assertNotIn('var xllrCreditsPage =', generated)
+        load = function(generated, 'function onLoad()')
+        self.assertLess(load.index('xllrCreditsActive = false;'), load.index('UpdateMainMenu();'))
+        self.assertLess(load.index('xllrCreditsPage = 0;'), load.index('UpdateMainMenu();'))
+
     def test_geometry_keeps_original_and_mesh_urls(self):
         modified, names = menu_geometry(GEOMETRY)
         self.assertTrue(modified.startswith(GEOMETRY.rstrip()))

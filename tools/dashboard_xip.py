@@ -67,6 +67,11 @@ class Xip:
         result.extend(b"\0" * (-len(result) % 16))
         offset = len(result) - self.start
         result.extend(payload)
+        # The original buffered reader eagerly refills after exhausting a
+        # block, even when the requested member has just completed. Keep a
+        # full 64-KiB read-ahead block after appended data; EOF must not turn
+        # a successful member read into the retail fatal-reboot path.
+        result.extend(b"\0" * ((-len(result) % 65536) + 65536))
         extent = len(result) - self.start
         if max(offset, len(payload), extent) > 0xFFFFFFFF:
             raise ValueError("XIP overlay exceeds 32-bit extent")

@@ -1,4 +1,5 @@
 """Authored archives check overlays without any dashboard files."""
+import io
 import struct
 import sys
 from pathlib import Path
@@ -19,6 +20,22 @@ def fixture():
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_appended_member_allows_eager_reader_refill(self):
+        # An original member normally has later archive data behind it. A
+        # replacement at EOF must also allow the retail reader's next refill.
+        for length in (1, 65535, 65536, 65537):
+            payload = b'x' * length
+            output = Xip(fixture()).replace('default.xap', payload)
+            archive = Xip(output)
+            _, begin, size = archive.entry('default.xap')
+            reader = io.BytesIO(output)
+            reader.seek(begin)
+            self.assertEqual(reader.read(size), payload)
+            refill = ((begin + size + 65535) // 65536) * 65536
+            reader.seek(refill)
+            self.assertEqual(len(reader.read(65536)), 65536)
+            self.assertEqual(archive.end, len(output))
+
     def test_replacement_preserves_other_payloads_and_metadata(self):
         original = fixture()
         source = Xip(original)

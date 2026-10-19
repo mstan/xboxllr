@@ -100,7 +100,7 @@ def viewer(pages: list[str], sections: list[int]) -> str:
     if not pages or len(pages) > 5000:
         raise ValueError("unsupported number of Credits/legal pages")
     out = ["\n// Independently authored XboxLLR Credits mod.\n",
-           "var xllrCreditsActive = false;\nvar xllrCreditsPage = 0;\n"]
+           "var xllrCreditsActive;\nvar xllrCreditsPage;\n"]
     for start in range(0, len(pages), 48):
         out.append(f"function XllrCreditsText{start // 48}() {{\n")
         for index in range(start, min(start + 48, len(pages))):
@@ -200,7 +200,10 @@ xllrMenu.{item}.SetRotation(0, 1, 0, xllrAngle);
     anchor = "UpdateMainMenu();"
     if load.count(anchor) != 1:
         raise ValueError("reviewed first-load menu update differs")
-    placement = f"c.{ring}.SetTranslation(57.43, -43.38, 101.5);\n"
+    # The retail class compiler accepts declarations here, but rejects class
+    # member initializers. Initialize the modal state under the real onLoad.
+    placement = ("xllrCreditsActive = false;\nxllrCreditsPage = 0;\n"
+                 f"c.{ring}.SetTranslation(57.43, -43.38, 101.5);\n")
     load = load.replace(anchor, placement + anchor)
     level = level[:begin_load] + load + level[end_load:]
     source = source[:begin] + level + source[end:]
