@@ -2882,7 +2882,7 @@ private:
     bool pgraph_setup_read(uint32_t offset, uint32_t& value);
     bool pgraph_setup_write(uint32_t offset, uint32_t value);
     bool pgraph_load_context();
-    void pgraph_reset_setup();
+    void pgraph_reset_setup(bool preserve_storage=false);
     uint32_t pgraph_status() const;
     uint32_t& patt_color0_=context_state_.patt_color0_;
     struct ContextSurfaces2DState {
@@ -3455,6 +3455,11 @@ private:
     std::vector<uint8_t> context_save_raw_unknown_=std::vector<uint8_t>(0x100000,0);
     bool pgraph_context_suspended_=false;
     bool hle_context_transport_started_=false;
+    uint64_t context_mutation_serial_=0,saved_context_serial_=0;
+    uint32_t saved_live_context_instance_=0;
+    bool hle_pmc_reset_pending_=false,hle_pmc_fresh_context_=false;
+    void context_state_changed() {++context_mutation_serial_;pgraph_context_suspended_=false;}
+    bool current_context_saved() const;
     bool pgraph_save_context();
     bool pgraph_restore_context();
     bool context_save_raw_range_known(uint32_t offset,size_t bytes) const;

@@ -191,6 +191,7 @@ bool Nv2a::context_method_ready(const PushMethod& push) {
 }
 
 void Nv2a::context_method_completed(const PushMethod& push) {
+    if(push.method!=0x50)context_state_changed();
     const auto m=push.method;
     const auto sub=push.subchannel;
     const auto cls=object_class_[sub];

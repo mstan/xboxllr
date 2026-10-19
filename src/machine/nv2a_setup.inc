@@ -222,7 +222,7 @@ uint32_t Nv2a::pgraph_status() const {
             draw_published_ != draw_retired_) ? 1 : 0;
 }
 
-void Nv2a::pgraph_reset_setup() {
+void Nv2a::pgraph_reset_setup(bool preserve_storage) {
     pgraph_context_suspended_=false; // frontend reset retains PRAMIN-backed saved owners
     // PRAMIN is memory, not reset frontend state: unknown SAVE bytes remain
     // unknown until CPU writes them. Clearing this bitmap would expose stale RAM.
@@ -239,7 +239,7 @@ void Nv2a::pgraph_reset_setup() {
     pgraph_method_faulted_=false;
     pgraph_fd_state_.fill(0);pgraph_fd_initialized_=0;
     dxt1_noise_control_.fill(0);
-    pgraph_tiles_=RamTileConfig{};texture_tiles_=RamTileConfig{};
+    if(!preserve_storage){pgraph_tiles_=RamTileConfig{};texture_tiles_=RamTileConfig{};}
     compress_zbuffer_=false; // controller tags are not PGRAPH context state
     invalidate_vsh_program_cache();
 }
@@ -332,7 +332,7 @@ bool Nv2a::pgraph_load_context() {
             hle_cold_default_w_&=uint16_t(~(1u<<slot));
     }
     hle_context_seen_=true;
-    pgraph_loaded_context_=std::move(staged);
+    pgraph_loaded_context_=std::move(staged);hle_pmc_fresh_context_=false;
     pgraph_object_header_cache_.fill(0);pgraph_object_header_known_=0;
     pgraph_active_header_known_=false;
     pgraph_method_faulted_=false;
@@ -477,7 +477,7 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
     case 0x080: {
         bool saved_reset=false;
 #if XLLE_RENDERER_HLE
-        saved_reset=value==0x70000 && pgraph_context_suspended_ && !draw_faulted_ &&
+        saved_reset=value==0x70000 && (current_context_saved() || (hle_pmc_fresh_context_ && !pgraph_loaded_context_)) && !draw_faulted_ &&
             !pgraph_method_faulted_ && !pgraph_fifo_access_ &&
             !pgraph_status() && !primitive_mode_ && vertex_indices_.empty() &&
             inline_array_words_.empty() && inline_vertices_.empty() && immediate_vertices_.empty();
@@ -550,6 +550,7 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
             if(address>=pgraph_fd_state_.size()*4 || value || pgraph_status()) {
                 fault_("NV2A unsupported active/nonzero FD state write");return true;
             }
+            context_state_changed();
             pgraph_fd_state_[address/4]=0;pgraph_fd_initialized_|=uint16_t(1u<<(address/4));
             pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);return true;
         }
@@ -557,6 +558,7 @@ bool Nv2a::pgraph_setup_write(uint32_t offset,uint32_t value) {
             if(value>1 || pgraph_status()) {
                 fault_("NV2A unsupported DXT1 noise control transition");return true;
             }
+            context_state_changed();
             *word=value;
             pgraph_rdi_index_=(pgraph_rdi_index_&~0x1ffcu)|((address+4)&0x1ffc);
             return true;

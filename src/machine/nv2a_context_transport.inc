@@ -1,3 +1,7 @@
+bool Nv2a::current_context_saved() const {
+    return pgraph_context_suspended_ && saved_context_serial_==context_mutation_serial_ &&
+        std::any_of(saved_contexts_.begin(),saved_contexts_.end(),[&](const SavedContext& entry){return entry.instance==saved_live_context_instance_;});
+}
 // HLE semantic transport. Raw silicon SAVE reconstruction remains guarded.
 bool Nv2a::context_save_raw_range_known(uint32_t offset,size_t bytes) const {
     if(uint64_t(offset)+bytes>context_save_raw_unknown_.size())return false;
@@ -12,6 +16,26 @@ bool Nv2a::context_save_raw_read_ready(uint32_t offset,size_t bytes) {
 }
 void Nv2a::context_saved_image_written(uint32_t offset,size_t bytes) {
     const uint64_t end=uint64_t(offset)+bytes;
+    if(pgraph_context_suspended_) {
+        auto overlap=[&](uint32_t instance,size_t extent){return offset<uint64_t(instance)+extent && instance<end;};
+        bool changed=false;
+        for(unsigned sub=0;sub<8;++sub) {
+            changed|=(context_objects_known_&(1u<<sub)) && overlap(object_instance_[sub],4);
+            changed|=(context_semaphore_dma_known_&(1u<<sub)) && overlap(semaphore_dma_[sub],12);
+            changed|=report_dma_bound_[sub] && overlap(report_dma_[sub],12);
+        }
+        const std::pair<bool,uint32_t> descriptors[]={{color_dma_bound_,color_dma_},{zeta_dma_bound_,zeta_dma_},
+            {texture_dma_a_bound_,texture_dma_a_},{texture_dma_b_bound_,texture_dma_b_},
+            {vertex_dma_a_bound_,vertex_dma_a_},{vertex_dma_b_bound_,vertex_dma_b_},
+            {context_surfaces_2d_.dma_source_bound,context_surfaces_2d_.dma_source},
+            {context_surfaces_2d_.dma_dest_bound,context_surfaces_2d_.dma_dest}};
+        for(const auto& descriptor:descriptors)changed|=descriptor.first && overlap(descriptor.second,12);
+        if(changed)context_state_changed();
+    }
+    if(pgraph_context_suspended_) {
+        const uint64_t base=uint64_t(saved_live_context_instance_)<<4;
+        if(offset<base+Nv2aContextImage::kSourceBytes && base<end)context_state_changed();
+    }
     saved_contexts_.erase(std::remove_if(saved_contexts_.begin(),saved_contexts_.end(),
         [&](const SavedContext& saved){const uint64_t base=uint64_t(saved.instance)<<4;
             return offset<base+Nv2aContextImage::kSourceBytes && base<end;}),saved_contexts_.end());
@@ -78,6 +102,7 @@ bool Nv2a::pgraph_save_context() {
         }
     }
     pgraph_context_suspended_=true;hle_context_transport_started_=true;
+    saved_live_context_instance_=pgraph_context_pointer_;saved_context_serial_=context_mutation_serial_;
     std::fprintf(stderr,"[nv2a] HLE semantic context SAVE instance=%04x; capsule preserved, unmapped raw prefix guarded, no silicon SAVE equivalence\n",pgraph_context_pointer_);
     return true;
 #endif
@@ -102,7 +127,7 @@ bool Nv2a::pgraph_restore_context() {
     // Fresh contexts never derive eligibility from canonical numeric defaults.
     invalidate_vsh_program_cache();
     current_raster_state_sample_index_=UINT32_MAX;
-    pgraph_context_user_=0x11;pgraph_context_suspended_=false;
+    pgraph_context_user_=0x11;pgraph_context_suspended_=false;hle_pmc_fresh_context_=false;
     std::fprintf(stderr,"[nv2a] HLE semantic context restore instance=%04x; raw projection remains independently guarded\n",pgraph_context_pointer_);
     return true;
 #endif

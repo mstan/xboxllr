@@ -370,3 +370,11 @@ unresolved. See [HLE context transport](../../docs/HLE-CONTEXT-TRANSPORT.md).
 Reopen exact raw mapping when an actual saved-byte consumer is reached, a
 validated mapping contradicts semantic state, or an unsupported context-local
 field becomes necessary. This adds no silicon timing or netplay claim.
+
+GFX-D25 semantic transport follow-up: the reached dashboard PMC bit12 reset is
+admitted only for an unchanged successfully saved live owner, idle disabled
+FIFO/empty queues/closed primitives and clear fault flags, with a matching
+re-enable token. PRAMIN/snapshots/raw unknowns/storage/global counters survive.
+Exact PGRAPH reset contents and timing remain deferred; strict LLE unchanged.
+Reopen when a reached consumer requires omitted reset effects or retained
+state contradicts a validated reference.

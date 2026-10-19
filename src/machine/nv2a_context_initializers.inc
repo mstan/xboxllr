@@ -236,8 +236,10 @@ void Nv2a::context_initializer_pramin_written(uint32_t offset,size_t bytes) {
         if(!owner.used)continue;
         for(unsigned byte=0;byte<8;++byte) {
             const uint64_t address=uint64_t(owner.instance)+byte;
-            if(address>=offset && address<uint64_t(offset)+bytes)
+            if(address>=offset && address<uint64_t(offset)+bytes) {
+                context_state_changed();
                 owner.pramin_readback_unknown&=uint8_t(~(1u<<byte));
+            }
         }
     }
 }

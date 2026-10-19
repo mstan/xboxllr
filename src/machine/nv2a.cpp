@@ -1276,18 +1276,37 @@ void Nv2a::mmio_write(uint32_t addr, int size, uint32_t value) {
         // Initial engine availability and pristine PGRAPH reset are the
         // currently qualified control family. An in-flight or previously
         // used engine needs broader reset/resource qualification.
+        bool semantic_disable=false,semantic_enable=false;
+#if XLLE_RENDERER_HLE
+        const bool idle_reset=!pgraph_fifo_access_ && !pgraph_status() && pull_queue_.empty() &&
+            !draw_faulted_ && !pgraph_method_faulted_ && !primitive_mode_ &&
+            vertex_indices_.empty() && inline_array_words_.empty() &&
+            inline_vertices_.empty() && immediate_vertices_.empty();
+        semantic_disable=(changed==(1u<<12)) && !(value&(1u<<12)) &&
+            pgraph_loaded_context_ && current_context_saved() && idle_reset;
+        semantic_enable=(changed==(1u<<12)) && (value&(1u<<12)) &&
+            hle_pmc_reset_pending_ && !pgraph_loaded_context_ && idle_reset;
+#endif
         if (size != 4 || (changed & ~(1u << 12)) ||
-            ((changed & (1u << 12)) && (pgraph_loaded_context_ || methods_.total() || !pull_queue_.empty()))) {
+            ((changed & (1u << 12)) && !semantic_disable && !semantic_enable &&
+             (pgraph_loaded_context_ || methods_.total() || !pull_queue_.empty()))) {
             fault_("NV2A unqualified engine reset transition"); return;
         }
+        if(semantic_disable && !storage_epoch_barrier())return;
         if ((changed & (1u << 12)) && !(value & (1u << 12))) {
+            if(semantic_disable) {
+                context_state_=ContextState{};context_state_changed();
+                hle_pmc_reset_pending_=true;hle_pmc_fresh_context_=true;
+            }
             pgraph_intr_ = pgraph_intr_en_ = pgraph_nsource_ = 0;
             pgraph_trapped_addr_ = pgraph_trapped_data_ = patt_color0_ = 0;
             pgraph_context_table_ = 0;
-            pgraph_reset_setup();
+            pgraph_reset_setup(semantic_disable);
             pgraph_fifo_access_ = false;
             waiting_for_nop_ = waiting_for_flip_ = false;
         }
+        if(semantic_enable)hle_pmc_reset_pending_=false;
+        if(semantic_disable || semantic_enable)std::fprintf(stderr,"[nv2a] HLE saved-idle PGRAPH PMC %s; PRAMIN/capsules/storage preserved, silicon reset timing deferred\n",semantic_disable?"disable":"enable");
         pmc_enable_ = value; update_irq(); return;
     }
     // Interrupt plumbing (xemu nv2a.c/pcrtc.c): PMC_INTR_EN_0 gates the PCI line; PCRTC's
@@ -18314,6 +18333,11 @@ bool Nv2a::drain_pull_queue() {
                 pgraph_ffintfc_|=0x10000000u;
                 update_irq();return true;
             }
+        }
+        // Semantic transport cannot fall back into never-loaded fixture defaults
+        // after its active owner is cleared by reset. Preserve the queued packet.
+        if(hle_context_transport_started_ && !pgraph_loaded_context_) {
+            fault_("NV2A semantic context transport requires LOAD before queued methods");return false;
         }
         // Preflight before retirement; unsupported consumers retain their packet.
         if(pgraph_loaded_context_ && !context_method_ready(push))return false;
