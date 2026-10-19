@@ -27,6 +27,8 @@
 #include "machine/apu_adpcm.h"
 #include "machine/apu_gp_dma.hpp"
 #include "machine/apu_envelope_curve.hpp"
+#include "machine/apu_dls2_lpf.hpp"
+#include "machine/apu_signal_model.hpp"
 #include "machine/apu_ssl.hpp"
 #include "machine/apu_observation.hpp"
 
@@ -93,8 +95,8 @@ public:
     static constexpr uint32_t kBase = 0xFE800000u;
     static constexpr uint32_t kSize = 0x80000u;
 
-    explicit McpxApu(FaultFn fault)
-        : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)),
+    explicit McpxApu(FaultFn fault,ApuSignalModel signal_model=ApuSignalModel::Strict)
+        : RegFileMmio("mcpx-apu", kBase, kSize, std::move(fault)),signal_model_(signal_model),
           gp_dma_([this](uint32_t a){return gp_word(a);},
                   [this](uint32_t a,void* data,uint32_t n,bool output){return gp_scratch_transfer(a,data,n,output);},
                   [this](unsigned i,void* data,uint32_t n,bool output){return dsp_fifo(ApuDspKind::Gp,i,data,n,output);},
@@ -218,6 +220,8 @@ public:
     // Caller controls admission/cadence; this neither starts nor completes GP.
     bool process_2d_quantum(ApuVoiceQuantum& result);
     uint64_t voice_mix_quanta()const{return voice_mix_quanta_;}
+    uint64_t dls2_filter_frames()const{return dls2_filter_frames_;}
+    ApuSignalModel signal_model()const{return signal_model_;}
 
     // Fresh opaque descriptor reads for the later stream owner. This stages
     // real shared RAM, without consuming samples or decoding control fields.
@@ -872,6 +876,8 @@ public:
         if(size==4 && (off==kVpvaddr || off==kVpsgeaddr)) {
             for(auto& rate:voice_rates_)rate.reset();
             for(auto& envelope:voice_envelopes_)envelope={};
+            for(auto& filter:voice_filters_)filter.reset();
+            voice_filter_owned_.fill(false);
         }
         if ((off == kIen || off == kFectl) && size == 4) update_irq();
     }
@@ -882,6 +888,11 @@ public:
 
 private:
     bool process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,bool& completed,bool retire);
+    bool prepare_2d_filter(uint16_t voice,uint32_t format,uint32_t misc,uint32_t route,
+                           uint32_t control50,uint32_t control70,bool& enabled,ApuDls2Coefficients& coefficients);
+    const ApuSignalModel signal_model_;
+    uint64_t dls2_filter_frames_=0;
+    bool dls2_model_reported_=false;
     uint64_t voice_mix_quanta_=0;
     bool processing_quantum_=false,processing_voice_=false;
     bool configure_ssl(uint32_t method,uint32_t value) {
@@ -1532,6 +1543,7 @@ private:
         set_reg32(kFedecparam, argument);
         voice_rates_[voice].reset();
         voice_envelopes_[voice]={};
+        voice_filters_[voice].reset();voice_filter_owned_[voice]=true;
         ++voice_on_methods_;
     }
 
@@ -1712,6 +1724,8 @@ private:
     bool fectl_initialized_=false;
     std::array<bool,kMaxVoices> voice_locked_{};
     std::array<std::shared_ptr<ApuRateState>,kMaxVoices> voice_rates_{};
+    std::array<ApuDls2Lpf,kMaxVoices> voice_filters_{};
+    std::array<bool,kMaxVoices> voice_filter_owned_{};
     std::array<std::array<apu_envelope_curve::ReleaseHistory,2>,kMaxVoices> voice_envelopes_{};
     ApuObserver observer_;
     std::array<uint8_t,32> submix_headroom_{};

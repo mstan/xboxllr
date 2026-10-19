@@ -1676,6 +1676,7 @@ int main(int argc, char** argv) {
     bool test_synthetic_controller_hub_input_down = false;
     bool test_synthetic_controller_hub_input_down_a = false;
     bool reduced_retire_diag = false;
+    ApuSignalModel apu_signal_model = ApuSignalModel::Strict;
     // CPU tier (beads-xbox.1.4.6). Default: block-granularity scheduling, no per-instruction
     // hook. --cpu-insn-hook is the toggle-off arm -- identical binary, identical device
     // models, identical guest workload, only the floor's scheduling granularity differs.
@@ -1942,6 +1943,19 @@ int main(int argc, char** argv) {
             test_synthetic_controller_hub_input_down_a = true;
         else if (!std::strcmp(argv[i], "--reduced-retire-diag"))
             reduced_retire_diag = true;
+        else if (!std::strcmp(argv[i], "--apu-signal-model")) {
+            if(i+1>=argc) {
+                std::fprintf(stderr,"[audio] --apu-signal-model requires strict or nominal-dls2-linear-v1\n");
+                return 2;
+            }
+            const char* model=argv[++i];
+            if(!std::strcmp(model,"strict"))apu_signal_model=ApuSignalModel::Strict;
+            else if(!std::strcmp(model,"nominal-dls2-linear-v1"))apu_signal_model=ApuSignalModel::NominalDls2LinearV1;
+            else {
+                std::fprintf(stderr,"[audio] unsupported signal model: %s\n",model);
+                return 2;
+            }
+        }
         else if (!std::strcmp(argv[i], "--cpu-insn-hook"))
             cpu_insn_hook = true;
         else if (!std::strcmp(argv[i], "--legacy-host-tsc"))
@@ -2661,6 +2675,14 @@ int main(int argc, char** argv) {
             "[net] --net-disconnected cannot be combined with a UDP Ethernet peer\n");
         return 1;
     }
+    if(apu_signal_model!=ApuSignalModel::Strict && (!boot_flash || !run2bl)) {
+        std::fprintf(stderr,"[audio] nominal signal model requires --boot and --run2bl\n");
+        return 2;
+    }
+    if(apu_signal_model!=ApuSignalModel::Strict && net_requested) {
+        std::fprintf(stderr,"[audio] nominal signal model has no qualified netplay compatibility profile\n");
+        return 2;
+    }
     if (test_synthetic_controller_hub && (!boot_flash || !run2bl)) {
         std::fprintf(stderr,
                      "[input] --test-synthetic-controller-hub requires both "
@@ -2929,6 +2951,7 @@ int main(int argc, char** argv) {
         XboxMachine::Config machine_config;
         machine_config.nv2a_renderer = nv2a_renderer.get();
         machine_config.cpu_chunk_insns = machine_chunk_insns;
+        machine_config.apu_signal_model = apu_signal_model;
         if (test_synthetic_controller_hub) {
             machine_config.ohci0_topology =
                 Ohci::UsbTopology::kSyntheticControllerSHubForTest;

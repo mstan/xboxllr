@@ -19,7 +19,8 @@ if(NOT TARGET xlle_apu_rate)
   xlle_prepare_samplerate()
   add_library(xlle_apu_rate STATIC "${CMAKE_CURRENT_LIST_DIR}/../src/machine/apu_rate.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/../src/machine/apu_envelope.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/../src/machine/apu_voice_quantum.cpp")
+    "${CMAKE_CURRENT_LIST_DIR}/../src/machine/apu_voice_quantum.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../src/machine/apu_filter.cpp")
   set_target_properties(xlle_apu_rate PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_include_directories(xlle_apu_rate PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../src")
   target_link_libraries(xlle_apu_rate PUBLIC xlle_apu_adpcm PRIVATE SampleRate::samplerate)

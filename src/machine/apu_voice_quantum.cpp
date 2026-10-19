@@ -3,6 +3,7 @@
 #include "machine/apu.hpp"
 #include "machine/apu_mix_word.hpp"
 #include <algorithm>
+#include <cstdio>
 
 namespace xlle {
 bool McpxApu::process_2d_quantum(ApuVoiceQuantum& result) {
@@ -35,10 +36,9 @@ bool McpxApu::process_2d_quantum(ApuVoiceQuantum& result) {
             device_fault("VP quantum list/configuration DMA failed");return false;
         }
         if(!(state&kVoiceActive)) {if(idle==kNullVoice)idle=voice;}
-        else if(!(state&(1u<<18)) && !voice_locked_[voice] &&
-                (control50 || control70 || (misc&0x30000) || ((format>>13)&7)!=7 ||
-                 (format&((1u<<21)|(1u<<22)|(1u<<24))) || (route&0x80008000))) {
-            device_fault("VP quantum filter/headroom/owner mode remains unqualified");return false;
+        else if(!(state&(1u<<18)) && !voice_locked_[voice]) {
+            bool filtered=false;ApuDls2Coefficients coefficients;
+            if(!prepare_2d_filter(voice,format,misc,route,control50,control70,filtered,coefficients))return false;
         }
         voices[total]=voice;nexts[total++]=uint16_t(link);voice=uint16_t(link);
     }

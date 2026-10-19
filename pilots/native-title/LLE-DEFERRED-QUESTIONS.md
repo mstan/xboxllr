@@ -188,3 +188,29 @@ enters that private constructor/lock path, or captured ownership contradicts
 normal title execution. Actual original allocator, disk, image handoff and G05
 output/lifecycle still must pass. This extends the existing startup-profile scope;
 it adds no family waiver or new deferral ID.
+
+## AUDIO-D17 — nominal DLS2 signal projection
+
+The explicit construction-time `nominal-dls2-linear-v1` policy supplies an
+independently authored ordinary mono LPF stage; default `Strict` still rejects
+this unqualified extension. Stage presence, descriptor/source ownership,
+VOICE_ON lifetime, clocks and real GP publication are implemented work, not
+waived dependencies. This policy does not broaden bounded Blinx qualification.
+
+Deferred questions: exact FC0/FC1 projection (especially whether the nominal
+raw FC1 damping interpretation matches MCPX), cutoff-envelope scale/sign/units
+and modulation scheduling beyond the supported zero scale, internal coefficient
+and accumulator precision, update order and rounding, nonlinear stabilization,
+input normalization/DC gain, saturation location and tail/history behavior
+outside the supported lifetime. Generic Microsoft SVF mathematics does not
+establish Xbox register encoding. xemu's nonlinear/gain implementation is not
+copied or claimed equivalent. The policy is replaceable through the same DSP
+interface without moving MMIO, source DMA, rate, envelopes or GP ownership.
+
+Reopen when independent hardware/reference evidence distinguishes a required
+supported waveform/control, a required consumer needs nonzero modulation or a
+new profile, output validation contradicts the declared model, or a new signal
+policy is selected. Retain saved authored impulse/frequency/partition/lifetime
+and preflight checks, then validate the affected actual output and compatibility
+identity. There is no new hardware probe authorization or netplay qualification.
+See [model contract](../../docs/APU-NOMINAL-DLS2.md).

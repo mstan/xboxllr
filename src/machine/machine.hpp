@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "machine/ide.hpp"
+#include "machine/apu_signal_model.hpp"
 #include "machine/io_device.hpp"
 #include "machine/mmio_device.hpp"
 #include "machine/nv2a.hpp"
@@ -46,6 +47,9 @@ public:
         // CPU execution slice size. 4096 is the conservative LLE floor used by
         // existing gates; larger values are an explicit speed/iteration knob.
         uint64_t cpu_chunk_insns = 4096;
+        // Immutable signal policy, independent of GPU selection. Approximations
+        // require an explicit caller choice; physical qualification stays strict.
+        ApuSignalModel apu_signal_model = ApuSignalModel::Strict;
     };
 
     XboxMachine();

@@ -19,8 +19,9 @@ struct Fixture {
     uint32_t fail_read=UINT32_MAX,fail_write=UINT32_MAX;
     unsigned source_reads=0,irqs=0,reads=0,writes=0;
     xlle::ApuVoiceQuantum* current=nullptr;
-    xlle::McpxApu apu{[this](const std::string& why){error=why;}};
-    Fixture() {
+    xlle::McpxApu apu;
+    explicit Fixture(xlle::ApuSignalModel model=xlle::ApuSignalModel::Strict)
+        :apu([this](const std::string& why){error=why;},model) {
         apu.set_mem_access(
             [this](uint32_t a,void* p,size_t n){
                 ++reads;
@@ -196,7 +197,7 @@ static void admission_and_failures() {
         case 1:f.reg(0x2060,7);break;
         case 2:f.reg(0x2054,7);break;
         case 3:f.reg(0x202c,0xfffff000);break;
-        case 4:f.put(object+0x18,1u<<16);break;
+        case 4:f.put(object+0x18,2u<<16);break;
         case 5:f.put(object+4,f.word(object+4)&~0xe000u);break;
         case 6:f.put(object+4,f.word(object+4)|(1u<<24));break;
         case 7:f.put(object,f.word(object)|0x8000);break;
@@ -296,7 +297,9 @@ static void passive_observation() {
     xlle::ApuVoiceQuantum a,b;CHECK(baseline.quantum(a) && observed.quantum(b));
     CHECK(counts[4]==16 && baseline.ram==observed.ram && baseline.reads==observed.reads && baseline.writes==observed.writes);
 }
+#include "apu_dls2_cases.hpp"
 int main() {
+    dls2_math();dls2_device();
     passive_observation();
     mixed_waveforms_and_dma();finite_and_idle_ownership();admission_and_failures();
     std::puts("PASS: device-owned ordinary VP/GP quanta; 3 mixed-waveform lifetimes, 3 finite/idle lifetimes, shared GP DMA, publication before IRQ, preflight and terminal partial failures; no bootstrap/EP/clock qualification");

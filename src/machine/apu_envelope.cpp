@@ -42,7 +42,9 @@ bool McpxApu::step_envelopes(uint16_t voice,ApuEnvelopeStep& result) {
             break;
         case 2:
             if(!rate || count>rate) {
-                device_fault("envelope zero-rate/overflow attack remains unqualified");return false;
+                char detail[240];
+                std::snprintf(detail,sizeof(detail),"envelope zero-rate/overflow attack remains unqualified voice=%u env=%u state=%08x count=%u rate=%u cfg=%08x/%08x",voice,i,state,count,rate,configuration[i*2],configuration[i*2+1]);
+                device_fault(detail);return false;
             }
             level=count*255/rate;
             if(count==rate){phase=3;count=((configuration[i*2+1]>>12)&0xfff)*16;}
@@ -135,16 +137,20 @@ bool McpxApu::process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,b
         device_fault("2D processing configuration DMA failed");return false;
     }
     if(!(state&kVoiceActive) || (state&(1u<<18)) || voice_locked_[voice])return true;
-    // This executable composition covers the ordinary original 2D defaults.
-    // Other filter/headroom/spatial modes must acquire their real stages first.
-    if(control50 || control70 || (misc&0x30000) || ((format>>13)&7)!=7 ||
-       (format&((1u<<21)|(1u<<22)|(1u<<24))) || (route&0x80008000)) {
-        device_fault("2D filter/headroom/owner mode remains unqualified");return false;
-    }
+    bool filtered=false;ApuDls2Coefficients coefficients;
+    if(!prepare_2d_filter(voice,format,misc,route,control50,control70,filtered,coefficients))return false;
     float samples[64];bool ended=false;ApuEnvelopeStep envelope;
     if(!source_signal_quantum(voice,samples,count,ended,envelope))return false;
-    // An owned filter belongs here, before amplitude and final sends. This
-    // batch retains only the already-qualified bypass mode/headroom defaults.
+    if(filtered && count) {
+        if(!voice_filters_[voice].process(coefficients,samples,count)) {
+            device_fault("DLS2 nominal filter non-finite input/state");return false;
+        }
+        dls2_filter_frames_+=count;
+        if(!dls2_model_reported_) {
+            std::fprintf(stderr,"[audio] model=nominal-dls2-linear-v1 ordinary-mono FCscale=0 f=%a damping=%a; silicon precision/nonlinearity/gain deferred\n",
+                coefficients.frequency,coefficients.damping);dls2_model_reported_=true;
+        }
+    }
     for(unsigned i=0;i<count*2;++i)samples[i]*=envelope.amplitude;
     if(!mix_2d_samples(voice,samples,count,bins))return false;
     // The real final samples reach the destination before its completion/IRQ.

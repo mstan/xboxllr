@@ -244,8 +244,10 @@ void XboxMachine::init_devices() {
                    [this](uint32_t a, int s, uint32_t v) { mmio_write(a, s, v); });
 
     // MCPX APU at 0xFE800000 (512 KB), including timed voice-idle completion.
-    auto apu = std::make_unique<McpxApu>(fault);
+    auto apu = std::make_unique<McpxApu>(fault,config_.apu_signal_model);
     apu_ = apu.get();
+    std::printf("[audio] signal-model=%s; immutable construction profile\n",
+                apu_signal_model_name(config_.apu_signal_model));
     if (!apu_->initialize_board_audio_reset()) {
         apu_=nullptr; // initializer already requested a loud CPU stop
         return;
