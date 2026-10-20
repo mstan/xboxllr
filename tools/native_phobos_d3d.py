@@ -59,6 +59,13 @@ def prepare_sampling_format(code, combiners=False):
 
 
 def shaders(code):
+    # Guest matrices are row-major; HLSL constants are column-major. Packing
+    # inverse-transpose(M) therefore stores inverse(M), not its transpose.
+    # The latter reverses an orthogonal rotation for normals (and texgen).
+    for name in ('world','wv'):
+        code = once(code, f'            mat4_transpose({name}_inv_t, {name}_inv);',
+            f'            memcpy({name}_inv_t, {name}_inv, sizeof({name}_inv_t));'
+            ' /* column-major inverse-transpose */')
     # Reuse the existing dependent-bump and homogeneous-coordinate adapter.
     # Phobos already has float4 texture varyings and linear texture metadata.
     code = once(code,
@@ -241,6 +248,8 @@ def prepare(donor, output, reference):
         'device teardown. XLLE_PILOT_D3D_DEBUG enables native layer diagnostics.\n'
         'Independent Xbox reset adapter reuses real presentation-buffer creation\n'
         'while retaining the native device, resources, shaders and state caches.\n'
+        'Pack inverse-transpose normal matrices in HLSL column-major order; '
+        'camera/world rotations retain the original normal direction.\n'
         'Programmable fog is evaluated per vertex in the native translator;\n'
         'the pixel adapter consumes its interpolated, late-clamped factor.\n'
         'The existing feedback scratch/copy is exposed to native draws and target\n'

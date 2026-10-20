@@ -27,6 +27,7 @@
 #include "graphics_gamma_backend_test.inc"
 #include "graphics_presentation_backend_test.inc"
 #include "graphics_initializer_backend_test.inc"
+#include "graphics_texgen_backend_test.inc"
 #include "graphics_fixed_backend_test.inc"
 #include "graphics_index_backend_test.inc"
 #include "graphics_edge_backend_test.inc"

@@ -10,6 +10,7 @@ static int test_fixed_declarations(void)
         pilot_gfx_texture_bind(stage,0);pilot_gfx_set_texture_state(stage,D3DTSS_COLOROP,D3DTOP_DISABLE);
         pilot_gfx_set_texture_state(stage,D3DTSS_TEXCOORDINDEX,stage);
     }
+    CHECK(!test_camera_normal_texgen());
     uint32_t texture=0,pixels[64];
     for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x) {
         unsigned at=0;for(unsigned bit=0;bit<3;++bit)at|=((x>>bit)&1)<<(2*bit)|((y>>bit)&1)<<(2*bit+1);

@@ -155,7 +155,19 @@ int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
     case 25:host=D3DTSS_BUMPENVMAT10; break;
     case 26:host=22; break; /* desktop BUMPENVLSCALE */
     case 27:host=23; break; /* desktop BUMPENVLOFFSET */
-    case 28:if(value>3)return 0; host=D3DTSS_TEXCOORDINDEX; break;
+    case 28:
+        if(value>3) {
+#ifdef PILOT_D3D_PHOBOS
+            /* The fixed-function VS consumes camera-space normal generation
+             * before its stage texture matrix. The low bits retain the source
+             * set selector; generated coordinates do not use that selector.
+             * Other generation modes require their own output qualification. */
+            if((value&~3u)!=0x10000u)return 0;
+#else
+            return 0;
+#endif
+        }
+        host=D3DTSS_TEXCOORDINDEX;break;
     case 29:host=D3DTSS_BORDERCOLOR; break;
     default:return 0;
     }
