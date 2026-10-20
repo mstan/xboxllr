@@ -47,6 +47,9 @@ def bind(xbe, output, symbols, profile=None):
                 'XInputOpen': 16, 'XInputClose': 4, 'XInputGetCapabilities': 8,
                 'XInputGetState': 8, 'XInputSetState': 8,
                 'XGetDeviceEnumerationStatus': 0, 'XInputGetDeviceDescription': 4}
+    # Explicit optional admission keeps existing generated headers byte stable.
+    if 'XInputPoll' in proof['calls']:
+        required['XInputPoll']=4
     core = {'XInitDevices', 'XGetDevices', 'XGetDeviceChanges', 'XInputOpen', 'XInputClose', 'XInputGetState'}
     if not core <= set(proof['calls']) <= set(required):
         raise ValueError('incomplete or unsupported input family proof')
@@ -139,6 +142,8 @@ def bind(xbe, output, symbols, profile=None):
         header += ['static const struct { unsigned address; const char *name; } pilot_input_absent_classes[] = {']
         header += [f'    {{0x{entry["address"]:08x}u, "{entry["symbol"]}"}},' for entry in absent_types]
         header += ['};']
+    if 'XInputPoll' in proof['calls']:
+        header += ['#define PILOT_INPUT_HAS_POLL 1']
     wrapper = ['#include "pilot_input_bindings.h"',
                'extern void pilot_input_dispatch(unsigned, void (*)(void));',
                f'extern void {last_error["name"]}(void);']
@@ -153,20 +158,47 @@ def bind(xbe, output, symbols, profile=None):
     probe_call = ['#ifdef PILOT_INPUT_QUALIFICATION',
         f'    pilot_input_qualify_open({symbols_by_name.get("XInputGetCapabilities", "pilot_absent_input_capabilities")}, {symbols_by_name.get("XInputSetState", "pilot_absent_input_feedback")});', '#endif'] if qualify else []
     state_probe = ['#ifdef PILOT_INPUT_QUALIFICATION', '    pilot_input_qualify_state();', '#endif']
+    call_blocks={}
     for c in calls:
-        wrapper += [f'extern void pilot_original_input_{c["name"]}(void);',
+        block = [f'extern void pilot_original_input_{c["name"]}(void);',
                     f'void {c["symbol"]}(void) {{', '#ifdef PILOT_INPUT_NATIVE',
                     f'    pilot_input_dispatch(PILOT_INPUT_{c["name"]}, {last_error["name"]});',
                     '#else', f'    pilot_original_input_{c["name"]}();', '#endif']
         if c['name'] == 'XInputOpen':
-            wrapper += probe_call
+            block += probe_call
         if c['name'] == 'XInputGetState':
-            wrapper += state_probe
-        wrapper += ['}']
+            block += state_probe
+        block += ['}'];call_blocks[c['name']]='\n'.join(block)+'\n';wrapper += block
     texts = {'pilot_input_bindings.h': '\n'.join(header) + '\n',
              'pilot_input_binding.c': '\n'.join(wrapper) + '\n'}
     record = output / 'input-binding.aot-private.json'
     if (context.generated / 'pilot_input_binding.c').exists():
+        prior=json.loads(record.read_text())
+        without_poll=dict(binding,calls=[c for c in calls if c['name']!='XInputPoll'])
+        if 'XInputPoll' in call_blocks and prior==without_poll and context.manifest.get('input_binding')==prior:
+            prior_header='\n'.join(line for line in texts['pilot_input_bindings.h'].splitlines() if
+                'PILOT_INPUT_XInputPoll' not in line and '"XInputPoll"' not in line and
+                not line.startswith('#define PILOT_INPUT_HAS_POLL '))+'\n'
+            prior_wrapper=texts['pilot_input_binding.c'].replace(call_blocks['XInputPoll'],'')
+            if ((context.generated/'pilot_input_bindings.h').read_text()!=prior_header or
+                    (context.generated/'pilot_input_binding.c').read_text()!=prior_wrapper):
+                raise ValueError('existing input source differs before optional poll admission')
+            poll=next(c for c in calls if c['name']=='XInputPoll');needle=f'void {poll["symbol"]}(void)\n{{'
+            matches=[]
+            for path in context.generated.glob('recomp_*.c'):
+                source=path.read_text(encoding='utf-8')
+                if needle in source:matches.append((path,source))
+            if len(matches)!=1 or matches[0][1].count(needle)!=1:
+                raise ValueError('missing original poll body before optional admission')
+            path,source=matches[0]
+            path.write_text(source.replace(needle,'void pilot_original_input_XInputPoll(void)\n{',1),encoding='utf-8',newline='\n')
+            for name,text in texts.items():(context.generated/name).write_text(text,encoding='utf-8',newline='\n')
+            record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+            context.manifest['input_binding']=binding
+            for path in (path,*(context.generated/name for name in texts)):
+                context.manifest['files'][path.name]=hashlib.sha256(path.read_bytes()).hexdigest()
+            context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+            return binding
         without_state = texts['pilot_input_binding.c'].replace('extern void pilot_input_qualify_state(void);\n', '').replace('\n'.join(state_probe)+'\n', '')
         old_wrapper = texts['pilot_input_binding.c'].replace('\n'.join(probe_declarations)+'\n', '').replace('\n'.join(probe_call)+'\n', '').replace('\n'.join(state_probe)+'\n', '')
         previous_binding = {k: v for k, v in binding.items() if k != 'known_absent_classes'}

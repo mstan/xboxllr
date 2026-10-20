@@ -90,6 +90,22 @@ struct PilotAudioBuffer {
 #endif
 };
 static struct PilotAudioBuffer audio_buffers[256];
+static void *audio_pointer(uint32_t address,uint32_t bytes);
+static void audio_caps(uint32_t destination)
+{
+    /* Native ownership, not desktop DirectSound caps. Report the maintained
+     * 256-buffer table and the guest's 64 MiB page namespace. Spatial voices
+     * remain unavailable until their consuming services are admitted. Original
+     * Xbox DSCAPS is four DWORDs, without the desktop dwSize/dwFlags prefix. */
+    uint32_t active=0,pages=0,bytes=audio_device?44:0;
+    for(unsigned i=0;i<256;++i)if(audio_buffers[i].base) {
+        const struct PilotAudioBuffer *b=&audio_buffers[i];++active;
+        if(b->bytes)pages+=((b->data&4095)+b->bytes+4095)/4096;
+        bytes+=36+(b->owned?b->bytes:0);
+    }
+    uint32_t caps[]={256-active,0,pages>=16384?0:16384-pages,bytes};
+    memcpy(audio_pointer(destination,sizeof(caps)),caps,sizeof(caps));
+}
 #include "audio_configuration_capture.inc"
 static void *audio_pointer(uint32_t address,uint32_t bytes)
 {
@@ -373,6 +389,10 @@ void pilot_audio_dispatch(unsigned entry)
         }
     } else if(entry==PILOT_AUDIO_IDirectSound_Release) {
         audio_device_check(a[0]);result=audio_ref(audio_device,0);
+    } else if(!strcmp(pilot_audio_calls[entry].name,"IDirectSound_AddRef")) {
+        audio_device_check(a[0]);result=audio_ref(audio_device,1);
+    } else if(!strcmp(pilot_audio_calls[entry].name,"IDirectSound_GetCaps")) {
+        audio_device_check(a[0]);audio_caps(a[1]);
     } else if(entry==PILOT_AUDIO_ObjectAddRef)result=audio_ref(a[0],1);
 #if PILOT_AUDIO_HAS_MIXBIN_HEADROOM
     else if(entry==PILOT_AUDIO_IDirectSound_SetMixBinHeadroom) {
@@ -395,11 +415,16 @@ void pilot_audio_dispatch(unsigned entry)
         stop("Xbox DSP effects image needs a real native effect implementation",a[2]);
 #endif
     } else {
+        /* An unimplemented device method must guard as that method, before
+         * trying to interpret its device interface as a buffer interface. */
+        if(strncmp(pilot_audio_calls[entry].name,"IDirectSoundBuffer_",sizeof("IDirectSoundBuffer_")-1))
+            stop(pilot_audio_calls[entry].name,pilot_audio_calls[entry].address);
         struct PilotAudioBuffer *b=audio_buffer(a[0]);
         if(configuration && entry==PILOT_AUDIO_IDirectSoundBuffer_Release) {
             before_release=*b;configuration_slot=(unsigned)(b-audio_buffers);
         }
         if(entry==PILOT_AUDIO_IDirectSoundBuffer_Release)result=audio_ref(b->base,0);
+        else if(!strcmp(pilot_audio_calls[entry].name,"IDirectSoundBuffer_AddRef"))result=audio_ref(b->base,1);
 #if PILOT_AUDIO_HAS_NOTIFICATIONS
         else if(entry==PILOT_AUDIO_IDirectSoundBuffer_SetNotificationPositions)result=audio_set_notifications(b,a[1],a[2]);
 #endif

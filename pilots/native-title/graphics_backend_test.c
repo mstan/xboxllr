@@ -19,6 +19,7 @@
 #include "graphics_blend_backend_test.inc"
 #include "graphics_resultarg_backend_test.inc"
 #include "graphics_g8b8_backend_test.inc"
+#include "graphics_l8_backend_test.inc"
 #include "graphics_pixel_bump_backend_test.inc"
 #include "graphics_fan_backend_test.inc"
 #include "graphics_visual_backend_test.inc"
@@ -143,6 +144,12 @@ int main(int argc,char **argv)
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
+        if(argc==2 && !strcmp(argv[1],"--l8")) {
+            CHECK(!test_l8_texture());pilot_gfx_close();continue;
+        }
+        if(argc==2 && !strcmp(argv[1],"--lin565")) {
+            CHECK(!test_linear_565_texture());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--g8b8")) {
             CHECK(!test_g8b8_texture());pilot_gfx_close();continue;
         }

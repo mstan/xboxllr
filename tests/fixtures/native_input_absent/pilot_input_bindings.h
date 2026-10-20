@@ -5,6 +5,8 @@ enum PilotInputEntry {
     PILOT_INPUT_XInputOpen,PILOT_INPUT_XInputClose,PILOT_INPUT_XInputGetState,
 #ifdef PILOT_INPUT_TEST_LEGACY
     PILOT_INPUT_XInputGetCapabilities,PILOT_INPUT_XInputSetState,
+#else
+    PILOT_INPUT_XInputPoll,
 #endif
     PILOT_INPUT_COUNT
 };
@@ -13,12 +15,15 @@ static const struct {const char *name;unsigned stack_bytes;} pilot_input_calls[]
     {"XInputOpen",16},{"XInputClose",4},{"XInputGetState",8},
 #ifdef PILOT_INPUT_TEST_LEGACY
     {"XInputGetCapabilities",8},{"XInputSetState",8},
+#else
+    {"XInputPoll",4},
 #endif
 };
 #define PILOT_INPUT_g_DeviceType_Gamepad 0x1000u
 #define PILOT_INPUT_g_DeviceType_MU 0x1010u
 #define PILOT_INPUT_g_DeviceType_IRDongle 0x1020u
 #ifndef PILOT_INPUT_TEST_LEGACY
+#define PILOT_INPUT_HAS_POLL 1
 #define PILOT_INPUT_ABI_VERSION 1u
 #define PILOT_INPUT_STATE_BYTES 22u
 #define PILOT_INPUT_DEFAULT_POLLING_0 1u

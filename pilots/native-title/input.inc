@@ -249,6 +249,16 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
         MEM32(args[1])=h->packet; memcpy(memory+args[1]+4,h->gamepad,PILOT_INPUT_STATE_BYTES-4);
         result=input_connected(h)?ERROR_SUCCESS:ERROR_DEVICE_NOT_CONNECTED; break;
     }
+#ifdef PILOT_INPUT_HAS_POLL
+    case PILOT_INPUT_XInputPoll: {
+        struct PilotInputHandle *h=input_handle(args[0]);
+        /* Open currently admits automatic polling only. This explicit Poll
+         * services the same due host report before returning its connection
+         * result; it must not invent a report inside the polling interval. */
+        input_sample(h->port,dispatch_monotonic(),0);
+        result=input_connected(h)?ERROR_SUCCESS:ERROR_DEVICE_NOT_CONNECTED;break;
+    }
+#endif
 #if PILOT_INPUT_HAS_CAPABILITIES
     case PILOT_INPUT_XInputGetCapabilities: {
         input_buffer(args[1],PILOT_INPUT_CAPABILITIES_BYTES);

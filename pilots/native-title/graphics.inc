@@ -3,17 +3,6 @@
  * stop before executing against a device owned by the native renderer. */
 #include "graphics_backend.h"
 #include "pilot_d3d_bindings.h"
-#ifdef PILOT_D3D_PROFILE_CLASSIC
-extern void pilot_original_d3d_D3D_GetAdapterModeCount(void);
-extern void pilot_original_d3d_D3D_EnumAdapterModes(void);
-extern void pilot_original_d3d_CMiniport_GetDisplayCapabilities(void);
-extern void pilot_original_d3d_D3D_GetDeviceCaps(void);
-extern void pilot_original_d3d_D3D_CheckDeviceFormat(void);
-extern void pilot_original_d3d_D3DDevice_SetLight(void);
-extern void pilot_original_d3d_D3DDevice_LightEnable(void);
-extern void pilot_original_d3d_D3DDevice_SetMaterial(void);
-extern void pilot_original_d3d_D3DDevice_GetGammaRamp(void);
-#endif
 #ifndef PILOT_D3D_CREATE_BEHAVIOR_MASK
 /* Compatibility with already generated headers for the original adapter. */
 #define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x40u
@@ -264,24 +253,13 @@ static void graphics_dispatch_impl(unsigned entry)
     if(pilot_verbose){fprintf(stderr,"[D3D] %s return=%08x",pilot_d3d_calls[entry].name,MEM32(g_esp));
     for (unsigned i=0;i<pilot_d3d_calls[entry].stack_bytes/4;i++) fprintf(stderr," %08x",arguments[i]);
     fprintf(stderr,"\n");}
-#ifdef PILOT_D3D_PROFILE_CLASSIC
-    /* Keep the source-qualified, CPU-only mode-table filters as generated
-     * native code. Their sole AV query is owned by the native kernel service;
-     * neither requires a renderer device nor submits original GPU commands. */
-    if(entry==PILOT_D3D_D3D_GetAdapterModeCount){graphics_original_table_query(pilot_original_d3d_D3D_GetAdapterModeCount,4);return;}
-    if(entry==PILOT_D3D_D3D_EnumAdapterModes){graphics_original_table_query(pilot_original_d3d_D3D_EnumAdapterModes,12);return;}
-    if(entry==PILOT_D3D_CMiniport_GetDisplayCapabilities){graphics_original_table_query(pilot_original_d3d_CMiniport_GetDisplayCapabilities,0);return;}
-    if(entry==PILOT_D3D_D3D_GetDeviceCaps){graphics_original_table_query(pilot_original_d3d_D3D_GetDeviceCaps,12);return;}
-    if(entry==PILOT_D3D_D3D_CheckDeviceFormat){graphics_original_table_query(pilot_original_d3d_D3D_CheckDeviceFormat,24);return;}
-    /* These original CPU routines own their cache allocation/list/dirty bits;
-     * they issue no GPU commands. Active fixed-function lighting still needs
-     * an admitted draw consumer and cannot silently become an unlit draw. */
-    if(entry==PILOT_D3D_D3DDevice_SetLight){graphics_original_table_query(pilot_original_d3d_D3DDevice_SetLight,8);return;}
-    if(entry==PILOT_D3D_D3DDevice_LightEnable){graphics_original_table_query(pilot_original_d3d_D3DDevice_LightEnable,8);return;}
-    if(entry==PILOT_D3D_D3DDevice_SetMaterial){graphics_original_table_query(pilot_original_d3d_D3DDevice_SetMaterial,4);return;}
-#ifdef PILOT_D3D_GAMMA_CACHE_VERSION
-    if(entry==PILOT_D3D_D3DDevice_GetGammaRamp){graphics_original_table_query(pilot_original_d3d_D3DDevice_GetGammaRamp,4);return;}
-#endif
+#ifdef PILOT_D3D_NATIVE_CPU_SERVICE_VERSION
+    int cpu_service=pilot_d3d_native_cpu_service_index[entry];
+    if(cpu_service>=0) {
+        if((unsigned)cpu_service>=PILOT_D3D_NATIVE_CPU_SERVICE_COUNT)stop("invalid native CPU service index",entry);
+        graphics_original_cpu_service(pilot_d3d_native_cpu_services[cpu_service].function,
+                                      pilot_d3d_native_cpu_services[cpu_service].stack_bytes);return;
+    }
 #endif
     if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank) {
         graphics_wait_vblank();
@@ -358,6 +336,53 @@ static void graphics_dispatch_impl(unsigned entry)
     case PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInline:
         graphics_shader_constants(g_ecx,g_edx,arguments[0],graphics_shader_records());break;
 #ifdef PILOT_D3D_PROFILE_CLASSIC
+#ifdef PILOT_D3D_TILE_CACHE_VERSION
+    case PILOT_D3D_D3DDevice_SetTile: {
+        if(arguments[0]>=PILOT_D3D_TILE_COUNT)stop("tile index outside native cache",arguments[0]);
+        uint32_t tile[6]={0};
+        if(arguments[1])memcpy(tile,graphics_pointer(arguments[1],sizeof(tile)),sizeof(tile));
+        if(tile[1]) {
+            if((tile[0]&~0x84000001u) || !(tile[0]&1) || !tile[2] || !tile[3] ||
+               (tile[1]&0x3fff) || (tile[2]&0x3fff) || (tile[3]&63))
+                stop("unqualified native tile layout",arguments[0]);
+            uint32_t data=(tile[1]&0x03ffffffu)|0x80000000u;
+            AcquireSRWLockExclusive(&vm_lock);
+            int owned=physical_find(data,tile[2])!=NULL;
+            ReleaseSRWLockExclusive(&vm_lock);
+            if(!owned)stop("native tile requires owned contiguous backing",tile[1]);
+            /* RHI images own logical color/depth; hardware tile and Z-tag
+             * compression are storage encodings under that same interface.
+             * Preserve the original queryable descriptor, not NV2A MMIO or
+             * fictitious register acknowledgements. Its CPU setter clears
+             * the two Z fields when compression is disabled. */
+            if(!(tile[0]&0x80000000u))tile[4]=tile[5]=0;
+        } else memset(tile,0,sizeof(tile));
+        memcpy(graphics_pointer(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_TILE_OFFSET+arguments[0]*PILOT_D3D_TILE_STRIDE,sizeof(tile)),tile,sizeof(tile));
+        break;
+    }
+#endif
+    case PILOT_D3D_D3DVertexBuffer_Lock: {
+        struct GraphicsVertexObject *vertex=graphics_vertex(arguments[0]);
+        if(arguments[1]>vertex->bytes || arguments[2]>vertex->bytes-arguments[1])
+            stop("vertex lock range outside owned storage",arguments[1]);
+        graphics_pointer(arguments[3],4);
+        g_eax=graphics_vertex_lock(arguments[0],arguments[4])+arguments[1];
+        MEM32(arguments[3])=g_eax; /* Original leaves the returned data in EAX. */
+        break;
+    }
+    case PILOT_D3D_D3DDevice_CreateTexture: {
+        graphics_pointer(arguments[6],4);
+        uint32_t allocation[]={arguments[0],arguments[1],1,arguments[2],arguments[3],arguments[4],3};
+        uint32_t header=graphics_texture_allocate(allocation);
+        if(header)MEM32(arguments[6])=header;
+        g_eax=header?0:0x8007000eu;break;
+    }
+    case PILOT_D3D_D3DTexture_GetSurfaceLevel: {
+        graphics_pointer(arguments[2],4);
+        uint32_t header=graphics_texture_surface(arguments[0],arguments[1]);
+        if(header)MEM32(arguments[2])=header;
+        g_eax=header?0:0x8007000eu;break;
+    }
     case PILOT_D3D_D3DDevice_CreateVertexBuffer:
     case PILOT_D3D_D3DDevice_CreateIndexBuffer: {
         graphics_pointer(arguments[4],4);
@@ -461,6 +486,9 @@ static void graphics_dispatch_impl(unsigned entry)
             MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)=0;
             graphics_state_init();
             graphics_surfaces_create();
+#ifdef PILOT_D3D_SAMPLE_COUNT_OFFSET
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SAMPLE_COUNT_OFFSET)=staged[4];
+#endif
             graphics_snapshot_init();
             graphics_transform_init();
 #ifdef PILOT_D3D_GAMMA_CACHE_VERSION

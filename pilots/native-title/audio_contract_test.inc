@@ -40,6 +40,10 @@ static void test_audio(void)
     uint32_t device=audio_test_device(),buffer=audio_test_buffer(device,9600);
     struct PilotAudioBuffer *b=audio_buffer(buffer);
     CHECK(b->owned && b->bytes==9600 && b->headroom==600 && MEM32(audio_device+4)==2);
+    MEM32(0x194fc)=0x11223344;MEM32(0x19510)=0x55667788;
+    audio_caps(0x19500);
+    CHECK(MEM32(0x19500)==255 && !MEM32(0x19504) && MEM32(0x19508)==16381 && MEM32(0x1950c)==9680);
+    CHECK(MEM32(0x194fc)==0x11223344 && MEM32(0x19510)==0x55667788);
     uint32_t ref_args[]={b->base};CHECK(audio_test_call(PILOT_AUDIO_ObjectAddRef,ref_args)==2);
     ref_args[0]=buffer;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,ref_args)==1);
     for(unsigned i=0;i<4800;++i)MEM16(b->data+2*i)=(uint16_t)(int16_t)(1500.0*sin(6.283185307179586*440*i/48000));
@@ -106,6 +110,8 @@ static void test_audio(void)
     memcpy(memory+caller,memory+b->data,9600);uint32_t old=b->data;
     a[1]=caller;a[2]=9600;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0);
     CHECK(!b->owned && b->data==caller && b->frequency==24000 && test_write_faults(old));
+    audio_caps(0x19500);
+    CHECK(MEM32(0x19500)==255 && MEM32(0x19508)==16381 && MEM32(0x1950c)==80);
     CHECK(pilot_audio_buffer_copy(b->host,0,samples,9600,1)==0 && !memcmp(samples,memory+caller,9600));
     if(PILOT_AUDIO_IDirectSoundBuffer_SetPitch<PILOT_AUDIO_COUNT) {
         a[1]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetPitch,a)==0 && b->frequency==48000);

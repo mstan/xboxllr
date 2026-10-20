@@ -831,10 +831,10 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
     if(yuv)return E_NOTIMPL;
 #endif
     if(yuv && (usage || (width&1)))return E_INVALIDARG;
-    int linear=format==0x12 || format==0x1e || format==0x2e || yuv;
+    int linear=format==0x11 || format==0x12 || format==0x1e || format==0x2e || yuv;
     if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))return E_NOTIMPL;
     if(!levels || levels>13 || (linear && levels!=1) || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) ||
-       !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf || format==0x28))return E_NOTIMPL;
+       !(linear || (format==0 || (format>=4 && format<=7)) || format==0xc || format==0xe || format==0xf || format==0x28))return E_NOTIMPL;
     unsigned slot;
     for(slot=0;slot<pilot_texture_capacity && pilot_textures[slot].object;++slot) {}
     if(slot==pilot_texture_capacity) {
@@ -935,7 +935,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     int depth=texture->d3d8_format==0x2e;
     int yuv=texture->d3d8_format==0x24 || texture->d3d8_format==0x25;
     int pair=pilot_textures[handle-1].guest_format==0x28;
-    int linear=texture->d3d8_format==0x12 || texture->d3d8_format==0x1e || depth || yuv;
+    int linear=texture->d3d8_format==0x11 || texture->d3d8_format==0x12 || texture->d3d8_format==0x1e || depth || yuv;
     UINT pitch=d3d8_row_pitch(texture->d3d8_format,width),guest_pitch=pair?width*2:(linear?(pitch+63)&~63u:pitch);
     if(bytes!=guest_pitch*rows)
         pilot_d3d_backend_stop("texture upload size does not match subresource");
@@ -1081,7 +1081,13 @@ int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uin
     D3D11_MAPPED_SUBRESOURCE mapped;
     hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)staging,level,D3D11_MAP_READ,0,&mapped);
     if(SUCCEEDED(hr)) {
-        if(level==0 && (desc.Width!=width || desc.Height!=height)) {
+        if(texture->d3d8_format==0) {
+            /* Donor upload expands L8 into BGRA so all RGB channels sample
+             * luminance. Return its original single byte per texel here. */
+            if(desc.Format!=DXGI_FORMAT_B8G8R8A8_UNORM)pilot_d3d_backend_stop("unqualified native luminance storage");
+            for(UINT y=0;y<height;++y)for(UINT x=0;x<width;++x)
+                ((BYTE*)data)[(size_t)y*pitch+x]=((BYTE*)mapped.pData)[(size_t)y*mapped.RowPitch+x*4];
+        } else if(level==0 && (desc.Width!=width || desc.Height!=height)) {
             if(pitch!=width*4 || rows!=height)pilot_d3d_backend_stop("scaled readback requires a single-level 32-bit target");
             for(UINT y=0;y<height;++y)for(UINT x=0;x<width;++x) {
                 unsigned sx=pilot_visual_sample(x,width,desc.Width),sy=pilot_visual_sample(y,height,desc.Height);

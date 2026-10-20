@@ -7,7 +7,7 @@
 #include <string.h>
 static unsigned char memory[65536],before[65536];
 static uint32_t g_esp,g_eax;
-static unsigned connected=1,host_calls,expected_guard;
+static unsigned connected=1,host_calls,expected_guard,host_buttons;
 static uint64_t test_now=100000;
 typedef void (*recomp_func_t)(void);
 #define MEM8(a) (*(uint8_t *)(memory+(uint32_t)(a)))
@@ -27,7 +27,7 @@ static uint64_t dispatch_monotonic(void){return test_now;}
 uint32_t pilot_input_host_state(unsigned port,uint8_t state[18])
 {
     ++host_calls;if(port || !connected)return ERROR_DEVICE_NOT_CONNECTED;
-    memset(state,0,18);return 0;
+    memset(state,0,18);state[0]=(uint8_t)host_buttons;return 0;
 }
 uint32_t pilot_input_host_caps(unsigned port,uint8_t state[18],uint8_t rumble[4])
 {
@@ -69,6 +69,12 @@ int main(int argc,char **argv)
             input_initialized=0;MEM32(0x3000)=keyboard;MEM32(0x3004)=1;
             expected_guard=1;invoke(PILOT_INPUT_XInitDevices,1,0x3000,0,0);
         }
+#ifdef PILOT_INPUT_HAS_POLL
+        if(!strcmp(argv[1],"poll-closed")) {
+            uint32_t handle=invoke(PILOT_INPUT_XInputOpen,PILOT_INPUT_g_DeviceType_Gamepad,0,0,0);
+            invoke(PILOT_INPUT_XInputClose,handle,0,0,0);expected_guard=1;invoke(PILOT_INPUT_XInputPoll,handle,0,0,0);
+        }
+#endif
         return 1;
     }
 #if PILOT_INPUT_ABSENT_CLASS_COUNT > 0
@@ -90,9 +96,22 @@ int main(int argc,char **argv)
     connected=1;test_now+=3000000;
     CHECK(invoke(PILOT_INPUT_XGetDeviceChanges,PILOT_INPUT_g_DeviceType_Gamepad,out,out+4,0)==1);
     CHECK(MEM32(out)==1 && !MEM32(out+4));
+#ifdef PILOT_INPUT_HAS_POLL
+    uint32_t handle=invoke(PILOT_INPUT_XInputOpen,PILOT_INPUT_g_DeviceType_Gamepad,0,0,0);
+    CHECK(handle);unsigned sampled=host_calls;
+    invoke(PILOT_INPUT_XInputGetState,handle,out,0,0);uint32_t packet=MEM32(out);
+    host_buttons=0x10;test_now+=10000;
+    CHECK(!invoke(PILOT_INPUT_XInputPoll,handle,0,0,0) && host_calls==sampled);
+    test_now+=80000;
+    CHECK(!invoke(PILOT_INPUT_XInputPoll,handle,0,0,0) && host_calls==sampled+1);
+    CHECK(!invoke(PILOT_INPUT_XInputGetState,handle,out,0,0) && MEM32(out)==packet+1 && MEM8(out+4)==0x10);
+    connected=0;test_now+=80000;
+    CHECK(invoke(PILOT_INPUT_XInputPoll,handle,0,0,0)==ERROR_DEVICE_NOT_CONNECTED);
+    CHECK(!invoke(PILOT_INPUT_XInputClose,handle,0,0,0));
+#endif
     const char *negative[]={"unknown",
 #if PILOT_INPUT_ABSENT_CLASS_COUNT > 0
-        "open","mutation","previous","range","prealloc","init-mutation"
+        "open","mutation","previous","range","prealloc","init-mutation","poll-closed"
 #else
         "legacy"
 #endif

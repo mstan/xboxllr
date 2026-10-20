@@ -320,8 +320,17 @@ def emit_text(binding,interface,behavior_mask):
     header += [f'    PILOT_D3D_{name},' for name in absent]
     header += ['};','static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_d3d_calls[] = {']
     header += [f'{{"{c["name"]}",{c["address"]}u,{c["stack_bytes"]}u,{c["bytes"]}u,"{c["function_sha256"]}"}},' for c in calls]
+    header += ['};']
+    if binding.get('cpu_services'):
+        by_name={c['name']:c for c in calls};selected=binding['cpu_services'];indices={name:i for i,name in enumerate(selected)}
+        header += ['#define PILOT_D3D_NATIVE_CPU_SERVICE_VERSION 1',
+                   f'#define PILOT_D3D_NATIVE_CPU_SERVICE_COUNT {len(selected)}u']
+        header += [f'extern void pilot_original_d3d_{name}(void);' for name in selected]
+        header += ['static const struct {void (*function)(void);unsigned stack_bytes;} pilot_d3d_native_cpu_services[]={']
+        header += [f'{{pilot_original_d3d_{name},{by_name[name]["original_stack_bytes"]}u}},' for name in selected]
+        header += ['};','static const int16_t pilot_d3d_native_cpu_service_index[]={'+','.join(str(indices.get(c['name'],-1)) for c in calls)+'};']
     profile_define='PILOT_D3D_PROFILE_CLASSIC' if binding['adapter']=='xdk-d3d8-classic-cache-v1' else 'PILOT_D3D_PROFILE_5849'
-    header += ['};',f'#define {profile_define} 1','#define PILOT_D3D_STATEBLOCK_AVAILABLE 0',
+    header += [f'#define {profile_define} 1','#define PILOT_D3D_STATEBLOCK_AVAILABLE 0',
                f'#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x{behavior_mask:x}u']
     if 'render_cache' in binding:
         mapping=binding['render_cache'];inverse=[0]*mapping['count']
@@ -338,6 +347,11 @@ def emit_text(binding,interface,behavior_mask):
     if 'gamma_cache' in layout:
         header += ['#define PILOT_D3D_GAMMA_CACHE_VERSION 1']
         header += [f'#define PILOT_D3D_GAMMA_{name.upper()} 0x{value:x}u' for name,value in layout['gamma_cache'].items()]
+    if 'tile_cache' in layout:
+        header += ['#define PILOT_D3D_TILE_CACHE_VERSION 1']
+        header += [f'#define PILOT_D3D_TILE_{name.upper()} {value}u' for name,value in layout['tile_cache'].items()]
+    if 'sample_count' in layout:
+        header += [f'#define PILOT_D3D_SAMPLE_COUNT_OFFSET {layout["sample_count"]}u']
     if 'guest_presentation' in binding:
         header += ['#define PILOT_D3D_GUEST_PRESENTATION_VERSION 1u',
                    f'#define PILOT_D3D_SAMPLE_AA_STATE {binding["guest_presentation"]["aa_state"]}u',

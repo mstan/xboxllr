@@ -74,6 +74,8 @@ static uint32_t graphics_log2(uint32_t value)
 }
 static uint32_t graphics_texture_bpp(const struct GraphicsTextureObject *texture)
 {
+    if(texture->format==0)return 1;
+    if(texture->format==0x11)return 2;
     return texture->format<=5 || texture->format==0x24 || texture->format==0x25 || texture->format==0x28?2:4;
 }
 static uint32_t graphics_texture_block(const struct GraphicsTextureObject *texture)
@@ -81,7 +83,7 @@ static uint32_t graphics_texture_block(const struct GraphicsTextureObject *textu
     return texture->format==0xc?8:(texture->format==0xe || texture->format==0xf?16:0);
 }
 static int graphics_texture_linear(const struct GraphicsTextureObject *texture)
-{return texture->format==0x12 || texture->format==0x1e || texture->format==0x2e || texture->format==0x24 || texture->format==0x25;}
+{return texture->format==0x11 || texture->format==0x12 || texture->format==0x1e || texture->format==0x2e || texture->format==0x24 || texture->format==0x25;}
 static uint32_t graphics_level_width(const struct GraphicsTextureObject *texture,unsigned level)
 {
     uint32_t width=texture->width>>level; return width?width:1;
@@ -120,9 +122,9 @@ static uint32_t graphics_texture_allocate(const uint32_t *args)
 {
     uint32_t width=args[0],height=args[1],levels=args[3],format=args[5],usage=args[4];
     int yuv=format==0x24 || format==0x25;
-    int linear=format==0x12 || format==0x1e || format==0x2e || yuv;
+    int linear=format==0x11 || format==0x12 || format==0x1e || format==0x2e || yuv;
     if(yuv && (usage || (width&1)))stop("unqualified packed YUV texture dimensions/usage",width);
-    if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format>=4 && format<=7) || format==0xc || format==0xe || format==0xf || format==0x28))
+    if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format==0 || (format>=4 && format<=7)) || format==0xc || format==0xe || format==0xf || format==0x28))
         stop("unqualified texture type/usage/format",format);
     if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))
         stop("unqualified texture dimensions",width);

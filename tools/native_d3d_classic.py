@@ -13,6 +13,10 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from native_d3d_ltcg import INTERFACE, marshal, emit_text
 
 ADAPTER = 'xdk-d3d8-classic-cache-v1'
+CPU_SERVICES={'D3D_GetAdapterModeCount','D3D_EnumAdapterModes','CMiniport_GetDisplayCapabilities',
+              'D3D_GetDeviceCaps','D3D_CheckDeviceFormat','D3DDevice_SetLight','D3DDevice_LightEnable',
+              'D3DDevice_SetMaterial','D3DDevice_GetGammaRamp','D3D_AllocContiguousMemory','D3DResource_Register',
+              'D3DDevice_GetTile','D3DSurface_GetDesc','Get2DSurfaceDesc','D3DResource_GetType'}
 
 
 def inspect(context, proof):
@@ -68,6 +72,24 @@ def inspect(context, proof):
                           source_signature=row['source_signature'], argument_sources=args, register_sources=registers))
     for name, helper in proof['helpers'].items(): decode(name, helper['address'], helper)
     layout = proof['layout']
+    if 'sample_count' in layout:
+        sample=layout['sample_count']
+        if (type(sample) is not int or sample<0 or sample%4 or sample+4>layout['device_bytes'] or
+                not any(i.mnemonic=='mov' and i.op_str==f'eax, dword ptr [eax + {hex(sample)}]'
+                        for i in codes['Get2DSurfaceDesc']) or 'surface_dimensions' not in proof['helpers']):
+            raise ValueError('unreviewed original surface description cache')
+    if 'tile_cache' in layout:
+        tile=layout['tile_cache']
+        if (set(tile)!={'offset','count','stride'} or tile['count']!=8 or tile['stride']!=24 or
+                type(tile['offset']) is not int or tile['offset']<0 or tile['offset']%4 or
+                tile['offset']+tile['count']*tile['stride']>layout['device_bytes']):
+            raise ValueError('unreviewed classic tile cache layout')
+        if not any(i.mnemonic=='lea' and i.op_str==f'esi, [ecx + eax*8 + {hex(tile["offset"])}]'
+                   for i in codes['D3DDevice_GetTile']):
+            raise ValueError('classic tile getter cache reference changed')
+        if not any(i.mnemonic=='lea' and i.op_str==f'edi, [ebx + ecx*8 + {hex(tile["offset"])}]'
+                   for i in codes['D3DDevice_SetTile']):
+            raise ValueError('classic tile setter cache reference changed')
     def field(path):
         value = layout
         for key in path.split('.'): value = value[key]
@@ -129,12 +151,26 @@ def inspect(context, proof):
                texture_defaults=list(read(layout['texture_defaults'],32)),
                device_caps=list(struct.unpack('<53I',read(layout['device_caps'],212))),
                surface_formats=[dict(format=f,flags=read(layout['surface_formats']+f,1)[0])
-                                for f in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e,0x24,0x25,0x28)])
+                                for f in (4,5,6,7,0xc,0xe,0xf,0x12,0x1e,0x2e,0x24,0x25,0x28,0,0x11)])
     binding=dict(xbe_sha256=context.image['sha256'],adapter=ADAPTER,device_global=layout['device_global'],
                  device_object=layout['device_object'],vertex_shader_offset=layout['cache_fields']['vertex_object'],
                  layout=copy.deepcopy(layout),calls=calls,helpers=proof['helpers'],stateblock=False,
                  render_cache=copy.deepcopy(mapping),native_create_behavior_mask=0x40,
                  original_create_driver_mask=0x10,**facts)
+    if 'cpu_services' in proof:
+        selected=proof['cpu_services'];by_name={c['name']:c for c in calls}
+        if not isinstance(selected,list) or len(set(selected))!=len(selected) or not set(selected)<=CPU_SERVICES:
+            raise ValueError('unreviewed original CPU service selection')
+        for name in selected:
+            call=by_name.get(name)
+            if (call is None or call['register_sources'] or call['stack_bytes']!=call['original_stack_bytes'] or
+                    any(p['type']!='psh' for p in call['original_signature']['params'])):
+                raise ValueError('original CPU service cannot borrow this caller ABI')
+        if 'D3DDevice_GetGammaRamp' in selected and 'gamma_cache' not in layout:
+            raise ValueError('original gamma getter requires its initialized cache proof')
+        if {'D3DSurface_GetDesc','Get2DSurfaceDesc'}&set(selected) and 'sample_count' not in layout:
+            raise ValueError('original surface description requires its sample cache proof')
+        binding['cpu_services']=list(selected)
     if 'command_buffer' in proof:
         p=proof['command_buffer']
         if ((p['version'],p['current_offset'],p['limit_offset'],p['flags_offset'],p['record_mask'])!=(1,0,4,8,4) or
@@ -154,6 +190,7 @@ def bind(context, proof):
         previous=json.loads(record.read_text())
         def retained(old,new):
             if isinstance(old,dict):return isinstance(new,dict) and all(k in new and retained(v,new[k]) for k,v in old.items())
+            if isinstance(old,list):return isinstance(new,list) and len(old)<=len(new) and all(retained(v,new[i]) for i,v in enumerate(old))
             return old==new
         if previous!=binding and previous.get('adapter')==ADAPTER and retained(previous,binding):
             interface={r['name']:r for r in json.loads(INTERFACE.read_text())}
