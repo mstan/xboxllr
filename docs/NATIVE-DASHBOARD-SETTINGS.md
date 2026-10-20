@@ -1,7 +1,8 @@
 # Native Dashboard settings
 
 Tracked by `beads-xbox.1.155` (settings), `beads-xbox.1.156` (Credits) and
-`beads-xbox.1.159` (console system time).
+`beads-xbox.1.159` (console system time). The Credits menu relocation is
+tracked separately by `beads-xbox.1.169`.
 The owner preview is an immutable executable snapshot. Investigations use an
 independent state directory, a private copy of the input EEPROM, muted output
 and TCP controller/screenshot port 4384. No real Xbox operations are involved.
@@ -69,6 +70,7 @@ implementation body was copied.
 | System Info | Pass | Original floating green panel opens and returns |
 | Credits document/controller | Pass, synthetic | Complete notices and controller boundaries in `test_dashboard_credits.py` |
 | Credits native presentation | Pass | Actual original panel, Matthew first, scroll/section/page and Back; ordinary System Info restored afterward |
+| Credits under Settings / after System Info | Pass for current native profile | Actual Home has no Credits; Settings places it directly below System Info; scroll, Back, reopening and ordinary System Info checked in one 36.8 s native run. Conditional list variants also pass offline |
 | Network / Auto Sign-In offline route | Pass within offline scope | Each opens native offline panel and returns; separate original XoDash remains deferred |
 | Console-time/timer/wait regression batch | Pass | Seven actual runtime tests, 1.12 s; new time/guard/refurb checks plus existing timers/events/delay/worker waits |
 
@@ -107,10 +109,19 @@ remain deferred; no invented record or successful disk write is reported.
 
 ## Credits
 
+Credits is the last item in Settings, directly below System Info. The existing
+six-row Settings list scrolls to it and includes it in its normal navigation
+bounds for the available regional/AV-pack choices. Home keeps its original
+choices, geometry, selection handlers and highlights; the complete original
+`mainmenu5.xip` is included to replace the cloned Home row from older mods.
+
 The authored scrolling document controller uses the existing System Info
 Level, camera, meshes, green materials, console icon, heading and body Text.
 The body contains only the visible document window; Up/Down scroll, Left/Right
-move between sections, A advances a page and B returns to the main menu.
+move between sections, A advances a page and B returns to Settings with Credits
+still selected. Reopening starts at the first credit. The main document owner
+owns only its modal state; the Settings script opens its own panel and returns
+through the original Settings submenu transition.
 Normal System Info geometry/text settings are restored on its next use.
 Matthew Stanley remains the first credited person. Complete third-party
 notices remain copied verbatim and reachable through the document/index.
@@ -118,6 +129,15 @@ The original proportional Text node clips at the native panel edge; line
 scrolling exposes wrapped continuation lines. Runtime checks sample document
 navigation and do not claim that a person read every notice. Authored controller
 tests check every viewport boundary and complete, non-elided notice payloads.
+The relocation also has offline checks against the actual generated original
+scripts: conditional list sizes, scrolling boundaries, Credits selection,
+console icon and return selection. Its panel setup and scrolling handlers are
+byte-identical to the previously native-qualified reader. One isolated native
+run checked the actual Home and Settings entries, document scrolling, Back to
+the selected Credits row, reopening at the first credit, ordinary System Info
+restoration, and return to Home. It reported no native guard, fault or script
+error. Other regional/AV-pack list variants remain offline checks; those do
+not establish retail VM execution or scene pixels for every hardware profile.
 
 All transformed original XAP/XIP data and the original-body generated C stay
 private. The checked-in tools contain authored transformations and assertions.

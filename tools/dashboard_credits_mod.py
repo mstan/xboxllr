@@ -101,59 +101,10 @@ def credit_pages(spec: dict, extra_notices: list[Path]) -> tuple[list[str], list
     return pages, records, sections
 
 
-def menu_geometry(source: str) -> tuple[str, dict[str, str]]:
-    begin, _, end = block(source, "DEF Main_memory_ringpin_4 Transform")
-    original = source[begin:end]
-    names = {name: "xllrCredits_" + name for name in re.findall(r"\bDEF\s+([\w-]+)", original)}
-    # Rename only DEF/USE identifiers, preserving every quoted mesh URL.
-    token = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/|\b(DEF|USE)\s+([\w-]+)', re.S)
-    clone = token.sub(lambda m: f"{m[1]} {names.get(m[2], m[2])}" if m[1] else m[0], original)
-    anchor = 'translate true text "SETTINGS"'
-    if clone.count(anchor) != 1:
-        raise ValueError("reviewed Settings text geometry differs")
-    clone = clone.replace(anchor, 'translate false text "CREDITS"')
-    return source[:end] + "\n" + clone + source[end:], names
-
-
-def menu_script(source: str, names: dict[str, str], pages: list[str], sections: list[int]) -> str:
-    item = names["theSettingsItem"]
-    panel = names["SettingsPanelMaterial"]
-    text = names["SettingsTextMaterial"]
-    glow = names["game_select_pod_inner03"]
-    ring = names["Main_memory_ringpin_4"]
-    reset = (f"\nvar xllrMenu = theMainMenu.children[0].children[0];\nvar xllrAngle = 0.0;\n"
-             f'xllrMenu.{panel}.name = "FlatSurfaces2sided";\n'
-             f'xllrMenu.{text}.name = "NavType";\n'
-             f"xllrMenu.{glow}.visible = false;\n")
-    selected = ["if (nCurMainMenuItem == 4) {\nxllrAngle = 0.9;\nif (g_bXOnDashExists) xllrAngle = 0.75;\n",
-                "xllrMenu.theMenuItems.SetRotation(0, 0, 1, xllrAngle);\n"]
-    for label, inner in (("Memory", "02"), ("Music", ""), ("Online", "04"), ("Settings", "03")):
-        selected.append(f'xllrMenu.{label}PanelMaterial.name = "FlatSurfaces2sided";\n')
-        selected.append(f'xllrMenu.{label}TextMaterial.name = "NavType";\n')
-        selected.append(f"xllrMenu.the{label}Item.SetRotation(0, 1, 0, xllrAngle);\n")
-        selected.append(f"xllrMenu.game_select_pod_inner{inner}.visible = false;\n")
-    selected.extend((f'xllrMenu.{panel}.name = "GameHilite";\n',
-                     f'xllrMenu.{text}.name = "HilightedType";\n',
-                     f"xllrMenu.{glow}.visible = true;\n",
-                     f"xllrMenu.{item}.SetRotation(0, 1, 0, xllrAngle);\nreturn;\n}}\n"))
-    follow = f"""
-xllrAngle = 0.0;
-if (g_bXOnDashExists) xllrAngle = (nCurMainMenuItem - 1) * 0.25;
-else {{
-    if (nCurMainMenuItem == 0) xllrAngle = -0.45;
-    if (nCurMainMenuItem == 3) xllrAngle = 0.45;
-}}
-xllrMenu.{item}.SetRotation(0, 1, 0, xllrAngle);
-"""
-    source = inject(source, "function UpdateMainMenu()", reset + "".join(selected), follow)
+def main_script(source: str, pages: list[str], sections: list[int]) -> str:
+    """Add the document owner without changing Home choices or geometry."""
     begin, _, end = block(source, "DEF theMainMenu Level")
     level = source[begin:end]
-    level = inject(level, "function OnADown()", "\nif (nCurMainMenuItem == 4) { PlaySoundA(); XllrCreditsOpen(); return; }\n")
-    if level.count("nCurMainMenuItem < 3") != 1:
-        raise ValueError("reviewed menu navigation bound differs")
-    level = level.replace("nCurMainMenuItem < 3", "nCurMainMenuItem < 4")
-    # Place the clone from the original onLoad owner of `c`, before the menu
-    # selection/highlight update. Never add a global reference to that local.
     begin_load, _, end_load = block(level, "function onLoad()")
     load = level[begin_load:end_load]
     anchor = "UpdateMainMenu();"
@@ -161,8 +112,7 @@ xllrMenu.{item}.SetRotation(0, 1, 0, xllrAngle);
         raise ValueError("reviewed first-load menu update differs")
     # The retail class compiler accepts declarations here, but rejects class
     # member initializers. Initialize the modal state under the real onLoad.
-    placement = ("xllrCreditsActive = false;\nxllrCreditsLine = 0;\n"
-                 f"c.{ring}.SetTranslation(57.43, -43.38, 101.5);\n")
+    placement = "xllrCreditsActive = false;\nxllrCreditsLine = 0;\n"
     load = load.replace(anchor, placement + anchor)
     level = level[:begin_load] + load + level[end_load:]
     source = source[:begin] + level + source[end:]
@@ -175,10 +125,17 @@ def native_panel_script(source: str) -> str:
     Only authored guards/assignments are inserted in the private owned script.
     No original script or geometry is distributed by this tool.
     """
-    source = inject(source, "function StartSettingsMenu()", """
-if (xllrCreditsActive) {
-    strCurMenu = "XLLR CREDITS";
-    theSetPanelMenu.GoTo();
+    begin, _, end = block(source, "function StartSettingsMenu()")
+    settings = source[begin:end]
+    anchor = re.compile(r'(sSettingsMenu\[index\] = theTranslator\.Translate\("SYSTEM INFO"\);'
+                        r'\s*index = index \+ 1;)')
+    settings, count = anchor.subn(r'\1\n    sSettingsMenu[index] = "CREDITS";\n    index = index + 1;', settings)
+    if count != 1:
+        raise ValueError("reviewed System Info Settings entry differs")
+    source = source[:begin] + settings + source[end:]
+    source = inject(source, "function MenuIcon()", """
+if (sSettingsElements[nCurSettingsMenuItem] == "CREDITS") {
+    ShowIcon(theSettingsMenu.children[0].children[0].ConsoleIcon);
     return;
 }
 """)
@@ -223,16 +180,26 @@ if (strCurMenu == "XLLR OFFLINE") {
     joystick = inject(joystick, "function OnBDown()", """
 if (strCurMenu == "XLLR CREDITS") {
     XllrCreditsClose();
+    PlaySoundB();
+    strPrevMenu = "XLLR CREDITS";
     strCurMenu = "SETTINGS";
-    strPrevMenu = "SETTINGS";
-    theMainMenu.GoBackTo();
-    theSettingsMenuOut.Play();
+    theSettingsMenu.GoBackTo();
+    theSettingsSubMenuOut.Play();
     return;
 }
 """)
     source = source[:begin] + joystick + source[end:]
     begin, _, end = block(source, "DEF theSettingsMenu Level")
     settings = inject(source[begin:end], "function OnADown()", """
+if (sSettingsElements[nCurSettingsMenuItem] == "CREDITS") {
+    PlaySoundA();
+    strPrevMenu = "SETTINGS";
+    XllrCreditsOpen();
+    strCurMenu = "XLLR CREDITS";
+    theSetPanelMenu.GoTo();
+    theSettingsSubMenuIn.Play();
+    return;
+}
 if ((sSettingsElements[nCurSettingsMenuItem] == theTranslator.Translate("NETWORK")) +
     (sSettingsElements[nCurSettingsMenuItem] == theTranslator.Translate("LIVE TODAY"))) {
     PlaySoundA();
@@ -270,13 +237,14 @@ def main() -> None:
         extra_notices.extend(path for path in sorted(directory.rglob("*"))
                              if path.is_file() and any(word in path.name.upper() for word in ("LICENSE", "COPYING", "NOTICE")))
     pages, notices, sections = credit_pages(spec, extra_notices)
-    geometry, names = menu_geometry(inputs["mainmenu5.xip"].read("default.xap").decode("utf-8"))
-    script = menu_script(inputs["default.xip"].read("default.xap").decode("utf-8"), names, pages, sections)
+    script = main_script(inputs["default.xip"].read("default.xap").decode("utf-8"), pages, sections)
     main_archive = Xip(inputs["default.xip"].replace("default.xap", script.encode("utf-8")))
     settings = inputs["default.xip"].read("settings3.xap").decode("latin1")
     outputs = {
         "default.xip": main_archive.replace("settings3.xap", native_panel_script(settings).encode("latin1")),
-        "mainmenu5.xip": inputs["mainmenu5.xip"].replace("default.xap", geometry.encode("utf-8")),
+        # Restore the complete original Home asset when overlaying an older
+        # Credits mod; do not retain its cloned Home item or transformed mesh.
+        "mainmenu5.xip": (args.assets / "mainmenu5.xip").read_bytes(),
     }
     native = None
     if args.native_xbe:
@@ -312,6 +280,7 @@ def main() -> None:
     manifest = dict(schema="xboxllr.dashboard.asset-mod.v1", private_guest_output=True,
                     id="xboxllr.dashboard.credits", dashboard_build=5960, credits_pages=len(pages),
                     credits_lines=len(document_lines(pages,sections)[0]), viewer="native-system-info-scroll",
+                    entry_point="settings-after-system-info", home_menu="original-unmodified",
                     validation="generated and read back; in-dashboard visual/input validation pending",
                     inputs_unchanged=True, files=records, notices=notices, sections=sections,
                     source_reference=dict(repository="https://github.com/MrMilenko/Theseus",

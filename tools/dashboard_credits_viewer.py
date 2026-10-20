@@ -66,7 +66,6 @@ function XllrCreditsRefresh() {{
 function XllrCreditsOpen() {{
     xllrCreditsLine = 0;
     xllrCreditsActive = true;
-    GoToSettings();
 }}
 function XllrCreditsClose() {{
     xllrCreditsActive = false;
