@@ -66,3 +66,14 @@ int32_t pilot_gfx_shader_prepare_fixed(uint32_t handle)
     ID3D11DeviceContext_IASetInputLayout(context,shader->layout);
     native_shader_bound=handle;return S_OK;
 }
+int32_t pilot_gfx_fvf_prepare_fixed(uint32_t fvf)
+{
+    if((fvf&15)!=2)return E_INVALIDARG;
+    struct PilotVertexElement elements[16];pilot_gfx_fvf_layout(fvf,elements);
+    for(unsigned i=0;i<256;++i)if(native_shaders[i].object && native_shaders[i].source_fvf==fvf)
+        return pilot_gfx_shader_prepare_fixed(i+1);
+    uint32_t handle=0;HRESULT result=pilot_gfx_shader_create_fixed(elements,&handle);
+    if(FAILED(result))return result;
+    native_shader(handle)->source_fvf=fvf;
+    return pilot_gfx_shader_prepare_fixed(handle);
+}

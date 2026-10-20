@@ -104,6 +104,10 @@ void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t off
 void pilot_gfx_vertex_bind(unsigned stream,uint32_t handle,uint32_t stride);
 int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity);
 struct PilotVertexElement { uint32_t type,stream,offset; };
+int pilot_gfx_vertex_current_get(unsigned reg,float value[4]);
+int pilot_gfx_vertex_current_set(unsigned reg,const float value[4]);
+int pilot_gfx_vertex_current_method(uint32_t method,uint32_t word,int apply);
+unsigned pilot_gfx_shader_current_inputs(uint32_t handle);
 uint32_t pilot_gfx_vertex_type_size(uint32_t type);
 /* Private ownership handles, never desktop FVF/donor shader selectors. */
 int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle);
@@ -111,6 +115,8 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
  * shader. Typed stream decoding remains on the GPU, including packed normals. */
 int32_t pilot_gfx_shader_create_fixed(const struct PilotVertexElement elements[16],uint32_t *handle);
 int32_t pilot_gfx_shader_prepare_fixed(uint32_t handle);
+/* Source-decoded XYZ FVF reuses the typed fixed-function core and cache. */
+int32_t pilot_gfx_fvf_prepare_fixed(uint32_t fvf);
 void pilot_gfx_shader_destroy(uint32_t handle);
 void pilot_gfx_shaders_close(void);
 int32_t pilot_gfx_shader_bind(uint32_t handle);
@@ -134,6 +140,7 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
 int32_t pilot_gfx_draw_indexed(unsigned primitive,unsigned count,const void *indices,int32_t base);
 int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vertices,unsigned stride);
 uint32_t pilot_gfx_fvf_extent(uint32_t fvf);
+uint32_t pilot_gfx_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16]);
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y);
 unsigned pilot_gfx_shader_streams(uint32_t extents[16]);
 void pilot_gfx_pixel_fixed(void);

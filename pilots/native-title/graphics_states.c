@@ -102,6 +102,8 @@ int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
 int pilot_gfx_command_method(uint32_t method,uint32_t value,int apply)
 {
     if(method==0x1710)return !value && pilot_gfx_vertex_cache_break(apply);
+    if((method>=0x1880 && method<0x1900) || (method>=0x1940 && method<0x1b00))
+        return pilot_gfx_vertex_current_method(method,value,apply);
     /* A zero CONTROL0 disables this sampler. The runtime separately validates
      * the original software NULL-binding transaction and its resource owner.
      * Enabled stages/LOD controls require their complete texture state. */

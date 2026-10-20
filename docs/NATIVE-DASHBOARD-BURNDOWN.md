@@ -18,19 +18,18 @@ Rows have different sizes, so their count is not a completion percentage.
 |---|---|---|---|
 | DB01 | Reach native dashboard graphics startup | Passed for reached startup | Actual native execution loads assets, opens native audio and passes the animation and inline NULL-texture boundaries. Latest run: `9cfa3b45...`, 255389 stopped-thread entries. |
 | DB02 | Consume the dashboard's original vertex layouts | Passed for reached layouts | Three original declaration-only layout classes consume packed normals/color/UV and cached transforms on the GPU. Pixel/reference and ownership checks pass; actual startup binds the original object and advances into mesh submission. Lighting remains disabled for this reached caller. |
-| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Indexed drawing, mesh/resources, native edge coverage, swath scheduling and resource waits pass reached startup. One captured present is black. Next: the reached shader's undeclared vertex input 7 and its actual producer/consumer. |
+| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Current attributes and XYZ FVF now pass. A 20-second run captures 17 images and renders the green 3D background, but menu text/choices are not visible yet. Next trace their actual submission/state. |
 | DB04 | Make the ordinary menus usable | Pending | Exercise controller navigation, opening/back transitions and supported offline menu paths; record failures explicitly. Determine concrete routes from the actual menu after DB03. |
 | DB05 | Check dashboard audio and responsiveness | Pending | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
 | DB06 | Validate the native Credits mod | Pending | Open the bottom Credits entry in the actual native dashboard, verify the intended credits/legal content, then return to ordinary menus. |
 | DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
 | DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
 
-Current next action: **DB03**, the reached shader reading undeclared vertex
-input 7 (`used=0089`, 21 slots). Inspect its actual program/declaration and
-current-attribute producer or establish that the raster consumer does not
-read that input. Preserve the real input contract. The shared resource wait
-now passes actual startup and further content loads/draws. The captured
-presentation is still black and does not pass the first-menu row.
+Current next action: **DB03**, trace menu/text submission and its state. Shared
+current-value input and XYZ FVF owners now pass actual startup. The bounded
+20-second run reaches its deadline without another unsupported-operation
+stop and renders the green dashboard background. Its 17 images do not show
+recognizable menu choices, so this progress does not pass the first-menu row.
 
 Several later rows may mainly reuse existing code: controller input, native
 audio transport and Credits admission are already implemented. Their actual
@@ -71,8 +70,9 @@ mesh virtual methods are now native; created vertex data uses the correct
 cached physical alias, and original destruction of native-owned temporaries
 passes. Native edge coverage and source-proved host swath scheduling now
 pass reached startup; controller port zero opens. The resource wait now
-passes too; startup advances to a program reading undeclared input 7.
-One native presentation is captured but black. The explicit
+passes too. Current vertex attributes and XYZ FVF now pass, and the native
+dashboard renders its green 3D background. A 20-second run captures 17
+presentations but no recognizable menu text or choices. The explicit
 offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
@@ -102,7 +102,8 @@ functions execute.
 | Native mesh methods and resource aliases | Implemented; actual conversion/temporary retirement passes | 14 roots/396 bytes from 54 original table slots; shared created-vertex physical/cached alias and native-owned destruction; 12 Windows checks pass. See [mesh resources](NATIVE-MESH-RESOURCES.md). |
 | Native edge coverage and swath scheduling | Implemented; reached startup passes | Real four-sample coverage before Gaussian resolve, preserved destination/blending, cached requests and host scheduling; exact edge-alpha precision remains NTD-14. See [edge coverage](NATIVE-EDGE-ANTIALIASING.md). |
 | Shared resource waits | Implemented; reached startup passes | Source-proved register ABI, real GPU serial/event waits, bound/parent resource semantics and private retention across last public Release; see [resource waits](NATIVE-RESOURCE-WAITS.md). |
-| First rendered native menu | Current blocker | Resolve reached undeclared shader input 7; captured presentation is black, so no recognizable menu yet |
+| Current vertex inputs and XYZ FVF | Implemented; actual startup passes | Shared live current-value GPU buffer, packet producers, source-decoded FVF and cached fixed-function shaders; 15 combined checks pass. See [vertex inputs](NATIVE-VERTEX-INPUTS.md). |
+| First rendered native menu | Current blocker | Green 3D background renders; trace missing menu text/choices and retain a stable recognizable menu |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -118,13 +119,13 @@ delivery burndown.
 
 ## Current graphics batch evidence
 
-Latest: [resource waits](NATIVE-RESOURCE-WAITS.md). Actual startup passes the
-resource block and advances into additional content. It next reaches a shader
-reading undeclared input 7. The single captured present is black, not a menu.
-Fourteen focused Windows checks pass in 10.38 seconds, including the new
-wait/ownership cases and earlier graphics/audio/scheduler regression. All 118
-CPU objects remain unchanged. The evidence below records preceding graphics
-checkpoints.
+Latest: [vertex inputs](NATIVE-VERTEX-INPUTS.md). Actual startup passes current
+attributes and XYZ FVF, then runs until the 20-second diagnostic deadline.
+Seventeen captures include the green 3D background; menu text/choices remain
+missing. Fifteen combined Windows checks pass, including live current-value
+updates, cached XYZ fixed-function shaders and earlier graphics/audio/scheduler
+regression. All 118 CPU objects remain unchanged. The evidence below records
+preceding graphics checkpoints.
 
 The latest [indexed drawing batch](NATIVE-INDEXED-DRAWING.md) advances actual
 execution beyond the index and device-reference boundaries described below.

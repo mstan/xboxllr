@@ -40,5 +40,34 @@ static void test_graphics_fixed_declarations(const char *failure)
         call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&handle); /* retained compiled owner */
         CHECK(!memcmp(original,memory+header,sizeof(original)));
     }
+    /* Source-decoded XYZ FVF uses the same cached matrix owner. Both FLOAT3
+     * normals and no-normal layouts must reach actual GPU drawing. */
+    const uint32_t fvfs[]={0x42,0x52,0x142,0x20152};
+    const unsigned strides[]={16,28,24,44};
+    uint32_t previous=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
+    for(unsigned variant=0;variant<4;++variant) {
+        uint32_t fvf=fvfs[variant];call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&fvf);
+        unsigned normal=(fvf&0x10)!=0,color=normal?24:12;
+        CHECK(MEM32(PILOT_D3D_FVF_OBJECT+4)==0x400 && MEM32(PILOT_D3D_FVF_OBJECT+0x1c)==0x32);
+        CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0x48)==color && MEM32(PILOT_D3D_FVF_OBJECT+0x4c)==0x40);
+        CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0x3c)==(normal?0x32:2));
+        if(normal)CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0x38)==12);
+        if(variant>=2)CHECK(MEM32(PILOT_D3D_FVF_OBJECT+0xa8)==color+4 &&
+            MEM32(PILOT_D3D_FVF_OBJECT+0xac)==(variant==2?0x22:0x42) &&
+            MEM32(PILOT_D3D_FVF_OBJECT+0x10)==(variant==2?2:4));
+        memset(memory+data,0,3*44);
+        for(unsigned i=0;i<3;++i) {
+            memcpy(memory+data+i*strides[variant],positions[i],12);
+            if(normal)graphics_store_float(data+i*strides[variant]+20,1);
+            MEM32(data+i*strides[variant]+color)=0xff20a060;
+        }
+        uint32_t clear[]={0,0,0xf0,0xff000000,0x3f800000,0};call_graphics(PILOT_D3D_D3DDevice_Clear,clear);
+        uint32_t draw[]={5,3,data,strides[variant]};call_graphics(PILOT_D3D_D3DDevice_DrawVerticesUP,draw);
+        unsigned char pixels[64*64*4];CHECK(!pilot_gfx_readback(pixels,sizeof(pixels)));
+        unsigned center=(24*64+36)*4;CHECK(pixels[center]==0x20 && pixels[center+1]==0xa0 && pixels[center+2]==0x60);
+        call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&fvf);
+    }
+    call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&previous);
     puts("PASS original fixed declarations: three layouts, untouched guest objects, borrowed header lifetime, repeated binding, inline matrix cache to real GPU pixels");
+    puts("PASS XYZ FVF: four source layouts, original header/query owner, FLOAT3 normal, color and coordinates to real GPU pixels");
 }

@@ -129,7 +129,22 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     graphics_draw_profile_step(&profile,0);
     uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
     struct GraphicsShader *declaration=(shader&1)?graphics_shader(shader):NULL;
-    int fixed=declaration && declaration->fixed;
+    int fixed_fvf=!(shader&1) && (shader&15)==2;
+    int fixed=(declaration && declaration->fixed) || fixed_fvf;
+    if(fixed_fvf) {
+        if((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture))
+            stop("XYZ FVF input serialization outside qualified diagnostic scope",shader);
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+        if(graphics_frame_inputs.file)stop("XYZ FVF frame inputs outside qualified diagnostic scope",shader);
+#endif
+    }
+    if(declaration && !fixed && pilot_gfx_shader_current_inputs(declaration->native)) {
+        if((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture))
+            stop("current vertex input serialization outside qualified diagnostic scope",shader);
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+        if(graphics_frame_inputs.file)stop("current vertex frame inputs outside qualified diagnostic scope",shader);
+#endif
+    }
     FILE *scene_reference=NULL;
     uint32_t extents[16]={0};unsigned streams;
     if(shader&1)streams=pilot_gfx_shader_streams(extents);
@@ -177,7 +192,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     float mod_x_scale=1,mod_x_anchor=0;
 #ifdef PILOT_TITLE_MODS
     if(title_mod && title_mod->draw) {
-        uint32_t stride=up_stride,data=up_data,position_type=0x42,position_offset=0;
+        uint32_t stride=up_stride,data=up_data,position_type=fixed_fvf?0x32:0x42,position_offset=0;
         if(!up_data && (streams&1)) {
             stride=MEM32(PILOT_D3D_STREAMS);
             data=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8))->data+first*stride;
@@ -205,7 +220,8 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
         for(unsigned i=0;i<10;++i)
             if(pilot_gfx_transform(i,(const float*)(memory+TRANSFORM_STATE(TRANSFORMS)+i*64))<0)
                 stop("native fixed-function transform synchronization failed",i);
-        if(pilot_gfx_shader_prepare_fixed(declaration->native)<0)stop("native fixed-function declaration preparation failed",shader);
+        int32_t result=fixed_fvf?pilot_gfx_fvf_prepare_fixed(shader):pilot_gfx_shader_prepare_fixed(declaration->native);
+        if(result<0)stop("native fixed-function preparation failed",shader);
     } else if(!(shader&1)) {
         if(MEM32(PILOT_D3D_RENDER_STATES+92*4))stop("pretransformed fog is unqualified",shader);
         if(pilot_gfx_fvf_placement(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),

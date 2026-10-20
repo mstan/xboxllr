@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "graphics_shader_source.inc"
+#include "graphics_current_backend.inc"
 struct NativeShader {
     ID3D11VertexShader *object;
     ID3D11InputLayout *layout;
@@ -15,9 +16,9 @@ struct NativeShader {
     ID3DBlob *raw_code;
     char *source;
     struct PilotVertexElement elements[16];
-    unsigned used;
+    unsigned used,current;
     unsigned blend_recipe;
-    uint32_t fixed_fvf;
+    uint32_t fixed_fvf,source_fvf;
 };
 static struct NativeShader native_shaders[256];
 static ID3D11Buffer *native_constants_buffer;
@@ -52,7 +53,7 @@ int32_t pilot_gfx_shader_bind(uint32_t handle)
     ID3D11DeviceContext_IASetInputLayout(context,shader->layout);
     ID3D11DeviceContext_VSSetConstantBuffers(context,1,1,&native_constants_buffer);
     native_shader_bound=handle;native_shader_active=native_constants_bound=1;
-    pilot_d3d_program_fog_mode(1);return S_OK;
+    pilot_d3d_program_fog_mode(1);return shader->current?native_current_flush():S_OK;
 }
 void pilot_gfx_shader_constants(unsigned first,unsigned count,const void *data)
 {
@@ -72,13 +73,14 @@ int32_t pilot_gfx_shader_flush(void)
         ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)native_constants_buffer,0);
         native_constants_dirty=0;++native_constants_uploads;
     }
-    return S_OK;
+    return native_shader(native_shader_bound)->current?native_current_flush():S_OK;
 }
 unsigned pilot_gfx_shader_uploads(void) {return native_constants_uploads;}
+unsigned pilot_gfx_shader_current_inputs(uint32_t handle){return native_shader(handle)->current;}
 unsigned pilot_gfx_shader_streams(uint32_t extents[16])
 {
     struct NativeShader *shader=native_shader(native_shader_bound);unsigned mask=0;memset(extents,0,16*4);
-    for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
+    for(unsigned i=0;i<16;++i)if((shader->used&(1u<<i)) && shader->elements[i].type) {
         struct PilotVertexElement *element=&shader->elements[i];unsigned stream=element->stream;
         uint32_t end=element->offset+shader_format(element->type)->bytes;
         if(end>extents[stream])extents[stream]=end;mask|=1u<<stream;
@@ -106,7 +108,7 @@ static int32_t native_shader_compile(struct NativeShader *candidate,char *source
     shader.source=source;
     result=ID3D11Device_CreateVertexShader(d3d8_GetD3D11Device(),ID3D10Blob_GetBufferPointer(shader.code),ID3D10Blob_GetBufferSize(shader.code),NULL,&shader.object);
     D3D11_INPUT_ELEMENT_DESC layout[16]={0};unsigned n=0;
-    for(unsigned i=0;i<16;++i)if(shader.used&(1u<<i)) {
+    for(unsigned i=0;i<16;++i)if((shader.used&(1u<<i)) && elements[i].type) {
         if(elements[i].stream>=16)pilot_d3d_backend_stop("invalid declaration stream");
         layout[n].SemanticName="ATTR";layout[n].SemanticIndex=i;
         layout[n].Format=shader_format(elements[i].type)->native;
@@ -130,9 +132,10 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
     if(slot==256)return E_OUTOFMEMORY;
     struct NativeShader shader={0};shader.blend_recipe=shader_blend_recipe(code,count,elements);
     char *source=shader_source(code,count,elements,&shader.used);if(!source)return E_OUTOFMEMORY;
+    for(unsigned i=0;i<16;++i)if((shader.used&(1u<<i)) && !elements[i].type)shader.current|=1u<<i;
     HRESULT result=native_shader_compile(&shader,source,elements);if(FAILED(result))return result;
     native_shaders[slot]=shader;*handle=slot+1;
-    fprintf(stderr,"[SHADER CREATE] native=%u instructions=%u inputs=%04x bytecode=%zu\n",*handle,count,shader.used,ID3D10Blob_GetBufferSize(shader.code));
+    fprintf(stderr,"[SHADER CREATE] native=%u instructions=%u inputs=%04x current=%04x bytecode=%zu\n",*handle,count,shader.used,shader.current,ID3D10Blob_GetBufferSize(shader.code));
     return S_OK;
 }
 #include "graphics_fixed_backend.inc"
@@ -154,6 +157,7 @@ void pilot_gfx_shader_destroy(uint32_t handle)
 }
 void pilot_gfx_shaders_close(void)
 {
+    native_current_close();
     for(unsigned i=0;i<256;++i)if(native_shaders[i].object)pilot_gfx_shader_destroy(i+1);
     if(native_constants_buffer) {
         ID3D11Buffer *empty=NULL;
@@ -199,7 +203,7 @@ static int32_t shader_raw_prepare(struct NativeShader *shader)
     hr=ID3D11Device_CreateVertexShader(d3d8_GetD3D11Device(),ID3D10Blob_GetBufferPointer(shader->raw_code),ID3D10Blob_GetBufferSize(shader->raw_code),NULL,&shader->raw_object);
     if(FAILED(hr))goto failure;
     D3D11_INPUT_ELEMENT_DESC layout[16]={0};unsigned n=0;
-    for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
+    for(unsigned i=0;i<16;++i)if((shader->used&(1u<<i)) && shader->elements[i].type) {
         layout[n].SemanticName="ATTR";layout[n].SemanticIndex=i;
         layout[n].Format=shader_format(shader->elements[i].type)->native;
         layout[n].InputSlot=shader->elements[i].stream;layout[n].AlignedByteOffset=shader->elements[i].offset;
@@ -226,7 +230,7 @@ static int32_t shader_probe(uint32_t handle,const struct PilotVertexProbeStream 
     if(shader->fixed_fvf)return E_NOTIMPL; /* This probe owns NV2A program outputs. */
     HRESULT raw_result=raster?S_OK:shader_raw_prepare(shader);if(FAILED(raw_result))return raw_result;
     unsigned stream_mask=0;
-    for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
+    for(unsigned i=0;i<16;++i)if((shader->used&(1u<<i)) && shader->elements[i].type) {
         unsigned stream=shader->elements[i].stream;stream_mask|=1u<<stream;
         if(!streams[stream].data || !streams[stream].stride || streams[stream].stride>2048 ||
             shader->elements[i].offset+shader_format(shader->elements[i].type)->bytes>streams[stream].stride)return E_INVALIDARG;
@@ -234,7 +238,7 @@ static int32_t shader_probe(uint32_t handle,const struct PilotVertexProbeStream 
     ID3D11Device *device=d3d8_GetD3D11Device();
     ID3D11DeviceContext *context=NULL;
     ID3D11GeometryShader *geometry=NULL;
-    ID3D11Buffer *vb[16]={0},*cb=NULL,*raster_cb=NULL,*output=NULL,*staging=NULL;
+    ID3D11Buffer *vb[16]={0},*cb=NULL,*raster_cb=NULL,*current_cb=NULL,*output=NULL,*staging=NULL;
     ID3D11CommandList *commands=NULL;
     HRESULT result=ID3D11Device_CreateDeferredContext(device,0,&context);
     if(FAILED(result))goto cleanup;
@@ -281,6 +285,17 @@ static int32_t shader_probe(uint32_t handle,const struct PilotVertexProbeStream 
         ID3D11DeviceContext_VSGetConstantBuffers(immediate,1,1,&cb);
         if(cb!=native_constants_buffer){result=E_INVALIDARG;goto cleanup;}
     }
+    if(shader->current) {
+        if(constants) {
+            float values[16][4];result=native_current_snapshot(values);if(FAILED(result))goto cleanup;
+            desc.ByteWidth=sizeof(values);desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;initial.pSysMem=values;
+            result=ID3D11Device_CreateBuffer(device,&desc,&initial,&current_cb);if(FAILED(result))goto cleanup;
+        } else {
+            ID3D11DeviceContext_VSGetConstantBuffers(d3d8_GetD3D11Context(),3,1,&current_cb);
+            if(current_cb!=native_current_buffer){result=E_INVALIDARG;goto cleanup;}
+        }
+        ID3D11DeviceContext_VSSetConstantBuffers(context,3,1,&current_cb);
+    }
     desc.ByteWidth=count*output_stride;desc.BindFlags=D3D11_BIND_STREAM_OUTPUT;desc.Usage=D3D11_USAGE_DEFAULT;
     result=ID3D11Device_CreateBuffer(device,&desc,NULL,&output);if(FAILED(result))goto cleanup;
     desc.BindFlags=0;desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
@@ -310,7 +325,8 @@ cleanup:
     if(commands)ID3D11CommandList_Release(commands);
     if(staging)ID3D11Buffer_Release(staging);if(output)ID3D11Buffer_Release(output);
     if(raster_cb)ID3D11Buffer_Release(raster_cb);
-    if(cb)ID3D11Buffer_Release(cb);for(unsigned i=0;i<16;++i)if(vb[i])ID3D11Buffer_Release(vb[i]);
+    if(cb)ID3D11Buffer_Release(cb);if(current_cb)ID3D11Buffer_Release(current_cb);
+    for(unsigned i=0;i<16;++i)if(vb[i])ID3D11Buffer_Release(vb[i]);
     if(geometry)ID3D11GeometryShader_Release(geometry);if(context)ID3D11DeviceContext_Release(context);
     return result;
 }

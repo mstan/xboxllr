@@ -79,8 +79,9 @@ static void graphics_shader_bind(uint32_t handle)
     if(!(handle&1)) {
         /* Zero is a valid empty declaration binding in the original XDK.
          * Draw submission still rejects it until a draw contract is qualified. */
-        if(handle)pilot_gfx_fvf_extent(handle);
-        uint32_t object=PILOT_D3D_FVF_OBJECT,flags=handle?2:0,offset=handle?16:0,dimensions=0;
+        struct PilotVertexElement elements[16]={0};
+        if(handle)pilot_gfx_fvf_layout(handle,elements);
+        uint32_t object=PILOT_D3D_FVF_OBJECT,flags=(handle&15)==4?2:0,dimensions=0;
         FILE *capture_file=NULL;const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture) {
             static unsigned sequence;char path[1024];uint32_t metadata[]={handle,0x114};
@@ -90,14 +91,11 @@ static void graphics_shader_bind(uint32_t handle)
                 fwrite(memory+object,0x114,1,capture_file)!=1)stop("FVF capture input",0);
         }
         for(unsigned i=0;i<16;++i)MEM32(object+0x1c+i*16)=2;
-        if(handle)MEM32(object+0x1c)=0x42;
-        for(unsigned i=0;i<2;++i)if(handle&(0x40u<<i)) {
-            flags|=0x400u<<i;MEM32(object+0x48+i*16)=offset;MEM32(object+0x4c+i*16)=0x40;offset+=4;
-        }
-        for(unsigned i=0;i<((handle>>8)&15);++i) {
-            unsigned lanes=((((handle>>(16+i*2))+1)&3)+1);
-            MEM32(object+0xa8+i*16)=offset;MEM32(object+0xac+i*16)=(lanes<<4)|2;
-            dimensions|=lanes<<(i*8);offset+=lanes*4;
+        if(handle)MEM32(object+0x1c)=elements[0].type;
+        for(unsigned i=1;i<16;++i)if(elements[i].type) {
+            MEM32(object+0x18+i*16)=elements[i].offset;MEM32(object+0x1c+i*16)=elements[i].type;
+            if(i==3 || i==4)flags|=0x400u<<(i-3);
+            if(i>=9 && i<=12)dimensions|=(elements[i].type>>4)<<((i-9)*8);
         }
         MEM32(object+4)=flags;MEM32(object+0x10)=dimensions;
         if(capture_file && (fwrite(memory+object,0x114,1,capture_file)!=1 || fclose(capture_file)))stop("FVF capture output",0);

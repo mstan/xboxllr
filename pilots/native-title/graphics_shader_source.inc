@@ -120,17 +120,17 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
         shader_store(&body,&step.mac,"mac");shader_store(&body,&step.ilu,"ilu");shader_text(&body,"}\n");
     }
     shader_text(&source,"cbuffer Constants:register(b1){float4 c[192];};\n"
+        "cbuffer CurrentInputs:register(b3){float4 CurrentInput[16];};\n"
         "float nv_rcc(float x){float r=1/x;return (asuint(r)&0x80000000u)?-clamp(abs(r),5.42101e-20,1.8446744e19):clamp(r,5.42101e-20,1.8446744e19);}\n"
         "float4 nv_log(float x){float a=abs(x);uint u=asuint(a);if(a==0)return float4(asfloat(0xff800000u),1,asfloat(0xff800000u),1);"
         "if(isinf(a))return float4(a,1,a,1);return float4((int)((u>>23)&255)-127,asfloat((u&0x7fffffu)|0x3f800000u),log2(a),1);}\n"
         "float4 nv_lit(float4 a){return float4(1,max(a.x,0),(a.x>0&&a.y>0)?pow(a.y,clamp(a.w,-127.9961,127.9961)):0,1);}\n"
         "struct Input{\n");
-    for(unsigned i=0;i<16;++i)if(*used&(1u<<i)) {
-        if(!elements[i].type)fprintf(stderr,"[UNDECLARED VERTEX INPUT] register=%u used=%04x slots=%u\n",i,*used,count);
+    for(unsigned i=0;i<16;++i)if((*used&(1u<<i)) && elements[i].type) {
         const struct ShaderFormat *format=shader_format(elements[i].type);
         shader_text(&source,"%s v%u:ATTR%u;\n",format->hlsl,i,i);
     }
-    shader_text(&source,"};struct Output{\n");
+    shader_text(&source,"uint vertex_id:SV_VertexID;\n};struct Output{\n");
     for(unsigned i=0;i<13;++i)if(shader_output_widths[i])
         shader_text(&source,"%s o%u:%s%u;\n",shader_output_widths[i]==1?"float":"float4",i,shader_semantics[i],shader_semantic_indices[i]);
     shader_text(&source,"};Output main(Input input){float4 R[12];float4 O[13];int a0=0;\n"
@@ -138,7 +138,8 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
     for(unsigned i=0;i<16;++i)if(*used&(1u<<i)) {
         unsigned type=elements[i].type;
         shader_text(&source,"float4 v%u=",i);
-        if(type==0x16)shader_text(&source,"float4(max(float3((int)(input.v%u<<21)>>21,(int)(input.v%u<<10)>>21,(int)input.v%u>>22)/float3(1023,1023,511),-1),1)",i,i,i);
+        if(!type)shader_text(&source,"CurrentInput[%u]",i);
+        else if(type==0x16)shader_text(&source,"float4(max(float3((int)(input.v%u<<21)>>21,(int)(input.v%u<<10)>>21,(int)input.v%u>>22)/float3(1023,1023,511),-1),1)",i,i,i);
         else if(type==0x40)shader_text(&source,"input.v%u.bgra",i);
         else if(type==0x72)shader_text(&source,"float4(input.v%u.xy,0,input.v%u.z)",i,i);
         else if((type>>4)==1)shader_text(&source,"float4(input.v%u,0,0,1)",i);

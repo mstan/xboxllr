@@ -1117,18 +1117,31 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
     }
     return status;
 }
-uint32_t pilot_gfx_fvf_extent(uint32_t fvf)
+uint32_t pilot_gfx_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16])
 {
-    unsigned textures=(fvf>>8)&15;
-    if((fvf&15)!=4 || (fvf&0xf030u) || textures>4) {
+    unsigned textures=(fvf>>8)&15,position=fvf&15;
+    if((position!=2 && position!=4) || (fvf&(position==4?0xf030u:0xf020u)) || textures>4) {
         fprintf(stderr,"[D3D FVF] rejected format=%08x\n",fvf);
-        pilot_d3d_backend_stop("unqualified FVF: expected XYZRHW with colors and up to four coordinates");
+        pilot_d3d_backend_stop("unqualified FVF: expected XYZ or XYZRHW with admitted normal/colors/coordinates");
     }
     if((fvf>>16)>>(textures*2))pilot_d3d_backend_stop("FVF coordinate size without coordinate");
-    unsigned extent=16+((fvf&0x40)?4:0)+((fvf&0x80)?4:0);
-    for(unsigned i=0;i<textures;++i)extent+=((((fvf>>(16+i*2))+1)&3)+1)*4;
+    struct PilotVertexElement layout[16]={0};
+    layout[0]=(struct PilotVertexElement){position==2?0x32:0x42,0,0};
+    unsigned extent=position==2?12:16;
+    /* The original FVF decoder uses FLOAT3 normals. Packed CMP normals are
+     * a declaration format; the existing typed core supports both. */
+    if(fvf&0x10){layout[2]=(struct PilotVertexElement){0x32,0,extent};extent+=12;}
+    for(unsigned i=0;i<2;++i)if(fvf&(0x40u<<i)) {
+        layout[3+i]=(struct PilotVertexElement){0x40,0,extent};extent+=4;
+    }
+    for(unsigned i=0;i<textures;++i) {
+        unsigned lanes=((((fvf>>(16+i*2))+1)&3)+1);
+        layout[9+i]=(struct PilotVertexElement){(lanes<<4)|2,0,extent};extent+=lanes*4;
+    }
+    if(elements)memcpy(elements,layout,sizeof(layout));
     return extent;
 }
+uint32_t pilot_gfx_fvf_extent(uint32_t fvf){return pilot_gfx_fvf_layout(fvf,NULL);}
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
 {return pilot_gfx_fvf_placement(fvf,screen_x,screen_y,1,0);}
 int32_t pilot_gfx_fvf_placement(uint32_t fvf,float screen_x,float screen_y,float x_scale,float x_anchor)
@@ -1136,6 +1149,7 @@ int32_t pilot_gfx_fvf_placement(uint32_t fvf,float screen_x,float screen_y,float
     if(!pilot_device)return E_FAIL;
     pilot_gfx_shader_fixed_binding();
     pilot_gfx_fvf_extent(fvf);
+    if((fvf&15)!=4)return E_NOTIMPL; /* XYZ uses the transform owner, not screen placement. */
     uint32_t viewport[6];HRESULT hr=pilot_gfx_get_viewport(viewport);if(FAILED(hr))return hr;
     float low,high;memcpy(&low,viewport+4,4);memcpy(&high,viewport+5,4);
     if(!viewport[2] || !viewport[3] || !(high>low))return E_INVALIDARG;

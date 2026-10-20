@@ -22,7 +22,7 @@ static int check_program(const uint32_t *code,unsigned count,const struct PilotV
     for(unsigned i=0;i<192;++i)for(unsigned j=0;j<4;++j)constants[i][j]=0.125f+(float)((i+j)%7)*0.0625f;
     for(unsigned sample=0;sample<SAMPLES;++sample)for(unsigned reg=0;reg<16;++reg) {
         unsigned type=elements[reg].type,stream=elements[reg].stream,offset=elements[reg].offset;
-        if(!type)continue;
+        if(!type){CHECK(pilot_gfx_vertex_current_get(reg,inputs[sample][reg]));continue;}
         CHECK(stream<16 && offset+pilot_gfx_vertex_type_size(type)<=STRIDE);
         unsigned char *bytes=vertices[stream][sample]+offset;
         float *value=inputs[sample][reg];value[3]=1;
@@ -276,6 +276,7 @@ static int check_shader_constant_reference(const char *path)
     fprintf(stderr,"PASS: %u native constant cases, %u raw output lanes and GPU draws; three writes coalesce to one upload per case\n",header[2],comparisons);
     return 0;
 }
+#include "graphics_current_test.inc"
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -319,6 +320,7 @@ int main(int argc,char **argv)
     }
     if(argc>1)for(int i=1;i<argc;++i){if(check_capture(argv[i]))return 1;}
     else {
+        CHECK(!check_current_vertex_inputs());
         CHECK(check_scalar_address_reference()==0);
         /* ISA-encoded moves plus paired MOV R2,v1 + MOV oD1,R2. The second
          * operation must consume R2 from before the pair's first write. */

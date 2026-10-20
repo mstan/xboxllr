@@ -55,6 +55,38 @@ static int test_fixed_declarations(void)
         unsigned lit=0;for(unsigned i=0;i<sizeof(native);++i){CHECK(abs((int)native[i]-(int)reference[i])<=1);if((i&3)!=3 && native[i])++lit;}
         CHECK(lit>200);pilot_gfx_shader_destroy(shader);
     }
+    const uint32_t fvfs[]={2,0x42,0x52,0x142,0x20152};
+    const unsigned sizes[]={12,16,28,24,44};
+    ID3D11VertexShader *cached[5]={0};
+    for(unsigned transform=0;transform<2;++transform)for(unsigned variant=0;variant<5;++variant) {
+        uint32_t fvf=fvfs[variant];unsigned stride=sizes[variant];
+        CHECK(pilot_gfx_fvf_extent(fvf)==stride);
+        unsigned char source[3*44]={0};
+        for(unsigned i=0;i<3;++i) {
+            unsigned char *vertex=source+i*stride;unsigned offset=12;
+            memcpy(vertex,positions[i],12);
+            if(fvf&0x10){const float normal[3]={.25f,-.5f,1};memcpy(vertex+offset,normal,12);offset+=12;}
+            if(fvf&0x40){uint32_t color=0xff20a060;memcpy(vertex+offset,&color,4);offset+=4;}
+            if(fvf&0x100){float uv[4]={i==1?.8f:.1f,i==2?.8f:.1f,.25f,1};memcpy(vertex+offset,uv,stride-offset);}
+        }
+        float matrix[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+        CHECK(!pilot_gfx_transform(0,matrix) && !pilot_gfx_transform(1,matrix));
+        matrix[0]=transform?.75f:1;matrix[5]=transform?.8f:1;matrix[12]=transform?.2f:0;
+        CHECK(!pilot_gfx_transform(6,matrix));
+        pilot_gfx_texture_bind(0,(fvf&0x100)?texture:0);
+        pilot_gfx_set_texture_state(0,D3DTSS_TEXCOORDINDEX,0);
+        pilot_gfx_set_texture_state(0,D3DTSS_COLORARG1,(fvf&0x100)?D3DTA_TEXTURE:D3DTA_DIFFUSE);
+        CHECK(!pilot_gfx_clear(1,0xff000000,1,0) && !pilot_gfx_fvf_prepare_fixed(fvf));
+        ID3D11VertexShader *bound=NULL;ID3D11DeviceContext_VSGetShader(d3d8_GetD3D11Context(),&bound,NULL,NULL);
+        if(transform){CHECK(bound==cached[variant]);ID3D11VertexShader_Release(bound);}else cached[variant]=bound;
+        CHECK(!pilot_gfx_draw_memory(5,3,source,stride) && !pilot_gfx_readback(native,sizeof(native)));
+        CHECK(!pilot_gfx_clear(1,0xff000000,1,0));
+        CHECK(!pilot_gfx_draw_up(4,1,source,stride,fvf) && !pilot_gfx_readback(reference,sizeof(reference)));
+        unsigned lit=0;for(unsigned i=0;i<sizeof(native);++i){CHECK(abs((int)native[i]-(int)reference[i])<=1);if((i&3)!=3 && native[i])++lit;}
+        CHECK(lit>200);
+    }
+    for(unsigned i=0;i<5;++i)ID3D11VertexShader_Release(cached[i]);
+    fprintf(stderr,"PASS XYZ FVF: five source layouts, FLOAT3 normals, color/texture inputs, two matrix states, cached shader identity and pixels versus direct fixed-function reference\n");
     pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(texture);pilot_gfx_close();
     fprintf(stderr,"PASS fixed declarations: three source layout classes, packed-normal GPU decode via normal texgen, two matrix states, actual pixels versus expanded-float fixed-function reference\n");return 0;
 }
