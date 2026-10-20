@@ -1,16 +1,16 @@
 {
-  "title": "XboxLLR Credits",
+  "title": "xboxlle",
   "people": [
-    {"name": "Matthew Stanley", "work": "XboxLLR development and integration"},
-    {"name": "sp00nz / sp00nznet", "work": "xboxrecomp; Xbox recompilation and HLE reference", "url": "https://github.com/sp00nznet/xboxrecomp"},
-    {"name": "phobos665", "work": "xboxrecomp fork; native runtime, graphics and audio reference", "url": "https://github.com/phobos665/xboxrecomp"},
-    {"name": "NoRain211", "work": "Dead or Alive Xtreme Beach Volleyball recompilation; texture and ADPCM lineage", "url": "https://github.com/NoRain211/doaxvb-re"},
-    {"name": "MrMilenko and TeamUIX", "work": "Theseus dashboard reconstruction and reverse-engineering reference", "url": "https://github.com/MrMilenko/Theseus"},
-    {"name": "xemu contributors", "work": "Xbox hardware and graphics reference; attributed renderer components", "url": "https://github.com/xemu-project/xemu"},
-    {"name": "Unicorn and QEMU contributors", "work": "Reference CPU execution and instruction semantics", "url": "https://github.com/unicorn-engine/unicorn"},
-    {"name": "Matt Borgerson and DSP56300 contributors", "work": "DSP56300 processor backend", "url": "https://github.com/mborgerson/dsp56300"},
-    {"name": "SDL, libsamplerate and other dependency authors", "work": "Platform services and audio; full notices follow"},
-    {"name": "Evan-Amos", "work": "Xbox Controller S photograph used by the game launcher; public domain", "url": "https://commons.wikimedia.org/wiki/File:Xbox-s-controller.jpg"}
+    {"name": "Matthew Stanley", "work": "Development, integration"},
+    {"name": "sp00nz / sp00nznet", "section": "Special thanks", "work": "xboxrecomp recompiler and HLE foundation", "url": "https://github.com/sp00nznet/xboxrecomp"},
+    {"name": "phobos665", "section": "Special thanks", "work": "xboxrecomp fork: native runtime, graphics, audio", "url": "https://github.com/phobos665/xboxrecomp"},
+    {"name": "NoRain211", "section": "Special thanks", "work": "DOA Xtreme Beach Volleyball; texture and ADPCM reference", "url": "https://github.com/NoRain211/doaxvb-re"},
+    {"name": "MrMilenko and TeamUIX", "section": "Open source references", "work": "Theseus dashboard reference", "url": "https://github.com/MrMilenko/Theseus"},
+    {"name": "xemu contributors", "section": "Open source references", "work": "Xbox hardware and renderer reference", "url": "https://github.com/xemu-project/xemu"},
+    {"name": "Unicorn and QEMU contributors", "section": "Open source references", "work": "CPU reference and instruction semantics", "url": "https://github.com/unicorn-engine/unicorn"},
+    {"name": "Matt Borgerson and DSP56300 contributors", "section": "Open source references", "work": "DSP56300 processor backend", "url": "https://github.com/mborgerson/dsp56300"},
+    {"name": "SDL and libsamplerate", "section": "Open source references", "work": "Platform services and audio, with dependency contributors"},
+    {"name": "Evan-Amos", "section": "Artwork", "work": "Xbox Controller S photograph for the launcher; public domain", "url": "https://commons.wikimedia.org/wiki/File:Xbox-s-controller.jpg"}
   ],
   "legal": [
     "Original Xbox dashboard software and original assets remain the work of Microsoft. This private modification does not change their ownership.",

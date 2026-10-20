@@ -51,24 +51,43 @@ def js_string(value: str) -> str:
 
 def pages_from_text(title: str, text: str) -> list[str]:
     lines = []
-    for line in text.splitlines():
-        lines.extend(textwrap.wrap(line.expandtabs(4), width=26) or [""])
+    for line in text.splitlines() or [""]:
+        lines.extend(textwrap.wrap(line.expandtabs(4), width=24) or [""])
     return [title + "\n" + "\n".join(lines[i:i + 6]) for i in range(0, len(lines), 6)]
 
 
-def credit_pages(spec: dict, extra_notices: list[Path]) -> tuple[list[str], list[dict], list[int]]:
+def notice_title(source: Path) -> str:
+    names = {ROOT / "LICENSE": "xboxlle license", ROOT / "NOTICE": "xboxlle notices",
+             ROOT / "LICENSE-SCOPE.md": "License scope",
+             ROOT / "THIRD_PARTY_ATTRIBUTION.md": "Third-party attribution",
+             ROOT / "pilots/native-launcher/assets/NOTICE.md": "Launcher artwork"}
+    return names.get(source, source.parent.name.replace("-", " ").replace("_", " "))
+
+
+def credit_pages(spec: dict, extra_notices: list[Path]) -> tuple[list[str], list[dict], list[int], int]:
     pages = []
     sections = []
     def append(title, text):
         sections.append(len(pages))
         pages.extend(pages_from_text(title, text))
-    for person in spec["people"]:
+    if not spec["people"]:
+        raise ValueError("Credits requires its project lead")
+    group = None
+    links = []
+    for index, person in enumerate(spec["people"]):
         detail = person["name"] + "\n" + person["work"]
         if person.get("url"):
-            detail += "\n" + person["url"]
-        append(spec["title"], detail)
-    for paragraph in spec["legal"]:
-        append("Legal notices", paragraph)
+            links.append(person["name"] + "\n" + person["url"])
+        heading = spec["title"] if index == 0 else person.get("section", "Special thanks")
+        if heading != group:
+            append(heading, detail)
+            group = heading
+        else:
+            pages.extend(pages_from_text(heading, "\n" + detail))
+    licenses_page = len(pages)
+    append("About this build", "\n\n".join(spec["legal"]) or "Full third-party notices follow.")
+    if links:
+        append("Project links", "\n\n".join(links))
     sources = [ROOT / path for path in spec["notices"]] + extra_notices
     records = []
     seen = set()
@@ -87,21 +106,22 @@ def credit_pages(spec: dict, extra_notices: list[Path]) -> tuple[list[str], list
         canonical = text.replace("\r\n", "\n").strip()
         if canonical not in shared_text:
             shared_text[canonical] = len(pages)
-            append(source.parent.name + "/" + source.name, text)
+            append(notice_title(source), text)
         records.append(dict(name=source.name, path=str(source), sha256=hashlib.sha256(data).hexdigest(),
+                            title=notice_title(source), viewer_document="licenses",
                             viewer_page=shared_text[canonical] + 1))
     # Identical license texts appear once in the viewer, while every original
     # notice remains copied verbatim and listed with its applicable component.
     _, line_starts = document_lines(pages, sections)
     by_page = dict(zip(sections, line_starts))
     for item in records:
-        item['viewer_line'] = by_page[item['viewer_page'] - 1] + 1
-    append("Notice index", "\n".join(f"{Path(item['path']).parent.name}/{item['name']}: line {item['viewer_line']}"
+        item['viewer_line'] = by_page[item['viewer_page'] - 1] - by_page[licenses_page] + 1
+    append("Notice index", "\n".join(f"{item['title']}: line {item['viewer_line']}"
                                       for item in records))
-    return pages, records, sections
+    return pages, records, sections, licenses_page
 
 
-def main_script(source: str, pages: list[str], sections: list[int]) -> str:
+def main_script(source: str, pages: list[str], sections: list[int], licenses_page: int | None = None) -> str:
     """Add the document owner without changing Home choices or geometry."""
     begin, _, end = block(source, "DEF theMainMenu Level")
     level = source[begin:end]
@@ -116,7 +136,7 @@ def main_script(source: str, pages: list[str], sections: list[int]) -> str:
     load = load.replace(anchor, placement + anchor)
     level = level[:begin_load] + load + level[end_load:]
     source = source[:begin] + level + source[end:]
-    return source + viewer(pages, sections)
+    return source + viewer(pages, sections, licenses_page)
 
 
 def native_panel_script(source: str) -> str:
@@ -129,18 +149,19 @@ def native_panel_script(source: str) -> str:
     settings = source[begin:end]
     anchor = re.compile(r'(sSettingsMenu\[index\] = theTranslator\.Translate\("SYSTEM INFO"\);'
                         r'\s*index = index \+ 1;)')
-    settings, count = anchor.subn(r'\1\n    sSettingsMenu[index] = "CREDITS";\n    index = index + 1;', settings)
+    settings, count = anchor.subn(r'\1\n    sSettingsMenu[index] = "Credits";\n    index = index + 1;', settings)
     if count != 1:
         raise ValueError("reviewed System Info Settings entry differs")
     source = source[:begin] + settings + source[end:]
     source = inject(source, "function MenuIcon()", """
-if (sSettingsElements[nCurSettingsMenuItem] == "CREDITS") {
+if (sSettingsElements[nCurSettingsMenuItem] == "Credits") {
     ShowIcon(theSettingsMenu.children[0].children[0].ConsoleIcon);
     return;
 }
 """)
     source = inject(source, "function StartPanelMenu()", """
 var xllrPanel = theSetPanelMenu.children[0].children[0];
+xllrPanel.PanelHeading.font = "heading";
 xllrPanel.S_Home_text_games01.SetScale(1, 1, 1);
 xllrPanel.QuestionText.width = 10;
 xllrPanel.QuestionText.height = 8;
@@ -148,6 +169,7 @@ xllrPanel.QuestionText.scrollRate = 0.1;
 xllrPanel.QuestionText.scrollDelay = 5;
 """, """
 if (strCurMenu == "XLLR CREDITS") {
+    xllrPanel.PanelHeading.font = "body";
     xllrPanel.ButtonGroup.visible = false;
     xllrPanel.ConsoleIcon.visible = true;
     xllrPanel.Group07.visible = false;
@@ -172,7 +194,7 @@ if (strCurMenu == "XLLR OFFLINE") {
 """)
     begin, _, end = block(source, "control DEF thePanelJoystick Joystick")
     joystick = source[begin:end]
-    for event, action in (("OnADown", "PageDown"), ("OnMoveDown", "Next"), ("OnMoveUp", "Previous"),
+    for event, action in (("OnADown", "Toggle"), ("OnMoveDown", "Next"), ("OnMoveUp", "Previous"),
                           ("OnMoveLeft", "PreviousSection"), ("OnMoveRight", "NextSection")):
         joystick = inject(joystick, f"function {event}()",
                           f'\nif (strCurMenu == "XLLR OFFLINE") return;\n'
@@ -191,7 +213,7 @@ if (strCurMenu == "XLLR CREDITS") {
     source = source[:begin] + joystick + source[end:]
     begin, _, end = block(source, "DEF theSettingsMenu Level")
     settings = inject(source[begin:end], "function OnADown()", """
-if (sSettingsElements[nCurSettingsMenuItem] == "CREDITS") {
+if (sSettingsElements[nCurSettingsMenuItem] == "Credits") {
     PlaySoundA();
     strPrevMenu = "SETTINGS";
     XllrCreditsOpen();
@@ -236,8 +258,8 @@ def main() -> None:
             parser.error(f"missing notice directory: {directory}")
         extra_notices.extend(path for path in sorted(directory.rglob("*"))
                              if path.is_file() and any(word in path.name.upper() for word in ("LICENSE", "COPYING", "NOTICE")))
-    pages, notices, sections = credit_pages(spec, extra_notices)
-    script = main_script(inputs["default.xip"].read("default.xap").decode("utf-8"), pages, sections)
+    pages, notices, sections, licenses_page = credit_pages(spec, extra_notices)
+    script = main_script(inputs["default.xip"].read("default.xap").decode("utf-8"), pages, sections, licenses_page)
     main_archive = Xip(inputs["default.xip"].replace("default.xap", script.encode("utf-8")))
     settings = inputs["default.xip"].read("settings3.xap").decode("latin1")
     outputs = {
@@ -279,7 +301,8 @@ def main() -> None:
             raise ValueError("input archive changed during generation")
     manifest = dict(schema="xboxllr.dashboard.asset-mod.v1", private_guest_output=True,
                     id="xboxllr.dashboard.credits", dashboard_build=5960, credits_pages=len(pages),
-                    credits_lines=len(document_lines(pages,sections)[0]), viewer="native-system-info-scroll",
+                    credits_lines=len(document_lines(pages,sections)[0]), viewer="native-system-info-two-documents",
+                    licenses_page=licenses_page, visible_title="Credits", project_name=spec["title"],
                     entry_point="settings-after-system-info", home_menu="original-unmodified",
                     validation="generated and read back; in-dashboard visual/input validation pending",
                     inputs_unchanged=True, files=records, notices=notices, sections=sections,

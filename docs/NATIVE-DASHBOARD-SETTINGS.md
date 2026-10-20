@@ -117,22 +117,38 @@ choices, geometry, selection handlers and highlights; the complete original
 
 The authored scrolling document controller uses the existing System Info
 Level, camera, meshes, green materials, console icon, heading and body Text.
-The body contains only the visible document window; Up/Down scroll, Left/Right
-move between sections, A advances a page and B returns to Settings with Credits
+The opening document is a spaced credits list headed `xboxlle`, with Matthew
+Stanley first, then grouped contributors. Project headings do not repeat for
+each person; source URLs and full legal text are in the separate Licenses
+document. The native heading and Settings label read `Credits`, without a
+scroll percentage. A switches between Credits and Licenses; the stable hint
+occupies the bottom two text rows. Up/Down scroll, Left/Right move between
+sections within the selected document, and B returns to Settings with Credits
 still selected. Reopening starts at the first credit. The main document owner
 owns only its modal state; the Settings script opens its own panel and returns
 through the original Settings submenu transition.
 Normal System Info geometry/text settings are restored on its next use.
 Matthew Stanley remains the first credited person. Complete third-party
-notices remain copied verbatim and reachable through the document/index.
+notices remain copied verbatim and reachable through Licenses and its index.
+The reader selects literal rows for its viewport; it does not depend on the
+string-slicing behavior that differed between the native preview and the
+standalone JavaScript fixture. The mixed-case Credits/Licenses headings use
+the original body font; ordinary System Info restores the original heading
+font along with its other text/geometry settings.
 The original proportional Text node clips at the native panel edge; line
 scrolling exposes wrapped continuation lines. Runtime checks sample document
 navigation and do not claim that a person read every notice. Authored controller
 tests check every viewport boundary and complete, non-elided notice payloads.
+The readable two-document variant also passed eight focused checks and one
+35.2-second muted native pass: mixed-case labels, contributor/notice switching,
+section navigation, Back, ordinary System Info restoration and reopening.
+Its native images are in `build/dashboard-credits-readable-20261020/images`.
+The earlier sliced-window discrepancy is retained as deferred investigation
+`beads-xbox.1.173`; the current reader does not depend on that behavior.
 The relocation also has offline checks against the actual generated original
 scripts: conditional list sizes, scrolling boundaries, Credits selection,
-console icon and return selection. Its panel setup and scrolling handlers are
-byte-identical to the previously native-qualified reader. One isolated native
+console icon and return selection. The initial relocation at `e505927` kept its
+panel setup and scrolling handlers byte-identical to the earlier reader. One isolated native
 run checked the actual Home and Settings entries, document scrolling, Back to
 the selected Credits row, reopening at the first credit, ordinary System Info
 restoration, and return to Home. It reported no native guard, fault or script

@@ -105,16 +105,73 @@ class CreditsTests(unittest.TestCase):
             spec = dict(title="Credits", people=[dict(name="Matthew Stanley", work="Development",
                                                     url="https://example.invalid/project")],
                         legal=[], notices=[])
-            pages, notices, sections = credit_pages(spec, paths)
+            pages, notices, sections, licenses_page = credit_pages(spec, paths)
             self.assertIn("Matthew Stanley", pages[0])
-            self.assertIn("https://example.invalid/project", "".join(pages[0].split()))
+            self.assertNotIn("https:", "".join(pages[:licenses_page]))
+            self.assertIn("https://example.invalid/project", "".join("".join(pages[licenses_page:]).split()))
             self.assertEqual(len(notices), 2)
             self.assertEqual(notices[0]["viewer_page"], notices[1]["viewer_page"])
-            self.assertEqual(len(sections), 3)
+            self.assertIn(licenses_page, sections)
+            self.assertEqual(notices[0]["viewer_document"], "licenses")
             first = notices[0]["viewer_page"] - 1
             visible = " ".join(" ".join(page.splitlines()[1:]) for page in pages[first:sections[-1]])
             self.assertEqual("".join(visible.split()), "".join(text.split()))
-            self.assertIn("second-LICENSE", "".join(pages[-1].split()))
+            self.assertEqual(notices[1]["name"], "second-LICENSE")
+
+    def test_authored_credits_are_grouped_and_use_owner_project_name(self):
+        spec = json.loads((Path(__file__).resolve().parents[1] / "pilots/dashboard/credits.json").read_text())
+        # Leave complete notices to the separate notice-preservation check.
+        spec["notices"] = []
+        pages, _, sections, licenses_page = credit_pages(spec, [])
+        lines, _ = document_lines(pages, sections)
+        opening = "\n".join(document_lines(pages[:licenses_page],
+                            [i for i in sections if i < licenses_page])[0])
+        self.assertEqual(lines[0], "xboxlle")
+        self.assertLess(opening.index("Matthew Stanley"), opening.index("sp00nz"))
+        self.assertEqual(opening.count("Special thanks"), 1)
+        self.assertNotIn("XboxLLR", opening)
+        self.assertNotIn("https:", opening)
+        self.assertNotIn("Legal notices", opening)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is optional for generated-script logic checks")
+    def test_credits_and_licenses_have_separate_bounded_viewports(self):
+        pages = ["xboxlle\nMatthew Stanley\n" + "\n".join(f"Contributor {i}" for i in range(25)),
+                 "Special thanks\nsp00nz / sp00nznet\nphobos665\nNoRain211",
+                 "Licenses\n" + "\n".join(f"Legal notice {i}" for i in range(35)),
+                 "Another license\n" + "\n".join(f"Other notice {i}" for i in range(25))]
+        sections = [0, 1, 2, 3]
+        lines, starts = document_lines(pages, sections)
+        program = "const assert=require('node:assert/strict');\n"
+        program += "var expected=" + json.dumps(lines) + ";\n"
+        program += viewer(pages, sections, 2)
+        program += f"var licenseStart={starts[2]}; var rows={VISIBLE_LINES};\n"
+        program += r'''
+xllrCreditsBody={}; xllrCreditsPosition={}; XllrCreditsOpen(); XllrCreditsRefresh();
+assert.equal(xllrCreditsPosition.text,'Credits');
+assert.ok(xllrCreditsBody.text.includes('Matthew Stanley'));
+for(var i=0;i<=XllrCreditsLimit();i++){
+  xllrCreditsLine=i; XllrCreditsRefresh();
+  assert.equal(XllrCreditsText(),expected.slice(i,Math.min(i+rows,licenseStart)).join('\r'));
+  assert.ok(!xllrCreditsBody.text.includes('Legal notice'));
+}
+XllrCreditsNext(); XllrCreditsNextSection();
+assert.ok(xllrCreditsLine<licenseStart);
+XllrCreditsToggle(); assert.equal(xllrCreditsLegal,true);
+assert.equal(xllrCreditsLine,licenseStart); assert.equal(xllrCreditsPosition.text,'Licenses');
+assert.ok(xllrCreditsBody.text.endsWith('A  Credits   B  Back'));
+XllrCreditsPrevious(); XllrCreditsPreviousSection(); assert.equal(xllrCreditsLine,licenseStart);
+for(var i=licenseStart;i<=XllrCreditsLimit();i++){
+  xllrCreditsLine=i; XllrCreditsRefresh();
+  assert.equal(XllrCreditsText(),expected.slice(i,i+rows).join('\r'));
+}
+XllrCreditsNext(); XllrCreditsNextSection(); assert.equal(xllrCreditsLine,XllrCreditsLimit());
+XllrCreditsToggle(); assert.equal(xllrCreditsLine,0); assert.equal(xllrCreditsLegal,false);
+assert.equal(xllrCreditsPosition.text,'Credits');
+assert.ok(xllrCreditsBody.text.endsWith('A  Licenses   B  Back'));
+'''
+        result = subprocess.run([shutil.which("node"), "-"], input=program, text=True,
+                                capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(shutil.which("node"), "Node is optional for generated-script logic checks")
     def test_main_document_owner_can_open_without_child_settings_fields(self):
@@ -184,8 +241,8 @@ function originalPanel(){
         program += r'''
 for (var pack of ['COMPOSITE','RFU']) for (var gameRegion of ['NA','JAPAN','EU']) {
   avPack=pack; region=gameRegion; strCurMenu='SETTINGS'; strPrevMenu='SETTINGS'; StartSettingsMenu();
-  assert.deepEqual(sSettingsElements.slice(-2),['SYSTEM INFO','CREDITS']);
-  assert.equal(sSettingsElements.filter(s=>s=='CREDITS').length,1);
+  assert.deepEqual(sSettingsElements.slice(-2),['SYSTEM INFO','Credits']);
+  assert.equal(sSettingsElements.filter(s=>s=='Credits').length,1);
   assert.equal(nSettingsItemCount,10-(pack=='RFU')-(gameRegion=='EU'));
   for(var i=0;i<nSettingsItemCount+3;i++) settingsControl('OnMoveDown');
   assert.equal(nCurSettingsMenuItem,nSettingsItemCount-1);
@@ -197,6 +254,7 @@ for (var pack of ['COMPOSITE','RFU']) for (var gameRegion of ['NA','JAPAN','EU']
   assert.equal(xllrCreditsActive,true); assert.equal(xllrCreditsLine,0);
   assert.ok(xllrCreditsBody.text.includes('Matthew Stanley'));
   assert.equal(panelNodes.ConsoleIcon.visible,true); assert.equal(panelNodes.ButtonGroup.visible,false);
+  assert.equal(panelNodes.PanelHeading.font,'body');
   controller('OnMoveUp'); assert.equal(xllrCreditsLine,0);
   controller('OnMoveDown'); assert.equal(xllrCreditsLine,1);
   controller('OnMoveUp'); assert.equal(xllrCreditsLine,0);
@@ -205,11 +263,11 @@ for (var pack of ['COMPOSITE','RFU']) for (var gameRegion of ['NA','JAPAN','EU']
   controller('OnADown'); assert.equal(xllrCreditsLine,visibleLines-1);
   for(var i=0;i<=expectedLines.length-visibleLines;i++){
     xllrCreditsLine=i; XllrCreditsRefresh();
-    assert.equal(xllrCreditsBody.text,expectedLines.slice(i,i+visibleLines).join('\r'));
+    assert.equal(xllrCreditsBody.text,expectedLines.slice(i,i+visibleLines).join('\r')+'\r\rA  Page   B  Back');
   }
   controller('OnMoveDown'); controller('OnADown');
   assert.equal(xllrCreditsLine,expectedLines.length-visibleLines);
-  assert.equal(xllrCreditsPosition.text,'CREDITS 100%');
+  assert.equal(xllrCreditsPosition.text,'Credits');
   controller('OnBDown');
   assert.equal(xllrCreditsActive,false); assert.equal(strCurMenu,'SETTINGS'); assert.equal(strPrevMenu,'XLLR CREDITS');
   assert.equal(nCurSettingsMenuItem,nSettingsItemCount-1); // Returning does not jump to Clock/Home.
@@ -218,6 +276,7 @@ for (var pack of ['COMPOSITE','RFU']) for (var gameRegion of ['NA','JAPAN','EU']
   settingsControl('OnMoveUp'); assert.equal(sSettingsElements[nCurSettingsMenuItem],'SYSTEM INFO');
   settingsControl('OnADown'); assert.equal(strCurMenu,'SYSTEM INFO');
   assert.equal(panelNodes.QuestionText.text,'Original System Info');
+  assert.equal(panelNodes.PanelHeading.font,'heading');
   assert.deepEqual(panelNodes.S_Home_text_games01.scale,[1,1,1]);
   assert.equal(panelNodes.QuestionText.width,10); assert.equal(panelNodes.QuestionText.scrollRate,0.1);
 }
