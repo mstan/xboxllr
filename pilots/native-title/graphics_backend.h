@@ -106,6 +106,10 @@ struct PilotVertexElement { uint32_t type,stream,offset; };
 uint32_t pilot_gfx_vertex_type_size(uint32_t type);
 /* Private ownership handles, never desktop FVF/donor shader selectors. */
 int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle);
+/* Declaration-only 3D inputs use the shared fixed-function transform/lighting
+ * shader. Typed stream decoding remains on the GPU, including packed normals. */
+int32_t pilot_gfx_shader_create_fixed(const struct PilotVertexElement elements[16],uint32_t *handle);
+int32_t pilot_gfx_shader_prepare_fixed(uint32_t handle);
 void pilot_gfx_shader_destroy(uint32_t handle);
 void pilot_gfx_shaders_close(void);
 int32_t pilot_gfx_shader_bind(uint32_t handle);

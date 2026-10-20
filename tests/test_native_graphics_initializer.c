@@ -69,7 +69,8 @@ int main(void)
     if(!setjmp(failure)){graphics_simple_state(0x4030c,1);CHECK(0);}CHECK(calls==previous_calls);
     CHECK(pilot_initializer_consumer(1,5,0) && pilot_initializer_consumer(0,6,0x144));
     CHECK(!pilot_initializer_consumer(0,5,0x42) && !pilot_initializer_consumer(0,5,0x54));
-    CHECK(!pilot_initializer_consumer(1,1,0) && !pilot_initializer_consumer(2,5,0));
+    CHECK(pilot_initializer_consumer(2,5,0)); /* typed fixed declaration; owner checks lighting */
+    CHECK(!pilot_initializer_consumer(1,1,0) && !pilot_initializer_consumer(3,5,0));
     CHECK(pilot_initializer_format(6) && pilot_initializer_format(7) && pilot_initializer_format(0x12) && pilot_initializer_format(0x1e));
     CHECK(!pilot_initializer_format(5) && !pilot_initializer_format(0x2e));
     uint32_t small[4]={1,2,3,4},original[4];memcpy(original,small,sizeof(small));

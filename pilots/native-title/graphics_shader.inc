@@ -4,6 +4,8 @@ struct GraphicsShader {
     uint32_t header,native;
     uint32_t constant_mask[6],constants[192][4];
     uint32_t program[136][4];
+    unsigned fixed,guest_owned;
+    uint32_t original_descriptor[0x114/4];
 };
 static struct GraphicsShader graphics_shaders[256];
 static uint32_t graphics_vertex_constants_address(void)
@@ -17,7 +19,39 @@ static uint32_t graphics_vertex_constants_address(void)
 static struct GraphicsShader *graphics_shader(uint32_t handle)
 {
     if(handle&1)for(unsigned i=0;i<256;++i)
-        if(graphics_shaders[i].header==handle-1)return &graphics_shaders[i];
+        if(graphics_shaders[i].header==handle-1) {
+            struct GraphicsShader *shader=&graphics_shaders[i];
+            if(shader->guest_owned)graphics_pointer(shader->header,0x118);
+            if(shader->guest_owned && (!MEM32(shader->header) ||
+               memcmp(graphics_pointer(shader->header+4,0x114),shader->original_descriptor,0x114)))
+                stop("borrowed vertex declaration changed while bound",handle);
+            return shader;
+        }
+    if((handle&3)==1) {
+        uint32_t header=handle-1;graphics_pointer(header,0x118);
+        if(!MEM32(header) || MEM32(header)>0xffff || (MEM32(header+4)&~0xc00u) ||
+           MEM32(header+8) || MEM32(header+12) || MEM32(header+0x114))
+            stop("unqualified original declaration-only shader object",handle);
+        unsigned slot;for(slot=0;slot<256 && graphics_shaders[slot].header;++slot){}
+        if(slot==256)stop("original vertex declaration owner exhausted",handle);
+        struct PilotVertexElement elements[16]={0};
+        for(unsigned i=0;i<16;++i) {
+            uint32_t descriptor=header+0x14+i*16,type=MEM32(descriptor+8);
+            if(MEM32(descriptor+12))stop("unqualified tessellation vertex declaration",handle);
+            if(type!=2)elements[i]=(struct PilotVertexElement){type,MEM32(descriptor),MEM32(descriptor+4)};
+        }
+        uint32_t flags=(elements[3].type?0x400u:0)|(elements[4].type?0x800u:0),dimensions=0;
+        for(unsigned i=0;i<4;++i)dimensions|=(elements[i+9].type>>4)<<(i*8);
+        if(MEM32(header+4)!=flags || MEM32(header+0x10)!=dimensions)
+            stop("original vertex declaration flags disagree with inputs",handle);
+        struct GraphicsShader candidate={0};candidate.header=header;candidate.fixed=candidate.guest_owned=1;
+        int32_t result=pilot_gfx_shader_create_fixed(elements,&candidate.native);
+        if(result<0)stop("native original vertex declaration creation failed",(uint32_t)result);
+        memcpy(candidate.original_descriptor,memory+header+4,0x114);
+        graphics_shaders[slot]=candidate;
+        fprintf(stderr,"[VERTEX DECLARATION] borrowed=%08x native=%u\n",header,candidate.native);
+        return &graphics_shaders[slot];
+    }
     stop("unowned or unqualified vertex shader binding",handle);
 }
 static int graphics_shader_records(void)
@@ -171,7 +205,7 @@ static void graphics_shaders_release(void)
     for(unsigned i=0;i<256;++i)if(graphics_shaders[i].header) {
         pilot_gfx_shader_destroy(graphics_shaders[i].native);
         uint32_t bytes=0;
-        if(vm_free(&graphics_shaders[i].header,&bytes,MEM_RELEASE))stop("shader header release failed",i);
+        if(!graphics_shaders[i].guest_owned && vm_free(&graphics_shaders[i].header,&bytes,MEM_RELEASE))stop("shader header release failed",i);
         memset(&graphics_shaders[i],0,sizeof(graphics_shaders[i]));
     }
 }

@@ -121,6 +121,8 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     graphics_target_prepare(graphics_target);graphics_target_prepare(graphics_depth);
     graphics_draw_profile_step(&profile,0);
     uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
+    struct GraphicsShader *declaration=(shader&1)?graphics_shader(shader):NULL;
+    int fixed=declaration && declaration->fixed;
     FILE *scene_reference=NULL;
     uint32_t extents[16]={0};unsigned streams;
     if(shader&1)streams=pilot_gfx_shader_streams(extents);
@@ -157,9 +159,13 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
         }
     }
     graphics_draw_profile_step(&profile,2);
-    if(!pilot_gfx_initializer_consumer((shader&1)!=0,primitive,shader))
+    if(fixed) {
+        if(MEM32(PILOT_D3D_RENDER_STATES+102*4))stop("unqualified original fixed-function lighting owner",shader);
+        graphics_sync_deferred();
+    }
+    if(!pilot_gfx_initializer_consumer(fixed?2:(shader&1)!=0,primitive,shader))
         stop("unqualified initializer state consumer",shader);
-    graphics_sync_deferred();
+    if(!fixed)graphics_sync_deferred();
     graphics_draw_profile_step(&profile,3);
     float mod_x_scale=1,mod_x_anchor=0;
 #ifdef PILOT_TITLE_MODS
@@ -183,7 +189,17 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
         mod_x_scale=draw.x_scale;mod_x_anchor=draw.x_anchor;
     }
 #endif
-    if(!(shader&1)) {
+    if(fixed) {
+        /* The original driver may write its matrix cache inline. Synchronize
+         * the profile-owned values without changing guest dirty bits or caches.
+         * Lighting requires its original light/material owner before admission;
+         * reached declaration-only startup explicitly disables lighting. */
+        if(mod_x_scale!=1 || mod_x_anchor!=0)stop("unqualified fixed-function mod placement",shader);
+        for(unsigned i=0;i<10;++i)
+            if(pilot_gfx_transform(i,(const float*)(memory+TRANSFORM_STATE(TRANSFORMS)+i*64))<0)
+                stop("native fixed-function transform synchronization failed",i);
+        if(pilot_gfx_shader_prepare_fixed(declaration->native)<0)stop("native fixed-function declaration preparation failed",shader);
+    } else if(!(shader&1)) {
         if(MEM32(PILOT_D3D_RENDER_STATES+92*4))stop("pretransformed fog is unqualified",shader);
         if(pilot_gfx_fvf_placement(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
             graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4),mod_x_scale,mod_x_anchor)<0)stop("native FVF preparation failed",shader);

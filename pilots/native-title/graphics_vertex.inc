@@ -3,8 +3,9 @@
  * writes this storage, so Lock2 needs no emulated FIFO fence or CPU/GPU wait.
  * Physical/cache aliases use one canonical guest VA, as for native textures. */
 #define GRAPHICS_VERTEX_OBJECTS 256
-struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; };
+struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; unsigned borrowed; };
 static struct GraphicsVertexObject graphics_vertices[GRAPHICS_VERTEX_OBJECTS];
+static unsigned graphics_vertex_adopt(uint32_t header);
 static int graphics_vertex_defer_upload(void)
 {
     static int enabled=-1;
@@ -23,7 +24,10 @@ static int graphics_vertex_find(uint32_t header)
 static struct GraphicsVertexObject *graphics_vertex(uint32_t header)
 {
     int slot=graphics_vertex_find(header);
-    if(slot<0) stop("unowned vertex buffer",header);
+    if(slot<0)slot=(int)graphics_vertex_adopt(header);
+    if(graphics_vertices[slot].borrowed &&
+       (MEM32(header+4)!=(graphics_vertices[slot].data&0x0fffffffu) || ((MEM32(header)>>16)&7)))
+        stop("borrowed vertex storage changed while owned",header);
     return &graphics_vertices[slot];
 }
 static uint32_t graphics_vertex_allocate(uint32_t length)
@@ -78,6 +82,7 @@ static void graphics_vertex_collect(struct GraphicsVertexObject *vertex)
 static uint32_t graphics_vertex_ref(uint32_t header,int acquire)
 {
     struct GraphicsVertexObject *vertex=graphics_vertex(header);
+    if(vertex->borrowed)vertex->refs=MEM32(header)&0xffff;
     if((!vertex->refs && (!acquire || !vertex->bindings)) || (acquire && vertex->refs==0xffff))stop("invalid vertex reference lifetime",header);
     if(acquire)++vertex->refs;else --vertex->refs;
     uint32_t refs=vertex->refs;
@@ -87,6 +92,7 @@ static uint32_t graphics_vertex_ref(uint32_t header,int acquire)
 static void graphics_vertex_binding_ref(uint32_t header,int acquire)
 {
     struct GraphicsVertexObject *vertex=graphics_vertex(header);
+    if(vertex->borrowed)vertex->refs=MEM32(header)&0xffff;
     if(acquire?vertex->bindings==15:!vertex->bindings)stop("invalid vertex binding ownership",header);
     if(acquire)++vertex->bindings;
     else {--vertex->bindings;MEM32(header+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);}
@@ -119,14 +125,8 @@ static uint32_t graphics_vertex_lock(uint32_t header,uint32_t flags)
     if(flags&~0xf0u)stop("unqualified vertex lock flags",flags);
     return graphics_vertex(header)->data;
 }
-static void graphics_vertex_register(uint32_t header,uint32_t base)
+static unsigned graphics_vertex_borrow(uint32_t header,uint32_t address,uint32_t refs,unsigned borrowed)
 {
-    graphics_pointer(header,12);
-    uint32_t common=MEM32(header),offset=MEM32(header+4);
-    if(common!=1 || graphics_vertex_find(header)>=0)
-        stop("unqualified resource registration type/lifetime",common);
-    uint64_t address=(uint64_t)base+offset;
-    if(address>0xffffffffu)stop("resource registration address overflow",header);
     unsigned slot;
     for(slot=0;slot<GRAPHICS_VERTEX_OBJECTS && graphics_vertices[slot].header;++slot) {}
     if(slot==GRAPHICS_VERTEX_OBJECTS)stop("registered vertex resource slots exhausted",header);
@@ -144,7 +144,7 @@ static void graphics_vertex_register(uint32_t header,uint32_t base)
     bytes=allocation->bytes-((uint32_t)address-allocation->base);
     ++allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
 #endif
-    struct GraphicsVertexObject vertex={header,(uint32_t)address,bytes,1,0,1,0,original_reference};
+    struct GraphicsVertexObject vertex={header,address,bytes,refs,0,1,0,original_reference,borrowed};
     int32_t result=pilot_gfx_vertex_create(bytes,&vertex.native);
     if(result<0) {
 #ifdef PILOT_SCHEDULING_LLE
@@ -156,8 +156,33 @@ static void graphics_vertex_register(uint32_t header,uint32_t base)
         stop("registered vertex native allocation failed",(uint32_t)result);
     }
     graphics_vertices[slot]=vertex;
+    return slot;
+}
+static void graphics_vertex_register(uint32_t header,uint32_t base)
+{
+    graphics_pointer(header,12);
+    uint32_t common=MEM32(header),offset=MEM32(header+4);
+    if(common!=1 || graphics_vertex_find(header)>=0)
+        stop("unqualified resource registration type/lifetime",common);
+    uint64_t address=(uint64_t)base+offset;
+    if(address>0xffffffffu)stop("resource registration address overflow",header);
+    unsigned slot=graphics_vertex_borrow(header,(uint32_t)address,1,0);
     /* The original Register adds Base to Data then keeps the low 28 bits for
      * vertex resources. The header and allocation remain owned by the caller. */
     MEM32(header+4)=(uint32_t)address&0x0fffffffu;
-    fprintf(stderr,"[VERTEX REGISTER] header=%08x data=%08x bytes=%u\n",header,vertex.data,bytes);
+    fprintf(stderr,"[VERTEX REGISTER] header=%08x data=%08x bytes=%u\n",header,graphics_vertices[slot].data,graphics_vertices[slot].bytes);
+}
+static unsigned graphics_vertex_adopt(uint32_t header)
+{
+    graphics_pointer(header,12);
+    uint32_t common=MEM32(header),data=MEM32(header+4);
+    /* Original archive loading may execute Register itself. Reuse its same
+     * contiguous backing lease and GPU buffer owner without registering again
+     * or modifying the caller's already-relocated Data. */
+    if((common&0x01070000u)!=0x01000000u || !(common&0xffff) || data>=64u*1024*1024)
+        stop("unqualified caller-owned vertex header",header);
+    unsigned slot=graphics_vertex_borrow(header,data|0x80000000u,common&0xffff,1);
+    fprintf(stderr,"[VERTEX BORROW] header=%08x data=%08x cpu=%08x bytes=%u\n",
+        header,data,graphics_vertices[slot].data,graphics_vertices[slot].bytes);
+    return slot;
 }

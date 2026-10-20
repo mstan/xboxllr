@@ -8,6 +8,39 @@ input, audio, files, memory and scheduling services used by Blinx. Exact-image
 profiles provide XDK calling conventions and layouts. The old full-machine
 dashboard runner is historical evidence and is not an owner preview fallback.
 
+## Ordered work queue
+
+This is the active delivery checklist. Work from the first incomplete row;
+the detailed evidence and historical component inventory below support it.
+Rows have different sizes, so their count is not a completion percentage.
+
+| ID | Work item | Status | Pass condition |
+|---|---|---|---|
+| DB01 | Reach native dashboard graphics startup | Passed for reached startup | Actual native execution loads assets, opens native audio and passes the animation and inline NULL-texture boundaries. Latest run: `9cfa3b45...`, 255389 stopped-thread entries. |
+| DB02 | Consume the dashboard's original vertex layouts | Passed for reached layouts | Three original declaration-only layout classes consume packed normals/color/UV and cached transforms on the GPU. Pixel/reference and ownership checks pass; actual startup binds the original object and advances into mesh submission. Lighting remains disabled for this reached caller. |
+| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Original archive texture and vertex ownership now pass; the next required batch is indexed mesh binding/submission. |
+| DB04 | Make the ordinary menus usable | Pending | Exercise controller navigation, opening/back transitions and supported offline menu paths; record failures explicitly. Determine concrete routes from the actual menu after DB03. |
+| DB05 | Check dashboard audio and responsiveness | Pending | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
+| DB06 | Validate the native Credits mod | Pending | Open the bottom Credits entry in the actual native dashboard, verify the intended credits/legal content, then return to ordinary menus. |
+| DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
+| DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
+
+Current next action: **DB03**, indexed mesh submission. Actual startup now
+adopts its original declaration-only vertex object, a nine-level compressed
+archive texture and an archive vertex buffer through shared native owners.
+It next reaches `D3DDevice_SetIndices`; this and `DrawIndexedVertices` have
+exact-image ABI/body admissions but need shared runtime consumers. Implement
+index binding, original index storage/offset rules and real indexed drawing
+together, preserving existing nonindexed Blinx draws and resource lifetimes.
+
+Keep object adoption, input conversion and transform handling in one compatible
+graphics batch. Record the implementation, focused checks, actual run and next
+failure at each checkpoint. Close a row only when its full pass condition is
+observed. Add newly reached requirements beneath the owning row; put safely
+deferred precision/enhancement questions in the existing deferral ledger.
+Build-system experiments follow this queue when measurements show they are
+necessary to unblock iteration.
+
 ## Playtest delivery burndown
 
 The latest actual native run passes network startup and the cached-update
@@ -22,10 +55,13 @@ audio pause/resume now passes, and the remaining startup sound-effect buffers
 load. The shared inline command-buffer owner now passes the reached
 `D3D_MakeRequestedSpace` request. The missing animation virtual-method root
 `0004eaf0` now executes natively. Inline NULL texture bindings now pass on all
-four stages. The next stop is an original-created declaration-only vertex
-shader handle: the title constructs the object directly instead of using the
-native creation entry. Its packed-normal fixed-function input layout needs a
-shared native consumer. The explicit offline virtual-link query passes. No native menu
+four stages. Original declaration-only vertex objects now bind through a
+typed GPU wrapper around the existing fixed-function core, with packed normal,
+color/UV and original cached transforms. Original archive textures and vertex
+buffers now retain their real contiguous CPU backing and use existing native
+uploads/buffers. Actual startup advances to `D3DDevice_SetIndices`; shared
+indexed binding/drawing is the next compatible graphics batch. The explicit
+offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -48,7 +84,9 @@ functions execute.
 | Inline graphics command-buffer owner | Implemented; reached space request passes | Profile-proved layout/defaults, real packet delivery/refetch/fences and repeated lifetime checks pass; unsupported methods remain guarded |
 | Animation indirect native root | Recovered; actual startup passes | Original 46-byte body, constructor/vtable proof and native x87 lowering; nearby source-proved table audit found no other missing root |
 | Inline NULL texture bindings | Implemented; reached startup passes | Four stages, shared resources, original reference reconciliation, native unbind/rebind, two lifetimes and invalid-owner guards pass |
-| First rendered native menu | Current blocker | Consume original-created declaration-only vertex objects and their packed-normal fixed-function input layouts |
+| Original declaration-only vertex layouts | Implemented; actual binding passes | Three source layouts, packed normals/color/UV, unchanged original objects, repeated lifetimes and cached transforms; real GPU pixels versus expanded-input reference pass |
+| Original archive resource ownership | Implemented; actual texture/vertex consumption reached | Caller headers/storage retained, real contiguous backing leases, existing GPU uploads, CPU edits, mip chains, original references and release guards pass |
+| First rendered native menu | Current blocker | Shared index binding and indexed mesh submission; no actual menu frame yet |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -61,6 +99,35 @@ prerequisite for the offline menu.
 The [native-title deferral ledger](NATIVE-TITLE-DEFERRALS.md) records precision
 questions and deliberately unavailable enhancements separately from this
 delivery burndown.
+
+## Current graphics batch evidence
+
+- Source-proved declaration constructor `5c740` and tables `176660`, `176674`
+  and `176688`: three original input layouts, without interpreting packed
+  normals as floats or freeing the original shader header.
+- Typed fixed-function inputs run on the GPU through the existing renderer
+  core. Four input variants and two matrix states match independently expanded
+  float inputs in real rendered pixels. Runtime fixtures also cover original
+  inline matrix edits and two complete device lifetimes. Original lighting
+  ownership and programmable-only input-capture diagnostics are outside this
+  reached lighting-disabled path; ordinary GPU image readback is supported.
+- Original XPR-style texture headers retain their real cached physical alias.
+  Focused ownership fixtures cover five formats, four distinct mip levels,
+  CPU edits without rebinding, original inline references, bound retention and
+  teardown without freeing the caller's header/storage. GPU aliases retain
+  their separate live-image behavior.
+- Original registered vertex buffers reuse the existing shared Register
+  backing lease and native buffer owner. Both construction routes pass real
+  drawing, retained CPU edits, offset/reference and bound-lifetime checks.
+- Ten integrated Windows checks pass in 3.34 seconds, including 14 rejection
+  cases, the existing programmable-shader GPU/reference check, audio pause,
+  worker waits and scheduler. Warm builds retain all 104 generated CPU objects;
+  the last test rebuild took 4.40 seconds. No interpreter was added.
+- Actual muted native executable `a4bd95083caa6104...` adopts the original
+  vertex declaration, uploads the 256x256 nine-level DXT3 texture and binds the
+  32768-byte archive vertex buffer. It stops at `D3DDevice_SetIndices`
+  (`1453b0`), before a menu frame. Retained private run:
+  `build/dashboard-native-cache-20261019/host/runs/20261019-194320-8hy0bmep`.
 
 ## Current evidence
 

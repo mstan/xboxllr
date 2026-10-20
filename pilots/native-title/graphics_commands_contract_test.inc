@@ -1,4 +1,7 @@
 #ifdef PILOT_D3D_COMMANDS_VERSION
+#include "graphics_fixed_contract_test.inc"
+#include "graphics_borrowed_texture_contract_test.inc"
+#include "graphics_borrowed_vertex_contract_test.inc"
 static void test_graphics_command_null_textures(uint32_t base,const char *failure)
 {
     uint32_t create[]={2,2,1,1,0,0x12,3};
@@ -55,6 +58,11 @@ static void test_graphics_commands(const char *failure)
         CHECK(g_ebx==0x12345678 && g_esi==0x23456789 && g_edi==0x3456789a && g_ebp==0x456789ab);
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_LIMIT_OFFSET)==base+request-PILOT_D3D_COMMANDS_MARGIN);
         if(failure && !strncmp(failure,"texture-",8))test_graphics_command_null_textures(base,failure);
+        if(failure && !strncmp(failure,"declaration-",12))test_graphics_fixed_declarations(failure);
+        if(failure && !strncmp(failure,"borrowed-",9))test_graphics_borrowed_textures(failure);
+        if(failure && !strncmp(failure,"vertex-",7)) {
+            test_graphics_fixed_declarations(NULL);test_graphics_borrowed_vertices(failure);
+        }
         struct PilotInitializerState observed;CHECK(pilot_gfx_initializer_snapshot(&observed) && !observed.dither);
         MEM32(base)=0x41710;MEM32(base+4)=0;MEM32(base+8)=0x40310;MEM32(base+12)=1;
         MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_CURRENT_OFFSET)=base+16;
@@ -74,6 +82,9 @@ static void test_graphics_commands(const char *failure)
         g_ecx=PILOT_D3D_DEVICE_OBJECT;call_graphics(PILOT_D3D_COMMANDS_KICKOFF_ENTRY,NULL);
         CHECK(pilot_gfx_initializer_snapshot(&observed) && !observed.dither && graphics_commands.methods==3 && graphics_fence_next==fences);
         test_graphics_command_null_textures(base,NULL);CHECK(graphics_commands.methods==7);
+        test_graphics_fixed_declarations(NULL);
+        uint32_t borrowed_data=test_graphics_borrowed_textures(NULL);
+        test_graphics_borrowed_vertices(NULL);
         // This title does not expose the public InsertFence/BlockOnFence pair.
         // Exercise their real shared completion owner without admitting a
         // nonexistent guest wrapper just to make a fixture pass.
@@ -81,6 +92,9 @@ static void test_graphics_commands(const char *failure)
         uint32_t fence=graphics_fence_insert();graphics_fence_wait(fence);
         ReleaseSRWLockExclusive(&graphics_lock);
         call_graphics(PILOT_D3D_D3DDevice_Release,NULL);graphics_abi_thread_retire();
+        CHECK(physical_find(borrowed_data,1) && !physical_find(borrowed_data,1)->borrowers && MEM32(0x19600)==0x01040003);
+        physical_free(borrowed_data);
+        CHECK(MEM32(0x19800)==1 && MEM32(0x19920)==1 && MEM32(0x19a40)==1);
         CHECK(!graphics_commands.base && test_write_faults(base) && vm_committed(0,0x100000000ull)==resident);
     }
     puts("PASS actual inline graphics owner: register/stack ABI, original default projection, queued-state visibility, ordered API drain, no duplicate replay, recycle/kickoff without fence retirement, real fence completion, two complete lifetimes");

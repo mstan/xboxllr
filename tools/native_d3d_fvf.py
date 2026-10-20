@@ -71,4 +71,7 @@ def prepare_fvf(code: str, *, phobos: bool = False) -> str:
     replace('    "        current.rgb = lerp(FogColor.rgb, current.rgb, input.fog);\\n"',
             '    "        current.rgb = lerp(FogColor.rgb, current.rgb, saturate(input.fog));\\n"')
     code+='\nvoid pilot_d3d_program_fog_mode(unsigned program) { pilot_native_program_fog=program; }\n'
+    if code.count('static const char g_vs_source[]') != 1:
+        raise ValueError('unreviewed fixed-function vertex source')
+    code+='\nconst char *pilot_d3d_fixed_vertex_source(void) { return g_vs_source; }\n'
     return code

@@ -455,7 +455,8 @@ static void graphics_dispatch_impl(unsigned entry)
     case PILOT_D3D_D3DResource_Release:
         if(arguments[0]==graphics_headers || arguments[0]==graphics_headers+32 || arguments[0]==graphics_headers+64)
             g_eax=graphics_surface_ref(graphics_surface_index(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
-        else if(graphics_vertex_find(arguments[0])>=0)
+        else if(graphics_vertex_find(arguments[0])>=0 ||
+                (MEM32(arguments[0])&0x01070000u)==0x01000000u)
             g_eax=graphics_vertex_ref(arguments[0],entry==PILOT_D3D_D3DResource_AddRef);
         else g_eax=graphics_texture_ref(graphics_texture_slot(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
         break;

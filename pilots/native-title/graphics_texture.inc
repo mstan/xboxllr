@@ -7,6 +7,8 @@ struct GraphicsTextureObject {
     unsigned parent,level; /* parent is slot+1 for a surface view, zero for texture */
     unsigned bindings;
     unsigned guest_owned,alias_kind,alias_source,alias_format,alias_size;
+    unsigned cpu_borrowed;
+    uint64_t original_reference;
     /* Conservative owner hint: a CPU lock on this texture or any surface
      * sets it. A handoff clears it only after clearing the whole family. */
     unsigned family_exposed;
@@ -22,7 +24,7 @@ static uint32_t graphics_native_texture_headers[4];
  * pointer. Recheck the header on every hit: release/reuse, alias replacement
  * and realloc must retain exactly the same lookup and lifetime semantics. */
 static unsigned graphics_texture_lookup[256]; /* slot + 1; zero is empty */
-static unsigned graphics_texture_adopt_alias(uint32_t header);
+static unsigned graphics_texture_adopt(uint32_t header);
 static int graphics_texture_exposure_cache(void)
 {
     static int enabled=-1;
@@ -44,7 +46,7 @@ static unsigned graphics_texture_slot(uint32_t header)
         if(graphics_textures[i].header==header && header) {
             graphics_texture_lookup[key]=i+1;return i;
         }
-    unsigned slot=graphics_texture_adopt_alias(header);
+    unsigned slot=graphics_texture_adopt(header);
     graphics_texture_lookup[key]=slot+1;return slot;
 }
 static unsigned graphics_texture_unused(void)
@@ -158,6 +160,62 @@ static void graphics_texture_upload(struct GraphicsTextureObject *texture,unsign
     pilot_gfx_texture_upload(texture->native,level,memory+texture->data+offset,graphics_level_bytes(texture,level));
 }
 static uint32_t graphics_texture_ref(unsigned slot,int acquire);
+static void graphics_texture_borrow_release(struct GraphicsTextureObject *texture)
+{
+    if(!texture->cpu_borrowed)return;
+#ifdef PILOT_SCHEDULING_LLE
+    if(!pilot_io_device_contiguous_resource_release(texture->original_reference))
+        stop("lost original borrowed texture backing",texture->data);
+#else
+    AcquireSRWLockExclusive(&vm_lock);
+    struct PhysicalAllocation *allocation=physical_find(texture->data,texture->bytes);
+    if(!allocation || !allocation->borrowers)stop("lost borrowed texture backing",texture->data);
+    --allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
+#endif
+}
+static unsigned graphics_texture_adopt_cpu(uint32_t header)
+{
+    uint32_t common=MEM32(header),data=MEM32(header+4),format=MEM32(header+12),size=MEM32(header+16);
+    struct GraphicsTextureObject texture={0};
+    texture.header=header;texture.format=(format>>8)&255;texture.levels=(format>>16)&15;
+    unsigned log_width=(format>>20)&15,log_height=(format>>24)&15;
+    /* Original XPR/Register resources retain their caller's header and real
+     * contiguous image. Admit the same 2D Morton/block layouts as created
+     * textures. Cube/volume, border texels and arbitrary virtual pointers are
+     * distinct storage contracts. DMA A/B select this same owned CPU image. */
+    if(((common>>16)&7)!=4 || !(common&0xffff) || (format&0xfc)!=0x28 || !(format&3) || (format&3)==3 ||
+       (format&0xf0000000u) || size || log_width>12 || log_height>12 ||
+       !texture.levels || texture.levels>(log_width>log_height?log_width:log_height)+1 ||
+       !((texture.format>=4 && texture.format<=7) || texture.format==0xc ||
+         texture.format==0xe || texture.format==0xf || texture.format==0x28) ||
+       data>=64u*1024*1024)
+        stop("unqualified caller-owned CPU texture layout",header);
+    texture.width=1u<<log_width;texture.height=1u<<log_height;
+    if(graphics_texture_block(&texture) && (texture.width<4 || texture.height<4))
+        stop("compressed caller texture base below native block size",header);
+    texture.data=data|0x80000000u;texture.bytes=graphics_level_offset(&texture,texture.levels);
+    texture.refs=common&0xffff;texture.guest_owned=texture.cpu_borrowed=1;
+    texture.alias_format=format;texture.alias_size=size;
+#ifdef PILOT_SCHEDULING_LLE
+    uint32_t available=0;
+    if(!pilot_io_device_contiguous_resource_reference(texture.data,texture.bytes,&texture.original_reference,&available) ||
+       available<texture.bytes)stop("caller texture requires original physical backing",header);
+#else
+    AcquireSRWLockExclusive(&vm_lock);
+    struct PhysicalAllocation *allocation=physical_find(texture.data,texture.bytes);
+    if(!allocation || allocation->borrowers==UINT32_MAX)stop("caller texture requires owned physical backing",header);
+    ++allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
+#endif
+    int32_t result=pilot_gfx_texture_create(texture.width,texture.height,texture.levels,texture.format,&texture.native);
+    if(result<0) {
+        graphics_texture_borrow_release(&texture);
+        stop("native borrowed texture creation failed",(uint32_t)result);
+    }
+    unsigned slot=graphics_texture_unused();graphics_textures[slot]=texture;
+    fprintf(stderr,"[TEXTURE BORROW] header=%08x data=%08x cpu=%08x %ux%u levels=%u format=%02x bytes=%u\n",
+        header,data,texture.data,texture.width,texture.height,texture.levels,texture.format,texture.bytes);
+    return slot;
+}
 static unsigned graphics_texture_adopt_alias(uint32_t header)
 {
     graphics_pointer(header,20);
@@ -186,16 +244,27 @@ static unsigned graphics_texture_adopt_alias(uint32_t header)
     fprintf(stderr,"[TEXTURE ALIAS] header=%08x data=%08x %ux%u kind=%u source=%u\n",header,data,t.width,t.height,kind,source);
     return slot;
 }
+static unsigned graphics_texture_adopt(uint32_t header)
+{
+    graphics_pointer(header,20);
+    return ((MEM32(header+12)>>8)&255)==0x12?
+        graphics_texture_adopt_alias(header):graphics_texture_adopt_cpu(header);
+}
 static unsigned graphics_texture_refresh_alias(unsigned slot)
 {
     struct GraphicsTextureObject *t=&graphics_textures[slot];uint32_t header=t->header;
+    if(t->cpu_borrowed) {
+        if(MEM32(header+4)!=(t->data&0x0fffffffu) || MEM32(header+12)!=t->alias_format || MEM32(header+16)!=t->alias_size)
+            stop("borrowed CPU texture storage changed while owned",header);
+        return slot;
+    }
     if(!t->guest_owned || (t->data==MEM32(header+4) && t->alias_format==MEM32(header+12) && t->alias_size==MEM32(header+16)))return slot;
     unsigned bindings=t->bindings,stages=0;
     for(unsigned i=0;i<4;++i)if(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+i*4)==header){
         stages|=1u<<i;pilot_gfx_texture_bind(i,0);
     }
     pilot_gfx_texture_destroy(t->native);memset(t,0,sizeof(*t));
-    slot=graphics_texture_adopt_alias(header);graphics_textures[slot].bindings=bindings;
+    slot=graphics_texture_adopt(header);graphics_textures[slot].bindings=bindings;
     for(unsigned i=0;i<4;++i)if(stages&(1u<<i))pilot_gfx_texture_bind(i,graphics_textures[slot].native);
     return slot;
 }
@@ -203,7 +272,7 @@ static void graphics_texture_collect(unsigned slot)
 {
     struct GraphicsTextureObject *object=&graphics_textures[slot];
     if(object->refs || object->bindings)return;
-    if(object->guest_owned){pilot_gfx_texture_destroy(object->native);memset(object,0,sizeof(*object));return;}
+    if(object->guest_owned){pilot_gfx_texture_destroy(object->native);graphics_texture_borrow_release(object);memset(object,0,sizeof(*object));return;}
     unsigned parent=object->parent;
     if(parent) {
         if(!object->usage || object->cpu_exposed)graphics_texture_upload(&graphics_textures[parent-1],object->level);
@@ -219,6 +288,7 @@ static void graphics_texture_collect(unsigned slot)
 static uint32_t graphics_texture_ref(unsigned slot,int acquire)
 {
     struct GraphicsTextureObject *object=&graphics_textures[slot];
+    if(object->cpu_borrowed)object->refs=MEM32(object->header)&0xffff;
     if(!object->header || (!object->refs && (!acquire || !object->bindings)) || (acquire && object->refs==0xffff))
         stop("invalid texture reference lifetime",object->header);
     if(acquire)++object->refs; else --object->refs;
@@ -229,6 +299,7 @@ static uint32_t graphics_texture_ref(unsigned slot,int acquire)
 static void graphics_texture_binding_ref(uint32_t header,int acquire)
 {
     unsigned slot=graphics_texture_slot(header);struct GraphicsTextureObject *object=&graphics_textures[slot];
+    if(object->cpu_borrowed)object->refs=MEM32(header)&0xffff;
     if(object->parent || (acquire?object->bindings==15:!object->bindings))stop("invalid texture binding ownership",header);
     if(acquire)++object->bindings;
     else {--object->bindings;MEM32(header+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);}
@@ -238,7 +309,8 @@ static void graphics_texture_binding_ref(uint32_t header,int acquire)
 static void graphics_texture_sample_prepare(unsigned slot)
 {
     struct GraphicsTextureObject *texture=&graphics_textures[slot];int exposed=!texture->usage || texture->cpu_exposed;
-    if(texture->guest_owned)return; /* donor RHI view shares the live GPU storage */
+    if(texture->cpu_borrowed)graphics_texture_refresh_alias(slot);
+    if(texture->guest_owned && !texture->cpu_borrowed)return; /* live GPU alias */
     int scan=!graphics_texture_exposure_cache() || (texture->usage && texture->family_exposed);
     /* Ordinary CPU-owned textures still compare their actual bytes at every
      * consumption. Their exposure is unconditional; a child scan adds nothing. */
@@ -307,7 +379,8 @@ static void graphics_texture_aliases_close(void)
 {
     for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].guest_owned) {
         if(graphics_textures[i].bindings)stop("closing a bound texture alias",graphics_textures[i].header);
-        pilot_gfx_texture_destroy(graphics_textures[i].native);memset(&graphics_textures[i],0,sizeof(graphics_textures[i]));
+        pilot_gfx_texture_destroy(graphics_textures[i].native);graphics_texture_borrow_release(&graphics_textures[i]);
+        memset(&graphics_textures[i],0,sizeof(graphics_textures[i]));
     }
 }
 static uint32_t graphics_texture_surface(uint32_t header,unsigned level)

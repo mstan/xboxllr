@@ -1413,5 +1413,6 @@ int pilot_gfx_initializer_snapshot(struct PilotInitializerState *out)
 int pilot_gfx_initializer_consumer(unsigned program,uint32_t primitive,uint32_t fvf)
 {
     if(!pilot_device || !pilot_initializer_consumer(program,primitive,fvf))return 0;
+    if(program==2 && d3d8_GetRenderStates()[D3DRS_LIGHTING])return 0;
     return !pilot_initializer.dither || pilot_initializer_target_format();
 }

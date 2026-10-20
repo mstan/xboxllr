@@ -46,13 +46,14 @@ static inline int pilot_initializer_cache(uint32_t *cache,unsigned count,uint32_
     }
     cache[state]=value;return 1;
 }
-/* Normal/material/blend/point controls are inactive only for these admitted
- * vertex and triangle consumers. Expanding FFP or topology needs a new owner. */
-static inline int pilot_initializer_consumer(unsigned program,uint32_t primitive,uint32_t fvf)
+/* kind 0: screen-space FVF, 1: program, 2: declaration-only fixed function.
+ * The fixed-function caller additionally establishes inactive lighting and
+ * generated coordinates; weighted blending/points remain outside its owner. */
+static inline int pilot_initializer_consumer(unsigned kind,uint32_t primitive,uint32_t fvf)
 {
-    if(program>1 || primitive<5 || primitive>8)return 0;
+    if(kind>2 || primitive<5 || primitive>8)return 0;
     unsigned textures=(fvf>>8)&15;
-    return program || ((fvf&15)==4 && !(fvf&0xf030u) && textures<=4 && !((fvf>>16)>>(textures*2)));
+    return kind || ((fvf&15)==4 && !(fvf&0xf030u) && textures<=4 && !((fvf>>16)>>(textures*2)));
 }
 static inline int pilot_graphics_simple_decode(uint32_t method,uint32_t *state)
 {

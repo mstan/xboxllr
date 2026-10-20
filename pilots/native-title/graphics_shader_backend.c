@@ -17,6 +17,7 @@ struct NativeShader {
     struct PilotVertexElement elements[16];
     unsigned used;
     unsigned blend_recipe;
+    uint32_t fixed_fvf;
 };
 static struct NativeShader native_shaders[256];
 static ID3D11Buffer *native_constants_buffer;
@@ -35,6 +36,9 @@ int32_t pilot_gfx_shader_bind(uint32_t handle)
 {
     native_shader_active=0;
     struct NativeShader *shader=native_shader(handle);
+    if(shader->fixed_fvf) {
+        pilot_gfx_shader_fixed_binding();native_shader_bound=handle;return S_OK;
+    }
     if(!native_constants_buffer) {
         D3D11_BUFFER_DESC desc={0};
         desc.ByteWidth=sizeof(native_constants);desc.Usage=D3D11_USAGE_DYNAMIC;
@@ -82,16 +86,10 @@ unsigned pilot_gfx_shader_streams(uint32_t extents[16])
     return mask;
 }
 void pilot_gfx_shader_capture_constants(void *data) {memcpy(data,native_constants,sizeof(native_constants));}
-int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle)
+static int32_t native_shader_compile(struct NativeShader *candidate,char *source,
+                                    const struct PilotVertexElement elements[16])
 {
-    if(!code || !elements || !handle || !count || count>136 || !d3d8_GetD3D11Device())return E_INVALIDARG;
-    unsigned slot;
-    for(slot=0;slot<256 && native_shaders[slot].object;++slot){}
-    if(slot==256)return E_OUTOFMEMORY;
-    struct NativeShader shader={0};
-    shader.blend_recipe=shader_blend_recipe(code,count,elements);
-    char *source=shader_source(code,count,elements,&shader.used);
-    if(!source)return E_OUTOFMEMORY;
+    struct NativeShader shader=*candidate;
     ID3DBlob *errors=NULL;
     HRESULT result=D3DCompile(source,strlen(source),"xlle-nv2a",NULL,NULL,"raster_main","vs_5_0",
         D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&shader.code,&errors);
@@ -121,10 +119,23 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
         if(shader.object)ID3D11VertexShader_Release(shader.object);
         ID3D10Blob_Release(shader.code);free(source);return result;
     }
-    memcpy(shader.elements,elements,sizeof(shader.elements));native_shaders[slot]=shader;*handle=slot+1;
+    memcpy(shader.elements,elements,sizeof(shader.elements));*candidate=shader;
+    return S_OK;
+}
+int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct PilotVertexElement elements[16],uint32_t *handle)
+{
+    if(!code || !elements || !handle || !count || count>136 || !d3d8_GetD3D11Device())return E_INVALIDARG;
+    unsigned slot;
+    for(slot=0;slot<256 && native_shaders[slot].object;++slot){}
+    if(slot==256)return E_OUTOFMEMORY;
+    struct NativeShader shader={0};shader.blend_recipe=shader_blend_recipe(code,count,elements);
+    char *source=shader_source(code,count,elements,&shader.used);if(!source)return E_OUTOFMEMORY;
+    HRESULT result=native_shader_compile(&shader,source,elements);if(FAILED(result))return result;
+    native_shaders[slot]=shader;*handle=slot+1;
     fprintf(stderr,"[SHADER CREATE] native=%u instructions=%u inputs=%04x bytecode=%zu\n",*handle,count,shader.used,ID3D10Blob_GetBufferSize(shader.code));
     return S_OK;
 }
+#include "graphics_fixed_backend.inc"
 void pilot_gfx_shader_destroy(uint32_t handle)
 {
     struct NativeShader *shader=native_shader(handle);
@@ -212,6 +223,7 @@ static int32_t shader_probe(uint32_t handle,const struct PilotVertexProbeStream 
 {
     struct NativeShader *shader=native_shader(handle);
     if(!streams || !outputs || !count || count>65536)return E_INVALIDARG;
+    if(shader->fixed_fvf)return E_NOTIMPL; /* This probe owns NV2A program outputs. */
     HRESULT raw_result=raster?S_OK:shader_raw_prepare(shader);if(FAILED(raw_result))return raw_result;
     unsigned stream_mask=0;
     for(unsigned i=0;i<16;++i)if(shader->used&(1u<<i)) {
