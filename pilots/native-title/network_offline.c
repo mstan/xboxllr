@@ -15,6 +15,18 @@ int pilot_network_offline_initialize(PilotNetworkOffline *state,const PilotNetwo
        !ops->create_owner || !ops->destroy_owner || state->ops || state->owner || state->references)return 0;
     state->ops=ops;return 1;
 }
+PilotNetworkResult pilot_network_offline_link(PilotNetworkOffline *state,PilotNetworkLinkQuery query,void *context)
+{
+    if(!state || !state->ops)return network_result(0,PILOT_NETWORK_GUARD_UNINITIALIZED);
+    const PilotNetworkOps *ops=state->ops;ops->lock(ops->context);
+    PilotNetworkResult result=network_result(0,0);uint32_t flags=0;
+    if((state->references==0)!=(state->owner==0))result.guard=PILOT_NETWORK_GUARD_STATE;
+    else if(!query || !query(context,&flags))result.guard=PILOT_NETWORK_GUARD_LINK;
+    else result.hresult=(flags&1u)?flags:0;
+    /* The original link query works before/after XOnline ownership. Its return
+     * is raw DWORD flags, not an HRESULT, and it does not set guest LastError. */
+    ops->unlock(ops->context);return result;
+}
 PilotNetworkResult pilot_network_offline_startup(PilotNetworkOffline *state,uint32_t parameters)
 {
     if(!state || !state->ops)return network_result(0,PILOT_NETWORK_GUARD_UNINITIALIZED);

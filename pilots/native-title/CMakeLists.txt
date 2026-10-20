@@ -227,6 +227,15 @@ target_include_directories(pilot_network_random_test PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/native-network-random" "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_network_random COMMAND pilot_network_random_test)
 set_tests_properties(pilot_network_random PROPERTIES TIMEOUT 30)
+add_executable(pilot_network_link_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_network_link.c" network_offline.c)
+target_include_directories(pilot_network_link_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/native-network-link" "${CMAKE_CURRENT_SOURCE_DIR}")
+pilot_add_test(NAME pilot_network_link COMMAND pilot_network_link_test)
+set_tests_properties(pilot_network_link PROPERTIES TIMEOUT 15)
+if(MSVC)
+  target_compile_options(pilot_network_link_test PRIVATE /W4 /WX)
+endif()
 add_executable(pilot_graphics_surfaces_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_graphics_surfaces.c")
 target_include_directories(pilot_graphics_surfaces_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_graphics_surfaces COMMAND pilot_graphics_surfaces_test)

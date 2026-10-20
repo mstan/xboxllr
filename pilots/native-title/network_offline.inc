@@ -14,6 +14,12 @@
 #ifndef PILOT_NETWORK_HAS_RANDOM
 #define PILOT_NETWORK_HAS_RANDOM 0
 #endif
+#ifndef PILOT_NETWORK_HAS_LINK
+#define PILOT_NETWORK_HAS_LINK 0
+#endif
+#if PILOT_NETWORK_HAS_LINK
+static PilotNetworkLinkPolicy network_link_policy={PILOT_NETWORK_LINK_ATTACHMENT};
+#endif
 static PilotNetworkOffline network_offline;
 static PilotNetworkCacheProbe network_cached_update_probe;
 static void *network_cached_update_context;
@@ -101,6 +107,11 @@ void pilot_network_dispatch(unsigned entry,recomp_func_t set_last_error)
         uint32_t output=MEM32(g_esp+4),bytes=MEM32(g_esp+8);
         result=pilot_network_offline_random(&network_offline,bytes,network_random_stage,
             network_random_commit,&output,pilot_network_host_entropy,NULL);
+#endif
+#if PILOT_NETWORK_HAS_LINK
+    } else if(action==PILOT_NETWORK_ACTION_LINK) {
+        if(stack_bytes)stop("invalid link-state query ABI",entry);
+        result=pilot_network_offline_link(&network_offline,pilot_network_host_link,&network_link_policy);
 #endif
     } else {stop("invalid native network action",action);return;}
     if(result.guard)stop("unsupported native network lifecycle",result.guard);

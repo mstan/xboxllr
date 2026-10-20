@@ -18,7 +18,8 @@ the native audio device opens. Its mix-bin headroom setup now passes; the
 notification-enabled ADPCM ambient buffers are created and all three sets of
 workers issue subsequent stream reads. The periodic native delay now passes;
 the main thread opens the dashboard font and loads another section. The next
-stop is the guarded network link-state wrapper `0007e125`. No native menu
+stop is the bound but unimplemented native `IDirectSoundBuffer_Pause` service.
+The explicit offline virtual-link query now passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -36,7 +37,8 @@ functions execute.
 | Native audio device headroom | Reached setup passes | Device/ABI/output fixture and PCM/ADPCM-versus-LLE headroom checks pass; diagnostic captures now wait for real completed frames |
 | Native ambient buffer notifications | Setup and subsequent reads reached; audible QA pending | Three original ambient ADPCM buffers/workers progress; component checks cover real sample-position events and retained ownership |
 | Native worker timing and thread waits | Reached delay passes; teardown components pass | Real delay and CPU handoff, actual thread-exit waits and bounded paired signal/wait; 21 combined checks pass |
-| First rendered native menu | Current blocker | Startup reaches the guarded network link-state wrapper `0007e125`; an owned offline link-state contract is required |
+| Offline virtual link-state query | Passed for unattached policy | Original wrapper mask/ABI/context and native provider/lifetime checks pass; actual startup advances beyond the link query |
+| First rendered native menu | Current blocker | Startup reaches `IDirectSoundBuffer_Pause`; its native buffer state transition remains required |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -77,7 +79,7 @@ delivery burndown.
 | D3D creation and presentation surfaces | Actual native device creates the 1280x960 raster; guest surface allocation/projection setup returns. Real Gaussian pixels, optional depth and legacy visual mods pass focused GPU checks |
 | Initializer-state component and integration | Passed | Real zero raster bias, original cache roles, tracked native precision, inactive consumer bounds and Reset ownership; five combined CTests pass in 6.53 seconds |
 | Bounded random service integration | Passed | Twelve binder tests and nine original component cases; five combined network CTests pass in 0.64 seconds |
-| Latest actual native boot | Executable `cbb7ffa0` progresses beyond the periodic audio worker, creates three ambient streams, opens the font and loads another section; guarded network wrapper `0007e125`, no captured frame |
+| Latest actual native boot | Executable `20fe9248` advances beyond the offline link query into further initialization; explicit audio `Pause` guard, no captured frame |
 | Driver incremental admission and QA launches | 33 authored checks pass; selected families, actual admissions, failed-bind state, content-drive owner and link policy are checked; run-only replays are frozen and captures are separate from performance measurements |
 | Incremental attribution files | All 150 staged notice files match their sources; real MSBuild/Ninja checks cover unchanged, changed, missing and newly configured files |
 | Menu rendering/input/audio/performance | Unverified |
@@ -323,6 +325,15 @@ fault semantics and kernel-version identity are retained as LLE-D08/D09 in the
 behavior remains implementation work in `.1.137`.
 
 ## Delivery order
+
+The link-status batch now passes its actual startup boundary using an explicitly
+unattached virtual adapter. The [link contract](NATIVE-NETWORK-LINK.md) preserves
+the source-derived raw-bit mask, lifecycle lease and strict provider failures.
+Fifteen binder checks, strict portable core, real Windows dispatcher/host checks
+and ten combined CTests pass (5.22 seconds). The new executable `20fe9248...`
+reaches `IDirectSoundBuffer_Pause` instead. Raw PHY and connected-network behavior
+remain separate from this offline policy; pause/resume semantics are required
+implementation work, and menu rendering remains unverified.
 
 The next worker/timing batch advances actual startup beyond the periodic audio
 delay: all three ambient ADPCM buffers/workers are created, subsequent file

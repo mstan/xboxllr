@@ -250,7 +250,7 @@
               1547760
             ]
           ],
-          "action": "guard"
+          "action": "link"
         },
         {
           "address": 1140736,
@@ -1551,6 +1551,32 @@
           "sha256": "6e97193c7546fa207c812ff4bcada62cf94f2babe6237a30354da311af11390b"
         },
         "output_limit": 64
+      },
+      "link": {
+        "entry": 516389,
+        "attachment": "unattached",
+        "active_mask": 1,
+        "thread_pointer_offset": 32,
+        "thread_initialized_offset": 588,
+        "value_register": "esi",
+        "imports": {
+          "raise": {
+            "address": 73984,
+            "ordinal": 129
+          },
+          "initialize": {
+            "address": 74288,
+            "ordinal": 253
+          },
+          "query": {
+            "address": 74284,
+            "ordinal": 252
+          },
+          "lower": {
+            "address": 73980,
+            "ordinal": 161
+          }
+        }
       }
     }
   }

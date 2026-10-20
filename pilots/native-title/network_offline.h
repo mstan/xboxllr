@@ -33,10 +33,14 @@ typedef int (*PilotNetworkOutputClear)(void *,unsigned);
 typedef int (*PilotNetworkRandomStage)(void *,unsigned,unsigned char *);
 typedef void (*PilotNetworkRandomCommit)(void *,unsigned,const unsigned char *);
 typedef int (*PilotNetworkEntropy)(void *,unsigned,unsigned char *);
+/* Query an owned virtual link, not the host NIC. A failed provider guards;
+ * it must never silently become a disconnected/successful network result. */
+typedef int (*PilotNetworkLinkQuery)(void *,uint32_t *);
 enum { PILOT_NETWORK_GUARD_UNINITIALIZED=1, PILOT_NETWORK_GUARD_PARAMETER,
        PILOT_NETWORK_GUARD_REFCOUNT, PILOT_NETWORK_GUARD_STATE,
        PILOT_NETWORK_GUARD_OUTPUT, PILOT_NETWORK_GUARD_CACHE,
-       PILOT_NETWORK_GUARD_RANDOM_SIZE, PILOT_NETWORK_GUARD_ENTROPY };
+       PILOT_NETWORK_GUARD_RANDOM_SIZE, PILOT_NETWORK_GUARD_ENTROPY,
+       PILOT_NETWORK_GUARD_LINK };
 enum { PILOT_NETWORK_CACHED_UPDATE_BYTES=156 };
 enum { PILOT_NETWORK_RANDOM_MAX_BYTES=64 };
 int pilot_network_offline_initialize(PilotNetworkOffline *, const PilotNetworkOps *);
@@ -46,4 +50,5 @@ PilotNetworkResult pilot_network_offline_cached_update(PilotNetworkOffline *,Pil
                                                       PilotNetworkCacheProbe,void *,unsigned,const char *);
 PilotNetworkResult pilot_network_offline_random(PilotNetworkOffline *,uint32_t,PilotNetworkRandomStage,
     PilotNetworkRandomCommit,void *,PilotNetworkEntropy,void *);
+PilotNetworkResult pilot_network_offline_link(PilotNetworkOffline *,PilotNetworkLinkQuery,void *);
 #endif

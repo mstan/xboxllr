@@ -223,4 +223,71 @@ class NetworkBinding(unittest.TestCase):
         self.context.functions.append(dict(start='0x00002A00',end='0x00002A06',size=6,name='sub_00002A00',section='.text'))
         self.assert_unchanged_rejection('random-byte private method consumer')
 
+    def add_link(self):
+        c=self.context;blob=bytearray(c.blob);entry=0x2500
+        slots={'raise':0x3220,'initialize':0x3224,'query':0x3228,'lower':0x322c}
+        # Authored role fixture using EDI/ECX and a different layout/order.
+        # It is not an original SDK body or an execution proof of that body.
+        body=(b'\x57\x53\x31\xff\x8b\x15'+struct.pack('<I',0x300c)+
+              b'\x64\x8b\x0d'+struct.pack('<I',0x20)+b'\x83\x79\x20\0'+
+              b'\xff\x15'+struct.pack('<I',slots['raise'])+b'\x88\xc3\x57\x57'+
+              b'\xff\x15'+struct.pack('<I',slots['initialize'])+b'\x57'+
+              b'\xff\x15'+struct.pack('<I',slots['query'])+b'\x89\xc7\x88\xd9'+
+              b'\xff\x15'+struct.pack('<I',slots['lower'])+
+              b'\x89\xf8\x24\x01\xf6\xd8\x1b\xc0\x23\xc7\x5b\x5f\xc3')
+        blob[entry-0x1000:entry-0x1000+len(body)]=body
+        imports={}
+        for role,ordinal in {'raise':129,'initialize':253,'query':252,'lower':161}.items():
+            address=slots[role];struct.pack_into('<I',blob,address-0x1000,0x80000000|ordinal)
+            imports[role]=dict(address=address,ordinal=ordinal)
+        c.blob=bytes(blob)
+        c.functions.append(dict(start=f'0x{entry:08X}',end=f'0x{entry+len(body):08X}',size=len(body),name=f'sub_{entry:08X}',section='.text'))
+        source=c.generated/'recomp_0000.c';source.write_text(source.read_text()+f'\nvoid sub_{entry:08X}(void)\n{{\n/* authored link role */\n}}\n')
+        self.proof['calls'].append(dict(address=entry,bytes=len(body),sha256=hashlib.sha256(body).hexdigest(),
+                                       returns=[0],references=[[entry+4,0x300c]],action='guard'))
+        return dict(entry=entry,attachment='unattached',active_mask=1,thread_pointer_offset=0x20,
+                    thread_initialized_offset=0x20,value_register='edi',imports=imports)
+
+    def enable_link(self,proof):
+        self.proof['link']=proof
+        next(c for c in self.proof['calls'] if c['address']==proof['entry'])['action']='link'
+
+    def test_link_upgrade_preserves_cpu_wrapper_and_prior_features(self):
+        link=self.add_link();self.enable_cached_query(self.add_cached_query());self.enable_random(self.add_random())
+        old=self.run_bind();bodies={p.name:p.read_bytes() for p in self.context.generated.glob('recomp_*.c')}
+        wrapper=(self.context.generated/'pilot_network_binding.c').read_bytes()
+        self.enable_link(link);new=self.run_bind()
+        self.assertEqual(old['random'],new['random']);self.assertEqual(old['cached_update'],new['cached_update'])
+        self.assertEqual(bodies,{p.name:p.read_bytes() for p in self.context.generated.glob('recomp_*.c')})
+        self.assertEqual(wrapper,(self.context.generated/'pilot_network_binding.c').read_bytes())
+        header=(self.context.generated/'pilot_network_bindings.h').read_text()
+        self.assertIn('PILOT_NETWORK_ACTION_LINK, 0u',header)
+        self.assertIn('#define PILOT_NETWORK_LINK_ATTACHMENT 1u',header)
+        self.assertEqual(new,self.run_bind())
+        self.assertEqual(header,(self.context.generated/'pilot_network_bindings.h').read_text())
+
+    def test_link_policy_abi_roles_and_missing_proof_fail_before_mutation(self):
+        self.enable_link(self.add_link());original=copy.deepcopy(self.proof)
+        mutations=[lambda p:p['link'].update(attachment='host-nic'),
+                   lambda p:p['link'].update(active_mask=2),
+                   lambda p:p['link'].update(thread_initialized_offset=0x24),
+                   lambda p:p['link'].update(thread_pointer_offset=0x24),
+                   lambda p:p['link'].update(value_register='esi'),
+                   lambda p:p['link']['imports']['query'].update(ordinal=253),
+                   lambda p:p['link']['imports']['query'].update(address=0x3224),
+                   lambda p:p.pop('link')]
+        for mutation in mutations:
+            self.proof=copy.deepcopy(original);mutation(self.proof)
+            self.assert_unchanged_rejection('link-state')
+
+    def test_link_import_bytes_drift_and_unproved_feature_removal_rejected(self):
+        self.enable_link(self.add_link());self.run_bind()
+        original=self.context.blob;changed=bytearray(original)
+        struct.pack_into('<I',changed,0x3228-0x1000,0x800000fd);self.context.blob=bytes(changed)
+        self.assert_unchanged_rejection('link-state kernel import')
+        self.context.blob=original
+        entry=self.proof.pop('link')['entry']
+        next(c for c in self.proof['calls'] if c['address']==entry)['action']='guard'
+        self.assert_unchanged_rejection('existing network binding differs')
+
 if __name__=='__main__':unittest.main()

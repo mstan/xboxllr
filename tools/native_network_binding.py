@@ -8,8 +8,9 @@ import json
 from pathlib import Path
 import re
 import struct
+from itertools import combinations
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-from capstone.x86_const import X86_OP_IMM, X86_OP_MEM
+from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
 from native_binding import Binding, validate_body
 
 
@@ -178,11 +179,70 @@ def random_proof(context, proof, functions, calls, begin, end, network_owner):
     return proof
 
 
+def link_proof(context, proof, functions, calls, network_owner):
+    fields={'entry','attachment','active_mask','thread_pointer_offset','thread_initialized_offset','value_register','imports'}
+    if (not isinstance(proof,dict) or set(proof)!=fields or proof['attachment']!='unattached'
+            or type(proof['active_mask']) is not int or proof['active_mask']!=1
+            or type(proof['thread_pointer_offset']) is not int or not 0<=proof['thread_pointer_offset']<=4092
+            or type(proof['thread_initialized_offset']) is not int or not 0<proof['thread_initialized_offset']<=4092
+            or proof['thread_pointer_offset']%4 or proof['thread_initialized_offset']%4
+            or proof['value_register'] not in ('ebx','esi','edi','ebp')):
+        raise ValueError('unreviewed link-state proof boundary')
+    selected=[c for c in calls if c['action']=='link']
+    if (len(selected)!=1 or selected[0]['address']!=proof['entry'] or selected[0]['returns']!=[0]
+            or not any(target==network_owner for _,target in selected[0]['references'])):
+        raise ValueError('unreviewed link-state entry/ABI/owner')
+    body=original_bytes(context,proof['entry'],functions[proof['entry']]['size'])
+    decoder=Cs(CS_ARCH_X86,CS_MODE_32);decoder.detail=True
+    instructions=list(decoder.disasm(body,proof['entry']))
+    imports=proof['imports'];expected={'raise':129,'initialize':253,'query':252,'lower':161}
+    if not isinstance(imports,dict) or set(imports)!=set(expected):
+        raise ValueError('unreviewed link-state import roles')
+    addresses=[]
+    for role,ordinal in expected.items():
+        item=imports[role]
+        if (not isinstance(item,dict) or set(item)!={'address','ordinal'} or type(item['address']) is not int
+                or not 0<item['address']<=0xfffffffc or item['address']%4
+                or type(item['ordinal']) is not int or item['ordinal']!=ordinal
+                or original_bytes(context,item['address'],4)!=struct.pack('<I',0x80000000|ordinal)):
+            raise ValueError('unreviewed link-state kernel import')
+        addresses.append(item['address'])
+    if len(set(addresses))!=4:raise ValueError('aliased link-state import roles')
+    actual=[]
+    for instruction in instructions:
+        if instruction.mnemonic=='call':
+            if (len(instruction.operands)!=1 or instruction.operands[0].type!=X86_OP_MEM
+                    or instruction.operands[0].mem.base or instruction.operands[0].mem.index
+                    or instruction.operands[0].mem.segment):
+                raise ValueError('unreviewed link-state call role')
+            actual.append(instruction.operands[0].mem.disp&0xffffffff)
+    if actual!=addresses:raise ValueError('unreviewed link-state call order')
+    pointer_registers=[]
+    for instruction in instructions:
+        if instruction.mnemonic=='mov' and len(instruction.operands)==2 and instruction.operands[0].type==X86_OP_REG:
+            source=instruction.operands[1]
+            if (source.type==X86_OP_MEM and source.size==4 and instruction.operands[0].size==4
+                    and instruction.reg_name(source.mem.segment)=='fs'
+                    and not source.mem.base and not source.mem.index and source.mem.disp==proof['thread_pointer_offset']):
+                pointer_registers.append(instruction.operands[0].reg)
+    if len(pointer_registers)!=1 or not any(
+            operand.type==X86_OP_MEM and operand.mem.base==pointer_registers[0] and not operand.mem.index
+            and operand.mem.disp==proof['thread_initialized_offset'] and instruction.mnemonic in ('cmp','test')
+            for instruction in instructions for operand in instruction.operands):
+        raise ValueError('unreviewed link-state thread context role')
+    value=proof['value_register'];text=[(i.mnemonic,i.op_str) for i in instructions]
+    mask=[('mov','eax, '+value),('and','al, 1'),('neg','al'),('sbb','eax, eax'),('and','eax, '+value)]
+    if not any(text[i:i+len(mask)]==mask for i in range(len(text)-len(mask)+1)):
+        raise ValueError('unreviewed link-state returned flag mask')
+    return proof
+
+
 def emit_header(binding):
     calls=binding['calls'];query=binding.get('cached_update')
     actions='PILOT_NETWORK_ACTION_GUARD, PILOT_NETWORK_ACTION_STARTUP, PILOT_NETWORK_ACTION_CLEANUP'
     if query:actions+=', PILOT_NETWORK_ACTION_CACHED_UPDATE'
     if binding.get('random'):actions+=', PILOT_NETWORK_ACTION_RANDOM'
+    if binding.get('link'):actions+=', PILOT_NETWORK_ACTION_LINK'
     header=['#pragma once','#define PILOT_NETWORK_ABI_VERSION 1u','enum { '+actions+' };','enum PilotNetworkEntry {']
     header += [f'    PILOT_NETWORK_ENTRY_{c["address"]:08X},' for c in calls]
     header += ['    PILOT_NETWORK_COUNT','};',
@@ -196,6 +256,7 @@ def emit_header(binding):
                    f'#define PILOT_NETWORK_CACHE_PARTITION {query["partition"]}u',
                    '#define PILOT_NETWORK_CACHE_RELATIVE '+json.dumps(query['relative'])]
     if binding.get('random'):header+=['#define PILOT_NETWORK_HAS_RANDOM 1']
+    if binding.get('link'):header+=['#define PILOT_NETWORK_HAS_LINK 1','#define PILOT_NETWORK_LINK_ATTACHMENT 1u']
     return '\n'.join(header)+'\n'
 
 
@@ -203,7 +264,7 @@ def bind(xbe, output, symbols, profile=None):
     context = Binding(xbe, output, symbols)
     proof = context.require_profile('network', profile, adapter='xonline-offline-lifecycle-v1')
     required={'adapter','globals','consumer_range','calls','callback_table','untranslated_callbacks','set_last_error'}
-    if not required<=set(proof) or set(proof)-required-{'cached_update','random'}:
+    if not required<=set(proof) or set(proof)-required-{'cached_update','random','link'}:
         raise ValueError('unsupported network proof fields')
     globals_ = proof['globals']
     if (not isinstance(globals_, dict) or set(globals_) != {'online_owner', 'online_gate', 'network_owner', 'network_gate'}
@@ -225,7 +286,7 @@ def bind(xbe, output, symbols, profile=None):
         if set(entry) != {'address', 'bytes', 'sha256', 'returns', 'references', 'action'}:
             raise ValueError('invalid network entry proof fields')
         address = entry['address']; action = entry['action']
-        if type(address) is not int or address in seen or address not in functions or action not in ('startup', 'cleanup', 'guard','cached_update','random'):
+        if type(address) is not int or address in seen or address not in functions or action not in ('startup', 'cleanup', 'guard','cached_update','random','link'):
             raise ValueError('invalid network entry/action')
         function = functions[address]
         if function.get('section') == '.data' or not context.matches_body(function, entry):
@@ -248,6 +309,9 @@ def bind(xbe, output, symbols, profile=None):
     random=proof.get('random')
     if random is not None:random_proof(context,random,functions,calls,begin,end,globals_['network_owner'])
     elif any(c['action']=='random' for c in calls):raise ValueError('missing random-byte proof')
+    link=proof.get('link')
+    if link is not None:link_proof(context,link,functions,calls,globals_['network_owner'])
+    elif any(c['action']=='link' for c in calls):raise ValueError('missing link-state proof')
     # A profile cannot omit another discovered original global consumer while
     # admitting startup. The exact image/body identity remains the proof basis.
     consumers = set()
@@ -314,6 +378,7 @@ def bind(xbe, output, symbols, profile=None):
                    untranslated_callbacks=proof['untranslated_callbacks'], set_last_error=proof['set_last_error'])
     if query:binding['cached_update']=query
     if random:binding['random']=random
+    if link:binding['link']=link
     wrapper = ['#include "pilot_network_bindings.h"',
                'extern void pilot_network_dispatch(unsigned, void (*)(void));', f'extern void {error["name"]}(void);']
     replacements = {}
@@ -336,8 +401,8 @@ def bind(xbe, output, symbols, profile=None):
         header=(context.generated/'pilot_network_bindings.h').read_text()
         if actual==binding and header==texts['pilot_network_bindings.h']:return binding
         upgrades=[]
-        for removed in (('cached_update',),('random',),('cached_update','random')):
-            if not all(feature in binding for feature in removed):continue
+        features=[feature for feature in ('cached_update','random','link') if feature in binding]
+        for removed in (group for count in range(1,len(features)+1) for group in combinations(features,count)):
             prior=copy.deepcopy(binding)
             for feature in removed:
                 old=prior.pop(feature)

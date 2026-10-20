@@ -39,3 +39,11 @@ int pilot_network_host_entropy(void *context,unsigned bytes,unsigned char *outpu
     if(!output || !bytes || bytes>PILOT_NETWORK_RANDOM_MAX_BYTES)return 0;
     return BCryptGenRandom(NULL,output,bytes,BCRYPT_USE_SYSTEM_PREFERRED_RNG)>=0;
 }
+int pilot_network_host_link(void *context,uint32_t *flags)
+{
+    const PilotNetworkLinkPolicy *policy=context;
+    if(!policy || !flags || policy->attachment!=PILOT_NETWORK_ATTACHMENT_UNATTACHED)return 0;
+    /* Explicit offline virtual-console configuration: no guest NIC is
+     * attached. The desktop's real cable/Wi-Fi state is a different device. */
+    *flags=0;return 1;
+}
