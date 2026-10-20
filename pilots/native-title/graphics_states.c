@@ -104,6 +104,14 @@ int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
 int pilot_gfx_command_method(uint32_t method,uint32_t value,int apply)
 {
     if(method==0x1710)return !value && pilot_gfx_vertex_cache_break(apply);
+    /* A zero CONTROL0 disables this sampler. The runtime separately validates
+     * the original software NULL-binding transaction and its resource owner.
+     * Enabled stages/LOD controls require their complete texture state. */
+    if(method>=0x1b0c && method<=0x1bcc && !((method-0x1b0c)&63)) {
+        if(value)return 0;
+        if(apply)pilot_gfx_texture_bind((method-0x1b0c)/64,0);
+        return 1;
+    }
     uint32_t state;
     if(!pilot_graphics_simple_decode(0x40000u|method,&state))return 0;
     return render_state(state,value,apply);

@@ -9,7 +9,12 @@
 static struct PilotCommandArena graphics_commands;
 static int graphics_command_method(void *context,uint32_t method,uint32_t value,int apply)
 {
+    if(method>=0x1b0c && method<=0x1bcc && !((method-0x1b0c)&63) && !value &&
+       !graphics_texture_inline_null((method-0x1b0c)/64,0))return 0;
     (void)context;int accepted=pilot_gfx_command_method(method,value,apply);
+    if(accepted && apply && method>=0x1b0c && method<=0x1bcc && !((method-0x1b0c)&63) && !value &&
+       !graphics_texture_inline_null((method-0x1b0c)/64,1))
+        stop("inline texture NULL owner changed during application",method);
     if(!accepted)fprintf(stderr,"[D3D COMMAND] method=%04x value=%08x apply=%d\n",method,value,apply);
     return accepted;
 }

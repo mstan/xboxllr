@@ -6,6 +6,18 @@ static int test_initializer_states(void)
     CHECK(!pilot_gfx_command_method(0x304,2,0));
     CHECK(!pilot_gfx_command_method(0x7fc,0,0));
     CHECK(pilot_gfx_command_method(0x310,1,0));
+    uint32_t sampled=0;CHECK(!pilot_gfx_texture_create(2,2,1,0x12,&sampled));
+    for(unsigned stage=0;stage<4;++stage) {
+        uint32_t method=0x1b0c+stage*64;pilot_gfx_texture_bind(stage,sampled);
+        IDirect3DBaseTexture8 *before=d3d8_GetStageTexture(stage);CHECK(before);
+        CHECK(pilot_gfx_command_method(method,0,0) && d3d8_GetStageTexture(stage)==before);
+        CHECK(!pilot_gfx_command_method(method,0x40000000,0) && d3d8_GetStageTexture(stage)==before);
+        CHECK(pilot_gfx_command_method(method,0,1) && !d3d8_GetStageTexture(stage));
+        pilot_gfx_texture_bind(stage,sampled);CHECK(d3d8_GetStageTexture(stage)==before);
+        pilot_gfx_texture_bind(stage,0);
+    }
+    CHECK(!pilot_gfx_command_method(0x1c0c,0,0) && !pilot_gfx_command_method(0x1b10,0,0));
+    pilot_gfx_texture_destroy(sampled);
     struct PilotInitializerState untouched;CHECK(pilot_gfx_initializer_snapshot(&untouched) && !untouched.dither);
     uint32_t buffer=0,data[4]={1,2,3,4},read[4];
     CHECK(!pilot_gfx_vertex_create(sizeof(data),&buffer));pilot_gfx_vertex_upload(buffer,data,sizeof(data));

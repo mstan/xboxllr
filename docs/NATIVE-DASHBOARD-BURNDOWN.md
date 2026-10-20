@@ -21,8 +21,11 @@ the main thread opens the dashboard font and loads another section. Ordinary
 audio pause/resume now passes, and the remaining startup sound-effect buffers
 load. The shared inline command-buffer owner now passes the reached
 `D3D_MakeRequestedSpace` request. The missing animation virtual-method root
-`0004eaf0` now executes natively. The next stop is an unadmitted inline graphics
-method, `1b0c` with value zero. The explicit offline virtual-link query passes. No native menu
+`0004eaf0` now executes natively. Inline NULL texture bindings now pass on all
+four stages. The next stop is an original-created declaration-only vertex
+shader handle: the title constructs the object directly instead of using the
+native creation entry. Its packed-normal fixed-function input layout needs a
+shared native consumer. The explicit offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -44,7 +47,8 @@ functions execute.
 | Native ordinary audio pause/resume | Implemented; actual startup passes | Original software rules, real PCM/ADPCM queued-sample retention, notifications and three backend checks pass; synchronized mode remains guarded |
 | Inline graphics command-buffer owner | Implemented; reached space request passes | Profile-proved layout/defaults, real packet delivery/refetch/fences and repeated lifetime checks pass; unsupported methods remain guarded |
 | Animation indirect native root | Recovered; actual startup passes | Original 46-byte body, constructor/vtable proof and native x87 lowering; nearby source-proved table audit found no other missing root |
-| First rendered native menu | Current blocker | Startup reaches guarded inline graphics method `1b0c`; extend the shared native packet consumer with source-derived semantics |
+| Inline NULL texture bindings | Implemented; reached startup passes | Four stages, shared resources, original reference reconciliation, native unbind/rebind, two lifetimes and invalid-owner guards pass |
+| First rendered native menu | Current blocker | Consume original-created declaration-only vertex objects and their packed-normal fixed-function input layouts |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -331,6 +335,23 @@ fault semantics and kernel-version identity are retained as LLE-D08/D09 in the
 behavior remains implementation work in `.1.137`.
 
 ## Delivery order
+
+The inline NULL-texture batch advances the actual dashboard beyond method
+`1b0c`. Executable `9cfa3b45...` stops at an unowned original vertex handle
+`00ba4df1`, with 255389 stopped-title-thread entries, exit 2 before its deadline
+and no menu capture. Original caller `5c740` directly constructs a declaration-
+only object using the original declaration parsers; it bypasses the admitted
+CreateVertexShader entry. Source-derived layouts contain float3 positions and
+packed normals, with optional color or texture coordinates. Adopting the object
+and consuming its fixed-function layout remain required implementation work.
+
+Seven combined Windows checks pass in 1.85 seconds. They include real native
+stage unbinding and rebinding, all four inline stage packets sharing one texture,
+preserved guest references/use fence, two complete device lifetimes, and explicit
+guards for live guest bindings, missing original releases and enabled texture
+control. The optimized combined rebuild took 82.74 seconds without an explicit
+configure, retaining all 104 generated CPU objects. Variable load prevents a
+controlled speedup claim. The shared consumer contains no title address.
 
 The [incremental native recovery workflow](NATIVE-TITLE-DRIVER.md) now lowers
 the actual animation method `0004eaf0..0004eb1e`, retaining the original x87

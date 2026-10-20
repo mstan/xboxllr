@@ -13,6 +13,11 @@ struct GraphicsTextureObject {
 };
 static struct GraphicsTextureObject *graphics_textures;
 static unsigned graphics_texture_capacity;
+#ifdef PILOT_D3D_COMMANDS_VERSION
+/* Original inline NULL setters change the guest cache before their packets
+ * drain. Keep the native binding owner until the ordered command consumes it. */
+static uint32_t graphics_native_texture_headers[4];
+#endif
 /* A hint into the live ownership table, never another owner or a cached
  * pointer. Recheck the header on every hit: release/reuse, alias replacement
  * and realloc must retain exactly the same lookup and lifetime semantics. */
@@ -252,6 +257,10 @@ static void graphics_texture_bind(unsigned stage,uint32_t header)
 {
     if(stage>=4)stop("invalid texture stage",stage);
     uint32_t cache=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4,old=MEM32(cache),native=0,mode=0x80000000u;
+#ifdef PILOT_D3D_COMMANDS_VERSION
+    if(graphics_native_texture_headers[stage]!=old)
+        stop("texture cache changed without consumed binding commands",stage);
+#endif
     if(header) {
         unsigned slot=graphics_texture_refresh_alias(graphics_texture_slot(header));struct GraphicsTextureObject *texture=&graphics_textures[slot];
         if(texture->parent)stop("texture binding requires a texture",header);
@@ -270,8 +279,30 @@ static void graphics_texture_bind(unsigned stage,uint32_t header)
         MEM32(cache)=header;
         if(old)graphics_texture_binding_ref(old,0);
     } else if(old)MEM32(old+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);
+#ifdef PILOT_D3D_COMMANDS_VERSION
+    graphics_native_texture_headers[stage]=header;
+#endif
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_TEXTURE_MODE+stage*4)=mode;
 }
+#ifdef PILOT_D3D_COMMANDS_VERSION
+static int graphics_texture_inline_null(unsigned stage,int apply)
+{
+    if(stage>=4 || MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4))return 0;
+    uint32_t header=graphics_native_texture_headers[stage];
+    if(!header)return 1;
+    unsigned slot=graphics_texture_slot(header);struct GraphicsTextureObject *object=&graphics_textures[slot];
+    /* Original code already removed its internal reference and wrote its use
+     * fence. Several stages may have queued NULLs for the same texture, so the
+     * guest count can be lower by more than one before the first packet drains.
+     * Reconcile host ownership without subtracting the guest reference again. */
+    if(!object->bindings || ((MEM32(header)>>19)&15)>=object->bindings)return 0;
+    if(apply) {
+        --object->bindings;graphics_native_texture_headers[stage]=0;
+        graphics_texture_collect(slot);
+    }
+    return 1;
+}
+#endif
 static void graphics_texture_aliases_close(void)
 {
     for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].guest_owned) {

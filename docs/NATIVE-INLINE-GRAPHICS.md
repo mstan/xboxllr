@@ -26,6 +26,19 @@ its source bytes while previous GPU work and existing shader/binding ownership
 remain intact. Readback of already uploaded data remains valid. Unknown methods
 are implementation work if reached, rather than silently accepted state.
 
+Zero texture CONTROL0 packets now disable each of the four native sampling
+stages. The admitted runtime transaction is the original inline NULL setter:
+original software has cleared the selected guest cache and removed its internal
+resource reference before publishing the packet. The command consumer retains
+the prior native owner until that packet drains, then unbinds the actual native
+texture and reconciles host ownership without releasing the guest reference a
+second time or rewriting its last-use fence. Several pending stage NULLs may
+share one texture. Subsequent whole-API rebinding uses the same resource owner.
+The source-proved complete SetTexture body and reached inline caller both
+perform this transaction; no title addresses enter the shared implementation.
+Live guest bindings, missing original reference releases, enabled CONTROL0 and
+other texture register forms remain guarded rather than being treated as NULL.
+
 Title profiles supply the command ABI and device/global layout. The binder
 checks the original CreateDevice initializer's zero-default stores, reserve
 routine's device/current/limit/margin references, MakeSpace's half-window call,
@@ -52,3 +65,12 @@ and continues to a missing indirect native CPU target at `0004eaf0`. It exits 2
 before its deadline with 254635 stopped-title-thread entries and no captured
 menu. This proves startup advancement, not full scene rendering or menu QA.
 Original hardware is not needed for the current native-code discovery gap.
+
+The later NULL-binding batch passes seven combined Windows checks in 1.85s,
+including real native sampler state, all four stages sharing one resource,
+guest reference/fence preservation, rebinding, destruction, repeated lifetimes
+and five guard children. Its actual executable `9cfa3b45...` passes the NULL
+packet and reaches an original-created declaration-only vertex shader instead
+(255389 stopped-title-thread entries, exit 2 before deadline, no menu capture).
+All 104 generated CPU objects are retained. Original object adoption and its
+packed-normal fixed-function consumer remain required implementation work.

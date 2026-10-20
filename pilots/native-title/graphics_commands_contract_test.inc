@@ -1,4 +1,36 @@
 #ifdef PILOT_D3D_COMMANDS_VERSION
+static void test_graphics_command_null_textures(uint32_t base,const char *failure)
+{
+    uint32_t create[]={2,2,1,1,0,0x12,3};
+    uint32_t texture=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(texture);
+    for(unsigned stage=0;stage<4;++stage) {
+        uint32_t binding[]={stage,texture};call_graphics(PILOT_D3D_D3DDevice_SetTexture,binding);
+    }
+    unsigned slot=graphics_texture_slot(texture);CHECK(graphics_textures[slot].bindings==4);
+    uint32_t at=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_CURRENT_OFFSET);
+    CHECK(at>=base && at-base<=64);
+    /* Independent original NULL-setter effects: release each internal ref,
+     * clear its guest cache and publish the matching stage packet. All four
+     * original stores occur before the host consumes the first packet. */
+    for(unsigned stage=0;stage<4;++stage) {
+        if(!failure || strcmp(failure,"texture-live"))
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+stage*4)=0;
+        if(!failure || strcmp(failure,"texture-reference"))MEM32(texture)-=0x80000;
+        MEM32(texture+8)=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_RESOURCE_FENCE);
+        MEM32(at+stage*8)=0x41b0c+stage*64;
+        MEM32(at+stage*8+4)=failure && !strcmp(failure,"texture-enabled")?0x40000000:0;
+    }
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_CURRENT_OFFSET)=at+32;
+    uint32_t common=MEM32(texture),last_use=MEM32(texture+8),out=0x19500;
+    call_graphics(PILOT_D3D_D3DDevice_GetDeviceCaps,&out);CHECK(!failure);
+    CHECK(!graphics_textures[slot].bindings && MEM32(texture)==common && MEM32(texture+8)==last_use);
+    for(unsigned stage=0;stage<4;++stage)CHECK(!graphics_native_texture_headers[stage]);
+    uint32_t binding[]={0,texture};call_graphics(PILOT_D3D_D3DDevice_SetTexture,binding);
+    CHECK(graphics_textures[slot].bindings==1 && graphics_native_texture_headers[0]==texture);
+    binding[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetTexture,binding);
+    CHECK(!graphics_textures[slot].bindings && !graphics_native_texture_headers[0]);
+    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&texture)==0 && !test_pool_owned(texture));
+}
 static void test_graphics_commands(const char *failure)
 {
     vm_ensure();dispatch_ensure();
@@ -22,6 +54,7 @@ static void test_graphics_commands(const char *failure)
         uint32_t base=g_eax;CHECK(base==graphics_commands.base && g_esp==0x1800c && MEM32(0x18000)==0x12340);
         CHECK(g_ebx==0x12345678 && g_esi==0x23456789 && g_edi==0x3456789a && g_ebp==0x456789ab);
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_LIMIT_OFFSET)==base+request-PILOT_D3D_COMMANDS_MARGIN);
+        if(failure && !strncmp(failure,"texture-",8))test_graphics_command_null_textures(base,failure);
         struct PilotInitializerState observed;CHECK(pilot_gfx_initializer_snapshot(&observed) && !observed.dither);
         MEM32(base)=0x41710;MEM32(base+4)=0;MEM32(base+8)=0x40310;MEM32(base+12)=1;
         MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_CURRENT_OFFSET)=base+16;
@@ -40,6 +73,7 @@ static void test_graphics_commands(const char *failure)
         MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_CURRENT_OFFSET)=base+8;
         g_ecx=PILOT_D3D_DEVICE_OBJECT;call_graphics(PILOT_D3D_COMMANDS_KICKOFF_ENTRY,NULL);
         CHECK(pilot_gfx_initializer_snapshot(&observed) && !observed.dither && graphics_commands.methods==3 && graphics_fence_next==fences);
+        test_graphics_command_null_textures(base,NULL);CHECK(graphics_commands.methods==7);
         // This title does not expose the public InsertFence/BlockOnFence pair.
         // Exercise their real shared completion owner without admitting a
         // nonexistent guest wrapper just to make a fixture pass.
