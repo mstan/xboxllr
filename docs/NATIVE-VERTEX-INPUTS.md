@@ -72,6 +72,10 @@ or choices are visible yet. The process runs until the diagnostic deadline;
 this establishes progression, not responsiveness or audio acceptance.
 DB03 remains active. Next trace actual menu/text submission and its state.
 
+That checkpoint is superseded by the [transform-cache correction](NATIVE-TRANSFORM-CACHE.md):
+the main menu now renders and DB03 passes. Returning from Music exposes the
+next required resource-destruction contract under DB04.
+
 Optional raw draw/frame-input formats do not yet serialize current values or
 XYZ fixed-function transforms; explicit guards preserve that boundary under
 NTD-13. Ordinary native GPU image capture remains available. The iteration

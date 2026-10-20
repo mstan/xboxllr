@@ -128,6 +128,40 @@ class LTCGOriginalProofTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'layout/reference'):
             inspect(self.context,proof)
 
+    def test_projection_viewport_destination_is_distinct_and_source_proved(self):
+        self.assertEqual(self.binding['layout']['cache_fields']['transforms'],0xc60)
+        self.assertEqual(self.binding['layout']['transform_fields']['projection_viewport'],0x980)
+        for offset in (0xca0,0xc60,0x984,0x97c):
+            with self.subTest(offset=offset):
+                proof=copy.deepcopy(self.proof);proof['layout']['transform_fields']['projection_viewport']=offset
+                with self.assertRaises(ValueError):inspect(self.context,proof)
+
+    def test_projection_alias_correction_preserves_sources_and_rejects_drift(self):
+        for drift in (None,'header','record','wrapper'):
+            with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:
+                output=Path(directory);generated=output/'gen';generated.mkdir()
+                previous=copy.deepcopy(self.binding);previous['layout']['transform_fields']['projection_viewport']=0xca0
+                header=self.header.replace('PILOT_D3D_TRANSFORM_PROJECTION_VIEWPORT 0x980u','PILOT_D3D_TRANSFORM_PROJECTION_VIEWPORT 0xca0u')
+                if drift=='header':header+='/* drift */\n'
+                if drift=='record':previous['device_object']+=4
+                wrapper=self.wrapper+('/* drift */\n' if drift=='wrapper' else '')
+                (generated/'pilot_d3d_bindings.h').write_text(header)
+                (generated/'pilot_d3d_binding.c').write_text(wrapper)
+                record=output/'d3d-binding.aot-private.json';record.write_text(json.dumps(previous))
+                context=SimpleNamespace(output=output,generated=generated,manifest={'files':{},'d3d_binding':previous},
+                                        manifest_path=output/'generation.aot-private.json')
+                before={p.name:p.read_bytes() for p in generated.iterdir()}
+                with patch('native_d3d_ltcg.inspect',return_value=(self.binding,self.header,self.wrapper)):
+                    if drift:
+                        with self.assertRaises(ValueError):bind_ltcg(context,self.proof)
+                        self.assertEqual(before,{p.name:p.read_bytes() for p in generated.iterdir()})
+                    else:
+                        bind_ltcg(context,self.proof)
+                        self.assertEqual((generated/'pilot_d3d_binding.c').read_text(),self.wrapper)
+                        self.assertEqual((generated/'pilot_d3d_bindings.h').read_text(),self.header)
+                        with patch.object(Path,'write_text',side_effect=AssertionError('repeated write')):
+                            self.assertEqual(bind_ltcg(context,self.proof),self.binding)
+
     def test_exact_index_metadata_upgrade_retains_existing_source_and_guards_drift(self):
         for drift in (None,'header','record','wrapper'):
             with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:

@@ -55,16 +55,25 @@ static FILE *graphics_draw_capture(const uint32_t args[3])
 #endif
     return scene;
 }
-static void graphics_frame_capture_draw(unsigned shader,unsigned count,float x_scale,float x_anchor,int before)
+#include "graphics_fixed_capture.inc"
+static void graphics_frame_capture_draw(unsigned shader,const uint32_t args[3],uint32_t up_data,uint32_t up_stride,
+    const void *indices,unsigned index_count,int32_t base,float x_scale,float x_anchor,int before)
 {
     const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FRAME);
     if(!capture || !*capture || graphics_target!=graphics_headers)return;
-    static unsigned sequence,caller;
+    static unsigned sequence,caller,selected_shader;
     static int configured,filtered;
     static const char *trigger;
     if(sequence>=32)return;
     if(!configured) {
         configured=1;trigger=getenv("XLLE_PILOT_FRAME_CAPTURE_TRIGGER");
+        const char *selection=getenv("XLLE_PILOT_FRAME_CAPTURE_SHADER");
+        if(selection && *selection) {
+            char *end;unsigned long long value=strtoull(selection,&end,0);
+            if(selection[0]<'0' || selection[0]>'9' || *end || !value || value>UINT32_MAX)
+                stop("frame capture shader must be a nonzero uint32 literal",0);
+            selected_shader=(unsigned)value;filtered=1;
+        }
         const char *setting=getenv("XLLE_PILOT_FRAME_CAPTURE_CALLER");
         if(setting && *setting) {
             char *end;unsigned long long value=strtoull(setting,&end,0);
@@ -73,7 +82,7 @@ static void graphics_frame_capture_draw(unsigned shader,unsigned count,float x_s
             caller=(unsigned)value;filtered=1;
         }
     }
-    if((before && !filtered) || (filtered && MEM32(g_esp)!=caller))return;
+    if((before && !filtered) || (caller && MEM32(g_esp)!=caller) || (selected_shader && shader!=selected_shader))return;
     /* A late trigger leaves the existing startup capture unchanged when
      * absent. A caller filter captures paired before/after images of only
      * that producer, still bounded to 32 total images. */
@@ -87,6 +96,7 @@ static void graphics_frame_capture_draw(unsigned shader,unsigned count,float x_s
     FILE *file=fopen(path,"wb");if(!file || fprintf(file,"P6\n%u %u\n255\n",width,height)<0)stop("frame capture open",0);
     for(unsigned i=0;i<width*height;++i)if(fwrite(pixels+i*4,3,1,file)!=1)stop("frame capture write",0);
     free(pixels);if(fclose(file))stop("frame capture close",0);
+    if(before)graphics_fixed_capture_inputs(capture,sequence,shader,args,up_data,up_stride,indices,index_count,base);
     uint32_t target_shape[3]={0},header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES);
     uint32_t source_width=0,source_height=0;
     /* Observation never adopts an absent texture/alias through the ordinary
@@ -97,7 +107,7 @@ static void graphics_frame_capture_draw(unsigned shader,unsigned count,float x_s
     int32_t shape_status=pilot_gfx_reference_target_readback(0,NULL,0,target_shape);
     struct PilotRasterObservation raster;int32_t raster_status=pilot_gfx_reference_raster(&raster);
     fprintf(stderr,"[FRAME DRAW CAPTURE] sequence=%u phase=%s caller=%08x shader=%08x count=%u target=%08x storage=%ux%u shape_status=%08x texture=%08x source_guest=%ux%u x_scale=%.9g x_anchor=%.9g image=%s\n",
-        sequence,before?"before":"after",MEM32(g_esp),shader,count,graphics_target,target_shape[0],target_shape[1],(uint32_t)shape_status,
+        sequence,before?"before":"after",MEM32(g_esp),shader,args[2],graphics_target,target_shape[0],target_shape[1],(uint32_t)shape_status,
         header,source_width,source_height,x_scale,x_anchor,path);
     fprintf(stderr,"[FRAME RASTER CAPTURE] sequence=%u status=%08x available=%u viewport=%.9g,%.9g,%.9g,%.9g,%.9g,%.9g scissor_enabled=%u scissor=%d,%d,%d,%d source_storage=%ux%u\n",
         sequence,(uint32_t)raster_status,raster.available,raster.viewport[0],raster.viewport[1],raster.viewport[2],
@@ -249,7 +259,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     if(!up_data && !indices)scene_reference=graphics_draw_capture(args);
     }
     graphics_draw_profile_step(&profile,4);
-    graphics_frame_capture_draw(shader,count,mod_x_scale,mod_x_anchor,1);
+    graphics_frame_capture_draw(shader,args,up_data,up_stride,indices,index_count,base,mod_x_scale,mod_x_anchor,1);
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     if(!indices)graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);
 #endif
@@ -260,7 +270,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     if(scene_reference)graphics_scene_finish(scene_reference);
     if(graphics_diagnostic(GRAPHICS_DIAGNOSTIC_MOVIE))graphics_movie_capture_draw();
     if(pilot_verbose)fprintf(stderr,"[DRAW SUBMIT] primitive=%u first=%u count=%u\n",primitive,first,count);
-    graphics_frame_capture_draw(shader,count,mod_x_scale,mod_x_anchor,0);
+    graphics_frame_capture_draw(shader,args,up_data,up_stride,indices,index_count,base,mod_x_scale,mod_x_anchor,0);
     graphics_draw_profile_step(&profile,6);
 }
 static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)

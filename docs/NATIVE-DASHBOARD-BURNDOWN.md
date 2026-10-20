@@ -18,18 +18,18 @@ Rows have different sizes, so their count is not a completion percentage.
 |---|---|---|---|
 | DB01 | Reach native dashboard graphics startup | Passed for reached startup | Actual native execution loads assets, opens native audio and passes the animation and inline NULL-texture boundaries. Latest run: `9cfa3b45...`, 255389 stopped-thread entries. |
 | DB02 | Consume the dashboard's original vertex layouts | Passed for reached layouts | Three original declaration-only layout classes consume packed normals/color/UV and cached transforms on the GPU. Pixel/reference and ownership checks pass; actual startup binds the original object and advances into mesh submission. Lighting remains disabled for this reached caller. |
-| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Current attributes and XYZ FVF now pass. A 20-second run captures 17 images and renders the green 3D background, but menu text/choices are not visible yet. Next trace their actual submission/state. |
-| DB04 | Make the ordinary menus usable | Pending | Exercise controller navigation, opening/back transitions and supported offline menu paths; record failures explicitly. Determine concrete routes from the actual menu after DB03. |
+| DB03 | Draw the first real dashboard menu | **Passed** | Actual native runs show stable Memory/Music/Settings labels and controller hints. Source-proved correction separates raw projection from its viewport-adjusted output. See [transform cache](NATIVE-TRANSFORM-CACHE.md). |
+| DB04 | Make the ordinary menus usable | **Active** | Music opens and renders its item list. B returns into guarded original caller-owned resource destruction. Implement that original allocator/lifetime contract, then batch Music/Settings/Memory opening and back transitions. |
 | DB05 | Check dashboard audio and responsiveness | Pending | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
 | DB06 | Validate the native Credits mod | Pending | Open the bottom Credits entry in the actual native dashboard, verify the intended credits/legal content, then return to ordinary menus. |
 | DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
 | DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
 
-Current next action: **DB03**, trace menu/text submission and its state. Shared
-current-value input and XYZ FVF owners now pass actual startup. The bounded
-20-second run reaches its deadline without another unsupported-operation
-stop and renders the green dashboard background. Its 17 images do not show
-recognizable menu choices, so this progress does not pass the first-menu row.
+Current next action: **DB04**, original caller-owned resource destruction
+reached while returning from Music (`D3D_DestroyResource`, header `01515ff0`).
+DB03 now passes: correcting the source-proved projection/viewport destination
+restores the main menu labels. Music opens and its list renders, but its back
+transition does not pass yet. Settings/Memory routes remain unverified.
 Use the shared [TCP input and screenshot controls](NATIVE-TCP-CONTROL.md) for
 the live investigation. Owner visual/navigation validation can provide a
 quick acceptance check once a usable menu is ready.
@@ -74,10 +74,10 @@ cached physical alias, and original destruction of native-owned temporaries
 passes. Native edge coverage and source-proved host swath scheduling now
 pass reached startup; controller port zero opens. The resource wait now
 passes too. Current vertex attributes and XYZ FVF now pass, and the native
-dashboard renders its green 3D background. A 20-second run captures 17
-presentations but no recognizable menu text or choices. The explicit
-offline virtual-link query passes. No native menu
-frame has been captured. This is implementation work; original hardware
+dashboard renders its main menu after the raw/derived projection cache
+correction. Music opens, while returning reaches guarded original allocator
+resource destruction. The explicit offline virtual-link query passes. Complete
+menu navigation has not yet passed. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
 functions execute.
@@ -106,7 +106,7 @@ functions execute.
 | Native edge coverage and swath scheduling | Implemented; reached startup passes | Real four-sample coverage before Gaussian resolve, preserved destination/blending, cached requests and host scheduling; exact edge-alpha precision remains NTD-14. See [edge coverage](NATIVE-EDGE-ANTIALIASING.md). |
 | Shared resource waits | Implemented; reached startup passes | Source-proved register ABI, real GPU serial/event waits, bound/parent resource semantics and private retention across last public Release; see [resource waits](NATIVE-RESOURCE-WAITS.md). |
 | Current vertex inputs and XYZ FVF | Implemented; actual startup passes | Shared live current-value GPU buffer, packet producers, source-decoded FVF and cached fixed-function shaders; 15 combined checks pass. See [vertex inputs](NATIVE-VERTEX-INPUTS.md). |
-| First rendered native menu | Current blocker | Green 3D background renders; trace missing menu text/choices and retain a stable recognizable menu |
+| First rendered native menu | Passed | Stable labels/hints after source-proved raw/derived projection separation; see [transform cache](NATIVE-TRANSFORM-CACHE.md) |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -122,12 +122,11 @@ delivery burndown.
 
 ## Current graphics batch evidence
 
-Latest: [vertex inputs](NATIVE-VERTEX-INPUTS.md). Actual startup passes current
-attributes and XYZ FVF, then runs until the 20-second diagnostic deadline.
-Seventeen captures include the green 3D background; menu text/choices remain
-missing. Fifteen combined Windows checks pass, including live current-value
-updates, cached XYZ fixed-function shaders and earlier graphics/audio/scheduler
-regression. All 118 CPU objects remain unchanged. The evidence below records
+Latest: [transform cache](NATIVE-TRANSFORM-CACHE.md). Actual startup renders
+the main menu and opens Music. Returning reaches guarded original allocator
+resource destruction. Nineteen source/profile checks, three unchanged original
+helper executions and 18 combined Windows checks pass. All 118 CPU objects
+remain unchanged by this profile correction. The evidence below records
 preceding graphics checkpoints.
 
 The latest [indexed drawing batch](NATIVE-INDEXED-DRAWING.md) advances actual

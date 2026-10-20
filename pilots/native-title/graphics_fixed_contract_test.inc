@@ -3,6 +3,16 @@ static void test_graphics_fixed_declarations(const char *failure)
     const uint32_t data=0x19d00;const float positions[3][3]={{-.7f,.6f,.5f},{.6f,.6f,.5f},{0,-.6f,.5f}};
     float identity[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     for(unsigned i=0;i<10;++i)memcpy(memory+TRANSFORM_STATE(TRANSFORMS)+i*64,identity,64);
+    /* Exercise the production derived-matrix writer. Directly seeding both
+     * matrices with identity cannot detect a profile that aliases its output
+     * with the raw projection input. */
+    uint32_t source=data+512;memcpy(memory+source,identity,64);
+    uint32_t transform_args[]={1,source};call_graphics(PILOT_D3D_D3DDevice_SetTransform,transform_args);
+    CHECK(!memcmp(memory+TRANSFORM_STATE(TRANSFORMS)+64,identity,64));
+    unsigned char derived[64];memcpy(derived,memory+TRANSFORM_FIELD(PROJECTION_VIEWPORT),64);
+    graphics_projection_viewport();
+    CHECK(!memcmp(memory+TRANSFORM_STATE(TRANSFORMS)+64,identity,64));
+    CHECK(!memcmp(derived,memory+TRANSFORM_FIELD(PROJECTION_VIEWPORT),64));
     graphics_store_float(TRANSFORM_STATE(TRANSFORMS)+6*64+48,.2f); /* original inline world update */
     graphics_render_state(102,0,1);graphics_render_state(143,0,1);graphics_render_state(59,0,1);
     graphics_render_state(60,0,1);graphics_render_state(92,0,1);graphics_render_state(147,0,1);

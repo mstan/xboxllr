@@ -134,6 +134,14 @@ def inspect(context,proof):
     require('state_initializer','movzx',f'ecx, byte ptr [edi + {hex(layout["texture_defaults"])}]')
     require('state_initializer','mov',f'dword ptr [esi + {hex(layout["transform_fields"]["screen_offset"])}], eax')
     require('state_initializer','mov',f'eax, {hex(layout["screen_bias"])}')
+    # SetTransform stores the raw ten-matrix array. The projection/viewport
+    # helper multiplies its projection input into a separate destination.
+    # Confusing those two operands corrupts the title's queryable projection.
+    matrices=layout['cache_fields']['transforms']
+    combined=layout['transform_fields']['projection_viewport']
+    if not (combined+64<=matrices or combined>=matrices+10*64):
+        raise ValueError('projection/viewport destination overlaps raw transform cache')
+    require('D3D_UpdateProjectionViewportTransform','lea',f'ecx, [edx + {hex(matrices+64)}]')
     require('reset_buffers','mov',f'dword ptr [{hex(layout["presentation_interval"])}], edx')
     require('Get2DSurfaceDesc','mov',f'al, byte ptr [ecx + {hex(layout["surface_formats"])}]')
     require('D3DDevice_SetVertexShader','mov',f'edi, {hex(layout["fvf_object"])}')
@@ -239,7 +247,7 @@ def inspect(context,proof):
             ('projection_depth','D3DDevice_SetTransform','fstp','dword ptr [ebx + {offset}]'),
             ('depth_scale','D3D_UpdateProjectionViewportTransform','fmul','dword ptr [edx + {offset}]'),
             ('pixel_scale','D3D_UpdateProjectionViewportTransform','fmul','dword ptr [edx + {offset}]'),
-            ('projection_viewport','D3D_UpdateProjectionViewportTransform','lea','ecx, [edx + {offset}]')):
+            ('projection_viewport','D3D_UpdateProjectionViewportTransform','add','edx, {offset}')):
         require(name,mnemonic,template.format(offset=hex(transform[field])))
     facts=dict(render_defaults=list(struct.unpack('<109I',read(layout['render_defaults'],436))),
                texture_defaults=list(read(layout['texture_defaults'],32)),
@@ -357,6 +365,25 @@ def bind(context,proof):
     generated=context.generated;record=context.output/'d3d-binding.aot-private.json'
     texts={'pilot_d3d_bindings.h':header,'pilot_d3d_binding.c':wrapper}
     if (generated/'pilot_d3d_binding.c').exists():
+        # Correct only the exact old input-as-output alias. inspect() has
+        # proved the new destination from the unchanged original helper.
+        if ('transforms' in binding['layout'].get('cache_fields',{}) and
+                'projection_viewport' in binding['layout'].get('transform_fields',{})):
+            previous=copy.deepcopy(binding)
+            previous['layout']['transform_fields']['projection_viewport']=binding['layout']['cache_fields']['transforms']+64
+            current_define=f'#define PILOT_D3D_TRANSFORM_PROJECTION_VIEWPORT 0x{binding["layout"]["transform_fields"]["projection_viewport"]:x}u\n'
+            old_define=f'#define PILOT_D3D_TRANSFORM_PROJECTION_VIEWPORT 0x{previous["layout"]["transform_fields"]["projection_viewport"]:x}u\n'
+            previous_header=header.replace(current_define,old_define)
+            actual=json.loads(record.read_text())
+            if (actual==previous and actual!=binding and context.manifest.get('d3d_binding')==actual and
+                    header.count(current_define)==1 and (generated/'pilot_d3d_binding.c').read_text()==wrapper and
+                    (generated/'pilot_d3d_bindings.h').read_text()==previous_header):
+                (generated/'pilot_d3d_bindings.h').write_text(header,encoding='utf-8',newline='\n')
+                record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+                context.manifest['d3d_binding']=binding
+                context.manifest['files']['pilot_d3d_bindings.h']=hashlib.sha256((generated/'pilot_d3d_bindings.h').read_bytes()).hexdigest()
+                context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+                return binding
         additions={'index_data_global':'INDEX_DATA_GLOBAL','device_references':'DEVICE_REFERENCES'}
         available=[key for key in additions if key in binding['layout']]
         for count in range(1,len(available)+1):

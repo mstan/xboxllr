@@ -55,5 +55,7 @@ idle connection. Actual native-title input and GPU capture are checked
 separately in the dashboard run. The live muted run confirms delivery of
 Start/A, successful 640x480 presented PNG captures, input release and continued
 execution until its 30-second deadline. The images still lack menu labels;
-this validates the remote tooling, not menu acceptance. Eighteen combined
+this initial run validates the remote tooling, not menu acceptance. The later
+[transform-cache correction](NATIVE-TRANSFORM-CACHE.md) restores the labels;
+TCP controls then open Music and expose a guarded back transition. Eighteen combined
 Windows checks and 35 title-driver checks pass.
