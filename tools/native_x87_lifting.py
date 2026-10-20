@@ -1,8 +1,9 @@
-"""Framework-owned x87 extensions around the immutable pinned CPU generator.
+"""Framework-owned floating-point extensions around the pinned CPU generator.
 
 FCMOV reads CPU CF/ZF/PF, not x87 condition codes. Reuse the donor's existing
 CFG-aware CPU flag expressions by lifting ordinary spans between these flag
 consumers. Unsupported x87 instructions must never disappear as comments.
+Read-only SSE control stores also preserve the existing CPU flag context.
 """
 from copy import copy
 import json
@@ -18,6 +19,7 @@ sites={}
 def install(module):
     if getattr(module,'_xboxllr_x87_extension',False):return
     original_block=module.lift_basic_block;original_fpu=module.Lifter._lift_fpu
+    original_instruction=module.Lifter.lift_instruction
     def guard(instruction,reason):
         sites[instruction.address]=dict(address=instruction.address,mnemonic=instruction.mnemonic,
             status='guarded',reason=reason)
@@ -27,7 +29,7 @@ def install(module):
         match=re.fullmatch(r'st(?:\(([0-7])\)|([0-7]))?',operand.reg or '')
         return int((match.group(1) or match.group(2) or '0')) if match else None
     def lift_block(lifter,block,flag_state=None):
-        if not any(i.mnemonic.startswith('fcmov') for i in block.instructions):
+        if not any(i.mnemonic.startswith('fcmov') or i.mnemonic=='stmxcsr' for i in block.instructions):
             return original_block(lifter,block,flag_state)
         statements=[];span=[]
         def flush():
@@ -37,9 +39,11 @@ def install(module):
                 emitted,flag_state=original_block(lifter,part,flag_state)
                 statements.extend(emitted);span=[]
         for instruction in block.instructions:
-            if not instruction.mnemonic.startswith('fcmov'):
+            if not instruction.mnemonic.startswith('fcmov') and instruction.mnemonic!='stmxcsr':
                 span.append(instruction);continue
             flush();condition=None;ops=instruction.operands
+            if instruction.mnemonic=='stmxcsr':
+                statements.extend(lift_instruction(lifter,instruction));continue
             jcc=CONDITIONS.get(instruction.mnemonic)
             index=register_index(ops[1]) if len(ops)==2 else None
             if jcc and flag_state and index is not None and register_index(ops[0])==0:
@@ -62,7 +66,20 @@ def install(module):
         if any('/* FPU:' in statement for statement in statements):
             return [guard(instruction,'unqualified x87 instruction '+mnemonic)]
         return statements
+    def lift_instruction(lifter,instruction):
+        if instruction.mnemonic=='stmxcsr':
+            ops=instruction.operands
+            if len(ops)!=1 or ops[0].type!='mem' or ops[0].mem_size!=4:
+                return [guard(instruction,'unqualified SSE control query operand')]
+            sites[instruction.address]=dict(address=instruction.address,mnemonic='stmxcsr',status='lowered')
+            address=module._fmt_mem(ops[0])
+            return ['{ extern uint32_t recomp_mxcsr_read(void); '+
+                    f'MEM32({address}) = recomp_mxcsr_read(); }} /* stmxcsr: read native SSE control */']
+        if instruction.mnemonic=='ldmxcsr':
+            return [guard(instruction,'unqualified SSE control write')]
+        return original_instruction(lifter,instruction)
     module.lift_basic_block=lift_block;module.Lifter._lift_fpu=lift_fpu
+    module.Lifter.lift_instruction=lift_instruction
     translator=sys.modules.get('tools.recomp.translator')
     if translator is not None:translator.lift_basic_block=lift_block
     module._xboxllr_x87_extension=True

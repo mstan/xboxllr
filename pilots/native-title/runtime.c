@@ -207,6 +207,13 @@ static void commit(uint32_t address, uint32_t size)
 }
 
 void recomp_unimpl(const char *text, uint32_t va) { stop(text, va); }
+#include "native_sse_control.h"
+uint32_t recomp_mxcsr_read(void)
+{
+    uint32_t value=pilot_native_mxcsr_read();
+    if(value==UINT32_MAX)stop("unqualified native SSE rounding environment",0);
+    return value;
+}
 void recomp_icall_fail_log(uint32_t va) { stop("unresolved indirect target", va); }
 void recomp_icall_not_code_log(uint32_t va, uint32_t saved) { (void)saved; stop("non-code indirect target", va); }
 void recomp_int3_reached(uint32_t va) { stop("guest breakpoint", va); }

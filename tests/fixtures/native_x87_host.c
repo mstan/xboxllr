@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include "native_sse_control.h"
+uint32_t recomp_mxcsr_read(void){return pilot_native_mxcsr_read();}
 ptrdiff_t g_xbox_mem_offset;
 RECOMP_TLS uint32_t g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp;
 RECOMP_TLS uint32_t g_fs_base,g_seh_ebp,g_icall_saved_esp,g_icall_dispatch_form;
@@ -19,6 +21,7 @@ void recomp_trace_exit(const char *name,uint32_t address){(void)name;(void)addre
 static unsigned parity(uint32_t value){unsigned count=0;for(unsigned i=0;i<8;++i)count+=(value>>i)&1;return !(count&1);}
 int main(void)
 {
+    unsigned char *memory=calloc(1,0x20000);CHECK(memory);g_xbox_mem_offset=(ptrdiff_t)memory;
     const uint32_t pairs[][2]={{0,1},{1,0},{0,0},{2,0},{3,0}};unsigned runs=0;
     for(unsigned kind=0;kind<8;++kind)for(unsigned source=1;source<8;++source)
     for(unsigned top=0;top<8;++top)for(unsigned p=0;p<5;++p)for(int fcmp=-1;fcmp<=2;++fcmp) {
@@ -62,5 +65,27 @@ int main(void)
         CHECK(g_edx==((a==b)|((a<b)<<8)|(parity(a-b)<<16)));
     }
     puts("PASS clear exception status retains all comparison codes, TOP, values, control word and CPU flags");
+    fenv_t environment;CHECK(!fegetenv(&environment));runs=0;
+    const int modes[]={FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO};
+    for(unsigned mode=0;mode<4;++mode) {
+        CHECK(!fesetround(modes[mode]) && !feclearexcept(FE_ALL_EXCEPT));
+        if(mode&1)CHECK(!feraiseexcept(FE_INVALID|FE_DIVBYZERO));
+        uint32_t expected=pilot_native_mxcsr_read();CHECK(((expected>>13)&3)==mode);
+        int flags=fetestexcept(FE_ALL_EXCEPT);
+        for(unsigned indexed=0;indexed<2;++indexed)for(unsigned p=0;p<5;++p) {
+            uint32_t a=pairs[p][0],b=pairs[p][1];g_eax=a;g_ebx=b;g_edx=0;g_esp=0x18000;g_esi=0x10ffc;
+            g_fp_top=5;g_fp_cmp=2;g_fp_cc=0x4500;g_fp_control_word=0x027f;
+            MEM32(0x10ffc)=MEM32(0x11004)=0xa5b6c7d8;MEM32(0x11000)=0;
+            (indexed?INDEXED:STORED)();
+            CHECK(MEM32(0x11000)==expected && MEM32(0x10ffc)==0xa5b6c7d8 && MEM32(0x11004)==0xa5b6c7d8);
+            CHECK(g_eax==a && g_ebx==b && g_esi==0x10ffc && g_esp==0x18004);
+            CHECK(g_edx==((a==b)|((a<b)<<8)|(parity(a-b)<<16)));
+            CHECK(g_fp_top==5 && g_fp_cmp==2 && g_fp_cc==0x4500 && g_fp_control_word==0x027f);
+            CHECK(fegetround()==modes[mode] && fetestexcept(FE_ALL_EXCEPT)==flags && pilot_native_mxcsr_read()==expected);
+            ++runs;
+        }
+    }
+    CHECK(!fesetenv(&environment));free(memory);
+    printf("PASS %u SSE control stores: absolute/indexed DWORD, four rounding modes, preserved CPU flags, x87 state, native environment and adjacent bytes\n",runs);
     return 0;
 }
