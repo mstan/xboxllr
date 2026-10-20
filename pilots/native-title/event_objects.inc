@@ -28,6 +28,8 @@ static EventSet mutant_nt_release;
 static EventQuery mutant_nt_query;
 static HANDLE media_wait_duplicate(uint32_t id,uint32_t *status);
 static HANDLE thread_wait_duplicate(uint32_t id,uint32_t *status);
+static int native_apc_pending(void);
+static void native_apc_rearm_if_ready(void);
 static BOOL CALLBACK event_start(PINIT_ONCE once,void *parameter,void **context)
 {
     (void)once;(void)parameter;(void)context;HMODULE nt=GetModuleHandleW(L"ntdll.dll");
@@ -123,13 +125,13 @@ static void delay_thread_kernel(void)
     wait_native_thread_context(99);
     if(!InitOnceExecuteOnce(&event_once,event_start,NULL,NULL))stop("delay initialization failed",0);
     uint32_t mode=MEM8(g_esp+4),alertable=MEM8(g_esp+8),interval=MEM32(g_esp+12);
-    if(mode>1 || alertable)stop("native delay APC/mode unqualified",mode);
+    if(mode>1 || (alertable && !mode))stop("native delay APC/mode unqualified",mode);
     if(!wait_range(interval,8,0))stop("native delay interval range unqualified",interval);
     LARGE_INTEGER due;memcpy(&due,memory+interval,8);
     /* Relative 100ns intervals and zero share the original contract. Absolute
      * dates need a proved guest/host clock-domain translation, not a guess. */
     if(due.QuadPart>0)stop("native absolute delay unqualified",interval);
-    g_eax=(uint32_t)thread_nt_delay(FALSE,&due);
+    g_eax=alertable && native_apc_pending()?0xc0u:(uint32_t)thread_nt_delay((BOOLEAN)alertable,&due);
     /* Desktop's optimized yield may report STATUS_NO_YIELD_PERFORMED.
      * Original KeDelay returns success on the expired/zero-time path, even
      * when no peer runs. Retain the real wait and all other native statuses. */
@@ -138,15 +140,15 @@ static void delay_thread_kernel(void)
 }
 static void wait_single_kernel(unsigned ordinal)
 {
-    uint32_t id=MEM32(g_esp+4),mode=ordinal==234?MEM8(g_esp+8):0;
+    uint32_t id=MEM32(g_esp+4),mode=ordinal==234?MEM8(g_esp+8):1;
     uint32_t alertable=MEM8(g_esp+(ordinal==234?12:8));
     uint32_t timeout=MEM32(g_esp+(ordinal==234?16:12));
-    if(mode>1 || alertable)stop("native single wait APC/mode unqualified",id);
+    if(mode>1 || (alertable && !mode))stop("native single wait APC/mode unqualified",id);
     if(timeout && !wait_range(timeout,8,0))stop("native single wait timeout range unqualified",timeout);
     LARGE_INTEGER due;if(timeout)memcpy(&due,memory+timeout,8);
     uint32_t status;HANDLE host=wait_reference(id,&status);g_eax=status;
     if(host) {
-        g_eax=(uint32_t)event_nt_wait(host,FALSE,timeout?&due:NULL);
+        g_eax=alertable && native_apc_pending()?0xc0u:(uint32_t)event_nt_wait(host,(BOOLEAN)alertable,timeout?&due:NULL);
         if(!CloseHandle(host))stop("single wait operation reference close failed",id);
     }
     g_esp+=ordinal==234?20:16;
@@ -157,7 +159,7 @@ static void signal_wait_kernel(void)
     if(!InitOnceExecuteOnce(&event_once,event_start,NULL,NULL))stop("signal/wait initialization failed",0);
     uint32_t signal=MEM32(g_esp+4),wait=MEM32(g_esp+8),mode=MEM8(g_esp+12);
     uint32_t alertable=MEM8(g_esp+16),timeout=MEM32(g_esp+20);
-    if(mode>1 || alertable)stop("native signal/wait APC/mode unqualified",signal);
+    if(mode>1 || (alertable && !mode))stop("native signal/wait APC/mode unqualified",signal);
     if(timeout && !wait_range(timeout,8,0))stop("native signal/wait timeout range unqualified",timeout);
     if((signal&0xf0000000u)!=0x30000000u)stop("native signal/wait signal type unqualified",signal);
     LARGE_INTEGER due;if(timeout)memcpy(&due,memory+timeout,8);
@@ -173,7 +175,8 @@ static void signal_wait_kernel(void)
         if(second) {
             /* Both references precede the first mutation. Use the real paired
              * NT service; a separate SetEvent+Wait sequence is not used. */
-            g_eax=(uint32_t)event_nt_signal_wait(first,second,FALSE,timeout?&due:NULL);
+            if(alertable)native_apc_rearm_if_ready();
+            g_eax=(uint32_t)event_nt_signal_wait(first,second,(BOOLEAN)alertable,timeout?&due:NULL);
             if(!CloseHandle(second))stop("signal/wait wait reference close failed",wait);
         }
         if(!CloseHandle(first))stop("signal/wait signal reference close failed",signal);
@@ -186,7 +189,7 @@ static void wait_multiple_kernel(void)
     if(!InitOnceExecuteOnce(&event_once,event_start,NULL,NULL))stop("multiwait initialization failed",0);
     uint32_t count=MEM32(g_esp+4),array=MEM32(g_esp+8),kind=MEM32(g_esp+12);
     uint32_t mode=MEM32(g_esp+16),alertable=MEM8(g_esp+20),timeout=MEM32(g_esp+24);
-    if(!count || count>64 || kind>1 || mode>1 || alertable)
+    if(!count || count>64 || kind>1 || mode>1 || (alertable && !mode))
         stop("unqualified multi-object wait parameters",count);
     if(!wait_range(array,count*4,0) || (timeout && !wait_range(timeout,8,0)))
         stop("unqualified multi-object wait range",array);
@@ -205,7 +208,8 @@ static void wait_multiple_kernel(void)
         uint32_t status;handles[i]=wait_reference(ids[i],&status);
         if(!handles[i]){g_eax=status;break;}
     }
-    if(!g_eax)g_eax=(uint32_t)event_nt_wait_multiple(count,handles,kind,FALSE,timeout?&due:NULL);
+    if(!g_eax)g_eax=alertable && native_apc_pending()?0xc0u:
+        (uint32_t)event_nt_wait_multiple(count,handles,kind,(BOOLEAN)alertable,timeout?&due:NULL);
     for(unsigned i=0;i<count;++i)if(handles[i] && !CloseHandle(handles[i]))
         stop("multiwait operation reference close failed",ids[i]);
     g_esp+=28;

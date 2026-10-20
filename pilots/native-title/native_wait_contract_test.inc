@@ -119,7 +119,7 @@ static void test_native_wait_guard(const char *name)
         dispatch_in_dpc=1;call_kernel(230,args,5);CHECK(0);
     } else if(!strcmp(name,"native-wait-thread-dpc")) {
         uint32_t status;dispatch_in_dpc=1;(void)thread_wait_duplicate(0x40000001u,&status);CHECK(0);
-    } else if(!strcmp(name,"native-wait-delay-alertable"))args[1]=1;
+    } else if(!strcmp(name,"native-wait-delay-alertable")){args[0]=0;args[1]=1;}
     else if(!strcmp(name,"native-wait-delay-absolute"))MEM64(args[2])=1;
     else if(!strcmp(name,"native-wait-delay-range"))args[2]=0xfffffffcu;
     else if(!strcmp(name,"native-wait-signal-blocking")) {

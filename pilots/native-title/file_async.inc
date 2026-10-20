@@ -8,6 +8,7 @@ struct MediaAsyncTransfer {
     PTP_WAIT waiter;
     struct MediaFile *owner;
     uint32_t iosb,length,write;
+    struct NativeFileApc *apc;
 };
 static void media_async_publish(uint32_t iosb,uint32_t status,uint32_t bytes)
 {
@@ -19,6 +20,7 @@ static void media_async_publish(uint32_t iosb,uint32_t status,uint32_t bytes)
 static void media_async_release(struct MediaAsyncTransfer *r)
 {
     struct MediaFile *owner=r->owner;
+    native_apc_discard(r->apc);
     if((r->event && !CloseHandle(r->event)) || !CloseHandle(r->done))stop("asynchronous IO handle cleanup failed",owner->id);
     CloseThreadpoolWait(r->waiter);free(r);
     if(!owner->pending)stop("asynchronous file ownership underflow",owner->id);
@@ -30,6 +32,7 @@ static void media_async_finish(struct MediaAsyncTransfer *r)
     struct MediaFile *owner=r->owner;uint32_t status=(uint32_t)r->io.Status;
     if(status==0x103u || r->io.Information>r->length)stop("invalid native asynchronous completion",owner->id);
     media_async_publish(r->iosb,status,(uint32_t)r->io.Information);
+    native_apc_complete(r->apc);r->apc=NULL;
     if(r->event && event_nt_set(r->event,NULL)<0)stop("file event completion delivery failed",owner->id);
     /* Original async IO signals its explicit event, or the file when no event
      * is supplied. It does not notify both objects for the same request. */
@@ -46,18 +49,21 @@ static void CALLBACK media_async_ready(PTP_CALLBACK_INSTANCE instance,void *cont
 }
 static uint32_t media_async_transfer(struct MediaFile *owner,const uint32_t *a,int write)
 {
-    if(a[2])stop("asynchronous file APC delivery outside qualified scope",a[2]);
     if(!a[7])stop("asynchronous transfer requires explicit offset",owner->id);
     LARGE_INTEGER offset;offset.QuadPart=(int64_t)MEM64(a[7]);
     uint32_t status=0;HANDLE event=a[1]?event_duplicate(a[1],&status):NULL;
     if(status)return status;
+    struct NativeFileApc *apc=a[2]?native_apc_prepare(a[2],a[3],a[4],&status):NULL;
+    if(status){if(event)CloseHandle(event);return status;}
     struct MediaAsyncTransfer *r=calloc(1,sizeof(*r));
     if(r){r->event=event;r->done=CreateEventW(NULL,FALSE,FALSE,NULL);r->waiter=CreateThreadpoolWait(media_async_ready,r,NULL);}
     if(!r || !r->done || !r->waiter) {
         if(r){if(r->done)CloseHandle(r->done);if(r->waiter)CloseThreadpoolWait(r->waiter);free(r);}if(event)CloseHandle(event);
+        native_apc_discard(apc);
         return 0xc000009au;
     }
     r->owner=owner;r->iosb=a[4];r->length=a[6];r->write=write;r->io.Status=(LONG)0x103;
+    r->apc=apc;
     if((event && event_nt_reset(event,NULL)<0) || !ResetEvent(owner->async_idle) || !ResetEvent(owner->async_signal))stop("file IO event reset failed",owner->id);
     ++owner->pending;
     if(write)fprintf(stderr,"[ASYNC FILE WRITE] handle=%08x event=%08x bytes=%u offset=%lld\n",owner->id,a[1],a[6],offset.QuadPart);

@@ -56,6 +56,8 @@ static int test_write_faults(uint32_t va);
 static void test_scheduler_worker(void);
 static void test_thread_fp_body(void);
 static void test_thread_lifetime_body(void);
+static void test_file_apc_worker(void);
+static void test_file_apc_callback(void);
 #if defined(PILOT_D3D_RESOURCE_RETIRE_VERSION) && !defined(PILOT_SCHEDULING_LLE)
 static void test_original_resource_unregister(void);
 static void test_original_resource_free(void);
@@ -110,6 +112,8 @@ static void test_worker(void)
 recomp_func_t pilot_gpu_av_original_lookup(uint32_t va);
 #endif
 recomp_func_t recomp_lookup(uint32_t va) {
+    if(va==0x15900)return test_file_apc_worker;
+    if(va==0x15920)return test_file_apc_callback;
 #if defined(PILOT_D3D_RESOURCE_RETIRE_VERSION) && !defined(PILOT_SCHEDULING_LLE)
     if(va==PILOT_D3D_RESOURCE_UNREGISTER)return test_original_resource_unregister;
     if(va==PILOT_D3D_RESOURCE_TAGGED_FREE)return test_original_resource_free;

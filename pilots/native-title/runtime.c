@@ -320,6 +320,7 @@ void pilot_thread_checkpoint(void)
 #ifdef PILOT_D3D_NATIVE
 static void graphics_abi_thread_retire(void);
 #endif
+static void native_apc_thread_retire_locked(unsigned slot);
 static void thread_finished(void)
 {
 #ifdef PILOT_D3D_NATIVE
@@ -328,6 +329,7 @@ static void thread_finished(void)
     scheduler_retire();
     AcquireSRWLockExclusive(&thread_lock);
     threads[current_thread_slot].finished=1;
+    native_apc_thread_retire_locked(current_thread_slot);
     ReleaseSRWLockExclusive(&thread_lock);
 }
 void pilot_native_poll_wait(void)
@@ -595,6 +597,7 @@ static void query_setting(void)
 #endif
 #include "system_time.inc"
 #include "event_objects.inc"
+#include "native_file_apc.inc"
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_lle.h"
 #endif
@@ -1016,8 +1019,11 @@ static void kernel_dispatch(void)
     if(original_thread_exit.active){original_thread_kernel_dispatch();return;}
 #endif
     int blocked=scheduler_kernel_blocks(next_kernel_ordinal)?scheduler_block_begin():0;
+    unsigned completing_ordinal=next_kernel_ordinal;
     kernel_dispatch_impl();
     scheduler_block_end(blocked);
+    if(g_eax==0xc0u && (completing_ordinal==99 || completing_ordinal==230 || completing_ordinal==233 ||
+       completing_ordinal==234 || completing_ordinal==235) && native_apc_pending())native_apc_deliver();
 #ifdef PILOT_USB_LLE
     usb_poll();
 #endif
