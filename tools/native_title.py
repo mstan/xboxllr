@@ -593,6 +593,8 @@ def main():
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--input-replay", type=Path, help="Freeze a native controller replay into this run's staging")
     parser.add_argument("--capture", action="store_true", help="Capture diagnostic present images; unsuitable for performance measurement")
+    parser.add_argument("--reuse-discovery", action="store_true",
+                        help="Prepare using the existing image-bound function discovery; original bodies are regenerated")
     parser.add_argument("--debug-port", type=int, help="Opt-in localhost native input/presented-screenshot server")
     args = parser.parse_args()
     if not 1 <= args.jobs <= 32 or (args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds <= 0)):
@@ -601,6 +603,8 @@ def main():
         parser.error("--input-replay, --capture and --debug-port apply only to run")
     if args.with_checks and args.action != "build":
         parser.error("--with-checks applies only to build")
+    if args.reuse_discovery and args.action != "prepare":
+        parser.error("--reuse-discovery applies only to prepare")
     if (args.action == "recover") != (args.recovery is not None):
         parser.error("recover requires --recovery, which applies only to recover")
     source, data = definition(args.title)
@@ -611,7 +615,9 @@ def main():
     if args.action in ("prepare", "bind", "recover", "partition", "configure", "build"):
         reject_staging_mutation(args.generated, args.build_dir)
     if args.action == "prepare":
-        subprocess.run(prepare_command(source, data, paths, args.generated), check=True)
+        command=prepare_command(source, data, paths, args.generated)
+        if args.reuse_discovery:command.append("--reuse-discovery")
+        subprocess.run(command, check=True)
         write_runtime_profile(args.generated, data)
         (args.generated / "native-title-preparation.json").write_text(json.dumps(_preparation_identity(source, data, args.generated, completing_bind=True, completing_recovery=True), indent=2) + "\n")
         (args.generated / INCOMPLETE_BIND).unlink(missing_ok=True)

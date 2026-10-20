@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -18,6 +19,24 @@ from aot_inventory import parse_xbe
 
 DONOR_PIN = "63f18f0334fbd8c00313c4bb565accf00627a4fd"
 ROOT = Path(__file__).resolve().parent.parent
+
+def generated_file_times(directory):
+    """Keep the actual pre-generation bytes and times of compiler inputs."""
+    saved={}
+    for path in Path(directory).glob('*'):
+        if path.is_file() and path.suffix in ('.c','.h'):
+            stat=path.stat()
+            saved[path.name]=(hashlib.sha256(path.read_bytes()).digest(),stat.st_atime_ns,stat.st_mtime_ns)
+    return saved
+
+def retain_identical_file_times(directory,saved):
+    """Preserve incremental compilation only when final bytes are identical."""
+    count=0
+    for name,(digest,access,modified) in saved.items():
+        path=Path(directory)/name
+        if path.is_file() and hashlib.sha256(path.read_bytes()).digest()==digest:
+            os.utime(path,ns=(access,modified));count+=1
+    return count
 
 
 def validate_seeds(seeds, image, discovery=None):
@@ -61,7 +80,7 @@ def harden_generated(directory):
             path.unlink()
         else:
             path.write_text(code, encoding="utf-8")
-        if re.search(r"translation failed \*/|recomp_stub_missing\(|/\*[^\n]*unhandled[^\n]*\*/", code):
+        if re.search(r"translation failed \*/|recomp_stub_missing\(|/\*[^\n]*unhandled[^\n]*\*/|/\* FPU:", code):
             raise ValueError(f"unhandled donor lowering in {path.name}")
     # Diagnostic rings must be per-thread along with the CPU registers. The
     # donor's shared volatile counters race when bootstrap and workers overlap.
@@ -118,10 +137,11 @@ def prepare(args):
         target=notices/path.relative_to(donor);target.parent.mkdir(parents=True,exist_ok=True)
         target.write_bytes(path.read_bytes())
     (notices/'PROVENANCE.txt').write_text('https://github.com/phobos665/xboxrecomp\nRevision '+pin+
-        '\nGenerated CPU code/helper reference pilot. Changes: explicit unsupported\nfaults, TLS diagnostics, guest-thread checkpoints and reviewed ABI bindings.\n')
+        '\nGenerated CPU code/helper reference pilot. Changes: explicit unsupported\nfaults, TLS diagnostics, guest-thread checkpoints, framework-owned x87 CPU-flag\nconditional moves and reviewed ABI bindings.\n')
     identity = out / "identity.aot-private.json"
     if identity.exists() and json.loads(identity.read_text())["sha256"] != image["sha256"]:
         raise ValueError("output belongs to a different XBE; use a separate directory")
+    previous_file_times=generated_file_times(out/'gen')
     (out / "gen" / "pilot_image.h").unlink(missing_ok=True)
     (out / "gen" / "pilot_media_binding.c").unlink(missing_ok=True)
     (out / "gen" / "pilot_cache_binding.c").unlink(missing_ok=True)
@@ -164,7 +184,8 @@ def prepare(args):
         extent_records=record['extents'];functions_path=out/'disasm/functions.json'
         updated=apply_extents(args.xbe.read_bytes(),image,json.loads(functions_path.read_text()),extent_records)
         functions_path.write_text(json.dumps(updated,indent=2)+'\n',newline='\n')
-    run("lift", ["-m", "tools.recomp", xbe, "--all", "--split", "250",
+    x87_report=out/'x87-lowering.aot-private.json'
+    run("lift", [str(ROOT/'tools/native_x87_lifting.py'),str(donor),str(x87_report),xbe, "--all", "--split", "250",
                  "--disasm-dir", str(out / "disasm"), "--func-id-dir", str(out / "classification"),
                  "--abi-dir", str(out / "abi"), "-o", str(out / "lift"),
                  "--hle-impl", str(ROOT / "pilots/native-title/runtime.c"),
@@ -177,6 +198,7 @@ def prepare(args):
             max_bytes=getattr(args, 'unit_max_bytes', 0) or 524288)
     retire_recovered_entry_units(out/'gen',extent_records)
     counts = harden_generated(out / "gen")
+    counts['x87_instruction_lowering']=json.loads(x87_report.read_text())
     if unit_budget is not None:
         counts['unit_budget'] = unit_budget
     from native_dispatch import apply as compact_dispatch
@@ -245,6 +267,11 @@ def prepare(args):
         manifest['files'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                              for p in sorted((out/'gen').iterdir()) if p.is_file()}
         path.write_text(json.dumps(manifest, indent=2) + '\n')
+    retained=retain_identical_file_times(out/'gen',previous_file_times)
+    manifest_path=out/'generation.aot-private.json'
+    manifest=json.loads(manifest_path.read_text())
+    manifest['identical_compiler_input_times_retained']=retained
+    manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps({k: v for k, v in manifest.items() if k != "files"}, indent=2))
 
 
