@@ -39,6 +39,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_x8_texture_contract_test.inc"
 #include "graphics_reset_contract_test.inc"
 #include "graphics_present_contract_test.inc"
+#include "graphics_resource_wait_contract_test.inc"
 #include "graphics_commands_contract_test.inc"
 static void test_graphics_guest_scheduler(void)
 {

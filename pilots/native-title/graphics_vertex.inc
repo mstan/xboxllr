@@ -3,7 +3,7 @@
  * writes this storage, so Lock2 needs no emulated FIFO fence or CPU/GPU wait.
  * Physical/cache aliases use one canonical guest VA, as for native textures. */
 #define GRAPHICS_VERTEX_OBJECTS 256
-struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; unsigned borrowed; };
+struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; unsigned borrowed,waiters; };
 static struct GraphicsVertexObject graphics_vertices[GRAPHICS_VERTEX_OBJECTS];
 static unsigned graphics_vertex_adopt(uint32_t header);
 static int graphics_vertex_defer_upload(void)
@@ -62,7 +62,7 @@ static uint32_t graphics_vertex_allocate(uint32_t length)
 }
 static void graphics_vertex_collect(struct GraphicsVertexObject *vertex)
 {
-    if(vertex->refs || vertex->bindings)return;
+    if(vertex->refs || vertex->bindings || vertex->waiters)return;
     pilot_gfx_vertex_destroy(vertex->native);
     if(vertex->external) {
 #ifdef PILOT_SCHEDULING_LLE

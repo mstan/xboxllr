@@ -247,6 +247,9 @@ static void graphics_dispatch_impl(unsigned entry)
     uint64_t entered=graphics_service_profile_enabled()?dispatch_monotonic():0;
     AcquireSRWLockExclusive(&graphics_lock);
     uint64_t acquired=entered?dispatch_monotonic():0;
+    if(entry==graphics_resource_wait_entry() && !graphics_active) {
+        ReleaseSRWLockExclusive(&graphics_lock);g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
+    }
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
 #ifdef PILOT_D3D_COMMANDS_VERSION
@@ -495,7 +498,7 @@ static void graphics_dispatch_impl(unsigned entry)
         if(graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding inline surface ownership",entry);
 #endif
-        if(graphics_clock_waiters)stop("device release with active vertical-blank waits",entry);
+        if(graphics_clock_waiters || graphics_resource_waiters)stop("device release with active graphics waits",entry);
 #ifdef PILOT_SCHEDULING_LLE
         if(pilot_io_device_thread_component_active()) {
             graphics_present_drain();
@@ -567,6 +570,7 @@ static void graphics_dispatch_impl(unsigned entry)
         g_eax=graphics_present();
         break;
     default:
+        if(entry==graphics_resource_wait_entry()){graphics_resource_wait(arguments[0]);break;}
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
     uint64_t unlocking=entered?dispatch_monotonic():0;
@@ -637,7 +641,7 @@ void pilot_d3d_dispatch(unsigned entry)
      * off at every state setter/draw. Here the real callback barrier/fence
      * wait has its own hook; whole blocking lifecycle/present services keep
      * their outer release. Native work and actual GPU completion are intact. */
-    int waits=entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank ||
+    int waits=entry==graphics_resource_wait_entry() || entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank ||
         entry==PILOT_D3D_D3DDevice_BlockOnFence || entry==PILOT_D3D_D3DDevice_Swap ||
         entry==PILOT_D3D_Direct3D_CreateDevice || entry==PILOT_D3D_D3DDevice_Reset ||
         entry==PILOT_D3D_D3DDevice_Release;

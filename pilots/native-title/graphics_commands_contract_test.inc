@@ -48,6 +48,10 @@ static void test_graphics_commands(const char *failure)
     uint32_t parameters[]={64,64,7,1,0x11,1,0,0,1,0x2e,0,60,1};
     memcpy(memory+0x19000,parameters,sizeof(parameters));
     uint32_t create[]={0,1,0,PILOT_D3D_CREATE_BEHAVIOR_MASK,0x19000,0x19100};
+    if(graphics_resource_wait_entry()<PILOT_D3D_COUNT) {
+        uint32_t unused=UINT32_MAX;CHECK(!graphics_active);
+        call_graphics(graphics_resource_wait_entry(),&unused);CHECK(!graphics_resource_waiters);
+    }
     for(unsigned lifetime=0;lifetime<2;++lifetime) {
         CHECK(!call_graphics(PILOT_D3D_Direct3D_CreateDevice,create));
         CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES)==1);
@@ -101,6 +105,7 @@ static void test_graphics_commands(const char *failure)
         test_graphics_borrowed_vertices(NULL);
         test_graphics_indices(NULL);
         test_graphics_resource_destruction(NULL);
+        test_graphics_resource_wait();
         // This title does not expose the public InsertFence/BlockOnFence pair.
         // Exercise their real shared completion owner without admitting a
         // nonexistent guest wrapper just to make a fixture pass.

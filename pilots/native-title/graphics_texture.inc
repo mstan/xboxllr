@@ -12,6 +12,7 @@ struct GraphicsTextureObject {
     /* Conservative owner hint: a CPU lock on this texture or any surface
      * sets it. A handoff clears it only after clearing the whole family. */
     unsigned family_exposed;
+    unsigned waiters;
 };
 static struct GraphicsTextureObject *graphics_textures;
 static unsigned graphics_texture_capacity;
@@ -259,6 +260,7 @@ static unsigned graphics_texture_refresh_alias(unsigned slot)
         return slot;
     }
     if(!t->guest_owned || (t->data==MEM32(header+4) && t->alias_format==MEM32(header+12) && t->alias_size==MEM32(header+16)))return slot;
+    if(t->waiters)stop("GPU alias changed during resource wait",header);
     unsigned bindings=t->bindings,stages=0;
     for(unsigned i=0;i<4;++i)if(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+i*4)==header){
         stages|=1u<<i;pilot_gfx_texture_bind(i,0);
@@ -271,7 +273,7 @@ static unsigned graphics_texture_refresh_alias(unsigned slot)
 static void graphics_texture_collect(unsigned slot)
 {
     struct GraphicsTextureObject *object=&graphics_textures[slot];
-    if(object->refs || object->bindings)return;
+    if(object->refs || object->bindings || object->waiters)return;
     if(object->guest_owned){pilot_gfx_texture_destroy(object->native);graphics_texture_borrow_release(object);memset(object,0,sizeof(*object));return;}
     unsigned parent=object->parent;
     if(parent) {

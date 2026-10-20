@@ -7,7 +7,7 @@ static uint32_t graphics_reset(uint32_t pointer)
 {
     uint32_t p[17];memcpy(p,graphics_pointer(pointer,sizeof(p)),sizeof(p));
     int32_t hr=graphics_parameters_check(p);if(hr<0)return (uint32_t)hr;
-    if(dispatch_in_dpc || graphics_clock_closing)stop("reset during callback/device close",pointer);
+    if(dispatch_in_dpc || graphics_clock_closing || graphics_resource_waiters)stop("reset during callback/device close/resource wait",pointer);
     PilotPresentation presentation;if(!pilot_presentation_parse(p,&presentation))return 0x80070057u;
     uint32_t data[3]={0},width=p[0],height=p[1];
 #ifdef PILOT_SCHEDULING_LLE

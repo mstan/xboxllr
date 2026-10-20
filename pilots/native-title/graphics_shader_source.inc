@@ -27,6 +27,7 @@ static const struct ShaderFormat *shader_format(uint32_t type)
 {
     for(unsigned i=0;i<sizeof(shader_formats)/sizeof(shader_formats[0]);++i)
         if(shader_formats[i].type==type)return &shader_formats[i];
+    fprintf(stderr,"[VERTEX FORMAT] type=%08x\n",type);
     pilot_d3d_backend_stop("unqualified vertex declaration format");
 }
 uint32_t pilot_gfx_vertex_type_size(uint32_t type){return shader_format(type)->bytes;}
@@ -125,6 +126,7 @@ static char *shader_source(const uint32_t *code,unsigned count,const struct Pilo
         "float4 nv_lit(float4 a){return float4(1,max(a.x,0),(a.x>0&&a.y>0)?pow(a.y,clamp(a.w,-127.9961,127.9961)):0,1);}\n"
         "struct Input{\n");
     for(unsigned i=0;i<16;++i)if(*used&(1u<<i)) {
+        if(!elements[i].type)fprintf(stderr,"[UNDECLARED VERTEX INPUT] register=%u used=%04x slots=%u\n",i,*used,count);
         const struct ShaderFormat *format=shader_format(elements[i].type);
         shader_text(&source,"%s v%u:ATTR%u;\n",format->hlsl,i,i);
     }

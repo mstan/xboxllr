@@ -2,7 +2,7 @@
  * into commands; the native renderer snapshots them into GPU index storage.
  * Headers made by original code remain caller-owned, as for archive textures.
  */
-struct GraphicsIndexObject {uint32_t header,data,bytes,refs,bindings;unsigned borrowed;uint64_t last_use;};
+struct GraphicsIndexObject {uint32_t header,data,bytes,refs,bindings;unsigned borrowed;uint64_t last_use;unsigned waiters;};
 static struct GraphicsIndexObject graphics_indices[256];
 static uint32_t graphics_native_index_header;
 static uint64_t graphics_index_draws;
@@ -45,7 +45,7 @@ static uint32_t graphics_index_allocate(uint32_t bytes)
 }
 static void graphics_index_collect(struct GraphicsIndexObject *object)
 {
-    if(object->refs || object->bindings)return;
+    if(object->refs || object->bindings || object->waiters)return;
     if(!object->borrowed)pool_free(object->header);
     memset(object,0,sizeof(*object));
 }
