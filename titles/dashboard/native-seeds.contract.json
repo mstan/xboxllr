@@ -1,6 +1,6 @@
 {
   "xbe_sha256": "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d",
-  "seed_sha256": "272b356f95906a2b95629ff91489268d1f3138e26df8b29e12f1a6471c9871b6",
+  "seed_sha256": "b16b6832cfa78841c0776ab3c963aeb42c8008aeef7e51fa981720ca50f95421",
   "source": "Exact original image constructor/vtable and complete original function bodies; no borrowed revision addresses.",
   "scope": "Static source-derived indirect roots; not evidence that execution reached every method. Native CPU lowering preserves original implementations.",
   "body_sha256": {
@@ -10,7 +10,9 @@
     "0x000D045E": "c4a12ce46cb1de94883ea2c46fc4efc7ccea13739112a617fa91f53075363bc0",
     "0x000D0617": "ef68644dac8e5594bd26c78cbd4ba02104de14690066efe8a7460b17abea679a",
     "0x000D0996": "f0c56d0a29f7eeef8f1cdccfd060b3089d7d39f4fac74ad4e8cc70553a4f0eae",
-    "0x000F53F2": "2a8170b61c41a06663d8a4876de5c52ccee8164f3ac1b99b56868011a03fd316"
+    "0x000F53F2": "2a8170b61c41a06663d8a4876de5c52ccee8164f3ac1b99b56868011a03fd316",
+    "0x0004EAF0": "b67f0bb20d3226048fc467ee8c7354c82809549d934490673fc13c1572419df0"
   },
-  "matrix_stack_table_sha256": "86d3a339e33cebf2856fe1e1edeed4c9268c04458e1f6ad0733226bf5b235766"
+  "matrix_stack_table_sha256": "86d3a339e33cebf2856fe1e1edeed4c9268c04458e1f6ad0733226bf5b235766",
+  "animation_table_sha256": "7a1072e2d9317fc7a50a5f809dea354db09144c0983231b8eb098e828c303da8"
 }

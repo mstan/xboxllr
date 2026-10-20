@@ -56,6 +56,25 @@ preparation. An incomplete-bind marker blocks configuration, build and launch
 even if a failed binder changed no artifacts. A successful full bind clears the
 marker; a fresh preparation clears it only after all selected admissions pass.
 
+`recover --recovery plan.json` adds reviewed original function bodies to an
+existing preparation without translating the whole title again. The plan uses
+`xboxllr.native-function-recovery.v1`, binds the original image SHA256 and gives
+each extent's original/new boundary, body hash and reason. New indirect roots
+also set `new_entry`. The dashboard's `native-recovery.json` is an example.
+The pinned CPU donor lowers the selected bodies; all previously selected
+bindings are revalidated in a temporary candidate. Existing service admissions
+must remain unchanged. Unchanged CPU units and common headers retain their
+bytes, including line endings, so the compiler can reuse their objects.
+
+Only a validated candidate is published. `recovery-history` retains the plan,
+previous artifacts and compiler diagnostics. A failed staged recovery leaves
+the live preparation unchanged; an interrupted publication leaves an explicit
+marker that blocks configure/build/run until its retained history is restored
+or a fresh preparation succeeds. Repeating an already applied identical plan
+is a no-op. Configure and build after a successful recovery; the old executable
+is deliberately stale. Retain source-derived discovery seeds for fresh
+preparations as well. Recovery does not establish runtime coverage of a root.
+
 Each launch copies the verified executable and adjacent DLLs into a unique run
 stage and verifies the staged executable hash before creating the process.
 Driver mutations into a marked stage or its descendants are rejected. Future

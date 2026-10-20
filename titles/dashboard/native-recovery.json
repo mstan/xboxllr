@@ -1,0 +1,14 @@
+{
+  "schema": "xboxllr.native-function-recovery.v1",
+  "sha256": "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d",
+  "extents": [
+    {
+      "start": 322288,
+      "original_end": 322288,
+      "end": 322334,
+      "sha256": "b67f0bb20d3226048fc467ee8c7354c82809549d934490673fc13c1572419df0",
+      "reason": "Animation virtual update; reached indirect entry, constructor4EAB0 publishes table27B60 slot15; eight nearby source-proved tables/184 slots audited, only this root missing.",
+      "new_entry": true
+    }
+  ]
+}

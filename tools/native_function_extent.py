@@ -19,6 +19,34 @@ from aot_inventory import parse_xbe
 from native_pilot import DONOR_PIN
 
 
+def load_plan(path,blob,image,functions):
+    """Validate a source-only batch before invoking the compiler or publishing."""
+    plan=json.loads(Path(path).read_text(encoding='utf-8'))
+    if (not isinstance(plan,dict) or set(plan)!={'schema','sha256','extents'} or
+        plan['schema']!='xboxllr.native-function-recovery.v1' or plan['sha256']!=image['sha256'] or
+        not isinstance(plan['extents'],list) or not plan['extents']):
+        raise ValueError('invalid native recovery plan/image')
+    seen=set()
+    for record in plan['extents']:
+        required={'start','original_end','end','sha256','reason'}
+        if (not isinstance(record,dict) or not required.issubset(record) or
+            set(record)-required-{'new_entry','terminal','contained_entries'} or
+            any(type(record[k]) is not int or not 0<=record[k]<=0xffffffff for k in ('start','original_end','end')) or
+            not isinstance(record['sha256'],str) or not re.fullmatch('[0-9a-f]{64}',record['sha256']) or
+            not isinstance(record['reason'],str) or not record['reason'].strip() or
+            type(record.get('new_entry',False)) is not bool or record['start'] in seen):
+            raise ValueError('invalid native recovery extent')
+        if record.get('new_entry') and record['original_end']!=record['start']:
+            raise ValueError('new native entry must have an empty previous extent')
+        seen.add(record['start'])
+        # Match the extent compiler's canonical record for explicit defaults.
+        if not record.get('new_entry'):record.pop('new_entry',None)
+        if record.get('terminal')=='return':record.pop('terminal')
+        if record.get('contained_entries')==[]:record.pop('contained_entries')
+    apply_extents(blob,image,functions,plan['extents'])
+    return plan
+
+
 def apply_extents(blob, image, functions, records):
     from capstone import Cs, CS_ARCH_X86, CS_MODE_32
     functions=json.loads(json.dumps(functions))

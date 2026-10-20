@@ -20,8 +20,9 @@ workers issue subsequent stream reads. The periodic native delay now passes;
 the main thread opens the dashboard font and loads another section. Ordinary
 audio pause/resume now passes, and the remaining startup sound-effect buffers
 load. The shared inline command-buffer owner now passes the reached
-`D3D_MakeRequestedSpace` request. The next stop is a missing indirect native
-CPU target, `0004eaf0`. The explicit offline virtual-link query passes. No native menu
+`D3D_MakeRequestedSpace` request. The missing animation virtual-method root
+`0004eaf0` now executes natively. The next stop is an unadmitted inline graphics
+method, `1b0c` with value zero. The explicit offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -42,7 +43,8 @@ functions execute.
 | Offline virtual link-state query | Passed for unattached policy | Original wrapper mask/ABI/context and native provider/lifetime checks pass; actual startup advances beyond the link query |
 | Native ordinary audio pause/resume | Implemented; actual startup passes | Original software rules, real PCM/ADPCM queued-sample retention, notifications and three backend checks pass; synchronized mode remains guarded |
 | Inline graphics command-buffer owner | Implemented; reached space request passes | Profile-proved layout/defaults, real packet delivery/refetch/fences and repeated lifetime checks pass; unsupported methods remain guarded |
-| First rendered native menu | Current blocker | Startup reaches missing indirect native CPU target `0004eaf0`; extend title-owned discovery/native generation |
+| Animation indirect native root | Recovered; actual startup passes | Original 46-byte body, constructor/vtable proof and native x87 lowering; nearby source-proved table audit found no other missing root |
+| First rendered native menu | Current blocker | Startup reaches guarded inline graphics method `1b0c`; extend the shared native packet consumer with source-derived semantics |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -329,6 +331,25 @@ fault semantics and kernel-version identity are retained as LLE-D08/D09 in the
 behavior remains implementation work in `.1.137`.
 
 ## Delivery order
+
+The [incremental native recovery workflow](NATIVE-TITLE-DRIVER.md) now lowers
+the actual animation method `0004eaf0..0004eb1e`, retaining the original x87
+operations and original native callees. Eight nearby constructor-proved tables
+with 184 slots were audited; only this root was absent. This is a bounded
+lookahead, not whole-title coverage. Fresh discovery seeds retain the same root.
+The actual executable `572a3a3d...` advances beyond it and stops at guarded
+inline graphics method `1b0c`, value zero, with 255316 stopped-title-thread
+entries, exit 2 before the deadline and no menu capture.
+
+Forty-two driver/recovery checks and seven combined Windows checks pass (the
+Windows checks take 1.76 seconds). The build reused 100 of 103 existing CPU
+objects, rebuilt dispatch and two units whose line endings had changed, and
+added one native unit. The workflow now preserves line-ending-only differences
+byte for byte to avoid those two unrelated rebuilds on future recoveries.
+This observed configure took 59.07 seconds and compile/link took 70.54 seconds;
+host load varies, so these are not controlled speedup comparisons. The shared
+recovery workflow retains failure isolation, source/body hashes and exact
+service admissions rather than adopting an edited tree implicitly.
 
 The [inline command-buffer batch](NATIVE-INLINE-GRAPHICS.md) advances the actual
 dashboard beyond MakeRequestedSpace. Executable `461f0c76...` stops at unresolved

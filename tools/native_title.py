@@ -26,6 +26,7 @@ SCHEMA = "xboxllr.native-title.v1"
 BINDINGS = {name: "native_" + name + "_binding" for name in
             ("media", "cache", "cpu", "jump", "d3d", "input", "audio", "startup", "network")}
 INCOMPLETE_BIND = "native-title-bind-incomplete.json"
+INCOMPLETE_RECOVERY = "native-title-recovery-incomplete.json"
 DEPENDENCIES = {
     "PILOT_D3D_SOURCE": "d3d_source", "PILOT_DSP_SOURCE": "dsp_source",
     "PILOT_DSP_LIBRARY": "dsp_library", "PILOT_ADPCM_SOURCE": "adpcm_source",
@@ -235,7 +236,9 @@ def generation_proof(manifest):
     return hashlib.sha256(json.dumps(proof, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def _preparation_identity(source, data, output, *, completing_bind=False):
+def _preparation_identity(source, data, output, *, completing_bind=False, completing_recovery=False):
+    if not completing_recovery and (Path(output) / INCOMPLETE_RECOVERY).exists():
+        raise ValueError("native function recovery publication is incomplete; restore its retained history or prepare again")
     if not completing_bind and (Path(output) / INCOMPLETE_BIND).exists():
         raise ValueError("native binding refresh is incomplete; successfully bind every selected family before configuring or running")
     manifest = check_generated(output, data["title"])
@@ -350,6 +353,117 @@ def bind_prepared(source, data, paths, output):
             "generation_sha256": digest(output / "generation.aot-private.json"), "history": str(history)}
 
 
+def recover_prepared(source, data, paths, output, plan_path):
+    """Stage original native function recovery, rebind, then publish a receipt.
+
+    CPU lowering is owned by the pinned donor/extent tool. A staged failure
+    leaves the live preparation intact. Publication is guarded across files;
+    an interrupted copy cannot acquire a valid launch receipt.
+    """
+    from types import SimpleNamespace
+    from aot_inventory import parse_xbe
+    from native_function_extent import load_plan, recover
+    output=Path(output).resolve();plan_path=Path(plan_path).resolve()
+    reject_staging_mutation(output)
+    manifest=check_generated(output,data['title'])
+    preparation=output/'native-title-preparation.json'
+    require_receipt(preparation,preparation_identity(source,data,output))
+    if 'cpu_donor' not in paths or 'xdk_symbols' not in paths:
+        raise ValueError('native recovery requires the pinned CPU donor and selected SDK symbols')
+    blob=paths['xbe'].read_bytes();image=parse_xbe(blob)
+    if image['sha256']!=data['title']['xbe_sha256']:
+        raise ValueError('native recovery original image changed')
+    functions=json.loads((output/'disasm/functions.json').read_text())
+    plan=load_plan(plan_path,blob,image,functions)
+    retained={r['start']:r for r in manifest.get('function_extents',[])}
+    for record in plan['extents']:
+        if record['start'] in retained and retained[record['start']]!=record:
+            raise ValueError('native recovery conflicts with an existing original extent')
+    pending=[r for r in plan['extents'] if r['start'] not in retained]
+    if not pending:return {'recovered':0,'idempotent':True}
+    original_generation=digest(output/'generation.aot-private.json');original_preparation=digest(preparation)
+    original_profile=profile_identity(source,data.get('generation',{}).get('profile'))
+    # This stage may live on a temporary fast volume. It is never a run stage.
+    temporary=Path(tempfile.gettempdir()).resolve()/'build'/'native-title-recovery'
+    temporary.mkdir(parents=True,exist_ok=True)
+    stage=Path(tempfile.mkdtemp(prefix='candidate-',dir=temporary)).resolve()
+    try:
+        shutil.copytree(output/'gen',stage/'gen')
+        for name in ('disasm','classification','abi'):
+            if (output/name).is_dir():shutil.copytree(output/name,stage/name)
+        records=list(output.glob('*binding.aot-private.json'))
+        records += [output/'generation.aot-private.json']
+        if (output/'function-extents.aot-private.json').exists():records.append(output/'function-extents.aot-private.json')
+        for path in records:shutil.copy2(path,stage/path.name)
+        for record in pending:
+            result=recover(SimpleNamespace(output=stage,donor=paths['cpu_donor'],xbe=paths['xbe'],
+                function=record['start'],end=record['end'],reason=record['reason'],
+                new_entry=record.get('new_entry',False),terminal=record.get('terminal','return'),
+                contained_entry=[r['start'] for r in record.get('contained_entries',[])]))
+            if result!=record:raise ValueError('native compiler recovery differs from the reviewed plan')
+        families=selected_bindings(data)
+        profile=data.get('generation',{}).get('profile')
+        profile=(Path(source).parent/profile).resolve() if profile else None
+        for family in families:
+            importlib.import_module(BINDINGS[family]).bind(paths['xbe'],stage,paths['xdk_symbols'],profile=profile)
+        from native_binding import has_profile_binding
+        if 'd3d' in families and has_profile_binding(data['title']['xbe_sha256'],'display',profile):
+            importlib.import_module('native_display_binding').bind(paths['xbe'],stage,paths['xdk_symbols'],profile=profile)
+        # Some legacy binders rewrite a unit through text mode. Retain the
+        # original bytes when only CRLF/LF changed, avoiding an unrelated CPU
+        # recompile and preserving the preceding file identity exactly.
+        rebound=json.loads((stage/'generation.aot-private.json').read_text())
+        retained_text=False
+        for name in manifest['files']:
+            if not name.endswith(('.c','.h')) or not (stage/'gen'/name).exists():continue
+            old=(output/'gen'/name).read_bytes();new=(stage/'gen'/name).read_bytes()
+            if old!=new and old.replace(b'\r\n',b'\n')==new.replace(b'\r\n',b'\n'):
+                (stage/'gen'/name).write_bytes(old);rebound['files'][name]=digest(stage/'gen'/name);retained_text=True
+        if retained_text:(stage/'generation.aot-private.json').write_text(json.dumps(rebound,indent=2)+'\n')
+        write_runtime_profile(stage,data)
+        candidate=check_generated(stage,data['title'])
+        for family in BINDINGS:
+            key=family+'_binding'
+            if manifest.get(key)!=candidate.get(key):raise ValueError('native recovery changed service admissions: '+family)
+        if manifest.get('jump_abi')!=candidate.get('jump_abi') or manifest.get('display_binding')!=candidate.get('display_binding'):
+            raise ValueError('native recovery changed retained jump/display admissions')
+        if not set(manifest['files']).issubset(candidate['files']):
+            raise ValueError('native recovery removed a generated artifact')
+        selected=_preparation_identity(source,data,stage)
+        (stage/'native-title-preparation.json').write_text(json.dumps(selected,indent=2)+'\n')
+        # Revalidate the live input after the long lowering/rebinding phase.
+        check_generated(output,data['title'])
+        if (digest(output/'generation.aot-private.json')!=original_generation or digest(preparation)!=original_preparation or
+            profile_identity(source,data.get('generation',{}).get('profile'))!=original_profile):
+            raise ValueError('live native preparation changed during recovery')
+        relatives=['generation.aot-private.json','function-extents.aot-private.json',
+                   'disasm/functions.json','native-title-preparation.json']
+        relatives += ['gen/'+name for name,value in candidate['files'].items() if manifest['files'].get(name)!=value]
+        relatives += [p.name for p in stage.glob('*binding.aot-private.json') if not (output/p.name).exists() or digest(output/p.name)!=digest(p)]
+        history=output/'recovery-history'/str(time.time_ns());(history/'before').mkdir(parents=True)
+        (history/'proposed').mkdir();shutil.copy2(plan_path,history/'plan.json')
+        for relative in relatives:
+            target=history/'proposed'/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(stage/relative,target)
+            if (output/relative).exists():
+                old=history/'before'/relative;old.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(output/relative,old)
+        # Keep the exact compiler diagnostics with the durable transition.
+        if (stage/'extent-recovery').is_dir():shutil.copytree(stage/'extent-recovery',history/'lowering')
+        marker=output/INCOMPLETE_RECOVERY
+        marker.write_text(json.dumps({'plan_sha256':digest(plan_path),'history':str(history),'files':relatives},indent=2)+'\n')
+        for relative in relatives:
+            target=output/relative;target.parent.mkdir(parents=True,exist_ok=True)
+            os.replace(history/'proposed'/relative,target)
+        require_receipt(preparation,_preparation_identity(source,data,output,completing_recovery=True))
+        marker.unlink()
+        return {'recovered':len(pending),'changed_files':relatives,'history':str(history),
+                'generation_sha256':digest(output/'generation.aot-private.json')}
+    finally:
+        # Verified temporary path, native filesystem operations, no shell mix.
+        if stage.parent!=temporary or not stage.name.startswith('candidate-'):
+            raise ValueError('refusing recovery stage cleanup outside its temporary parent')
+        shutil.rmtree(stage)
+
+
 def require_receipt(path, expected):
     if not Path(path).is_file() or json.loads(Path(path).read_text()) != expected:
         raise ValueError("native build identity changed; configure and build the selected title again")
@@ -449,7 +563,7 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("check", "prepare", "bind", "partition", "configure", "build", "run"))
+    parser.add_argument("action", choices=("check", "prepare", "bind", "recover", "partition", "configure", "build", "run"))
     parser.add_argument("--title", type=Path, required=True)
     parser.add_argument("--paths", type=Path, required=True)
     parser.add_argument("--generated", type=Path, required=True)
@@ -459,6 +573,7 @@ def main():
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--with-checks", action="store_true",
                         help="Build the title and native iteration check executables in one build graph; does not run tests")
+    parser.add_argument("--recovery", type=Path, help="Original-image-bound function recovery plan; recover only")
     parser.add_argument("--link-profile", choices=("FINAL", "ITERATIVE"),
                         help="Select build-only linking policy; ITERATIVE keeps optimized CPU code on MSVC")
     parser.add_argument("--automated", action="store_true")
@@ -473,20 +588,25 @@ def main():
         parser.error("--input-replay and --capture apply only to run")
     if args.with_checks and args.action != "build":
         parser.error("--with-checks applies only to build")
+    if (args.action == "recover") != (args.recovery is not None):
+        parser.error("recover requires --recovery, which applies only to recover")
     source, data = definition(args.title)
     if args.link_profile:
         data["build"]["PILOT_NATIVE_LINK_PROFILE"] = args.link_profile
     paths = private_paths(args.paths)
     check_image(data["title"], paths)
-    if args.action in ("prepare", "bind", "partition", "configure", "build"):
+    if args.action in ("prepare", "bind", "recover", "partition", "configure", "build"):
         reject_staging_mutation(args.generated, args.build_dir)
     if args.action == "prepare":
         subprocess.run(prepare_command(source, data, paths, args.generated), check=True)
         write_runtime_profile(args.generated, data)
-        (args.generated / "native-title-preparation.json").write_text(json.dumps(_preparation_identity(source, data, args.generated, completing_bind=True), indent=2) + "\n")
+        (args.generated / "native-title-preparation.json").write_text(json.dumps(_preparation_identity(source, data, args.generated, completing_bind=True, completing_recovery=True), indent=2) + "\n")
         (args.generated / INCOMPLETE_BIND).unlink(missing_ok=True)
+        (args.generated / INCOMPLETE_RECOVERY).unlink(missing_ok=True)
     elif args.action == "bind":
         print(json.dumps(bind_prepared(source, data, paths, args.generated), indent=2))
+    elif args.action == "recover":
+        print(json.dumps(recover_prepared(source,data,paths,args.generated,args.recovery),indent=2))
     elif args.action == "partition":
         print(json.dumps(partition_prepared(source, data, args.generated), indent=2))
     elif args.action == "configure":
