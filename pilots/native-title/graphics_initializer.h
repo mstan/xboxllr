@@ -51,8 +51,8 @@ static inline int pilot_initializer_cache(uint32_t *cache,unsigned count,uint32_
     cache[state]=value;return 1;
 }
 /* kind 0: screen-space FVF, 1: program, 2: declaration-only fixed function.
- * The fixed-function caller additionally establishes inactive lighting and
- * generated coordinates; weighted blending/points remain outside its owner. */
+ * The fixed-function caller additionally establishes its qualified lighting
+ * snapshot and generated coordinates; active weighted blending remains guarded. */
 static inline int pilot_initializer_consumer(unsigned kind,uint32_t primitive,uint32_t fvf)
 {
     if(kind>2 || ((primitive<5 || primitive>8) && !(kind==2 && primitive==1)))return 0;

@@ -428,6 +428,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     pilot_blend_transient=pilot_blend_transient_proof=0;
     pilot_color_target=0;pilot_depth_target=next.depth?UINT32_MAX:0;pilot_default_color_format=p[2];
     pilot_edge_close();
+    pilot_gfx_lighting_invalidate();
     memset(&pilot_initializer,0,sizeof(pilot_initializer));pilot_initializer.precision_policy=PILOT_COLOR_NATIVE_RGBA8;
     pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
     /* Guest Reset reallocates console presentation storage. The host window
@@ -1536,6 +1537,6 @@ int pilot_gfx_initializer_snapshot(struct PilotInitializerState *out)
 int pilot_gfx_initializer_consumer(unsigned program,uint32_t primitive,uint32_t fvf)
 {
     if(!pilot_device || !pilot_initializer_consumer(program,primitive,fvf))return 0;
-    if(program==2 && d3d8_GetRenderStates()[D3DRS_LIGHTING])return 0;
+    if(program==2 && d3d8_GetRenderStates()[D3DRS_LIGHTING] && !pilot_gfx_lighting_ready())return 0;
     return !pilot_initializer.dither || pilot_initializer_target_format();
 }

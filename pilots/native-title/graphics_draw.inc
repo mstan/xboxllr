@@ -115,6 +115,7 @@ static void graphics_frame_capture_draw(unsigned shader,const uint32_t args[3],u
         raster.viewport[3],raster.viewport[4],raster.viewport[5],raster.scissor_enabled,
         raster.scissor[0],raster.scissor[1],raster.scissor[2],raster.scissor[3],raster.source_width,raster.source_height);
 }
+#include "graphics_lighting.inc"
 static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,uint32_t up_stride,const void *indices,unsigned index_count,int32_t base,const void *host_vertices)
 {
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
@@ -231,7 +232,7 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     }
     graphics_draw_profile_step(&profile,2);
     if(fixed) {
-        if(graphics_render_read(102))stop("unqualified original fixed-function lighting owner",shader);
+        if(graphics_render_read(102))graphics_lighting_sync(shader);
         graphics_sync_deferred();
     }
     if(!pilot_gfx_initializer_consumer(fixed?2:(shader&1)!=0,primitive,shader))
@@ -263,8 +264,8 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     if(fixed) {
         /* The original driver may write its matrix cache inline. Synchronize
          * the profile-owned values without changing guest dirty bits or caches.
-         * Lighting requires its original light/material owner before admission;
-         * reached declaration-only startup explicitly disables lighting. */
+         * Active lighting has already synchronized its original light/material
+         * snapshot. Neither operation changes original cache or dirty bits. */
         if(mod_x_scale!=1 || mod_x_anchor!=0)stop("unqualified fixed-function mod placement",shader);
         for(unsigned i=0;i<10;++i)
             if(pilot_gfx_transform(i,(const float*)(memory+TRANSFORM_STATE(TRANSFORMS)+i*64))<0)

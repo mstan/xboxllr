@@ -5,8 +5,8 @@ static uint32_t graphics_state_baseline[166],graphics_texture_baseline[4][32];
 
 /* These fields only feed fixed-function vertex lighting/material selection.
  * Preserve their actual guest cache even when a program or unlit draw makes
- * them inactive. The draw owner still guards every lit fixed-function draw
- * before native submission; a later implementation can consume this cache. */
+ * them inactive. A source-qualified lit draw samples these controls together
+ * with the original material and enabled-light list before native submission. */
 static int graphics_lighting_parameter(uint32_t state)
 {return (state>=104 && state<=111) || state==113 || state==114;}
 static int graphics_lighting_parameter_valid(uint32_t state,uint32_t value)

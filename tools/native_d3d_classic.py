@@ -219,6 +219,9 @@ def inspect(context, proof):
             ('lea','edx, [edx*4 + 0xc]')}
         if not required<=decoder:raise ValueError('unreviewed original float-beta FVF decoder')
         binding['float_beta_fvf']={'version':1,'max_components':4,'ignored_mask':0x1000}
+    if 'lighting_cache' in proof:
+        from native_d3d_lighting import inspect_lighting
+        binding['lighting_cache']=inspect_lighting(context,proof,codes)
     return binding, *emit_text(binding,interface,0x40)
 
 

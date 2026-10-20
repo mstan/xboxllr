@@ -138,6 +138,7 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
     fprintf(stderr,"[SHADER CREATE] native=%u instructions=%u inputs=%04x current=%04x bytecode=%zu\n",*handle,count,shader.used,shader.current,ID3D10Blob_GetBufferSize(shader.code));
     return S_OK;
 }
+#include "graphics_lighting_backend.inc"
 #include "graphics_fixed_backend.inc"
 #include "graphics_fvf_unblended_backend.inc"
 #include "graphics_immediate_backend.inc"
@@ -159,6 +160,7 @@ void pilot_gfx_shader_destroy(uint32_t handle)
 }
 void pilot_gfx_shaders_close(void)
 {
+    native_lighting_close();
     native_current_close();
     for(unsigned i=0;i<256;++i)if(native_shaders[i].object)pilot_gfx_shader_destroy(i+1);
     if(native_constants_buffer) {

@@ -16,6 +16,10 @@ void pilot_gfx_interpolation_stats(struct PilotInterpolationStats *out);
 #include <stdint.h>
 #include "graphics_presentation.h"
 #include "graphics_initializer.h"
+#include "graphics_lighting.h"
+int32_t pilot_gfx_lighting_publish(const struct PilotLightingSnapshot *snapshot);
+int pilot_gfx_lighting_ready(void);
+void pilot_gfx_lighting_invalidate(void);
 int pilot_gfx_initializer_set(uint32_t state,uint32_t value);
 int pilot_gfx_initializer_admits(uint32_t state,uint32_t value);
 int pilot_gfx_command_method(uint32_t method,uint32_t value,int apply);

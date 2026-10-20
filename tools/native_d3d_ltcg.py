@@ -328,6 +328,9 @@ def emit_text(binding,interface,behavior_mask):
         if binding['float_beta_fvf']!={'version':1,'max_components':4,'ignored_mask':0x1000}:
             raise ValueError('unreviewed float-beta FVF descriptor capability')
         header += ['#define PILOT_D3D_FVF_FLOAT_BETA_VERSION 1u']
+    if 'lighting_cache' in binding:
+        from native_d3d_lighting import emit_defines
+        header += emit_defines(binding['lighting_cache'])
     if binding.get('cpu_services'):
         by_name={c['name']:c for c in calls};selected=binding['cpu_services'];indices={name:i for i,name in enumerate(selected)}
         header += ['#define PILOT_D3D_NATIVE_CPU_SERVICE_VERSION 1',
