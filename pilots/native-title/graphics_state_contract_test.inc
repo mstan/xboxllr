@@ -22,6 +22,33 @@ static void graphics_test_pixel(unsigned red,unsigned green,unsigned blue,unsign
     CHECK(abs((int)p[1]-(int)green)<=(int)tolerance);
     CHECK(abs((int)p[2]-(int)blue)<=(int)tolerance);
 }
+static void test_graphics_deferred_relevance(unsigned failure)
+{
+    const uint32_t states[]={104,105,106,107,108,109,110,111,113,114,116,118,119,120,121,122,123};
+    const uint32_t values[]={0,0,1,2,0,2,1,2,1,0xff123456,0x40200000,1,1,0,0x3f800000,0x40000000,0x42000000};
+    for(unsigned i=0;i<sizeof(states)/sizeof(*states);++i)
+        graphics_render_state(states[i],values[i],1);
+    graphics_render_state(102,1,1); /* Pretransformed vertices do not consume vertex lighting. */
+    graphics_render_state(147,0,1);graphics_render_state(143,0,1);
+    graphics_render_state(59,0,1);graphics_render_state(60,0,1);
+    graphics_texture_state(0,12,2,1);graphics_texture_state(0,14,0,1);
+    graphics_texture_state(0,16,2,1);graphics_texture_state(0,18,0,1);
+    uint32_t fvf=failure==1?0x42:0x44;
+    call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&fvf);
+    struct Vertex {float x,y,z,w;uint32_t color;} source[]={
+        {8,8,.25f,1,0xffff0000},{56,8,.25f,1,0xffff0000},{32,56,.25f,1,0xffff0000}};
+    memcpy(memory+0x19600,source,sizeof(source));
+    if(failure==3)graphics_render_write(104,2);
+    if(failure==4)graphics_render_write(120,0x7f800000);
+    uint32_t draw[]={failure==2?1u:5u,0,3};
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_draw_submit(draw,0x19600,sizeof(source[0]),NULL,0,0);
+    CHECK(!failure);graphics_test_pixel(255,0,0,0);
+    for(unsigned i=0;i<sizeof(states)/sizeof(*states);++i)
+        CHECK(graphics_render_read(states[i])==values[i]);
+    CHECK(!graphics_lighting_parameter_valid(104,2) && !graphics_lighting_parameter_valid(111,3));
+    fprintf(stderr,"PASS deferred relevance: 17 cached lighting/point fields, actual pretransformed triangle pixels, lighting enabled without a vertex-lighting consumer\n");
+}
 static void test_graphics_states(void)
 {
     /* Exercise the actual three-argument callee-cleaned setter, all stages

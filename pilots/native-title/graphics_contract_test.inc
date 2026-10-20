@@ -76,12 +76,29 @@ static void test_graphics_guest_scheduler(void)
 }
 static void test_graphics(int focused_fixture)
 {
-    GRAPHICS_TEST_REQUIRE("graphics lifecycle/front-back/fence fixture",PILOT_D3D_D3DDevice_GetBackBuffer2,
-        PILOT_D3D_D3DDevice_InsertCallback,PILOT_D3D_D3DDevice_InsertFence,PILOT_D3D_D3DDevice_BlockOnFence);
+    if(focused_fixture>=4) {
+        GRAPHICS_TEST_REQUIRE("deferred state relevance fixture",PILOT_D3D_Direct3D_CreateDevice,
+            PILOT_D3D_D3DDevice_SetVertexShader,PILOT_D3D_D3DDevice_Release);
+    } else {
+        GRAPHICS_TEST_REQUIRE("graphics lifecycle/front-back/fence fixture",PILOT_D3D_D3DDevice_GetBackBuffer2,
+            PILOT_D3D_D3DDevice_InsertCallback,PILOT_D3D_D3DDevice_InsertFence,PILOT_D3D_D3DDevice_BlockOnFence);
+    }
     vm_ensure();
     dispatch_ensure(); /* Persistent shared callback stack precedes allocation baseline. */
     uint32_t global_page=PILOT_D3D_DEVICE_GLOBAL&~4095u;
     uint32_t state_bytes=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-global_page;
+    if(focused_fixture>=4) {
+        uint32_t low=PILOT_D3D_DEVICE_OBJECT<PILOT_D3D_TEXTURE_STATES?PILOT_D3D_DEVICE_OBJECT:PILOT_D3D_TEXTURE_STATES;
+        if(PILOT_D3D_DEVICE_GLOBAL<low)low=PILOT_D3D_DEVICE_GLOBAL;
+        uint32_t high=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4;
+#ifdef PILOT_D3D_DEVICE_BYTES
+        high=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_BYTES;
+#endif
+        const uint32_t ends[]={PILOT_D3D_DEVICE_GLOBAL+4,PILOT_D3D_RENDER_STATES+166*4,
+            PILOT_D3D_TEXTURE_STATES+512,PILOT_D3D_STREAMS+16*12,PILOT_D3D_FVF_OBJECT+256};
+        for(unsigned i=0;i<sizeof(ends)/sizeof(*ends);++i)if(ends[i]>high)high=ends[i];
+        global_page=low&~4095u;state_bytes=((high+4095)&~4095u)-global_page;
+    }
     commit(global_page,state_bytes); vm_fixed_region(global_page,state_bytes);
     uint32_t *parameters=(uint32_t*)(memory+0x19000);
     const uint32_t valid[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};
@@ -107,7 +124,8 @@ static void test_graphics(int focused_fixture)
         if(focused_fixture) {
             if(focused_fixture==1)test_graphics_depth_sampling_header();
             else if(focused_fixture==2)test_graphics_x8_texture_lifetime();
-            else { CHECK(focused_fixture==3);test_graphics_present_status(); }
+            else if(focused_fixture==3)test_graphics_present_status();
+            else test_graphics_deferred_relevance((unsigned)focused_fixture-4);
             CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
             CHECK(vm_committed(0,0x100000000ull)==resident);

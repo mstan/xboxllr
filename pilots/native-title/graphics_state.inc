@@ -3,8 +3,35 @@
  * guest cache. Deferred arrays are sampled together at the draw boundary. */
 static uint32_t graphics_state_baseline[166],graphics_texture_baseline[4][32];
 
+/* These fields only feed fixed-function vertex lighting/material selection.
+ * Preserve their actual guest cache even when a program or unlit draw makes
+ * them inactive. The draw owner still guards every lit fixed-function draw
+ * before native submission; a later implementation can consume this cache. */
+static int graphics_lighting_parameter(uint32_t state)
+{return (state>=104 && state<=111) || state==113 || state==114;}
+static int graphics_lighting_parameter_valid(uint32_t state,uint32_t value)
+{return graphics_lighting_parameter(state) && (state==114 || value<=(state<=105?1u:2u));}
+/* Point raster parameters cannot affect the triangle-only draw owner. Keep
+ * their cache intact; its primitive guard rejects points before submission.
+ * POINTSIZE_MIN (117) already has a separately qualified initializer owner. */
+static int graphics_point_parameter(uint32_t state)
+{return state==116 || (state>=118 && state<=123);}
+static int graphics_point_parameter_valid(uint32_t state,uint32_t value)
+{return graphics_point_parameter(state) && ((state==118 || state==119)?value<=1:
+    !(value&0x80000000u) && (value&0x7f800000u)!=0x7f800000u);}
+
 static void graphics_render_state(uint32_t state,uint32_t value,int cache)
 {
+    if(graphics_lighting_parameter(state)) {
+        if(!graphics_lighting_parameter_valid(state,value))stop("unqualified lighting parameter value",state);
+        if(cache)graphics_render_write(state,value);
+        return;
+    }
+    if(graphics_point_parameter(state)) {
+        if(!graphics_point_parameter_valid(state,value))stop("unqualified point parameter value",state);
+        if(cache)graphics_render_write(state,value);
+        return;
+    }
     /* The donor converts real packed pixels at upload. The original API's
      * enable/cache state gates that converted sampling path at draw time.
      * Disabled packed-YUV sampling remains unqualified, never mislabeled RGB. */
@@ -83,11 +110,23 @@ static void graphics_sync_deferred(void)
     for(unsigned state=92;state<136;++state) {
         int index=graphics_render_guest_index(state);if(index<0)continue;
         uint32_t value=graphics_render_read(state);
+        if(graphics_lighting_parameter(state)) {
+            if(!graphics_lighting_parameter_valid(state,value))stop("unqualified deferred lighting parameter",state);
+            continue;
+        }
+        if(graphics_point_parameter(state)) {
+            if(!graphics_point_parameter_valid(state,value))stop("unqualified deferred point parameter",state);
+            continue;
+        }
         if(PILOT_D3D_RENDER_STATES+4*(unsigned)index==PILOT_D3D_PRESENT_INTERVAL) {
             graphics_present_interval(value);continue; /* Applied by the actual presentation queue. */
         }
-        if(!pilot_gfx_xbox_render_state(state,value) && value!=graphics_state_baseline[state])
+        if(!pilot_gfx_xbox_render_state(state,value) && value!=graphics_state_baseline[state]) {
+            fprintf(stderr,"[D3D DEFERRED RENDER STATE] state=%u value=%08x baseline=%08x lighting=%u shader=%08x\n",
+                state,value,graphics_state_baseline[state],graphics_render_read(102),
+                MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER));
             stop("changed unqualified deferred render state",state);
+        }
     }
     for(unsigned stage=0;stage<4;++stage) for(unsigned state=0;state<22;++state) {
         uint32_t value=MEM32(PILOT_D3D_TEXTURE_STATES+128*stage+4*state);

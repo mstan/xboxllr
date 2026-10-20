@@ -800,6 +800,11 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"graphics-depth-argb")) { test_graphics(1); return 0; }
         if (!strcmp(argv[1],"graphics-x8-texture")) { test_graphics(2); return 0; }
         if (!strcmp(argv[1],"graphics-present")) { test_graphics(3); return 0; }
+        if (!strcmp(argv[1],"graphics-deferred-relevance")) { test_graphics(4); return 0; }
+        if (!strcmp(argv[1],"graphics-deferred-lighting")) { test_graphics(5); return 1; }
+        if (!strcmp(argv[1],"graphics-deferred-point")) { test_graphics(6); return 1; }
+        if (!strcmp(argv[1],"graphics-deferred-invalid-lighting")) { test_graphics(7); return 1; }
+        if (!strcmp(argv[1],"graphics-deferred-invalid-point")) { test_graphics(8); return 1; }
         if (!strcmp(argv[1],"graphics-present-device-removed") || !strcmp(argv[1],"graphics-present-device-reset")) {
             test_desktop_override=1;
             test_desktop_result=!strcmp(argv[1],"graphics-present-device-removed")?(int32_t)0x887a0005u:(int32_t)0x887a0007u;
