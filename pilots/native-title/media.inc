@@ -183,6 +183,7 @@ static uint32_t media_hash(HANDLE file,char hex[65])
     BCryptDestroyHash(hash);
     return status;
 }
+#include "media_capacity.inc"
 /* Lock held by caller. Successful mounts retain the root and identity handles
  * with write/delete sharing denied. Repeated verification rechecks the XBE. */
 static uint32_t media_verify(const char *expected)
@@ -217,6 +218,7 @@ static uint32_t media_verify(const char *expected)
         if (!media_root) { if (identity) CloseHandle(identity); CloseHandle(root); }
         return status;
     }
+    if(!media_root)media_content_sectors=0;
     media_root=root; media_identity=identity;
     return 0;
 }
@@ -457,8 +459,15 @@ static void media_kernel(unsigned ordinal)
                 }
             } else if (ordinal==198) g_eax=(uint32_t)media_nt_flush(file,&io);
             else if (ordinal==218) {
-                if (!media_partition(a[0]) || a[4]!=3) stop("volume information class/mount unsupported",a[4]);
+                if(a[4]!=3)stop("volume information class/mount unsupported",a[4]);
                 if (a[3]<24) g_eax=0xc0000004u;
+                else if(!media_partition(a[0])) {
+                    uint64_t sectors=0;g_eax=media_capacity_query(&sectors);
+                    if(!g_eax) {
+                        MEM64(a[2])=sectors;MEM64(a[2]+8)=0;
+                        MEM32(a[2]+16)=1;MEM32(a[2]+20)=2048;io.Information=24;
+                    }
+                }
                 else {
                     struct { LARGE_INTEGER total,available; ULONG sectors,bytes; } geometry={0};
                     g_eax=(uint32_t)media_nt_volume(file,&io,&geometry,sizeof(geometry),3);
