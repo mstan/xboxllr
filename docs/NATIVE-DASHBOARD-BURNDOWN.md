@@ -22,11 +22,11 @@ Rows have different sizes, so their count is not a completion percentage.
 | DB04 | Make the ordinary menus usable | **Passed for opening/back routes** | TCP-driven actual native Music/Settings/Memory opening and B return all pass; rendered screenshots inspected. Original allocator retirement now executes through generated native CPU. Deeper menu options remain unverified. |
 | DB05 | Check dashboard audio and responsiveness | **Technical checks passed; owner listening deferred to handoff** | Real four-second GP output is finite, nonzero stereo without clipping; ordinary Music opening/back passes during capture. A separate six-second interval measures 59.34 presents/s with no diagnostic capture during measurement. Owner reports the preview is snappy; subjective audio acceptance remains unverified. |
 | DB06 | Validate the native Credits mod | **Passed for sampled routes** | Bottom Credits entry opens a large scrolling reader with Matthew first, then the referenced projects and full indexed notices. Real stick scrolling, A page advance, section jumps, B return and subsequent Settings opening/back pass with inspected rendered images. |
-| DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
-| DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
+| DB07 | Validate both titles on the final shared framework | **Passed for the focused shared-change regression** | FINAL dashboard and Blinx use committed runtime 3dcdd0f. Blinx opening movie/title, authentic save load, Stage 1 movement/pause, adaptive 21:9/32:9, assisted original Results/save and fresh-process authenticated reload pass. Three game mod CTests pass. Prior Retry/fringe fixes remain unchanged; a new exhaustive campaign/fringe/Retry audit is not claimed. Owner original saves/build remain protected. |
+| DB08 | Hand both builds to the owner | Dashboard delivered/accepted; Blinx launcher staging | Dashboard owner preview runs normally on F: with normal audio and no deadline. Frozen same-framework Blinx build is prepared with isolated saves and the existing launcher UI. Private handoff receipts retain locations and remaining scope. |
 
-Current next action: **DB07**, FINAL dashboard linking and the isolated
-same-framework Blinx regression, then normal-window previews. The shared
+Current next action: **DB08**, finish the normal-window handoff and retain the
+private receipts, then proceed to the authorized JSRF native attract project. The shared
 [original resource retirement](NATIVE-ORIGINAL-RESOURCE-RETIREMENT.md) service
 preserves original heap ownership and GPU completion. A 25-second TCP batch
 opened Music, Settings and Memory and returned home from all three. A second
@@ -109,7 +109,7 @@ functions execute.
 | First rendered native menu | Passed | Stable labels/hints after source-proved raw/derived projection separation; see [transform cache](NATIVE-TRANSFORM-CACHE.md) |
 | Usable dashboard | Passed for sampled offline routes | Music/Settings/Memory opening and B return, real audio progression and measured near-60-Hz presentation pass. Deeper options and subjective audio remain unverified. |
 | Native Credits mod | Passed for sampled scrolling-reader routes | Shared immutable-image section-data admission, full notice generation, actual large reader, stick/page/section navigation and return to Settings pass. |
-| Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
+| Blinx on the same framework revision | Passed for focused regression | Separate optimized build, opening movie/title, Stage 1 movement/pause/adaptive resizing and original assisted Results/save/fresh reload; three mod checks pass |
 
 The first menu and ordinary opening/back routes now pass. There is still no
 measured total ETA for the remaining audio, Credits and joint-title checks.
@@ -544,3 +544,31 @@ Both titles must be good on the shared revision before proceeding. Jet Set Radio
 Future is title 3 after that joint dashboard/Blinx checkpoint.
 Public packaging, complete attribution and license
 resolution remain separate release work; this private port is not a publication.
+
+
+## Joint native checkpoint, 2026-10-20
+
+Runtime commit `3dcdd0f70b4c9f268e00325bd9248e5c7eb5af6d` corrects guest
+sample coordinates and supplies the large scrolling Credits reader. The FINAL
+dashboard executable `22456720...` passes the full sampled TCP reader/menu batch
+and measures 355 presents in 5.9196 seconds (59.97 Hz), with no screenshots or
+audio capture during measurement. Private content is independently copied and
+hash verified onto F:, excluding unrelated dashboard homebrew. The frozen owner
+preview is a normal window with normal audio and no deadline. The owner reports
+?looks good to me at a glance.? This accepts the sampled dashboard visuals;
+subjective audio and deeper options remain unverified.
+
+The separate Blinx FINAL executable `40a78753...` uses the same committed runtime.
+A 190-second muted run captures the opening movie and title without guards; it
+is not claimed as a complete attract-demo cycle. Three game mod tests pass in
+0.56 seconds. A focused 46.98-second actual run loads an authentic copied save,
+enters Stage 1, moves, pauses/resumes, resizes adaptively to 21:9 and 32:9, then
+uses explicit enemy-HP and player-position assistance. Original game updates
+own deaths, the Results transition and the actual gamedata/SaveImage writes.
+No completion/save/unlock flags are written by the harness. A separate process
+then authenticates the resulting save and reaches the selector in 21.99 seconds.
+Rendered scene/pause/Results/selector images were inspected. The bounded shared
+regression does not repeat the earlier campaign audit or claim new fringe-object,
+health-marker or Retry coverage. Those mod implementations are unchanged and
+their authored contracts pass. Private evidence lives under
+`build/blinx/dashboard-shared-regression-20261019`; owner originals are unchanged.
