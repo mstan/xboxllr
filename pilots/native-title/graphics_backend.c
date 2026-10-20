@@ -1232,7 +1232,8 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
     uint32_t feedback=pilot_feedback_validate();
     if(pilot_edge_requested && feedback)return E_NOTIMPL;
     D3D11_PRIMITIVE_TOPOLOGY topology;
-    if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    if(primitive==1 && !indices && !pilot_edge_requested)topology=D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
+    else if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else if(primitive==6 && count>=3)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
     else if(primitive==7 && count>=3 && count-2<=UINT32_MAX/12 && first<=INT32_MAX)
         topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;

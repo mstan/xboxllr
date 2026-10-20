@@ -124,9 +124,19 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     if(profile)++graphics_service_profile.draw_calls;
     unsigned primitive=args[0],first=args[1],count=args[2];
     unsigned submitted=indices?index_count:count;
+    int unit_points=primitive==1 && !indices && !up_data;
     if(!count || (uint64_t)first+count>UINT32_MAX)stop("invalid draw range",count);
-    if((primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || submitted<3 ||
-        (primitive==5 && submitted%3) || (primitive==8 && submitted%4))stop("unqualified primitive/count",primitive);
+    if((!unit_points && primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || (!unit_points && submitted<3) ||
+        (primitive==5 && submitted%3) || (primitive==8 && submitted%4)) {
+        fprintf(stderr,"[D3D PRIMITIVE] type=%u first=%u count=%u submitted=%u indexed=%u shader=%08x\n",
+            primitive,first,count,submitted,indices!=NULL,MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER));
+        if(primitive==1) {
+            fprintf(stderr,"[D3D POINT STATE]");
+            for(unsigned state=116;state<=123;++state)fprintf(stderr," %u=%08x",state,graphics_render_read(state));
+            fputc('\n',stderr);
+        }
+        stop("unqualified primitive/count",primitive);
+    }
     const char *draw_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW),*fvf_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
     if(indices && ((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture)))
         stop("indexed draw input capture outside qualified diagnostic scope",primitive);
@@ -142,6 +152,17 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     struct GraphicsShader *declaration=(shader&1)?graphics_shader(shader):NULL;
     int fixed_fvf=!(shader&1) && (shader&15)==2;
     int fixed=(declaration && declaration->fixed) || fixed_fvf;
+    if(unit_points) {
+        /* Native POINTLIST is a one-pixel raster primitive. Other point sizes,
+         * sprites, attenuation and programmable size outputs need their own
+         * consumer; retaining their cached parameters is not output support. */
+        uint32_t minimum=graphics_render_read(117),maximum=graphics_render_read(123);
+        if(!fixed || (fixed_fvf && (shader&0x20)) ||
+           graphics_render_read(116)!=0x3f800000u || minimum>0x3f800000u ||
+           maximum<0x3f800000u || maximum>=0x7f800000u ||
+           graphics_render_read(118) || graphics_render_read(119) || graphics_render_read(151))
+            stop("unqualified active point raster state",shader);
+    }
     if(fixed_fvf) {
         if((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture))
             stop("XYZ FVF input serialization outside qualified diagnostic scope",shader);

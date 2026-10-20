@@ -11,9 +11,9 @@ static int graphics_lighting_parameter(uint32_t state)
 {return (state>=104 && state<=111) || state==113 || state==114;}
 static int graphics_lighting_parameter_valid(uint32_t state,uint32_t value)
 {return graphics_lighting_parameter(state) && (state==114 || value<=(state<=105?1u:2u));}
-/* Point raster parameters cannot affect the triangle-only draw owner. Keep
- * their cache intact; its primitive guard rejects points before submission.
- * POINTSIZE_MIN (117) already has a separately qualified initializer owner. */
+/* Keep the original point cache. Triangle draws do not consume it; the unit
+ * point owner validates active size/sprite/scale parameters before submission.
+ * POINTSIZE_MIN (117) has its separately qualified initializer owner. */
 static int graphics_point_parameter(uint32_t state)
 {return state==116 || (state>=118 && state<=123);}
 static int graphics_point_parameter_valid(uint32_t state,uint32_t value)
@@ -83,7 +83,11 @@ static void graphics_state_init(void)
         92,93,94,95,96,97,102,103,115,138,139,143,144,145,147,148,150};
     for(unsigned i=0;i<sizeof(render)/sizeof(*render);++i)
         graphics_render_state(render[i],graphics_state_baseline[render[i]],0);
-    static const unsigned texture[]={0,1,2,3,4,5,6,7,8,12,14,15,16,18,19,20,22,23,24,25,26,27,28,29};
+    static const unsigned texture[]={0,1,2,3,4,5,6,7,8,12,14,15,16,18,19,20,
+#ifdef PILOT_D3D_PHOBOS
+        21,
+#endif
+        22,23,24,25,26,27,28,29};
     for(unsigned stage=0;stage<4;++stage) {
         uint32_t *values=graphics_texture_baseline[stage];
         memcpy(values,pilot_d3d_texture_defaults,sizeof(graphics_texture_baseline[stage]));

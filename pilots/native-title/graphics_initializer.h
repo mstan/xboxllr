@@ -55,7 +55,7 @@ static inline int pilot_initializer_cache(uint32_t *cache,unsigned count,uint32_
  * generated coordinates; weighted blending/points remain outside its owner. */
 static inline int pilot_initializer_consumer(unsigned kind,uint32_t primitive,uint32_t fvf)
 {
-    if(kind>2 || primitive<5 || primitive>8)return 0;
+    if(kind>2 || ((primitive<5 || primitive>8) && !(kind==2 && primitive==1)))return 0;
     unsigned textures=(fvf>>8)&15;
     return kind || ((fvf&15)==4 && !(fvf&0xf030u) && textures<=4 && !((fvf>>16)>>(textures*2)));
 }

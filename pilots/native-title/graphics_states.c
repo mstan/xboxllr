@@ -149,6 +149,13 @@ int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
     case 18:host=D3DTSS_ALPHAARG1; goto argument;
     case 19:host=D3DTSS_ALPHAARG2; goto argument;
     case 20:if(value!=1 && value!=5)return 0; host=D3DTSS_RESULTARG; break;
+    case 21:
+#ifdef PILOT_D3D_PHOBOS
+        if(value!=0 && value!=2)return 0;
+        host=24;break; /* desktop TEXTURETRANSFORMFLAGS: disabled / COUNT2 */
+#else
+        return 0;
+#endif
     case 22:host=D3DTSS_BUMPENVMAT00; break;
     case 23:host=D3DTSS_BUMPENVMAT01; break;
     case 24:host=D3DTSS_BUMPENVMAT11; break; /* Xbox swaps the final two entries. */

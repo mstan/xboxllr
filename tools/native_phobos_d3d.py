@@ -66,6 +66,19 @@ def shaders(code):
         code = once(code, f'            mat4_transpose({name}_inv_t, {name}_inv);',
             f'            memcpy({name}_inv_t, {name}_inv, sizeof({name}_inv_t));'
             ' /* column-major inverse-transpose */')
+    # Fixed-function state owns texture transformation. Disabled transforms
+    # pass generated/explicit coordinates through; COUNT2 emits only XY.
+    code = once(code, '    "    uint4    TexCoordIndex;\\n"',
+        '    "    uint4    TextureTransformFlags;\\n"\n'
+        '    "    uint4    TexCoordIndex;\\n"')
+    code = once(code, '    UINT  texcoord_index[4];',
+        '    UINT  texture_transform_flags[4];\n    UINT  texcoord_index[4];')
+    code = once(code, '    "    return mul(uv, TexMat[stage]);\\n"',
+        '    "    if (!TextureTransformFlags[stage]) return uv;\\n"\n'
+        '    "    return float4(mul(uv, TexMat[stage]).xy, 0, 1);\\n"')
+    code = once(code, '            cb->texcoord_index[i] = ts ? ts[D3DTSS_TEXCOORDINDEX] : (UINT)i;',
+        '            cb->texture_transform_flags[i] = ts ? ts[24] : 0; /* TEXTURETRANSFORMFLAGS */\n'
+        '            cb->texcoord_index[i] = ts ? ts[D3DTSS_TEXCOORDINDEX] : (UINT)i;')
     # Reuse the existing dependent-bump and homogeneous-coordinate adapter.
     # Phobos already has float4 texture varyings and linear texture metadata.
     code = once(code,
@@ -250,6 +263,8 @@ def prepare(donor, output, reference):
         'while retaining the native device, resources, shaders and state caches.\n'
         'Pack inverse-transpose normal matrices in HLSL column-major order; '
         'camera/world rotations retain the original normal direction.\n'
+        'Fixed-function texture transforms obey disabled/COUNT2 state; '
+        'other count/project modes remain guarded by the adapter.\n'
         'Programmable fog is evaluated per vertex in the native translator;\n'
         'the pixel adapter consumes its interpolated, late-clamped factor.\n'
         'The existing feedback scratch/copy is exposed to native draws and target\n'

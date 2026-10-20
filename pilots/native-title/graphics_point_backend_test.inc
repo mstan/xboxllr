@@ -1,0 +1,34 @@
+#ifdef PILOT_D3D_PHOBOS
+static int test_unit_point_pixels(void)
+{
+    struct {float x,y,z;uint32_t color;} vertices[]={
+        {-.484375f,.359375f,.5f,0xffff0000},
+        {-.046875f,-.046875f,.5f,0xff00ff00},
+        {.515625f,-.484375f,.5f,0xff0000ff}};
+    const unsigned locations[]={20*64+16,33*64+30,47*64+48};
+    uint32_t buffer=0;CHECK(!pilot_gfx_vertex_create(sizeof(vertices),&buffer));
+    pilot_gfx_vertex_upload_range(buffer,vertices,0,sizeof(vertices));
+    pilot_gfx_vertex_bind(0,buffer,sizeof(vertices[0]));
+    for(unsigned stage=0;stage<4;++stage) {
+        pilot_gfx_texture_bind(stage,0);CHECK(pilot_gfx_xbox_texture_state(stage,12,stage?1:2));
+    }
+    CHECK(pilot_gfx_xbox_texture_state(0,14,0));
+    CHECK(pilot_gfx_initializer_consumer(2,1,0x42));
+    CHECK(!pilot_gfx_initializer_consumer(1,1,0x42) && !pilot_gfx_initializer_consumer(0,1,0x44));
+    unsigned char pixels[64*64*4];
+    for(unsigned shade=1;shade<=2;++shade)for(unsigned first=0;first<3;++first)for(unsigned all=0;all<2;++all) {
+        unsigned count=all?3-first:1;
+        pilot_gfx_set_state(D3DRS_SHADEMODE,shade);
+        CHECK(!pilot_gfx_clear(1,0xff111111,1,0) && !pilot_gfx_fvf_prepare_fixed(0x42));
+        CHECK(!pilot_gfx_draw_vertices(1,first,count) && !pilot_gfx_readback(pixels,sizeof(pixels)));
+        for(unsigned pixel=0;pixel<64*64;++pixel) {
+            uint32_t color=0xff111111;
+            for(unsigned i=first;i<first+count;++i)if(pixel==locations[i])color=vertices[i].color;
+            CHECK(pixels[pixel*4]==((color>>16)&255) && pixels[pixel*4+1]==((color>>8)&255) && pixels[pixel*4+2]==(color&255));
+        }
+    }
+    pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(buffer);
+    fprintf(stderr,"PASS unit-point raster: exact complete images for one/multiple buffered points, nonzero first offsets and flat/Gouraud colors\n");
+    return 0;
+}
+#endif

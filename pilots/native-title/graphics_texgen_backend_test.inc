@@ -47,17 +47,19 @@ static int test_camera_normal_texgen(void)
             CHECK(!pilot_gfx_transform(0,camera==2?identity:view));
             CHECK(!pilot_gfx_transform(6,camera==2?view:identity) && !pilot_gfx_transform(1,projection));
             CHECK(!pilot_gfx_transform(2+stage,tex));
-            for(unsigned set=0;set<4;++set)for(unsigned generated=0;generated<2;++generated) {
+            for(unsigned enabled=0;enabled<2;++enabled)for(unsigned set=0;set<4;++set)for(unsigned generated=0;generated<2;++generated) {
+                CHECK(pilot_gfx_xbox_texture_state(stage,21,enabled?2:0));
+                CHECK(d3d8_GetTSS(stage)[24]==(enabled?2u:0));
                 CHECK(pilot_gfx_xbox_texture_state(stage,28,(generated?0x10000:0)|set));
                 CHECK(d3d8_GetTSS(stage)[D3DTSS_TEXCOORDINDEX]==((generated?0x10000u:0)|set));
                 CHECK(!pilot_gfx_clear(1,0xff202020,1,0) && !pilot_gfx_shader_prepare_fixed(shader));
                 CHECK(!pilot_gfx_draw_memory(5,3,vertices,sizeof(vertices[0])));
                 CHECK(!pilot_gfx_readback(pixels,sizeof(pixels)));
                 unsigned texel=generated?(camera?2:1):set;
-                if(swap)texel=((texel&1)<<1)|((texel&2)>>1);
+                if(swap && enabled)texel=((texel&1)<<1)|((texel&2)>>1);
                 uint32_t color=texels[texel];
                 if(pixels[center]!=((color>>16)&255) || pixels[center+1]!=((color>>8)&255) || pixels[center+2]!=(color&255))
-                    fprintf(stderr,"texgen stage=%u camera=%u swap=%u set=%u generated=%u expected=%08x RGB=%02x%02x%02x\n",stage,camera,swap,set,generated,color,pixels[center],pixels[center+1],pixels[center+2]);
+                    fprintf(stderr,"texgen stage=%u camera=%u swap=%u enabled=%u set=%u generated=%u expected=%08x RGB=%02x%02x%02x\n",stage,camera,swap,enabled,set,generated,color,pixels[center],pixels[center+1],pixels[center+2]);
                 CHECK(pixels[center]==((color>>16)&255) && pixels[center+1]==((color>>8)&255) && pixels[center+2]==(color&255));
             }
         }
@@ -67,16 +69,22 @@ static int test_camera_normal_texgen(void)
             CHECK(!pilot_gfx_xbox_texture_state(stage,28,refused[i]));
             CHECK(d3d8_GetTSS(stage)[D3DTSS_TEXCOORDINDEX]==before);
         }
+        const uint32_t refused_transforms[]={1,3,4,0x100,0x102,UINT32_MAX};
+        for(unsigned i=0;i<sizeof(refused_transforms)/sizeof(refused_transforms[0]);++i) {
+            CHECK(!pilot_gfx_xbox_texture_state(stage,21,refused_transforms[i]));
+            CHECK(d3d8_GetTSS(stage)[24]==2);
+        }
         CHECK(!pilot_gfx_transform(2+stage,identity));
     }
     CHECK(!pilot_gfx_xbox_texture_state(4,28,0x10000));
     for(unsigned stage=0;stage<4;++stage) {
         pilot_gfx_texture_bind(stage,0);CHECK(pilot_gfx_xbox_texture_state(stage,28,stage));
         CHECK(pilot_gfx_xbox_texture_state(stage,12,1));
+        CHECK(pilot_gfx_xbox_texture_state(stage,21,0));
     }
     CHECK(!pilot_gfx_transform(0,identity) && !pilot_gfx_transform(1,identity) && !pilot_gfx_transform(6,identity));
     pilot_gfx_shader_destroy(shader);pilot_gfx_texture_destroy(texture);
-    fprintf(stderr,"PASS camera-normal texgen: 192 independently expected GPU samples, four stages/selectors, camera/world rotation, texture matrix, passthrough and rejected modes\n");
+    fprintf(stderr,"PASS camera-normal texgen: 384 independently expected GPU samples, four stages/selectors, camera/world rotation, disabled/COUNT2 texture matrix, passthrough and rejected modes\n");
     return 0;
 }
 #endif

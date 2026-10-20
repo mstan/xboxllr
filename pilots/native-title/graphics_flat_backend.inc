@@ -25,7 +25,7 @@ static void pilot_flat_close(void)
 static HRESULT pilot_flat_prepare(unsigned primitive)
 {
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
-    if(d3d8_GetRenderStates()[D3DRS_SHADEMODE]!=1) {
+    if(primitive==1 || d3d8_GetRenderStates()[D3DRS_SHADEMODE]!=1) {
         ID3D11DeviceContext_GSSetShader(context,NULL,NULL,0);return S_OK;
     }
     if(primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8)return E_NOTIMPL;
