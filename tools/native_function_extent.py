@@ -101,6 +101,34 @@ def apply_extents(blob, image, functions, records):
     return sorted(functions,key=lambda f:int(f['start'],16))
 
 
+def retire_missing_guard(sources, symbol, address, missing_count):
+    """Retire exactly the hardened direct-target definition being recovered.
+
+    An indirect callback may have no old guard. A direct call already has a
+    one-line definition which the normal multiline compiler-body matcher does
+    not recognize. Reject other/duplicate definitions rather than leaving two
+    native owners or silently replacing an unreviewed implementation.
+    Returns proposed source edits; the caller publishes only after validation.
+    """
+    definition = re.compile(r'^\s*void\s+' + re.escape(symbol) +
+                            r'\s*\(\s*void\s*\)\s*\{', re.M)
+    canonical = re.compile(r'^void ' + re.escape(symbol) +
+        r'\(void\) \{ RECOMP_UNIMPL\("undiscovered direct target", 0x' +
+        f'{address:08X}' + r'u\); \}(?:\r?\n|$)', re.M)
+    owners = [(path, code) for path, code in sources if definition.search(code)]
+    if not owners:
+        return {}, missing_count
+    if len(owners) != 1:
+        raise ValueError('duplicate missing-target definitions before recovery')
+    path, code = owners[0]
+    matches = list(canonical.finditer(code))
+    if len(matches) != 1 or len(definition.findall(code)) != 1:
+        raise ValueError('unreviewed missing-target definition before recovery')
+    if type(missing_count) is not int or missing_count < 1:
+        raise ValueError('missing-target inventory disagrees with recovered guard')
+    return {path: canonical.sub('', code, count=1)}, missing_count - 1
+
+
 def recover(args):
     output=args.output.resolve();donor=args.donor.resolve();xbe=args.xbe.resolve()
     if 'build' not in output.parts: raise ValueError('output must remain under private build/')
@@ -154,10 +182,12 @@ def recover(args):
     if manifest.get('thread_checkpoints'):
         from native_thread_checkpoints import instrument
         bodies[0], unused = instrument(bodies[0])
-    matches=[(p,p.read_text()) for p in generated.glob('recomp_*.c')]
-    matches=[(p,c) for p,c in matches if pattern.search(c)]
+    sources=[(p,p.read_text()) for p in generated.glob('recomp_*.c')]
+    matches=[(p,c) for p,c in sources if pattern.search(c)]
+    retired={};remaining_missing=manifest.get('missing_targets',0)
     if args.new_entry:
         if matches:raise ValueError('new entry already has generated code')
+        retired,remaining_missing=retire_missing_guard(sources,symbol,args.function,remaining_missing)
         path=generated/f'recomp_entry_{args.function:08x}.c'
         if path.exists():raise ValueError('new entry output already exists')
         code='#define RECOMP_GENERATED_CODE\n#include "recomp_funcs.h"\n#include <math.h>\n'+bodies[0]
@@ -190,6 +220,9 @@ def recover(args):
     # All validation and lowering succeed before changing authoritative output.
     (work/f'recovered-{args.function:08x}.c').write_text(result.stdout,newline='\n')
     path.write_text(code,newline='\n');functions_path.write_text(json.dumps(updated,indent=2)+'\n',newline='\n')
+    for retired_path,retained_source in retired.items():
+        retired_path.write_text(retained_source,encoding='utf-8',newline='\n')
+    if retired:manifest['missing_targets']=remaining_missing
     if args.new_entry:
         dispatch_path.write_text(dispatch,encoding='utf-8',newline='\n')
     record_path.write_text(json.dumps(records,indent=2)+'\n',newline='\n')

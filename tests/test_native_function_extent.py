@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from native_function_extent import apply_extents
+from native_function_extent import apply_extents, retire_missing_guard
 from native_pilot import retire_recovered_entry_units
 
 
@@ -117,6 +117,40 @@ class ExtentRecovery(unittest.TestCase):
             self.assertFalse(old.exists())
             self.assertTrue((directory/'recomp_0000.c').exists())
             retire_recovered_entry_units(directory,[record])
+
+
+class MissingTargetRetirement(unittest.TestCase):
+    first='void sub_00010000(void) { RECOMP_UNIMPL("undiscovered direct target", 0x00010000u); }\n'
+    other='void sub_00020000(void) { RECOMP_UNIMPL("undiscovered direct target", 0x00020000u); }\n'
+
+    def test_direct_recovery_keeps_only_other_guards_and_updates_inventory(self):
+        source='#include "recomp_funcs.h"\n'+self.first+self.other
+        unchanged='void sub_00030000(void)\n{ sub_00010000(); }\n'
+        edits,count=retire_missing_guard([('guards.c',source),('caller.c',unchanged)],'sub_00010000',0x10000,2)
+        self.assertEqual(count,1)
+        self.assertEqual(edits,{'guards.c':'#include "recomp_funcs.h"\n'+self.other})
+        self.assertEqual(source.count('RECOMP_UNIMPL'),2) # proposed edits do not mutate input
+
+    def test_indirect_entry_without_old_guard_preserves_inventory(self):
+        self.assertEqual(retire_missing_guard([('guards.c',self.other)],'sub_00010000',0x10000,1),({},1))
+
+    def test_reject_duplicate_owners_or_duplicate_definitions(self):
+        for sources in [[('a.c',self.first),('b.c',self.first)],[('a.c',self.first+self.first)]]:
+            with self.assertRaisesRegex(ValueError,'duplicate|unreviewed'):
+                retire_missing_guard(sources,'sub_00010000',0x10000,2)
+
+    def test_reject_wrong_address_or_non_guard_body(self):
+        for body in [self.first.replace('0x00010000u','0x00010001u'),
+                     self.first.replace('undiscovered direct target','translation failed'),
+                     self.first.rstrip()+' extra_tokens\n',
+                     'void sub_00010000(void) { return; }\n']:
+            with self.assertRaisesRegex(ValueError,'unreviewed'):
+                retire_missing_guard([('a.c',body)],'sub_00010000',0x10000,1)
+
+    def test_reject_invalid_inventory_before_publishing_edits(self):
+        for count in [0,-1,True,'1']:
+            with self.assertRaisesRegex(ValueError,'inventory disagrees'):
+                retire_missing_guard([('a.c',self.first)],'sub_00010000',0x10000,count)
 
 
 if __name__=='__main__':unittest.main()
