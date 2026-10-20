@@ -230,6 +230,17 @@ add_executable(pilot_settings_factory_test "${CMAKE_CURRENT_SOURCE_DIR}/../../te
 target_include_directories(pilot_settings_factory_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 pilot_add_test(NAME pilot_settings_factory COMMAND pilot_settings_factory_test)
 set_tests_properties(pilot_settings_factory PROPERTIES TIMEOUT 15)
+pilot_add_test(NAME pilot_settings_user COMMAND pilot_contract_test settings-user)
+set_tests_properties(pilot_settings_user PROPERTIES TIMEOUT 30)
+if(PILOT_SCHEDULING STREQUAL "NATIVE")
+  pilot_add_test(NAME pilot_system_time_set COMMAND pilot_contract_test system-time-set)
+  pilot_add_test(NAME pilot_system_time_set_absolute_guard COMMAND "${CMAKE_COMMAND}"
+    "-DBINARY=$<TARGET_FILE:pilot_contract_test>" "-DCASE=system-time-set-absolute-guard"
+    "-DEXPECT=system-time change during native absolute wait unqualified"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/waitable_expect_stop.cmake")
+  set_tests_properties(pilot_system_time_set PROPERTIES TIMEOUT 15)
+  set_tests_properties(pilot_system_time_set_absolute_guard PROPERTIES TIMEOUT 10)
+endif()
 add_executable(pilot_settings_region_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_settings_region.c")
 target_include_directories(pilot_settings_region_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(pilot_settings_region_test PRIVATE bcrypt)

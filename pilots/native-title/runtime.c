@@ -554,6 +554,7 @@ static void critical_section(unsigned operation,uint32_t va)
 #include "counted_string.inc"
 #include "settings_region.inc"
 #include "settings_factory.inc"
+#include "settings_user.inc"
 
 static void query_setting(void)
 {
@@ -563,11 +564,10 @@ static void query_setting(void)
     if(settings_factory_query(index,type,value,length,result))return;
     /* XC_* user-settings layout from Cxbx EmuEEPROM.h/types.h. These are
      * actual file-backed settings; other factory/encrypted queries guard. */
-    static const unsigned char offsets[]={4,8,24,40,12,28,44,48,52,56,60,64,68,72,76,80,84,88,92};
+    unsigned offset,size;
     if (index>0xff) stop("EEPROM index outside pilot scope",index);
-    if (index>=sizeof(offsets) && index!=0xff) { g_eax=0xc0000034u; return; }
+    if (!settings_user_field(index,&offset,&size)) { g_eax=0xc0000034u; return; }
     if (!have_eeprom) stop("console settings require EEPROM input",index);
-    uint32_t size=index==0xff ? 96 : 4;
     AcquireSRWLockExclusive(&eeprom_lock);
     if(!settings_cache_valid) {
         memcpy(settings_cache,eeprom,sizeof(settings_cache));
@@ -586,12 +586,14 @@ static void query_setting(void)
         ReleaseSRWLockExclusive(&eeprom_lock);g_eax=0xc000009cu;return;
     }
     unsigned char payload[96];
-    memcpy(payload,settings_cache+0x60+(index==0xff ? 0 : offsets[index]),size);
+    memcpy(payload,settings_cache+offset,size);
     ReleaseSRWLockExclusive(&eeprom_lock);
     if (length<size) { g_eax=0xc0000023u; return; }
     /* Guest output accesses may enter memory transport. Keep owner locks out
      * of that path; payload is only this query's immutable read snapshot. */
-    MEM32(type)=(index==1 || index==2 || index==4 || index==5 || index==18 || index==0xff) ? 3 : 4;
+    if(!type || type>UINT32_MAX-3 || !value || value>UINT32_MAX-(length-1) || (result && result>UINT32_MAX-3))
+        stop("invalid user settings output range",index);
+    MEM32(type)=(index==1 || index==4 || index==0xff) ? 3 : 4;
     if (result) MEM32(result)=size;
     memset(memory+value,0,length);
     memcpy(memory+value,payload,size);
@@ -604,6 +606,7 @@ static void query_setting(void)
 #endif
 #include "system_time.inc"
 #include "event_objects.inc"
+#include "system_time_set.inc"
 #include "native_cpu_context.inc"
 #include "native_file_apc.inc"
 #ifdef PILOT_IO_DEVICE_LLE
@@ -631,6 +634,7 @@ static void scheduling_lle_execute(uint32_t entry);
 #endif
 #include "sections.inc"
 #include "media.inc"
+#include "settings_user_storage.inc"
 #include "cache.inc"
 #ifdef PILOT_FILES_LLE
 #include "files_lle.inc"
@@ -926,6 +930,15 @@ static void kernel_dispatch_impl(void)
     case 192:case 213:case 221:mutant_kernel(next_kernel_ordinal);return;
     case 235:wait_multiple_kernel();return;
     case 230:signal_wait_kernel();return;
+    case 228:system_time_set_kernel();return;
+    case 25: {
+        /* The native storage profile has no raw partition-zero refurbishment
+         * sector owner. Report that missing capability to the caller; never
+         * invent factory metadata or acknowledge an unperformed disk write. */
+        uint32_t buffer=MEM32(g_esp+4),length=MEM32(g_esp+8),write=MEM8(g_esp+12);
+        g_eax=length!=16?0xc000000du:!wait_range(buffer,16,!write)?0xc0000005u:0xc00000bbu;
+        g_esp+=16;return;
+    }
     case 99:delay_thread_kernel();return;
     case 97: g_eax=dispatch_cancel_timer(MEM32(g_esp+4)); g_esp+=8; return;
     case 108: {
@@ -965,6 +978,7 @@ static void kernel_dispatch_impl(void)
         g_eax=pilot_nt_status_to_dos_error(MEM32(g_esp+4));g_esp+=8;return;
     }
     case 24: query_setting(); g_esp+=24; return;
+    case 29: save_setting(); g_esp+=20; return;
     case 107: {
         uint32_t va=MEM32(g_esp+4);
         memset(memory+va,0,28);
@@ -1337,7 +1351,7 @@ int main(int argc,char **argv)
     files_lle_start();
 #else
     if (argc>=4) media_content_path=argv[3];
-    if (argc==5) storage_mount(argv[4]);
+    if (argc==5) {storage_mount(argv[4]);settings_user_storage_bind();}
     fsc_ensure();
 #ifdef PILOT_MEDIA_HOST
     uint32_t content_status=media_verify(PILOT_XBE_SHA256);

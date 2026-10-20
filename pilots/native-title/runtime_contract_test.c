@@ -566,6 +566,8 @@ static void test_timers(void)
 #include "thread_audio_gate_contract_test.inc"
 #endif
 
+#include "settings_user_contract_test.inc"
+#include "system_time_set_contract_test.inc"
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -601,6 +603,9 @@ int main(int argc,char **argv)
     commit(0x10000,0x10000);
     g_esp=0x18000; MEM32(g_esp)=0x12340;
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
+    if(argc==2 && !strcmp(argv[1],"settings-user")){test_settings_user();return 0;}
+    if(argc==2 && !strcmp(argv[1],"system-time-set")){test_system_time_set(0);return 0;}
+    if(argc==2 && !strcmp(argv[1],"system-time-set-absolute-guard")){test_system_time_set(1);return 0;}
 #ifdef PILOT_USB_LLE
     /* Production initializes the selected kernel during image reservation.
      * Include that one-time host engine setup before resource baselines. */

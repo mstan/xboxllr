@@ -1,5 +1,11 @@
 [
   {
+    "start": "0x000402D0",
+    "end": "0x0004031D",
+    "size": 77,
+    "evidence": "Input-property change callback; reached setting-video interaction; original constructor400F0 and destructor40190 publish table25758 slot2. All23 source table entries audited; only this root absent. Three already-discovered interior fragments retained."
+  },
+  {
     "start": "0x0004EAF0",
     "end": "0x0004EB1E",
     "size": 46,

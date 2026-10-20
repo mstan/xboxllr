@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from dashboard_credits_mod import block, credit_pages, menu_geometry, menu_script, viewer
+from dashboard_credits_mod import block, credit_pages, menu_geometry, menu_script, native_panel_script, viewer
 from dashboard_credits_viewer import document_lines, VISIBLE_LINES
 
 
@@ -36,6 +36,21 @@ DEF theMessageJoystick Joystick {
   function OnBDown() { originalMessageB(); }
   function OnMoveLeft() { originalMessageLeft(); }
   function OnMoveRight() { originalMessageRight(); }
+}
+'''
+PANEL_SCRIPT = '''
+function StartSettingsMenu() { originalSettings(); }
+function StartPanelMenu() { originalPanel(); }
+DEF theSettingsMenu Level {
+    function OnADown() { originalSelect(); }
+}
+control DEF thePanelJoystick Joystick {
+  function OnADown() { originalMessageA(); }
+  function OnBDown() { originalMessageB(); }
+  function OnMoveLeft() { originalMessageLeft(); }
+  function OnMoveRight() { originalMessageRight(); }
+  function OnMoveUp() { originalMessageUp(); }
+  function OnMoveDown() { originalMessageDown(); }
 }
 '''
 
@@ -78,14 +93,14 @@ class CreditsTests(unittest.TestCase):
                         legal=[], notices=[])
             pages, notices, sections = credit_pages(spec, paths)
             self.assertIn("Matthew Stanley", pages[0])
-            self.assertIn("https://example.invalid/project", pages[0])
+            self.assertIn("https://example.invalid/project", "".join(pages[0].split()))
             self.assertEqual(len(notices), 2)
             self.assertEqual(notices[0]["viewer_page"], notices[1]["viewer_page"])
             self.assertEqual(len(sections), 3)  # person, shared notice, complete index
             first = notices[0]["viewer_page"] - 1
             visible = " ".join(" ".join(page.splitlines()[1:]) for page in pages[first:sections[-1]])
             self.assertEqual("".join(visible.split()), "".join(text.split()))
-            self.assertIn("second-LICENSE", pages[-1])
+            self.assertIn("second-LICENSE", "".join(pages[-1].split()))
 
     @unittest.skipUnless(shutil.which("node"), "Node is optional for generated-script logic checks")
     def test_generated_controller_logic_and_menu_highlights(self):
@@ -100,8 +115,9 @@ class CreditsTests(unittest.TestCase):
         self.assertLess(load.index(".SetTranslation("), load.index("UpdateMainMenu();"))
         begin, _, end = block(generated, "DEF theMainMenu Level")
         select = function(generated[begin:end], "function OnADown()")
-        begin, _, end = block(generated, "DEF theMessageJoystick Joystick")
-        message = generated[begin:end]
+        panel = native_panel_script(PANEL_SCRIPT)
+        begin, _, end = block(panel, "control DEF thePanelJoystick Joystick")
+        message = panel[begin:end]
         handlers = "\n".join(function(message, "function " + event + "()")
                              for event in ("OnADown", "OnBDown", "OnMoveLeft", "OnMoveRight",
                                            "OnMoveUp", "OnMoveDown"))
@@ -109,18 +125,26 @@ class CreditsTests(unittest.TestCase):
 const assert = require('node:assert/strict');
 function node() { return { name: '', visible: true, SetRotation(...value) { this.rotation = value; } }; }
 var menuNodes = new Proxy({}, { get(target, key) { return target[key] ??= node(); } });
-var theMainMenu = { children: [{ children: [menuNodes] }] };
+var closes = 0;
+var theMainMenu = { children: [{ children: [menuNodes] }], GoBackTo() { closes++; } };
 var theMessageInline = { children: [{ MessageText: { text: '' } }] };
-var theMessageLayer = {transparency: 1}, xllrCreditsLayer = {transparency: 1};
-var xllrCreditsBody = {text: ''}, xllrCreditsPosition = {text: ''};
+var panelNodes = new Proxy({}, { get(target, key) { return target[key] ??= {...node(), SetScale(...s) {this.scale=s;}, SetTranslation(...t) {this.position=t;}}; } });
+var theSetPanelMenu = {children:[{children:[panelNodes]}], GoTo() {StartPanelMenu();}};
+var theSettingsMenuOut = {Play() {}};
+var strCurMenu='SETTINGS', strPrevMenu='SETTINGS';
 var nCurMainMenuItem = 0, g_bXOnDashExists = true;
-var originalUpdates = 0, originalSelections = 0, originalMessages = 0, closes = 0;
+var originalUpdates = 0, originalSelections = 0, originalMessages = 0, settingsCalls=0, panelCalls=0;
 function originalMenuUpdate() { originalUpdates++; }
 function originalSelect() { originalSelections++; }
 function originalMessageA() { originalMessages++; }
 function originalMessageB() { originalMessages++; }
 function originalMessageLeft() { originalMessages++; }
 function originalMessageRight() { originalMessages++; }
+function originalMessageUp() { originalMessages++; }
+function originalMessageDown() { originalMessages++; }
+function originalSettings() {settingsCalls++;}
+function originalPanel() {panelCalls++;}
+function GoToSettings() {StartSettingsMenu();}
 function PlaySoundA() {}
 function TellUser(text) { theMessageInline.children[0].MessageText.text = text; }
 function CloseMessage() { closes++; }
@@ -128,7 +152,9 @@ function CloseMessage() { closes++; }
         lines, starts = document_lines(pages, [0, 1, 2, 4])
         program += 'var expectedLines = ' + json.dumps(lines) + ';\n'
         program += 'var expectedStarts = ' + json.dumps(starts) + ';\n'
+        program += 'var visibleLines = ' + str(VISIBLE_LINES) + ';\n'
         program += viewer(pages, [0, 1, 2, 4]) + menu + "\nfunction select() {\n" + select + "; OnADown();\n}\n"
+        program += function(panel, 'function StartSettingsMenu()') + '\n' + function(panel, 'function StartPanelMenu()') + '\n'
         program += "\nfunction controller(event) {\n" + handlers + "; eval(event + '()');\n}\n"
         program += r'''
 for (var online of [true, false]) {
@@ -140,23 +166,28 @@ for (var online of [true, false]) {
     assert.equal(menuNodes.theMenuItems.rotation[3], online ? 0.75 : 0.9);
     select(); assert.equal(xllrCreditsLine, 0);
     assert.ok(xllrCreditsBody.text.includes('Matthew Stanley'));
-    assert.equal(xllrCreditsLayer.transparency, 0);
-    assert.equal(theMessageLayer.transparency, 1);
+    assert.equal(strCurMenu, 'XLLR CREDITS');
+    assert.equal(xllrCreditsBody, panelNodes.QuestionText);
+    assert.equal(xllrCreditsPosition, panelNodes.PanelHeading);
+    assert.equal(panelNodes.ConsoleIcon.visible, true);
+    assert.equal(panelNodes.ButtonGroup.visible, false);
     controller('OnMoveUp'); assert.equal(xllrCreditsLine, 0);
     controller('OnMoveDown'); assert.equal(xllrCreditsLine, 1);
     controller('OnMoveUp'); assert.equal(xllrCreditsLine, 0);
     controller('OnMoveRight'); assert.equal(xllrCreditsLine, expectedStarts[1]);
     controller('OnMoveLeft'); assert.equal(xllrCreditsLine, 0);
-    controller('OnADown'); assert.equal(xllrCreditsLine, 13);
-    for (var i = 0; i <= expectedLines.length - 14; i++) {
+    controller('OnADown'); assert.equal(xllrCreditsLine, visibleLines - 1);
+    for (var i = 0; i <= expectedLines.length - visibleLines; i++) {
         xllrCreditsLine = i;
         XllrCreditsRefresh();
-        assert.equal(xllrCreditsBody.text, expectedLines.slice(i, i + 14).join('\n'));
+        assert.equal(xllrCreditsBody.text, expectedLines.slice(i, i + visibleLines).join('\r'));
     }
-    controller('OnMoveDown'); assert.equal(xllrCreditsLine, expectedLines.length - 14);
-    controller('OnADown'); assert.equal(xllrCreditsLine, expectedLines.length - 14);
-    assert.equal(xllrCreditsPosition.text, '100%');
-    controller('OnBDown'); assert.equal(xllrCreditsActive, false); assert.equal(xllrCreditsLayer.transparency, 1);
+    controller('OnMoveDown'); assert.equal(xllrCreditsLine, expectedLines.length - visibleLines);
+    controller('OnADown'); assert.equal(xllrCreditsLine, expectedLines.length - visibleLines);
+    assert.equal(xllrCreditsPosition.text, 'CREDITS 100%');
+    controller('OnBDown'); assert.equal(xllrCreditsActive, false); assert.equal(strCurMenu, 'SETTINGS');
+    StartPanelMenu(); assert.deepEqual(panelNodes.S_Home_text_games01.scale,[1,1,1]);
+    assert.equal(panelNodes.QuestionText.width,10); assert.equal(panelNodes.QuestionText.scrollRate,0.1);
     assert.equal(nCurMainMenuItem, 4);
     nCurMainMenuItem = 0; UpdateMainMenu(); select();
     assert.equal(menuNodes.xllrCredits_game_select_pod_inner03.visible, false);
@@ -164,6 +195,14 @@ for (var online of [true, false]) {
 }
 assert.equal(originalUpdates, 2); assert.equal(originalSelections, 2);
 assert.equal(originalMessages, 4); assert.equal(closes, 2);
+assert.equal(panelCalls,4); assert.equal(settingsCalls,0);
+strCurMenu='XLLR OFFLINE'; StartPanelMenu();
+assert.equal(panelNodes.PanelHeading.text,'OFFLINE');
+assert.ok(panelNodes.QuestionText.text.includes('running offline'));
+assert.ok(panelNodes.QuestionText.text.includes('Xbox Live is unavailable'));
+assert.equal(panelNodes.ButtonGroup.visible,false);
+controller('OnADown'); controller('OnMoveRight');
+assert.equal(originalMessages,4); // Offline screen does not launch or select anything.
 '''
         result = subprocess.run([shutil.which("node"), "-"], input=program, text=True,
                                 capture_output=True, check=False)

@@ -14,7 +14,7 @@ import re
 import textwrap
 
 from dashboard_xip import Xip
-from dashboard_credits_viewer import viewer, viewer_geometry, document_lines
+from dashboard_credits_viewer import viewer, document_lines
 
 ROOT = Path(__file__).resolve().parents[1]
 PINS = {
@@ -52,7 +52,7 @@ def js_string(value: str) -> str:
 def pages_from_text(title: str, text: str) -> list[str]:
     lines = []
     for line in text.splitlines():
-        lines.extend(textwrap.wrap(line.expandtabs(4), width=70) or [""])
+        lines.extend(textwrap.wrap(line.expandtabs(4), width=26) or [""])
     return [title + "\n" + "\n".join(lines[i:i + 6]) for i in range(0, len(lines), 6)]
 
 
@@ -166,17 +166,82 @@ xllrMenu.{item}.SetRotation(0, 1, 0, xllrAngle);
     load = load.replace(anchor, placement + anchor)
     level = level[:begin_load] + load + level[end_load:]
     source = source[:begin] + level + source[end:]
-    begin, _, end = block(source, "DEF theMessageJoystick Joystick")
-    joystick = source[begin:end]
-    for event, action in (("OnADown", "PageDown"), ("OnBDown", "Close"), ("OnMoveLeft", "PreviousSection"), ("OnMoveRight", "NextSection")):
-        joystick = inject(joystick, f"function {event}()", f"\nif (xllrCreditsActive) {{ XllrCredits{action}(); return; }}\n")
-    # These events are new in the message controller; dashboard navigation
-    # remains handled by its original owner whenever this modal is absent.
-    joystick = inject(joystick, "DEF theMessageJoystick Joystick", suffix="""
-function OnMoveDown() { if (xllrCreditsActive) XllrCreditsNext(); }
-function OnMoveUp() { if (xllrCreditsActive) XllrCreditsPrevious(); }
+    return source + viewer(pages, sections)
+
+
+def native_panel_script(source: str) -> str:
+    """Route Credits through the existing System Info Level, camera and meshes.
+
+    Only authored guards/assignments are inserted in the private owned script.
+    No original script or geometry is distributed by this tool.
+    """
+    source = inject(source, "function StartSettingsMenu()", """
+if (xllrCreditsActive) {
+    strCurMenu = "XLLR CREDITS";
+    theSetPanelMenu.GoTo();
+    return;
+}
 """)
-    return source[:begin] + joystick + source[end:] + viewer(pages, sections) + viewer_geometry()
+    source = inject(source, "function StartPanelMenu()", """
+var xllrPanel = theSetPanelMenu.children[0].children[0];
+xllrPanel.S_Home_text_games01.SetScale(1, 1, 1);
+xllrPanel.QuestionText.width = 10;
+xllrPanel.QuestionText.height = 8;
+xllrPanel.QuestionText.scrollRate = 0.1;
+xllrPanel.QuestionText.scrollDelay = 5;
+""", """
+if (strCurMenu == "XLLR CREDITS") {
+    xllrPanel.ButtonGroup.visible = false;
+    xllrPanel.ConsoleIcon.visible = true;
+    xllrPanel.Group07.visible = false;
+    xllrPanel.Group02_supports.SetTranslation(-6.15, 0.3773, 61.650002);
+    xllrPanel.S_Home_text_games01.SetScale(0.72, 0.72, 0.72);
+    xllrPanel.QuestionText.width = 13.8;
+    xllrPanel.QuestionText.height = 11.1;
+    xllrPanel.QuestionText.scrollRate = 0;
+    xllrPanel.QuestionText.scrollDelay = 1000000;
+    xllrCreditsBody = xllrPanel.QuestionText;
+    xllrCreditsPosition = xllrPanel.PanelHeading;
+    XllrCreditsRefresh();
+}
+if (strCurMenu == "XLLR OFFLINE") {
+    xllrPanel.PanelHeading.text = "OFFLINE";
+    xllrPanel.QuestionText.text = "This dashboard is\\rrunning offline.\\r\\rXbox Live is unavailable.";
+    xllrPanel.ButtonGroup.visible = false;
+    xllrPanel.ConsoleIcon.visible = true;
+    xllrPanel.Group07.visible = false;
+    xllrPanel.Group02_supports.SetTranslation(-6.15, 0.3773, 61.650002);
+}
+""")
+    begin, _, end = block(source, "control DEF thePanelJoystick Joystick")
+    joystick = source[begin:end]
+    for event, action in (("OnADown", "PageDown"), ("OnMoveDown", "Next"), ("OnMoveUp", "Previous"),
+                          ("OnMoveLeft", "PreviousSection"), ("OnMoveRight", "NextSection")):
+        joystick = inject(joystick, f"function {event}()",
+                          f'\nif (strCurMenu == "XLLR OFFLINE") return;\n'
+                          f'if (strCurMenu == "XLLR CREDITS") {{ XllrCredits{action}(); return; }}\n')
+    joystick = inject(joystick, "function OnBDown()", """
+if (strCurMenu == "XLLR CREDITS") {
+    XllrCreditsClose();
+    strCurMenu = "SETTINGS";
+    strPrevMenu = "SETTINGS";
+    theMainMenu.GoBackTo();
+    theSettingsMenuOut.Play();
+    return;
+}
+""")
+    source = source[:begin] + joystick + source[end:]
+    begin, _, end = block(source, "DEF theSettingsMenu Level")
+    settings = inject(source[begin:end], "function OnADown()", """
+if ((sSettingsElements[nCurSettingsMenuItem] == theTranslator.Translate("NETWORK")) +
+    (sSettingsElements[nCurSettingsMenuItem] == theTranslator.Translate("LIVE TODAY"))) {
+    PlaySoundA();
+    strCurMenu = "XLLR OFFLINE";
+    theSetPanelMenu.GoTo();
+    return;
+}
+""")
+    return source[:begin] + settings + source[end:]
 
 
 def main() -> None:
@@ -207,8 +272,10 @@ def main() -> None:
     pages, notices, sections = credit_pages(spec, extra_notices)
     geometry, names = menu_geometry(inputs["mainmenu5.xip"].read("default.xap").decode("utf-8"))
     script = menu_script(inputs["default.xip"].read("default.xap").decode("utf-8"), names, pages, sections)
+    main_archive = Xip(inputs["default.xip"].replace("default.xap", script.encode("utf-8")))
+    settings = inputs["default.xip"].read("settings3.xap").decode("latin1")
     outputs = {
-        "default.xip": inputs["default.xip"].replace("default.xap", script.encode("utf-8")),
+        "default.xip": main_archive.replace("settings3.xap", native_panel_script(settings).encode("latin1")),
         "mainmenu5.xip": inputs["mainmenu5.xip"].replace("default.xap", geometry.encode("utf-8")),
     }
     native = None
@@ -244,7 +311,7 @@ def main() -> None:
             raise ValueError("input archive changed during generation")
     manifest = dict(schema="xboxllr.dashboard.asset-mod.v1", private_guest_output=True,
                     id="xboxllr.dashboard.credits", dashboard_build=5960, credits_pages=len(pages),
-                    credits_lines=len(document_lines(pages,sections)[0]), viewer="scrolling-text",
+                    credits_lines=len(document_lines(pages,sections)[0]), viewer="native-system-info-scroll",
                     validation="generated and read back; in-dashboard visual/input validation pending",
                     inputs_unchanged=True, files=records, notices=notices, sections=sections,
                     source_reference=dict(repository="https://github.com/MrMilenko/Theseus",

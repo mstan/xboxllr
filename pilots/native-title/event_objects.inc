@@ -148,7 +148,9 @@ static void wait_single_kernel(unsigned ordinal)
     LARGE_INTEGER due;if(timeout)memcpy(&due,memory+timeout,8);
     uint32_t status;HANDLE host=wait_reference(id,&status);g_eax=status;
     if(host) {
+        int absolute=dispatch_native_absolute_begin(timeout?&due:NULL);
         g_eax=alertable && native_apc_pending()?0xc0u:(uint32_t)event_nt_wait(host,(BOOLEAN)alertable,timeout?&due:NULL);
+        dispatch_native_absolute_end(absolute);
         if(!CloseHandle(host))stop("single wait operation reference close failed",id);
     }
     g_esp+=ordinal==234?20:16;
@@ -176,7 +178,9 @@ static void signal_wait_kernel(void)
             /* Both references precede the first mutation. Use the real paired
              * NT service; a separate SetEvent+Wait sequence is not used. */
             if(alertable)native_apc_rearm_if_ready();
+            int absolute=dispatch_native_absolute_begin(timeout?&due:NULL);
             g_eax=(uint32_t)event_nt_signal_wait(first,second,(BOOLEAN)alertable,timeout?&due:NULL);
+            dispatch_native_absolute_end(absolute);
             if(!CloseHandle(second))stop("signal/wait wait reference close failed",wait);
         }
         if(!CloseHandle(first))stop("signal/wait signal reference close failed",signal);
@@ -208,8 +212,12 @@ static void wait_multiple_kernel(void)
         uint32_t status;handles[i]=wait_reference(ids[i],&status);
         if(!handles[i]){g_eax=status;break;}
     }
-    if(!g_eax)g_eax=alertable && native_apc_pending()?0xc0u:
-        (uint32_t)event_nt_wait_multiple(count,handles,kind,(BOOLEAN)alertable,timeout?&due:NULL);
+    if(!g_eax) {
+        int absolute=dispatch_native_absolute_begin(timeout?&due:NULL);
+        g_eax=alertable && native_apc_pending()?0xc0u:
+            (uint32_t)event_nt_wait_multiple(count,handles,kind,(BOOLEAN)alertable,timeout?&due:NULL);
+        dispatch_native_absolute_end(absolute);
+    }
     for(unsigned i=0;i<count;++i)if(handles[i] && !CloseHandle(handles[i]))
         stop("multiwait operation reference close failed",ids[i]);
     g_esp+=28;

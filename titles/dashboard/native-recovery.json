@@ -3,6 +3,31 @@
   "sha256": "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d",
   "extents": [
     {
+      "start": 262864,
+      "original_end": 262864,
+      "end": 262941,
+      "sha256": "1d6ee0b5d93a586aa659bd81fe061a25dcc1da3501aa9d1b50b262c92c0cb71c",
+      "reason": "Input-property change callback; reached setting-video interaction; original constructor400F0 and destructor40190 publish table25758 slot2. All23 source table entries audited; only this root absent. Three already-discovered interior fragments retained.",
+      "new_entry": true,
+      "contained_entries": [
+        {
+          "start": 262912,
+          "end": 262916,
+          "sha256": "da9b872105c0420f7d25e0786cdc13e6431327eda0fa52bb371aad757e3016fb"
+        },
+        {
+          "start": 262916,
+          "end": 262920,
+          "sha256": "226a008a395de2e5258b1b9c1bcaee225373c4ee0c0c9296c9a6e2d4602b79cb"
+        },
+        {
+          "start": 262920,
+          "end": 262941,
+          "sha256": "e7bb4c09b57c98b0ae86d8f0e9f8eec44a8dfa38a9bec02babb165957a96d4a3"
+        }
+      ]
+    },
+    {
       "start": 322288,
       "original_end": 322288,
       "end": 322334,

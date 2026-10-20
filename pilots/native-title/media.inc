@@ -125,7 +125,7 @@ static void storage_mount(const char *directory)
 {
     WCHAR path[32768];
     if (!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,directory,-1,path,32768)) stop("invalid storage directory",0);
-    HANDLE root=CreateFileW(path,FILE_LIST_DIRECTORY|FILE_ADD_SUBDIRECTORY|FILE_READ_ATTRIBUTES|SYNCHRONIZE,
+    HANDLE root=CreateFileW(path,FILE_LIST_DIRECTORY|FILE_ADD_FILE|FILE_ADD_SUBDIRECTORY|FILE_READ_ATTRIBUTES|SYNCHRONIZE,
         FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,NULL);
     if (root==INVALID_HANDLE_VALUE) stop("cannot open local storage directory",GetLastError());
     BY_HANDLE_FILE_INFORMATION info;

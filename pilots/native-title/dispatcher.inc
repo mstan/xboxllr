@@ -36,13 +36,48 @@ static void dispatch_gpu_wait_event(HANDLE event)
 static uint64_t dispatch_pulse_time(uint64_t frame)
 {return dispatch_pulse_origin+(frame/dispatch_pulse_hz)*10000000+((frame%dispatch_pulse_hz)*10000000+dispatch_pulse_hz-1)/dispatch_pulse_hz;}
 
-static uint64_t dispatch_wall_time(void)
+/* Console wall time is independent of host administration and interrupt/QPC
+ * time. A session-only offset implements the system-time service; physical
+ * RTC persistence remains a separately qualified device contract. */
+static volatile LONG64 dispatch_wall_offset;
+static unsigned dispatch_native_absolute_waits;
+static uint64_t dispatch_host_wall_time(void)
 {
     /* Phobos's system-time service identified coarse host ticks as a polling
      * cost. Windows' precise clock supplies the same 100ns/1601 epoch directly,
      * shared with our absolute timers; no fabricated per-call advancement. */
     FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
     return ((uint64_t)ft.dwHighDateTime<<32)|ft.dwLowDateTime;
+}
+static uint64_t dispatch_shift_time(uint64_t time,int64_t offset)
+{
+    if(offset<0) {
+        uint64_t distance=0-(uint64_t)offset;
+        return time<distance?0:time-distance;
+    }
+    return time>(uint64_t)INT64_MAX-(uint64_t)offset?INT64_MAX:time+(uint64_t)offset;
+}
+static uint64_t dispatch_wall_time(void)
+{return dispatch_shift_time(dispatch_host_wall_time(),InterlockedCompareExchange64(&dispatch_wall_offset,0,0));}
+/* Callers hold dispatch_lock while arming a deadline or registering a native
+ * absolute wait, so a concurrent clock change cannot miss that owner. */
+static uint64_t dispatch_host_absolute(uint64_t guest)
+{return dispatch_shift_time(guest,-InterlockedCompareExchange64(&dispatch_wall_offset,0,0));}
+static int dispatch_native_absolute_begin(LARGE_INTEGER *due)
+{
+    if(!due || due->QuadPart<=0)return 0;
+    AcquireSRWLockExclusive(&dispatch_lock);
+    due->QuadPart=(LONGLONG)dispatch_host_absolute((uint64_t)due->QuadPart);
+    ++dispatch_native_absolute_waits;
+    ReleaseSRWLockExclusive(&dispatch_lock);return 1;
+}
+static void dispatch_native_absolute_end(int token)
+{
+    if(!token)return;
+    AcquireSRWLockExclusive(&dispatch_lock);
+    if(!dispatch_native_absolute_waits)stop("absolute native wait ownership underflow",0);
+    --dispatch_native_absolute_waits;
+    ReleaseSRWLockExclusive(&dispatch_lock);
 }
 static uint64_t dispatch_monotonic(void)
 {
@@ -93,7 +128,7 @@ static void dispatch_expire_locked(uint64_t mono,uint64_t wall)
 
 /* Waiters have private host events so a scheduler wakeup cannot consume theirs.
  * State inspection and subscription share dispatch_lock, preventing lost wakes. */
-struct PilotWaiter { HANDLE wake; const uint32_t *objects; unsigned count; int all,completed; uint32_t result; struct PilotWaiter *next; };
+struct PilotWaiter { HANDLE wake,alarm; int64_t due; const uint32_t *objects; unsigned count; int all,completed; uint32_t result; struct PilotWaiter *next; };
 static struct PilotWaiter *dispatch_waiters;
 static int dispatch_try_wait_locked(const uint32_t *objects,unsigned count,int all,uint32_t *result)
 {
@@ -196,7 +231,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
         }
         LARGE_INTEGER due;
         if (absolute!=UINT64_MAX) {
-            due.QuadPart=(LONGLONG)absolute;
+            due.QuadPart=(LONGLONG)dispatch_host_absolute(absolute);
             if (!SetWaitableTimer(dispatch_absolute,&due,0,NULL,NULL,FALSE)) stop("absolute timer arm failed",GetLastError());
         } else CancelWaitableTimer(dispatch_absolute);
         if (relative!=UINT64_MAX) {
@@ -237,6 +272,30 @@ static BOOL CALLBACK dispatch_start(PINIT_ONCE once,void *parameter,void **conte
 static void dispatch_ensure(void)
 {
     if (!InitOnceExecuteOnce(&dispatch_once,dispatch_start,NULL,NULL)) stop("dispatcher initialization failed",GetLastError());
+}
+static uint64_t dispatch_set_wall_time(uint64_t requested)
+{
+    dispatch_ensure();AcquireSRWLockExclusive(&dispatch_lock);
+    /* Native NtWait* owns atomic host operations whose in-flight absolute
+     * deadlines cannot be moved safely. Stop before mutation in this deferred
+     * concurrency case; relative and dispatcher-owned waits remain valid. */
+    if(dispatch_native_absolute_waits)stop("system-time change during native absolute wait unqualified",228);
+    uint64_t host=dispatch_host_wall_time(),previous=dispatch_wall_time();
+    InterlockedExchange64(&dispatch_wall_offset,(LONG64)requested-(LONG64)host);
+    uint64_t mono=dispatch_monotonic(),wall=dispatch_wall_time();
+    for(unsigned i=0;i<128;++i) {
+        struct PilotTimer *t=&dispatch_timers[i];
+        if(t->va && t->absolute) {
+            uint64_t remaining=t->deadline>wall?t->deadline-wall:0;
+            MEM64(t->va+16)=mono-dispatch_clock_origin+remaining;
+        }
+    }
+    dispatch_expire_locked(mono,wall);dispatch_wake_locked();
+    for(struct PilotWaiter *w=dispatch_waiters;w;w=w->next)if(w->alarm && w->due>0 && !w->completed) {
+        LARGE_INTEGER due;due.QuadPart=(LONGLONG)dispatch_host_absolute((uint64_t)w->due);
+        if(!SetWaitableTimer(w->alarm,&due,0,NULL,NULL,FALSE))stop("absolute wait clock rearm failed",GetLastError());
+    }
+    SetEvent(dispatch_changed);ReleaseSRWLockExclusive(&dispatch_lock);return previous;
 }
 static void dispatch_pulse_set(uint64_t origin,unsigned hz,void (*routine)(uint64_t))
 {
@@ -362,7 +421,7 @@ static uint32_t dispatch_wait(const uint32_t *objects,unsigned count,int all,int
     waiter.wake=CreateEventW(NULL,FALSE,FALSE,NULL);
     HANDLE alarm=timeout && due ? CreateWaitableTimerW(NULL,FALSE,NULL) : NULL;
     if (!waiter.wake || (timeout && due && !alarm)) stop("wait allocation failed",objects[0]);
-    if (alarm) { LARGE_INTEGER t; t.QuadPart=due; if (!SetWaitableTimer(alarm,&t,0,NULL,NULL,FALSE)) stop("wait timeout arm failed",objects[0]); }
+    waiter.alarm=alarm;waiter.due=due;
     uint32_t result=0x102;
     AcquireSRWLockExclusive(&dispatch_lock);
     for (unsigned i=0;i<count;++i) {
@@ -371,6 +430,8 @@ static uint32_t dispatch_wait(const uint32_t *objects,unsigned count,int all,int
         for (unsigned j=0;j<i;++j) if (objects[i]==objects[j]) stop("duplicate wait object",objects[i]);
     }
     waiter.next=dispatch_waiters; dispatch_waiters=&waiter;
+    if (alarm) { LARGE_INTEGER t;t.QuadPart=due>0?(LONGLONG)dispatch_host_absolute((uint64_t)due):due;
+        if (!SetWaitableTimer(alarm,&t,0,NULL,NULL,FALSE)) stop("wait timeout arm failed",objects[0]); }
     for (;;) {
         if (waiter.completed) { result=waiter.result; break; }
         if (dispatch_try_wait_locked(objects,count,all,&result)) break;
@@ -379,7 +440,13 @@ static uint32_t dispatch_wait(const uint32_t *objects,unsigned count,int all,int
         HANDLE waits[]={waiter.wake,alarm};
         DWORD rc=WaitForMultipleObjects(alarm ? 2 : 1,waits,FALSE,INFINITE);
         AcquireSRWLockExclusive(&dispatch_lock);
-        if (rc==WAIT_OBJECT_0+1) { if (waiter.completed) result=waiter.result; break; }
+        if (rc==WAIT_OBJECT_0+1) {
+            if (waiter.completed) {result=waiter.result;break;}
+            /* A previously signalled host alarm may race a backwards clock
+             * change. It is a timeout only in the console clock domain. */
+            if(due>0 && (uint64_t)due>dispatch_wall_time())continue;
+            break;
+        }
         if (rc!=WAIT_OBJECT_0) stop("native object wait failed",objects[0]);
     }
     struct PilotWaiter **link=&dispatch_waiters;

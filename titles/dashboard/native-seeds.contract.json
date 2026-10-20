@@ -1,6 +1,6 @@
 {
   "xbe_sha256": "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d",
-  "seed_sha256": "869dfa2047f015afebf18f1454d87962483299c031c3ae5462244446a865650e",
+  "seed_sha256": "9a160fe57d9281787a4020f746308befdb0035fa21506b8abca8d94a613379fc",
   "source": "Exact original image constructor/vtable and complete original function bodies; no borrowed revision addresses.",
   "scope": "Static source-derived indirect roots; not evidence that execution reached every method. Native CPU lowering preserves original implementations.",
   "body_sha256": {
@@ -25,7 +25,8 @@
     "0x000D2ECA": "1a3badc4396bc0782eef591d891f05958fb391e694e65d8e7b39c1b816aab1f1",
     "0x000D2EDF": "5fed5afb29946811bf02359627a94bc01d08d31b779528feaadde3866af9c855",
     "0x000D6451": "d43b39a37a2636a1d810bcb3fd6f9fc420db07662b5202635d74d9dcffcba393",
-    "0x000D93B4": "bed1917a7a9d46812e1463da79ce3b76126e3c2f2be1e20c65b7524ba836e54d"
+    "0x000D93B4": "bed1917a7a9d46812e1463da79ce3b76126e3c2f2be1e20c65b7524ba836e54d",
+    "0x000402D0": "1d6ee0b5d93a586aa659bd81fe061a25dcc1da3501aa9d1b50b262c92c0cb71c"
   },
   "matrix_stack_table_sha256": "86d3a339e33cebf2856fe1e1edeed4c9268c04458e1f6ad0733226bf5b235766",
   "animation_table_sha256": "7a1072e2d9317fc7a50a5f809dea354db09144c0983231b8eb098e828c303da8",
@@ -58,5 +59,14 @@
         "000d2d56 mov dword ptr [esi], 0x139a8"
       ]
     }
-  ]
+  ],
+  "input_property_table": {
+    "address": "0x25758",
+    "slots": 23,
+    "sha256": "b3b6334c77ec2d07a240768bd2f3c05898ad179b11feabacf73192359e262437",
+    "publishers": [
+      "0x400F0",
+      "0x40190"
+    ]
+  }
 }
