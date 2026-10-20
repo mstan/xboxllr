@@ -16,6 +16,7 @@
 #include "pilot_image.h"
 #include "title_profile.h"
 #include "kernel_profile.h"
+#include "kernel_av_caps.h"
 #ifdef PILOT_STARTUP_NATIVE
 #include "pilot_startup_bindings.h"
 #endif
@@ -600,6 +601,9 @@ static void query_setting(void)
 #include "virtual_memory.inc"
 #include "physical_memory.inc"
 #include "pool_memory.inc"
+#ifndef PILOT_GPU_LLE
+#include "kernel_av_caps.inc"
+#endif
 #include "save_crypto.inc"
 #include "kernel_hmac.inc"
 #ifdef PILOT_SCHEDULING_LLE
@@ -814,6 +818,9 @@ static void kernel_dispatch_impl(void)
         if (pilot_imports[i].ordinal == next_kernel_ordinal) name=pilot_imports[i].name;
     if(pilot_verbose)fprintf(stderr, "[KERNEL] %u %s return=%08x\n", next_kernel_ordinal, name, MEM32(g_esp));
     switch (next_kernel_ordinal) {
+#ifndef PILOT_GPU_LLE
+    case 2:kernel_av_query();return;
+#endif
 #ifdef PILOT_GPU_LLE
     case 2:case 3:case 45:case 50: {
         uint32_t args[6],result=g_eax;unsigned count=next_kernel_ordinal==3?6:4;
@@ -1181,7 +1188,7 @@ static void load_image(const char *path)
              * Same composite AV pack (SMC register 04 = 06) as machine/smbus.cpp.
              * Original XGetAudioFlags uses this to mask unsupported digital audio. */
             const uint32_t data=PILOT_KERNEL_DATA_BASE+0x4000u;
-            commit(data,4096); MEM32(data)=6;
+            commit(data,4096); MEM32(data)=PILOT_NATIVE_SMC_VIDEO_MODE;
             MEM32(pilot_imports[i].address)=data;
             fprintf(stderr,"[CONFIG] HalBootSMCVideoMode=6 (composite AV pack)\n");
         }
