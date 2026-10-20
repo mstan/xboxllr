@@ -8,6 +8,13 @@ input, audio, files, memory and scheduling services used by Blinx. Exact-image
 profiles provide XDK calling conventions and layouts. The old full-machine
 dashboard runner is historical evidence and is not an owner preview fallback.
 
+Latest owner follow-up, October 20: the washed-out Memory backing is corrected
+in the shared renderer, and the Credits console decoration is dimmer. Focused
+GPU and actual native navigation checks pass; the owner visual recheck is
+pending. The short menu-entry hitch remains open despite compiled native
+shader reuse. See [material evidence and limits](NATIVE-DASHBOARD-MATERIALS-2026-10-20.md),
+tracking `beads-xbox.1.174`. Dashboard sign-off precedes JSRF gameplay work.
+
 ## Ordered work queue
 
 This is the active delivery checklist. Work from the first incomplete row;

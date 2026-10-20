@@ -57,6 +57,7 @@ static FILE *graphics_draw_capture(const uint32_t args[3])
     return scene;
 }
 #include "graphics_fixed_capture.inc"
+#include "graphics_draw_state_capture.inc"
 static void graphics_frame_capture_draw(unsigned shader,const uint32_t args[3],uint32_t up_data,uint32_t up_stride,
     const void *indices,unsigned index_count,int32_t base,float x_scale,float x_anchor,int before)
 {
@@ -305,6 +306,7 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     if(!memory_vertices && !indices)scene_reference=graphics_draw_capture(args);
     }
     graphics_draw_profile_step(&profile,4);
+    graphics_draw_state_capture(args,shader,declaration?declaration->native:0,index_count);
     graphics_frame_capture_draw(shader,args,up_data,up_stride,indices,index_count,base,mod_x_scale,mod_x_anchor,1);
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     if(!indices && !host_vertices)graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);

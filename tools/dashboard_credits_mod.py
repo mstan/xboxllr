@@ -162,6 +162,7 @@ if (sSettingsElements[nCurSettingsMenuItem] == "Credits") {
     source = inject(source, "function StartPanelMenu()", """
 var xllrPanel = theSetPanelMenu.children[0].children[0];
 xllrPanel.PanelHeading.font = "heading";
+xllrPanel.ConsoleIcon.alpha = 1;
 xllrPanel.S_Home_text_games01.SetScale(1, 1, 1);
 xllrPanel.QuestionText.width = 10;
 xllrPanel.QuestionText.height = 8;
@@ -172,6 +173,7 @@ if (strCurMenu == "XLLR CREDITS") {
     xllrPanel.PanelHeading.font = "body";
     xllrPanel.ButtonGroup.visible = false;
     xllrPanel.ConsoleIcon.visible = true;
+    xllrPanel.ConsoleIcon.alpha = 0.45;
     xllrPanel.Group07.visible = false;
     xllrPanel.Group02_supports.SetTranslation(-6.15, 0.3773, 61.650002);
     xllrPanel.S_Home_text_games01.SetScale(0.72, 0.72, 0.72);
@@ -303,6 +305,7 @@ def main() -> None:
                     id="xboxllr.dashboard.credits", dashboard_build=5960, credits_pages=len(pages),
                     credits_lines=len(document_lines(pages,sections)[0]), viewer="native-system-info-two-documents",
                     licenses_page=licenses_page, visible_title="Credits", project_name=spec["title"],
+                    credits_console_alpha=0.45,
                     entry_point="settings-after-system-info", home_menu="original-unmodified",
                     validation="generated and read back; in-dashboard visual/input validation pending",
                     inputs_unchanged=True, files=records, notices=notices, sections=sections,

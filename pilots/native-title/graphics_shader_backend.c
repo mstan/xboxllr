@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#ifdef PILOT_D3D_PHOBOS
+#include "rhi.h"
+#include "rhi_shader_cache.h"
+#endif
 #include "graphics_shader_source.inc"
 #include "graphics_current_backend.inc"
 struct NativeShader {
@@ -93,8 +97,38 @@ static int32_t native_shader_compile(struct NativeShader *candidate,char *source
 {
     struct NativeShader shader=*candidate;
     ID3DBlob *errors=NULL;
-    HRESULT result=D3DCompile(source,strlen(source),"xlle-nv2a",NULL,NULL,"raster_main","vs_5_0",
-        D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&shader.code,&errors);
+    HRESULT result=E_FAIL;
+#ifdef PILOT_D3D_PHOBOS
+    /* Reuse the renderer's exact-source/entry/profile/settings cache. Input
+     * layouts and device-owned shader objects still belong to each caller.
+     * A rejected blob is a miss; compilation remains the portable fallback. */
+    const char *cache_tag="xboxlle-native-d3dcompiler47-vs5-O3-v1";
+    RhiShaderSource cache_source={0};
+    cache_source.hlsl=source;cache_source.len=strlen(source);cache_source.name="xlle-nv2a";
+    cache_source.entry="raster_main";cache_source.target="vs_5_0";cache_source.optimize=1;
+    void *cached=NULL;size_t cached_bytes=0;
+    if(rhi_shader_cache_get(&cache_source,cache_tag,&cached,&cached_bytes)) {
+        result=D3DCreateBlob(cached_bytes,&shader.code);
+        if(SUCCEEDED(result)) {
+            memcpy(ID3D10Blob_GetBufferPointer(shader.code),cached,cached_bytes);
+            result=ID3D11Device_CreateVertexShader(d3d8_GetD3D11Device(),cached,cached_bytes,NULL,&shader.object);
+            if(FAILED(result)) {
+                fprintf(stderr,"[NATIVE SHADER CACHE] rejected %08x; recompiling\n",(unsigned)result);
+                if(shader.object)ID3D11VertexShader_Release(shader.object);
+                shader.object=NULL;ID3D10Blob_Release(shader.code);shader.code=NULL;
+            } else fprintf(stderr,"[NATIVE SHADER CACHE] hit bytes=%zu\n",cached_bytes);
+        }
+        free(cached);
+    }
+#endif
+    if(!shader.code) {
+        result=D3DCompile(source,strlen(source),"xlle-nv2a",NULL,NULL,"raster_main","vs_5_0",
+            D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&shader.code,&errors);
+#ifdef PILOT_D3D_PHOBOS
+        if(SUCCEEDED(result))rhi_shader_cache_put(&cache_source,cache_tag,
+            ID3D10Blob_GetBufferPointer(shader.code),ID3D10Blob_GetBufferSize(shader.code));
+#endif
+    }
     if(FAILED(result))fprintf(stderr,"[SHADER COMPILE] %s\n",errors?(const char*)ID3D10Blob_GetBufferPointer(errors):"no compiler diagnostic");
     const char *capture=getenv("XLLE_PILOT_SHADER_CAPTURE");
     if(capture && *capture) {
@@ -106,7 +140,7 @@ static int32_t native_shader_compile(struct NativeShader *candidate,char *source
     if(errors)ID3D10Blob_Release(errors);
     if(FAILED(result)){free(source);return result;}
     shader.source=source;
-    result=ID3D11Device_CreateVertexShader(d3d8_GetD3D11Device(),ID3D10Blob_GetBufferPointer(shader.code),ID3D10Blob_GetBufferSize(shader.code),NULL,&shader.object);
+    if(!shader.object)result=ID3D11Device_CreateVertexShader(d3d8_GetD3D11Device(),ID3D10Blob_GetBufferPointer(shader.code),ID3D10Blob_GetBufferSize(shader.code),NULL,&shader.object);
     D3D11_INPUT_ELEMENT_DESC layout[16]={0};unsigned n=0;
     for(unsigned i=0;i<16;++i)if((shader.used&(1u<<i)) && elements[i].type) {
         if(elements[i].stream>=16)pilot_d3d_backend_stop("invalid declaration stream");

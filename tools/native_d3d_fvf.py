@@ -12,6 +12,19 @@ def prepare_fvf(code: str, *, phobos: bool = False) -> str:
     if phobos:
         if 'static const UINT floats[4] = { 2, 3, 4, 1 };' not in code:
             raise ValueError('unreviewed Phobos FVF coordinate dimensions')
+        # Empty sampling supplies neutral alpha. An alpha-only reference must
+        # not discard independently selected factor/diffuse RGB. Retain the
+        # existing later empty-RGB-stage compatibility used by the movie path.
+        replace('            if (!tex && (ff_op_reads_texture(colorop, tss[D3DTSS_COLORARG1],\n'
+                '                                             tss[D3DTSS_COLORARG2]) ||\n'
+                '                         ff_op_reads_texture(pc->stage_color[stage][3],\n'
+                '                                             tss[D3DTSS_ALPHAARG1],\n'
+                '                                             tss[D3DTSS_ALPHAARG2])))',
+                '            /* Empty alpha sampling is neutral; preserve independent RGB. */\n'
+                '            if (!tex && ff_op_reads_texture(colorop, tss[D3DTSS_COLORARG1],\n'
+                '                                            tss[D3DTSS_COLORARG2]))')
+        replace('            /* A stage with no texture that reads D3DTA_TEXTURE does not take\n',
+                '            /* A color stage with no texture that reads D3DTA_TEXTURE does not take\n')
     else:
         replace('return field == 0 ? 2 : field;', 'return ((field + 1) & 3) + 1;')
     replace('    "    uint4    TexCoordIndex;\\n"',

@@ -157,3 +157,9 @@ not establish retail VM execution or scene pixels for every hardware profile.
 
 All transformed original XAP/XIP data and the original-body generated C stay
 private. The checked-in tools contain authored transformations and assertions.
+
+The [October 20 material follow-up](NATIVE-DASHBOARD-MATERIALS-2026-10-20.md)
+corrects the washed-out Memory backing in the shared renderer and dims the
+Credits/Licenses console decoration through the selected asset mod. Ordinary
+System Info restores its original opacity. Compiled native shader reuse is
+enabled, while the reported short menu-entry hitch remains open.

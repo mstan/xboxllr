@@ -249,6 +249,8 @@ def prepare(donor, output, reference):
         'sampler corrections are retained. Fixed-function CURRENT/TEMP source\n'
         'and result routing uses live state through\n'
         'the existing pixel constant buffer without per-state compilation;\n'
+        'empty alpha sampling no longer discards independently selected RGB;\n'
+        'the existing later empty-RGB-stage movie compatibility is retained;\n'
         'sampling classification uses the live caller header, including\n'
         'depth storage reinterpreted as ARGB.\n'
         'Pretransformed screen+bias is rounded and truncated to four subpixel\n'

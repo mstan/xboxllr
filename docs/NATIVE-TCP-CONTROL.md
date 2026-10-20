@@ -74,3 +74,16 @@ pairs and page bytes. This is best-effort failure evidence, not a savestate.
 It contains private original data and must never be committed or published.
 This diagnostic recovered the original XAP compiler's string-literal error
 and allowed the reader's bounded chunk size to be corrected directly.
+
+For material diagnosis, `XLLE_PILOT_DRAW_STATE_CAPTURE` names an existing
+private output directory. Optional `XLLE_PILOT_DRAW_STATE_TRIGGER` delays
+arming until that file exists. The observer waits for the next swap interval
+and records at most 256 submitted draws from that interval, including indexed
+and immediate draws. Each version-one record is 4680 bytes: sixteen DWORDs of
+identity/draw metadata (magic `0x53444c58`, version 1), 166 render states,
+128 texture-stage states, 192 float4 vertex constants, four eight-DWORD texture
+descriptions, and sixty pixel-shader DWORDs, all little endian.
+This contains private guest data and must stay out of commits/releases.
+It does not serialize vertices, read GPU images, replay draws or change
+resource ownership. Disabled observation performs no file I/O. Existing raw
+input replay guards and [NTD-13](NATIVE-TITLE-DEFERRALS.md) remain intact.

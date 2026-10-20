@@ -255,6 +255,7 @@ for (var pack of ['COMPOSITE','RFU']) for (var gameRegion of ['NA','JAPAN','EU']
   assert.ok(xllrCreditsBody.text.includes('Matthew Stanley'));
   assert.equal(panelNodes.ConsoleIcon.visible,true); assert.equal(panelNodes.ButtonGroup.visible,false);
   assert.equal(panelNodes.PanelHeading.font,'body');
+  assert.equal(panelNodes.ConsoleIcon.alpha,0.45);
   controller('OnMoveUp'); assert.equal(xllrCreditsLine,0);
   controller('OnMoveDown'); assert.equal(xllrCreditsLine,1);
   controller('OnMoveUp'); assert.equal(xllrCreditsLine,0);
@@ -277,6 +278,7 @@ for (var pack of ['COMPOSITE','RFU']) for (var gameRegion of ['NA','JAPAN','EU']
   settingsControl('OnADown'); assert.equal(strCurMenu,'SYSTEM INFO');
   assert.equal(panelNodes.QuestionText.text,'Original System Info');
   assert.equal(panelNodes.PanelHeading.font,'heading');
+  assert.equal(panelNodes.ConsoleIcon.alpha,1);
   assert.deepEqual(panelNodes.S_Home_text_games01.scale,[1,1,1]);
   assert.equal(panelNodes.QuestionText.width,10); assert.equal(panelNodes.QuestionText.scrollRate,0.1);
 }
