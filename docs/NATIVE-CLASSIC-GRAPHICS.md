@@ -19,7 +19,8 @@ original generated implementations. They borrow the real guest caller stack,
 not the small temporary native service frame. This is static native execution;
 there is no interpreter fallback. Active fixed-function lighting still requires
 an admitted draw consumer. Gamma's original getter reads two source-proved
-identity caches; setting a nonidentity ramp remains an explicit reached boundary.
+identity caches; deferred setting uses the shared native GPU presentation map; immediate
+DAC timing remains guarded. See NATIVE-GAMMA-PRESENTATION.md.
 
 The reusable presentation descriptor also admits two-back-buffer COPY mode.
 There are four owned images: raster, two scanouts and depth. COPY exchanges the

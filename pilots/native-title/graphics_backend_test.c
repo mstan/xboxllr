@@ -23,6 +23,7 @@
 #include "graphics_pixel_bump_backend_test.inc"
 #include "graphics_fan_backend_test.inc"
 #include "graphics_visual_backend_test.inc"
+#include "graphics_gamma_backend_test.inc"
 #include "graphics_presentation_backend_test.inc"
 #include "graphics_initializer_backend_test.inc"
 #include "graphics_fixed_backend_test.inc"
@@ -131,6 +132,7 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
 #ifdef PILOT_D3D_PHOBOS
+    if(argc==2 && !strcmp(argv[1],"--gamma"))return test_gamma_presentation();
     if(argc==2 && !strcmp(argv[1],"--fixed-declarations"))return test_fixed_declarations();
     if(argc==2 && !strcmp(argv[1],"--indexed"))return test_indexed_pipeline();
     if(argc==2 && !strcmp(argv[1],"--edge-antialias"))return test_edge_antialias();

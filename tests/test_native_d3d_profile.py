@@ -110,6 +110,8 @@ class ClassicOriginalProofTests(unittest.TestCase):
                  lambda p:p['layout']['gamma_cache'].update(current=p['layout']['gamma_cache']['current']+4),
                  lambda p:p['layout']['tile_cache'].update(offset=p['layout']['tile_cache']['offset']+4),
                  lambda p:p['layout']['tile_cache'].update(count=9),
+                 lambda p:p['layout']['gamma_setter'].update(miniport=p['layout']['gamma_setter']['miniport']+4),
+                 lambda p:p['layout']['gamma_setter'].update(deferred_flags_mask=True),
                  lambda p:p['layout'].update(sample_count=p['layout']['sample_count']+4),
                  lambda p:p.update(cpu_services=['D3DDevice_Clear']),
                  lambda p:p.update(references=[r for r in p['references'] if r.get('field')!='packed_pixel_constants'])]
@@ -121,7 +123,7 @@ class ClassicOriginalProofTests(unittest.TestCase):
     def test_additive_gamma_proof_preserves_original_code_and_rejects_drift(self):
         from native_d3d_ltcg import emit_text,INTERFACE
         interface={r['name']:r for r in json.loads(INTERFACE.read_text())}
-        previous=copy.deepcopy(self.binding);previous['layout'].pop('gamma_cache');previous['helpers'].pop('gamma_initializer');previous.pop('cpu_services',None)
+        previous=copy.deepcopy(self.binding);previous['layout'].pop('gamma_cache');previous['layout'].pop('gamma_setter',None);previous['helpers'].pop('gamma_initializer');previous.pop('cpu_services',None)
         old_header,old_wrapper=emit_text(previous,interface,0x40)
         for drift in (False,True):
             with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:

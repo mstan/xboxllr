@@ -183,28 +183,28 @@ equivalence with hardware. Further integration must retain these visible gaps.
 ## Full-size native effects graphs (2026-10-20)
 
 Tracking: beads-xbox.1.142. JSRF's reached standard image contains 20 effects,
-3512 program words and3358 initial X words. Its original SDK4134 seed/decode
+3512 program words and 3358 initial X words. Its original SDK4134 seed/decode
 routines match every independently decoded key and program byte. Images and
 observations remain private. This is not the earlier Blinx nine-effect example.
 
-The native adapter previously reserved the first1024 P words and incorrectly
+The native adapter previously reserved the first 1024 P words and incorrectly
 used X:c00 as an allocation limit. Large graphs now use P:0, with a native
 JSR/STOP harness above the graph and one in-bank decoder lookahead word. Existing
 small graphs keep P:400. Relocated guest descriptors identify the selected real
-program storage. Both hardware banks remain4096 words; no unmapped memory guard
+program storage. Both hardware banks remain 4096 words; no unmapped memory guard
 is widened. Initial X data can include temporary/output buffers above X:c00.
 
-An authored4093-word program reaches the maintained P limit, performs a real
+An authored 4093-word program reaches the maintained P limit, performs a real
 write, returns through the harness and preserves the last X word and storage
-canaries. The next code size is rejected. The real JSRF graph passes1501 blocks,
-141094 DMA nodes,112 impulse samples and213240 tail samples;1500 warm blocks took
-139.994ms in this host run. The same test on Blinx passes1501 blocks/73549 DMA
+canaries. The next code size is rejected. The real JSRF graph passes 1501 blocks,
+141094 DMA nodes, 112 impulse samples and 213240 tail samples; 1500 warm blocks took
+139.994 ms in this host run. The same test on Blinx passes 1501 blocks/73549 DMA
 nodes, with its original program placement unchanged. Both graphs match original
 decoder bytes in actual DSP memory. The two shared DSP contract/guard tests pass
-in2.55seconds. These are isolated graph observations, not game FPS or hardware
+in 2.55 seconds. These are isolated graph observations, not game FPS or hardware
 sample/timing equivalence.
 
-Actual native JSRF installs this graph and creates four PCM16 stereo44100Hz
-buffers, then reaches SetGammaRamp after4784 entries. No complete title frame or
+Actual native JSRF installs this graph and creates four PCM16 stereo 44100 Hz
+buffers, then reaches SetGammaRamp after 4784 entries. No complete title frame or
 attract acceptance is established. The larger graph remains real DSP execution;
 effects were not disabled or replaced by an upload-success stub.

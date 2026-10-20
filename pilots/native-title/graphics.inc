@@ -336,6 +336,18 @@ static void graphics_dispatch_impl(unsigned entry)
     case PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInline:
         graphics_shader_constants(g_ecx,g_edx,arguments[0],graphics_shader_records());break;
 #ifdef PILOT_D3D_PROFILE_CLASSIC
+#ifdef PILOT_D3D_GAMMA_SETTER_VERSION
+    case PILOT_D3D_D3DDevice_SetGammaRamp: {
+        if(arguments[0]&~1u)stop("unqualified immediate gamma timing",arguments[0]);
+        const uint8_t *ramp=graphics_pointer(arguments[1],768);
+        if(pilot_gfx_gamma(ramp)<0)stop("native gamma presentation mapping failed",arguments[0]);
+        uint32_t bank=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SWAP_COUNTER)&1;
+        memmove(graphics_pointer(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_RAMPS+bank*768,768),ramp,768);
+        MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_CURRENT)=bank;
+        MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_PENDING+bank*4)=1;
+        g_eax=bank;break;
+    }
+#endif
 #ifdef PILOT_D3D_TILE_CACHE_VERSION
     case PILOT_D3D_D3DDevice_SetTile: {
         if(arguments[0]>=PILOT_D3D_TILE_COUNT)stop("tile index outside native cache",arguments[0]);

@@ -37,6 +37,9 @@ int32_t pilot_gfx_get_viewport(uint32_t viewport[6]);
 int32_t pilot_gfx_transform(unsigned state,const float matrix[16]);
 void pilot_gfx_matrix_multiply(float out[16],const float a[16],const float b[16]);
 int32_t pilot_gfx_present(void);
+/* Xbox byte ramps: red[256], green[256], blue[256]. Presentation only;
+ * guest render targets and readbacks retain their original stored values. */
+int32_t pilot_gfx_gamma(const uint8_t ramp[768]);
 /* Host presentation only: guest render targets, viewports and resource sizes
  * stay unchanged. Zero numerator/denominator restores the donor's shape. */
 int pilot_gfx_presentation(uint32_t numerator,uint32_t denominator,uint32_t height);

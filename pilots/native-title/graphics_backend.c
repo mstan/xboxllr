@@ -219,6 +219,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    pilot_visual_gamma_reset();
     pilot_blend_default_shape=pilot_blend_transient=pilot_blend_transient_proof=pilot_blend_draws=0;
     pilot_blend_noise=0;
     pilot_blend_default_depth_shape=0;

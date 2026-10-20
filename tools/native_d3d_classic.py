@@ -144,6 +144,22 @@ def inspect(context, proof):
                 gamma['pending']+8!=gamma['current'] or gamma['current']+4>layout['device_bytes'] or
                 not {'gamma_cache.ramps','gamma_cache.current'}<=seen or 'gamma_initializer' not in codes):
             raise ValueError('unreviewed classic gamma cache')
+    if 'gamma_setter' in layout:
+        setter=layout['gamma_setter'];gamma=layout.get('gamma_cache')
+        if (gamma is None or set(setter)!={'miniport','deferred_flags_mask'} or
+                type(setter['miniport']) is not int or setter['miniport']<0 or
+                setter['miniport']>gamma['ramps'] or type(setter['deferred_flags_mask']) is not int or
+                setter['deferred_flags_mask']!=1):
+            raise ValueError('unreviewed classic gamma setter policy')
+        required=(('lea',f'edx, [eax + {hex(setter["miniport"])}]'),
+                  ('mov',f'eax, dword ptr [eax + {hex(layout["swap_counter"])}]'),
+                  ('lea',f'ebx, [ecx + edx + {hex(gamma["ramps"]-setter["miniport"])}]'),
+                  ('mov',f'dword ptr [edx + {hex(gamma["current"]-setter["miniport"])}], eax'),
+                  ('mov',f'dword ptr [edx + eax*4 + {hex(gamma["pending"]-setter["miniport"])}], 1'),
+                  ('test','byte ptr [esp + 0x10], 2'))
+        for mnemonic,operands in required:
+            if not any(i.mnemonic==mnemonic and i.op_str==operands for i in codes['D3DDevice_SetGammaRamp']):
+                raise ValueError('original gamma setter layout changed')
     matrices=layout['cache_fields']['transforms'];combined=layout['transform_fields']['projection_viewport']
     if not (combined+64 <= matrices or combined >= matrices+640):
         raise ValueError('classic combined transform aliases raw projection')

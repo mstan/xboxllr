@@ -4,9 +4,10 @@
  * pacer calls only under the existing graphics lock. No context is shared
  * concurrently and all touched native state is restored before returning. */
 static const char pilot_visual_blend_source[]=
-    "cbuffer Frame:register(b7){float2 texel;float alpha;float pad;};\n"
+    "cbuffer Frame:register(b7){float2 texel;float alpha;" PILOT_GAMMA_CONSTANTS "};\n"
     "Texture2D<float4> previous:register(t9),current:register(t10);SamplerState linear_clamp:register(s9);\n"
-    "float4 pixel(float4 position:SV_Position):SV_Target{float2 uv=position.xy*texel;return lerp(previous.SampleLevel(linear_clamp,uv,0),current.SampleLevel(linear_clamp,uv,0),alpha);}\n";
+    PILOT_GAMMA_PIXEL
+    "float4 pixel(float4 position:SV_Position):SV_Target{float2 uv=position.xy*texel;return mapped(lerp(previous.SampleLevel(linear_clamp,uv,0),current.SampleLevel(linear_clamp,uv,0),alpha));}\n";
 static struct {
     RhiImage *image[2];RhiView *target[2],*sample[2];RhiShader *pixel;
     unsigned width,height,index,count,scope;
@@ -68,7 +69,7 @@ static HRESULT pilot_visual_capture_frame(RhiView *scene,unsigned width,unsigned
     uint64_t now=pilot_visual_now();
     if(pilot_visual_blend.current && (now<=pilot_visual_blend.current || now-pilot_visual_blend.current>2500000ull))pilot_visual_blend.count=0;
     unsigned slot=pilot_visual_blend.index^1;
-    HRESULT result=pilot_visual_resolve_image(scene,width,height,pilot_visual_blend.target[slot],fit,output_width,output_height);
+    HRESULT result=pilot_visual_resolve_image(scene,width,height,pilot_visual_blend.target[slot],fit,output_width,output_height,0);
     if(SUCCEEDED(result)) {
         pilot_visual_blend.index=slot;pilot_visual_blend.previous=pilot_visual_blend.current;pilot_visual_blend.current=now;
         if(pilot_visual_blend.count<2)++pilot_visual_blend.count;++pilot_visual_blend.sources;
@@ -92,9 +93,7 @@ HRESULT pilot_d3d_interpolate_image(uint64_t now,RhiView *output)
     pilot_visual_blend.alpha=alpha;
     unsigned w=pilot_visual_blend.width,h=pilot_visual_blend.height,index=pilot_visual_blend.index;
     struct PilotVisualState saved;pilot_visual_state_save(&saved);pilot_visual_aa_prepare(w,h);
-    float constants[]={1.0f/w,1.0f/h,alpha,0};void *mapped=rhi_buffer_map(pilot_visual_aa.constants,RHI_MAP_WRITE_DISCARD);
-    if(!mapped)pilot_d3d_backend_stop("interpolation constants upload failed");
-    memcpy(mapped,constants,sizeof(constants));rhi_buffer_unmap(pilot_visual_aa.constants);
+    pilot_visual_constants(w,h,alpha,1);
     RhiViewport viewport={0,0,(float)w,(float)h,0,1};float factor[]={1,1,1,1};
     rhi_set_render_target(output,NULL);rhi_set_viewports(1,&viewport);
     rhi_set_vertex_layout(NULL);rhi_set_topology(RHI_TOPOLOGY_TRIANGLES);rhi_set_shader(RHI_STAGE_VERTEX,pilot_visual_aa.vertex);

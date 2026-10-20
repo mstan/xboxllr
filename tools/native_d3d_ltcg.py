@@ -347,6 +347,8 @@ def emit_text(binding,interface,behavior_mask):
     if 'gamma_cache' in layout:
         header += ['#define PILOT_D3D_GAMMA_CACHE_VERSION 1']
         header += [f'#define PILOT_D3D_GAMMA_{name.upper()} 0x{value:x}u' for name,value in layout['gamma_cache'].items()]
+    if 'gamma_setter' in layout:
+        header += ['#define PILOT_D3D_GAMMA_SETTER_VERSION 1']
     if 'tile_cache' in layout:
         header += ['#define PILOT_D3D_TILE_CACHE_VERSION 1']
         header += [f'#define PILOT_D3D_TILE_{name.upper()} {value}u' for name,value in layout['tile_cache'].items()]

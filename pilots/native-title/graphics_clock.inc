@@ -352,6 +352,10 @@ static uint32_t graphics_present(void)
      * their actual display clock/GPU checkpoint; desktop visibility is not a
      * completion signal. Device errors retain the fatal HRESULT guard. */
     if(hr<0)stop("native presentation was not accepted",(uint32_t)hr);
+#ifdef PILOT_D3D_GAMMA_SETTER_VERSION
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_PENDING)=0;
+    MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_PENDING+4)=0;
+#endif
     uint64_t serial=pilot_gfx_checkpoint();
     uint32_t swap=++graphics_swap_submitted;
     if(pilot_gfx_interpolation_rate() && !(swap&127u)) {

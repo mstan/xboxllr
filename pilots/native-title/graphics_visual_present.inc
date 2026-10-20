@@ -2,6 +2,23 @@
 #include "d3d8_display.h"
 #include "graphics_visual_state.inc"
 #include "graphics_guest_resolve.inc"
+static unsigned pilot_gamma_active;
+static float pilot_gamma_table[256][4];
+static void pilot_visual_gamma_reset(void){pilot_gamma_active=0;}
+int32_t pilot_gfx_gamma(const uint8_t ramp[768])
+{
+    if(!pilot_device || !ramp)return E_INVALIDARG;
+    unsigned active=0;
+    for(unsigned i=0;i<256;++i)for(unsigned channel=0;channel<3;++channel) {
+        unsigned value=ramp[channel*256+i];active|=value!=i;
+        pilot_gamma_table[i][channel]=value/255.0f;
+    }
+    pilot_gamma_active=active;return S_OK;
+}
+#define PILOT_GAMMA_CONSTANTS "float gamma_enabled;float4 gamma_table[256];"
+#define PILOT_GAMMA_PIXEL \
+    "float4 mapped(float4 c){if(gamma_enabled<.5)return c;uint3 v=(uint3)round(saturate(c.rgb)*255);" \
+    "return float4(gamma_table[v.r].r,gamma_table[v.g].g,gamma_table[v.b].b,c.a);}\n"
 /* Independently written approximate AA, using local contrast, curvature,
  * bounded edge-end search and subpixel filtering. Algorithm reference:
  * Timothy Lottes, NVIDIA FXAA white paper, 2011:
@@ -9,19 +26,21 @@
  * This is a presentation filter, including the composed HUD. It claims no
  * official preset/bit identity. Guest readbacks never see this pass. */
 static const char pilot_visual_aa_source[]=
-    "cbuffer Frame:register(b7){float2 texel;float2 pad;};\n"
+    "cbuffer Frame:register(b7){float2 texel;float antialiasing;" PILOT_GAMMA_CONSTANTS "};\n"
     "Texture2D<float4> image:register(t9);SamplerState linear_clamp:register(s9);\n"
     "struct V{float4 position:SV_Position;};\n"
     "V vertex(uint id:SV_VertexID){V o;float2 q=float2((id<<1)&2,id&2);o.position=float4(q*float2(2,-2)+float2(-1,1),0,1);return o;}\n"
     "float4 color(float2 uv){return image.SampleLevel(linear_clamp,uv,0);}\n"
     "float light(float3 c){return dot(c,float3(.299,.587,.114));}\n"
+    PILOT_GAMMA_PIXEL
     "float4 pixel(V input):SV_Target{\n"
     " float2 uv=input.position.xy*texel;float4 m=color(uv);\n"
+    " if(antialiasing<.5)return mapped(m);\n"
     " float3 n=color(uv-float2(0,texel.y)).rgb,s=color(uv+float2(0,texel.y)).rgb;\n"
     " float3 w=color(uv-float2(texel.x,0)).rgb,e=color(uv+float2(texel.x,0)).rgb;\n"
     " float lm=light(m.rgb),ln=light(n),ls=light(s),lw=light(w),le=light(e);\n"
     " float lo=min(lm,min(min(ln,ls),min(lw,le))),hi=max(lm,max(max(ln,ls),max(lw,le)));\n"
-    " float contrast=hi-lo;if(contrast<max(.03125,hi*.125))return m;\n"
+    " float contrast=hi-lo;if(contrast<max(.03125,hi*.125))return mapped(m);\n"
     " float3 nw=color(uv-texel).rgb,ne=color(uv+float2(texel.x,-texel.y)).rgb;\n"
     " float3 sw=color(uv+float2(-texel.x,texel.y)).rgb,se=color(uv+texel).rgb;\n"
     " float a=light(nw),b=light(ne),c=light(sw),d=light(se);\n"
@@ -46,7 +65,7 @@ static const char pilot_visual_aa_source[]=
     " float3 edge=color(uv+normal*offset).rgb;\n"
     " float subpixel=saturate((abs((ln+ls+lw+le)*.25-lm)/contrast-.25)*(4.0/3));\n"
     " subpixel=subpixel*subpixel*(3-2*subpixel)*.75;\n"
-    " return float4(lerp(edge,(m.rgb+n+s+w+e+nw+ne+sw+se)/9,subpixel),m.a);\n"
+    " return mapped(float4(lerp(edge,(m.rgb+n+s+w+e+nw+ne+sw+se)/9,subpixel),m.a));\n"
     "}\n";
 static struct {
     RhiImage *image;RhiView *target,*sample;
@@ -91,7 +110,7 @@ static void pilot_visual_aa_prepare(unsigned width,unsigned height)
     if(pilot_visual_aa.vertex)return;
     pilot_visual_aa.vertex=pilot_visual_shader(RHI_STAGE_VERTEX,"vertex","vs_4_0");
     pilot_visual_aa.pixel=pilot_visual_shader(RHI_STAGE_PIXEL,"pixel","ps_4_0");
-    RhiBufferDesc cb={0};cb.size=16;cb.usage=RHI_USAGE_DYNAMIC;cb.bind=RHI_BIND_UNIFORM;cb.cpu_access=RHI_CPU_WRITE;
+    RhiBufferDesc cb={0};cb.size=16+sizeof(pilot_gamma_table);cb.usage=RHI_USAGE_DYNAMIC;cb.bind=RHI_BIND_UNIFORM;cb.cpu_access=RHI_CPU_WRITE;
     pilot_visual_aa.constants=rhi_buffer_create(&cb,NULL);
     RhiBlendDesc blend={0};blend.write_mask=RHI_WRITE_ALL;pilot_visual_aa.blend=rhi_blend_state_create(&blend);
     RhiDepthDesc depth={0};pilot_visual_aa.depth=rhi_depth_state_create(&depth);
@@ -104,17 +123,23 @@ static void pilot_visual_aa_prepare(unsigned width,unsigned height)
     if(!pilot_visual_aa.constants || !pilot_visual_aa.blend || !pilot_visual_aa.depth ||
        !pilot_visual_aa.raster || !pilot_visual_aa.sampler)pilot_d3d_backend_stop("visual AA pipeline allocation failed");
 }
-static HRESULT pilot_visual_resolve_image(RhiView *scene,unsigned width,unsigned height,RhiView *output,D3D8DisplayFit fit,unsigned output_width,unsigned output_height)
+static void pilot_visual_constants(unsigned width,unsigned height,float filter,unsigned apply_gamma)
+{
+    float constants[]={1.0f/width,1.0f/height,filter,(float)(apply_gamma && pilot_gamma_active)};
+    void *mapped=rhi_buffer_map(pilot_visual_aa.constants,RHI_MAP_WRITE_DISCARD);
+    if(!mapped)pilot_d3d_backend_stop("presentation constants upload failed");
+    memcpy(mapped,constants,sizeof(constants));
+    memcpy((uint8_t*)mapped+16,pilot_gamma_table,sizeof(pilot_gamma_table));
+    rhi_buffer_unmap(pilot_visual_aa.constants);
+}
+static HRESULT pilot_visual_resolve_image(RhiView *scene,unsigned width,unsigned height,RhiView *output,D3D8DisplayFit fit,unsigned output_width,unsigned output_height,unsigned apply_gamma)
 {
     if(!scene || !output || !fit.w || !fit.h || !output_width || !output_height)return E_INVALIDARG;
-    if(!pilot_visual.antialiasing)return d3d8_display_resolve(scene,width,height,output,fit);
+    if(!pilot_visual.antialiasing && !(apply_gamma && pilot_gamma_active))return d3d8_display_resolve(scene,width,height,output,fit);
     pilot_visual_aa_prepare(output_width,output_height);
     HRESULT result=d3d8_display_resolve(scene,width,height,pilot_visual_aa.target,fit);
     if(FAILED(result))return result;
-    float constants[]={1.0f/output_width,1.0f/output_height,0,0};
-    void *mapped=rhi_buffer_map(pilot_visual_aa.constants,RHI_MAP_WRITE_DISCARD);
-    if(!mapped)pilot_d3d_backend_stop("visual AA constant upload failed");
-    memcpy(mapped,constants,sizeof(constants));rhi_buffer_unmap(pilot_visual_aa.constants);
+    pilot_visual_constants(output_width,output_height,(float)pilot_visual.antialiasing,apply_gamma);
     RhiViewport viewport={0,0,(float)output_width,(float)output_height,0,1};float factor[]={1,1,1,1};
     rhi_set_render_target(output,NULL);rhi_set_viewports(1,&viewport);rhi_set_vertex_layout(NULL);rhi_set_topology(RHI_TOPOLOGY_TRIANGLES);
     rhi_set_shader(RHI_STAGE_VERTEX,pilot_visual_aa.vertex);rhi_set_shader(RHI_STAGE_PIXEL,pilot_visual_aa.pixel);
@@ -144,19 +169,29 @@ HRESULT pilot_d3d_visual_resolve(RhiView *scene,unsigned width,unsigned height,R
         scene=pilot_guest_resolved.sample;width=pilot_presentation.width;height=pilot_presentation.height;
     }
     int interpolate=pilot_visual.frame_mode==PILOT_FRAMES_INTERPOLATED && pilot_visual_scope && pilot_visual_real_present;
-    if(!pilot_visual.antialiasing && !interpolate) {
+    if(!pilot_visual.antialiasing && !interpolate && !pilot_gamma_active) {
         HRESULT result=d3d8_display_resolve(scene,width,height,output,fit);
         if(SUCCEEDED(result))pilot_debug_capture_presented();
         return result;
     }
     struct PilotVisualState saved;pilot_visual_state_save(&saved);
     HRESULT result=interpolate?pilot_visual_capture_frame(scene,width,height,fit,output_width,output_height):
-        pilot_visual_resolve_image(scene,width,height,output,fit,output_width,output_height);
+        pilot_visual_resolve_image(scene,width,height,output,fit,output_width,output_height,1);
     pilot_visual_state_restore(&saved);
     if(SUCCEEDED(result))pilot_debug_capture_presented();
     return result;
 }
+#undef PILOT_GAMMA_CONSTANTS
+#undef PILOT_GAMMA_PIXEL
 #else
+static void pilot_visual_gamma_reset(void){}
+int32_t pilot_gfx_gamma(const uint8_t ramp[768])
+{
+    if(!pilot_device || !ramp)return E_INVALIDARG;
+    for(unsigned i=0;i<256;++i)for(unsigned channel=0;channel<3;++channel)
+        if(ramp[channel*256+i]!=i)return E_NOTIMPL;
+    return S_OK;
+}
 static void pilot_visual_close(void){}
 void pilot_gfx_frame_scope(uint32_t scope){(void)scope;}
 unsigned pilot_gfx_interpolation_rate(void){return 0;}
