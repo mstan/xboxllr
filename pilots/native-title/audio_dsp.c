@@ -10,16 +10,19 @@
 #include "audio_dsp.h"
 
 enum { CODE_OFFSET=0x818, P_OFFSET=0, X_OFFSET=0x4000, Y_OFFSET=0x8000,
-       SCRATCH_OFFSET=0xa000, SCRATCH_PREFIX=0xc000, MAX_SCRATCH=8*1024*1024 };
+       SCRATCH_OFFSET=0xa000, SCRATCH_PREFIX=0xc000, MAX_SCRATCH=8*1024*1024,
+       GP_WORDS=4096, LARGE_GRAPH_CALL=GP_WORDS-3 };
 struct PilotDspImage {
     uint8_t *decoded;
     uint32_t code_words,state_words,state_base,descriptor,count,scratch_bytes,storage_bytes;
+    uint32_t program_base,call_pc;
 };
 struct PilotDsp {
     Dsp56300Jit *core;
     uint32_t *p,*x,*y,mix[1024];
     uint8_t *scratch;
     uint32_t scratch_bytes,next,control,irq;
+    uint32_t call_pc;
     uint64_t blocks,nodes;
 };
 static uint32_t word(const void *p) {uint32_t v;memcpy(&v,p,4);return v;}
@@ -45,7 +48,7 @@ PilotDspImage *pilot_dsp_decode(const void *source,uint32_t bytes,uint64_t seed,
     if(error)*error="invalid DSP image extent";
     if(!raw || bytes<CODE_OFFSET+12 || bytes>1024*1024 || bytes%4)return NULL;
     uint32_t code=word(raw+0x804),state=word(raw+0x80c);
-    if(!code || code>3072 || !state || state>3072)return NULL;
+    if(!code || code>LARGE_GRAPH_CALL || !state || state>GP_WORDS)return NULL;
     uint32_t state_start=CODE_OFFSET+code*4,desc=state_start+state*4;
     if(error)*error="unqualified DSP image header";
     if(word(raw+0x800)!=0 || word(raw+0x808)!=state_start || word(raw+0x810)!=3 || word(raw+0x814)!=0 || desc+8>bytes)return NULL;
@@ -78,7 +81,7 @@ PilotDspImage *pilot_dsp_decode(const void *source,uint32_t bytes,uint64_t seed,
     }
     uint32_t base=word(image->decoded+CODE_OFFSET+4);
     if(error)*error="unqualified decoded DSP program/state mapping";
-    if(word(image->decoded+CODE_OFFSET)!=0x65f400 || base>0xc00 || state>0xc00-base)goto fail;
+    if(word(image->decoded+CODE_OFFSET)!=0x65f400 || base>GP_WORDS || state>GP_WORDS-base)goto fail;
     for(uint32_t at=CODE_OFFSET;at<state_start;at+=4)if(word(image->decoded+at)&0xff000000)goto fail;
     /* Every entry's R5 assignment must agree with its actual relocated state.
      * The image graph falls through between entries and returns once. */
@@ -88,6 +91,14 @@ PilotDspImage *pilot_dsp_decode(const void *source,uint32_t bytes,uint64_t seed,
         if(word(m+4)<8 || word(image->decoded+c)!=0x65f400 || word(image->decoded+c+4)!=base+(s-state_start)/4)goto fail;
     }
     image->code_words=code;image->state_words=state;image->state_base=base;
+    /* The old 0x400 placement leaves only 3072 program words. Larger images
+     * use the actual full 4096-word GP bank and a native call/STOP harness
+     * above the graph, with one in-bank decoder lookahead word. No hardware
+     * bank or address guard is widened.
+     * Initial X state can include temporary/output buffers above 0xc00; its
+     * physical bound is the end of X RAM, not the speaker-output address. */
+    image->program_base=code<=3072?0x400:0;
+    image->call_pc=code<=3072?0:LARGE_GRAPH_CALL;
     image->descriptor=desc;image->count=count;image->scratch_bytes=SCRATCH_PREFIX+scratch;
     image->storage_bytes=SCRATCH_OFFSET+image->scratch_bytes+8+32*count;
     if(error)*error=NULL;
@@ -176,15 +187,16 @@ PilotDsp *pilot_dsp_create(const PilotDspImage *image,void *storage,uint32_t gue
     d->p=(uint32_t*)((uint8_t*)storage+P_OFFSET);d->x=(uint32_t*)((uint8_t*)storage+X_OFFSET);
     d->y=(uint32_t*)((uint8_t*)storage+Y_OFFSET);d->scratch=(uint8_t*)storage+SCRATCH_OFFSET;
     d->scratch_bytes=image->scratch_bytes;d->control=0x20;
-    memcpy(d->p+0x400,image->decoded+CODE_OFFSET,image->code_words*4);
+    memcpy(d->p+image->program_base,image->decoded+CODE_OFFSET,image->code_words*4);
     memcpy(d->x+image->state_base,image->decoded+CODE_OFFSET+image->code_words*4,image->state_words*4);
-    d->p[0]=0x0d0400;d->p[1]=0x87; /* JSR graph; STOP only after its real RTS. */
+    d->call_pc=image->call_pc;
+    d->p[d->call_pc]=0x0d0000|image->program_base;d->p[d->call_pc+1]=0x87; /* Real JSR/RTS then STOP. */
     uint32_t *desc=(uint32_t*)((uint8_t*)storage+pilot_dsp_descriptor_offset(image));
     desc[0]=image->count;desc[1]=image->scratch_bytes-SCRATCH_PREFIX;
     for(uint32_t i=0;i<image->count;++i) {
         const uint8_t *m=image->decoded+image->descriptor+8+32*i;uint32_t *map=desc+2+8*i;
         for(unsigned j=0;j<8;++j)map[j]=word(m+4*j);
-        map[0]=guest_base+P_OFFSET+0x1000+map[0]-CODE_OFFSET;
+        map[0]=guest_base+P_OFFSET+image->program_base*4+map[0]-CODE_OFFSET;
         map[2]=guest_base+X_OFFSET+image->state_base*4+map[2]-(CODE_OFFSET+image->code_words*4);
         map[4]+=guest_base+Y_OFFSET;map[6]+=guest_base+SCRATCH_OFFSET;
     }
@@ -206,9 +218,9 @@ void pilot_dsp_process(PilotDsp *d,const uint32_t mix[1024],uint32_t output[192]
      * adds effect returns. This is the bounded host GP-framework contract. */
     memcpy(d->x+0xc00,d->mix,192*4);
     Dsp56300State s;dsp56300_get_state(d->core,&s);
-    s.pc=0;s.power_state=0;s.halt_requested=false;
+    s.pc=d->call_pc;s.power_state=0;s.halt_requested=false;
     dsp56300_set_state(d->core,&s);dsp56300_run(d->core,1000000);dsp56300_get_state(d->core,&s);
-    if(s.pc!=2 || s.power_state!=2 || s.registers[DSP56300_REG_SP])invalid("DSP graph failed to return within budget",s.pc);
+    if(s.pc!=d->call_pc+2 || s.power_state!=2 || s.registers[DSP56300_REG_SP])invalid("DSP graph failed to return within budget",s.pc);
     memcpy(output,d->x+0xc00,192*4);++d->blocks;
 }
 uint64_t pilot_dsp_blocks(const PilotDsp *d){return d->blocks;}

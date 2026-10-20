@@ -29,9 +29,44 @@ static unsigned fixture(uint32_t data[1024])
     memcpy(desc+10,key,8);encrypt((uint8_t*)(desc+10),8,k,initial);
     return 0x84c+48;
 }
+static void full_bank_fixture(void)
+{
+    /* Reach both real GP bank ends with an authored position-independent
+     * graph. Temporary/output storage above X:c00 is valid initial state. */
+    const unsigned words=4093,state=4096-0x80,state_at=0x818+words*4;
+    const unsigned descriptor=state_at+state*4,bytes=descriptor+48;
+    uint32_t *data=calloc(1,bytes);CHECK(data);
+    data[0x804/4]=words;data[0x808/4]=state_at;data[0x80c/4]=state;data[0x810/4]=3;
+    const uint32_t prefix[]={0x65f400,0x80,0x44f400,0x123456,0x65f400,0xc00,0x021584};
+    memcpy((uint8_t*)data+0x818,prefix,sizeof(prefix));data[(state_at-4)/4]=0x0c;
+    data[(descriptor-4)/4]=0xabcdef;
+    uint32_t *desc=data+descriptor/4;desc[0]=1;
+    const uint32_t map[]={0x818,(4093-1)*4,state_at,(4096-0x80)*4,0,0,0xc000,0};
+    memcpy(desc+2,map,sizeof(map));
+    uint64_t initial=123;for(unsigned i=0;i<81;++i)initial=step(initial);
+    uint8_t key[8]={2,7,1,8,2,8,1,8},seed_key[8];
+    for(unsigned i=0;i<8;++i)seed_key[i]=(uint8_t)(initial>>(i*8));
+    encrypt((uint8_t*)data+0x818,(words-1)*4,key,initial);
+    memcpy(desc+10,key,8);encrypt((uint8_t*)(desc+10),8,seed_key,initial);
+    const char *error=NULL;PilotDspImage *image=pilot_dsp_decode(data,bytes,123,&error);CHECK(image && !error);
+    uint32_t capacity=pilot_dsp_storage_bytes(image);uint8_t *storage=malloc(capacity+16);CHECK(storage);
+    memset(storage+capacity,0x6b,16);PilotDsp *d=pilot_dsp_create(image,storage,0x10000000);CHECK(d);
+    uint32_t *actual=(uint32_t*)(storage+pilot_dsp_descriptor_offset(image));
+    CHECK(actual[2]==0x10000000 && actual[4]==0x10004200);
+    uint32_t mix[1024]={0},out[192];
+    for(unsigned block=0;block<3;++block) {
+        pilot_dsp_process(d,mix,out);CHECK(out[4]==0x123456);
+        CHECK(((uint32_t*)(storage+0x4000))[4095]==0xabcdef);
+    }
+    CHECK(pilot_dsp_blocks(d)==3);
+    for(unsigned i=0;i<16;++i)CHECK(storage[capacity+i]==0x6b);
+    pilot_dsp_destroy(d);pilot_dsp_image_destroy(image);free(storage);
+    data[0x804/4]=4094;CHECK(!pilot_dsp_decode(data,bytes,123,&error));free(data);
+}
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
+    full_bank_fixture();
     uint32_t data[1024];unsigned bytes=fixture(data);const char *error=NULL;
     PilotDspImage *image=pilot_dsp_decode(data,bytes,123,&error);CHECK(image && !error);
     unsigned storage_bytes=pilot_dsp_storage_bytes(image);uint8_t *storage=malloc(storage_bytes+16);CHECK(storage);
@@ -86,7 +121,10 @@ int main(int argc,char **argv)
         /* Compare independently decoded original routines' bytes, when supplied
          * as an external private qualification artifact. Never compile assets. */
         f=fopen(argv[3],"rb");CHECK(f);raw=malloc(n);CHECK(raw && fread(raw,1,n,f)==(size_t)n);fclose(f);
-        uint32_t words;memcpy(&words,raw+0x804,4);CHECK(!memcmp(storage+0x1000,raw+0x818,words*4));free(raw);
+        uint32_t words;memcpy(&words,raw+0x804,4);
+        uint32_t *actual=(uint32_t*)(storage+pilot_dsp_descriptor_offset(image));
+        CHECK(actual[2]>=0x20000000 && actual[2]-0x20000000+words*4<=0x4000);
+        CHECK(!memcmp(storage+(actual[2]-0x20000000),raw+0x818,words*4));free(raw);
         memset(in,0,sizeof(in));for(unsigned c=0;c<32;++c)in[c*32]=0x100000;
         pilot_dsp_process(d,in,out);unsigned impulse=0;for(unsigned i=0;i<192;++i)impulse+=out[i]!=0;CHECK(impulse);
         memset(in,0,sizeof(in));unsigned tail=0;LARGE_INTEGER start,end,freq;QueryPerformanceFrequency(&freq);QueryPerformanceCounter(&start);
