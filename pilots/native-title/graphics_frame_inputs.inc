@@ -213,7 +213,8 @@ static void graphics_frame_inputs_draw(const uint32_t args[3],uint32_t up_data,u
     if(pilot_gfx_get_viewport(draw.viewport)<0)stop("frame input viewport",0);
     draw.screen[0]=MEM32(TRANSFORM_FIELD(SCREEN_OFFSET));draw.screen[1]=MEM32(TRANSFORM_FIELD(SCREEN_OFFSET)+4);
     draw.depth_scale=MEM32(TRANSFORM_FIELD(DEPTH_SCALE));
-    draw.render=graphics_frame_inputs_asset(memory+PILOT_D3D_RENDER_STATES,166*4);
+    uint32_t render_states[166];graphics_render_copy(render_states);
+    draw.render=graphics_frame_inputs_asset(render_states,sizeof(render_states));
     draw.texture=graphics_frame_inputs_asset(memory+PILOT_D3D_TEXTURE_STATES,128*4);
     draw.pixel_handle=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER);
     if(draw.pixel_handle)draw.pixel=graphics_frame_inputs_asset(graphics_pointer(draw.pixel_handle+12,240),240);

@@ -10,7 +10,7 @@ static void graphics_store_float(uint32_t address,float value)
 static void graphics_viewport_offset_scale(float offset[4],float scale[4]);
 static void graphics_projection_viewport(void)
 {
-    if(MEM32(PILOT_D3D_RENDER_STATES+143*4)==2)stop("W-buffer projection is unqualified",2);
+    if(graphics_render_read(143)==2)stop("W-buffer projection is unqualified",2);
     uint32_t viewport=TRANSFORM_STATE(VIEWPORT);
     float x=MEM32(viewport+8)*graphics_float(TRANSFORM_FIELD(PIXEL_SCALE))*.5f;
     float y=MEM32(viewport+12)*graphics_float(TRANSFORM_FIELD(PIXEL_SCALE)+4)*-.5f;
@@ -70,7 +70,7 @@ static void graphics_viewport_offset_scale(float offset[4],float scale[4])
     float sx=graphics_float(TRANSFORM_FIELD(PIXEL_SCALE)),sy=graphics_float(TRANSFORM_FIELD(PIXEL_SCALE)+4);
     float depth=graphics_float(TRANSFORM_FIELD(DEPTH_SCALE)),low=graphics_float(viewport+16),high=graphics_float(viewport+20);
     scale[0]=MEM32(viewport+8)*sx*.5f;scale[1]=MEM32(viewport+12)*sy*-.5f;scale[2]=(high-low)*depth;scale[3]=0;
-    float bias=(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_RECORD_FLAGS)&0x8000u) && MEM32(PILOT_D3D_RENDER_STATES+152*4)?-.5f:0;
+    float bias=(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_VERTEX_RECORD_FLAGS)&0x8000u) && graphics_render_read(152)?-.5f:0;
     offset[0]=MEM32(viewport)*sx+graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET))+bias+scale[0];
     offset[1]=MEM32(viewport+4)*sy+graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4)+bias-scale[1];
     offset[2]=low*depth;offset[3]=0;

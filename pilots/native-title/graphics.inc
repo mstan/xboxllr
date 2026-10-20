@@ -48,6 +48,7 @@ static const char *graphics_original_leave(void)
 #endif
 
 #include "graphics_abi.inc"
+#include "graphics_state_cache.inc"
 static int graphics_active;
 #include "graphics_diagnostics.inc"
 static uint32_t graphics_parameters[17];
@@ -405,10 +406,10 @@ static void graphics_dispatch_impl(unsigned entry)
 #ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
     case PILOT_D3D_D3DDevice_SetRenderState_MultiSampleAntiAlias:
         if(!pilot_gfx_multisample(arguments[0],UINT32_MAX))stop("unqualified multisample enable",arguments[0]);
-        MEM32(PILOT_D3D_RENDER_STATES+PILOT_D3D_SAMPLE_AA_STATE*4)=arguments[0];break;
+        graphics_render_write(PILOT_D3D_SAMPLE_AA_STATE,arguments[0]);break;
     case PILOT_D3D_D3DDevice_SetRenderState_MultiSampleMask:
         if(!pilot_gfx_multisample(1,arguments[0]))stop("unqualified multisample mask",arguments[0]);
-        MEM32(PILOT_D3D_RENDER_STATES+PILOT_D3D_SAMPLE_MASK_STATE*4)=arguments[0];break;
+        graphics_render_write(PILOT_D3D_SAMPLE_MASK_STATE,arguments[0]);break;
 #endif
     case PILOT_D3D_D3DDevice_SetRenderState_Simple:
         if(pilot_verbose)fprintf(stderr,"[D3D SIMPLE] method=%08x value=%08x\n",g_ecx,g_edx);
@@ -427,7 +428,7 @@ static void graphics_dispatch_impl(unsigned entry)
     case PILOT_D3D_D3DDevice_SetRenderState_LogicOp:graphics_render_state(150,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderState_YuvEnable:graphics_render_state(PILOT_D3D_YUV_STATE,arguments[0],1);break;
     case PILOT_D3D_D3DDevice_SetRenderStateNotInline:
-        graphics_render_state(arguments[0],arguments[1],1);break;
+        graphics_render_state(graphics_render_from_guest(arguments[0]),arguments[1],1);break;
     case PILOT_D3D_D3DDevice_SetTextureState_TexCoordIndex:
         graphics_texture_state(arguments[0],28,arguments[1],1);break;
     case PILOT_D3D_D3DDevice_SetTextureState_BumpEnv:

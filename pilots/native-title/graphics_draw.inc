@@ -40,7 +40,8 @@ static FILE *graphics_draw_capture(const uint32_t args[3])
     uint32_t header[]={0x44534c58,1,args[0],args[1],args[2],MEM32(shader->header+8),shader->native,0};
 #define DRAW_CAPTURE(data,bytes) do{if(fwrite(data,bytes,1,file)!=1)stop("draw capture write",0);}while(0)
     DRAW_CAPTURE(header,sizeof(header));DRAW_CAPTURE(viewport,sizeof(viewport));
-    DRAW_CAPTURE(memory+PILOT_D3D_RENDER_STATES,166*4);DRAW_CAPTURE(memory+PILOT_D3D_TEXTURE_STATES,4*128);
+    if(!graphics_render_capture(file))stop("draw capture render states",0);
+    DRAW_CAPTURE(memory+PILOT_D3D_TEXTURE_STATES,4*128);
     DRAW_CAPTURE(elements,sizeof(elements));DRAW_CAPTURE(constants,sizeof(constants));
     DRAW_CAPTURE(shader->program,header[5]*16);DRAW_CAPTURE(metadata,sizeof(metadata));
     for(unsigned i=0;i<16;++i)if(metadata[i][1])DRAW_CAPTURE(streams[i].data,metadata[i][1]);
@@ -134,7 +135,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
 #endif
     if(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER) &&
         pilot_gfx_pixel_program((const uint32_t*)(memory+PILOT_D3D_RENDER_STATES),
-            MEM32(PILOT_D3D_RENDER_STATES+136*4))<0)stop("unsupported native pixel draw",0);
+            graphics_render_read(136))<0)stop("unsupported native pixel draw",0);
     graphics_target_prepare(graphics_target);graphics_target_prepare(graphics_depth);
     graphics_draw_profile_step(&profile,0);
     uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
@@ -171,7 +172,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
         FILE *file=fopen(path,"wb");if(!file)stop("feedback capture open",0);
         uint32_t header[]={0x42464c58,1,primitive,first,count,shader,up_stride,pilot_gfx_feedback_mask(),
             MEM32(TRANSFORM_FIELD(SCREEN_OFFSET)),MEM32(TRANSFORM_FIELD(SCREEN_OFFSET)+4)};
-        if(fwrite(header,sizeof(header),1,file)!=1 || fwrite(memory+PILOT_D3D_RENDER_STATES,166*4,1,file)!=1 ||
+        if(fwrite(header,sizeof(header),1,file)!=1 || !graphics_render_capture(file) ||
             fwrite(memory+PILOT_D3D_TEXTURE_STATES,128*4,1,file)!=1 || fwrite(memory+up_data,count*up_stride,1,file)!=1 || fclose(file))
             stop("feedback capture write",0);
     }
@@ -192,7 +193,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     }
     graphics_draw_profile_step(&profile,2);
     if(fixed) {
-        if(MEM32(PILOT_D3D_RENDER_STATES+102*4))stop("unqualified original fixed-function lighting owner",shader);
+        if(graphics_render_read(102))stop("unqualified original fixed-function lighting owner",shader);
         graphics_sync_deferred();
     }
     if(!pilot_gfx_initializer_consumer(fixed?2:(shader&1)!=0,primitive,shader))
@@ -214,7 +215,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
         }
         struct PilotTitleModDraw draw={MEM32(g_esp),shader,primitive,count,graphics_target==graphics_headers,
             data?memory+data+position_offset:NULL,stride,position_type,1,0,
-            MEM32(PILOT_D3D_RENDER_STATES+143*4),MEM32(PILOT_D3D_RENDER_STATES+64*4)};
+            graphics_render_read(143),graphics_render_read(64)};
         title_mod->draw(&draw);
         if(!(draw.x_scale>0 && draw.x_scale<=1 && isfinite(draw.x_anchor)))
             stop("invalid title mod raster placement",draw.caller);
@@ -233,7 +234,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
         int32_t result=fixed_fvf?pilot_gfx_fvf_prepare_fixed(shader):pilot_gfx_shader_prepare_fixed(declaration->native);
         if(result<0)stop("native fixed-function preparation failed",shader);
     } else if(!(shader&1)) {
-        if(MEM32(PILOT_D3D_RENDER_STATES+92*4))stop("pretransformed fog is unqualified",shader);
+        if(graphics_render_read(92))stop("pretransformed fog is unqualified",shader);
         if(pilot_gfx_fvf_placement(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
             graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4),mod_x_scale,mod_x_anchor)<0)stop("native FVF preparation failed",shader);
         const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
@@ -243,7 +244,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
             static unsigned sequence;char path[1024];uint32_t header[]={shader,primitive,first,count,stride,bytes};
             if(snprintf(path,sizeof(path),"%s/fixed-draw-%u.bin",capture,++sequence)>=(int)sizeof(path))stop("FVF draw capture path",0);
             FILE *file=fopen(path,"wb");if(!file || fwrite(header,sizeof(header),1,file)!=1)stop("FVF draw capture header",0);
-            if(fwrite(memory+PILOT_D3D_RENDER_STATES,166*4,1,file)!=1 || fwrite(memory+PILOT_D3D_TEXTURE_STATES,128*4,1,file)!=1)stop("FVF draw capture states",0);
+            if(!graphics_render_capture(file) || fwrite(memory+PILOT_D3D_TEXTURE_STATES,128*4,1,file)!=1)stop("FVF draw capture states",0);
             for(unsigned i=0;i<count;++i)if(fwrite(memory+vertex->data+(first+i)*stride,bytes,1,file)!=1)stop("FVF draw capture vertices",0);
             if(fclose(file))stop("FVF draw capture close",0);
         }

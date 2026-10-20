@@ -27,10 +27,10 @@ static void graphics_pixel_constants(const uint32_t *args)
         MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_PIXEL_PACKED_CONSTANTS+reg*4)=packed;
         for(unsigned bank=0;bank<2;++bank)for(unsigned stage=0;stage<8;++stage)
             if(((definition[57+bank]>>(4*stage))&15)==reg)
-                MEM32(PILOT_D3D_RENDER_STATES+(10+8*bank+stage)*4)=packed;
+                graphics_render_write(10+8*bank+stage,packed);
         for(unsigned bank=0;bank<2;++bank)
             if(((definition[59]>>(4*bank))&15)==reg)
-                MEM32(PILOT_D3D_RENDER_STATES+(43+bank)*4)=packed;
+                graphics_render_write(43+bank,packed);
         if(!reg)memcpy(graphics_pixel_eye_vector,values+i*4,12);
     }
     /* Draw submission already forwards this state to the real donor constant
@@ -52,7 +52,7 @@ static void graphics_pixel_bind(uint32_t handle)
         /* Original XDK SetPixelShader publishes these 57 DWORDs plus the
          * complex texture-mode slot; inline setters can change them later. */
         memcpy(memory+PILOT_D3D_RENDER_STATES,definition,57*4);
-        MEM32(PILOT_D3D_RENDER_STATES+136*4)=definition[54];
+        graphics_render_write(136,definition[54]);
         uint32_t snapshot=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER;
         MEM32(snapshot+4)=definition[8]|definition[9];
         MEM32(snapshot+8)=definition[59]&0x100;

@@ -81,7 +81,7 @@ static void graphics_block_capture(uint32_t type,const struct GraphicsStateBlock
     if(!file || fwrite(header,sizeof(header),1,file)!=1 ||
        fwrite(memory+PILOT_D3D_DEVICE_OBJECT,header[3],1,file)!=1 ||
        fwrite(memory+PILOT_D3D_STREAMS,header[4],1,file)!=1 ||
-       fwrite(memory+PILOT_D3D_RENDER_STATES,header[5],1,file)!=1 ||
+       !graphics_render_capture(file) ||
        fwrite(memory+PILOT_D3D_TEXTURE_STATES,header[6],1,file)!=1 ||
        fwrite(memory+block->header,block->bytes,1,file)!=1 || fclose(file))stop("state-block capture write failed",0);
 }
@@ -126,7 +126,7 @@ static uint32_t graphics_block_create(const uint32_t *args)
     for(unsigned i=0;i<16;++i)if(mask[23+i] && pixel){++data[5];WORD(i);COPY(SNAPSHOT_FIELD(PIXEL_CONSTANTS)+i*16,4);}
     /* Original capture excludes the first 96 reserved vertex constants. */
     for(unsigned i=96;i<192;++i)if(mask[39+i]){++data[6];WORD(i);COPY(SNAPSHOT_FIELD(VERTEX_CONSTANTS)+i*16,4);}
-    for(unsigned i=0;i<166;++i)if(mask[231+i] && (pixel || (i>56 && i!=136))){++data[7];WORD(i);WORD(MEM32(PILOT_D3D_RENDER_STATES+i*4));}
+    for(unsigned i=0;i<166;++i)if(mask[231+i] && (pixel || (i>56 && i!=136))){++data[7];WORD(i);WORD(graphics_render_read(i));}
     for(unsigned i=0;i<32;++i)for(unsigned s=0;s<4;++s)if(mask[397+i*4+s]){++data[8];WORD(s);WORD(i);WORD(MEM32(PILOT_D3D_TEXTURE_STATES+s*128+i*4));}
     for(unsigned i=0;i<10;++i)if(mask[525+i]){++data[9];WORD(i);COPY(SNAPSHOT_FIELD(TRANSFORMS)+i*64,16);}
     if(mask[535]){data[10]=1;COPY(SNAPSHOT_FIELD(VIEWPORT),6);}

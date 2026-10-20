@@ -34,7 +34,8 @@ static void graphics_fixed_capture_inputs(const char *directory,unsigned sequenc
         graphics_target,graphics_depth,166,128,160,16,0};
 #define FIXED_CAPTURE(value,bytes) do{if(fwrite(value,bytes,1,file)!=1)stop("fixed capture write",0);}while(0)
     FIXED_CAPTURE(header,sizeof(header));FIXED_CAPTURE(elements,sizeof(elements));FIXED_CAPTURE(streams,sizeof(streams));
-    FIXED_CAPTURE(memory+PILOT_D3D_RENDER_STATES,166*4);FIXED_CAPTURE(memory+PILOT_D3D_TEXTURE_STATES,128*4);
+    if(!graphics_render_capture(file))stop("fixed capture render states",0);
+    FIXED_CAPTURE(memory+PILOT_D3D_TEXTURE_STATES,128*4);
     FIXED_CAPTURE(memory+TRANSFORM_STATE(TRANSFORMS),160*4);
     for(unsigned i=0;i<16;++i)if(streams[i][1])FIXED_CAPTURE(data[i],streams[i][1]);
     if(index_count)FIXED_CAPTURE(indices,index_count*2);
