@@ -31,10 +31,11 @@ static void test_graphics_indices(const char *failure)
     for(unsigned i=0;i<3;++i){float x=positions[i][0]+3;memcpy(memory+allocation+i*32,&x,4);}
     index_test_draw(header+12,0);binding[1]=3;call_graphics(PILOT_D3D_D3DDevice_SetIndices,binding);index_test_draw(header+12,1);
     ++MEM32(header);CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==1);
-    CHECK(!call_graphics(PILOT_D3D_D3DResource_Release,&header));
-    call_graphics(PILOT_D3D_D3DDevice_SetIndices,binding); /* internal-only self rebind */
-    CHECK(graphics_index(header)->bindings==1 && !(MEM32(header)&0xffff));
+    call_graphics(PILOT_D3D_D3DDevice_SetIndices,binding);
+    CHECK(graphics_index(header)->bindings==1 && (MEM32(header)&0xffff)==1);
     binding[0]=0;call_graphics(PILOT_D3D_D3DDevice_SetIndices,binding);
+    AcquireSRWLockExclusive(&graphics_lock);struct GraphicsIndexObject *borrowed=graphics_index(header);
+    borrowed->refs=0;graphics_index_collect(borrowed);ReleaseSRWLockExclusive(&graphics_lock);
     CHECK(graphics_index_find(header)<0 && !MEM32(PILOT_D3D_INDEX_DATA_GLOBAL) && MEM32(header+4)==header+12);
     uint32_t length=64u*1024*1024;CHECK(!call_graphics(PILOT_D3D_D3DDevice_CreateIndexBuffer2,&length));
     length=6;uint32_t created=call_graphics(PILOT_D3D_D3DDevice_CreateIndexBuffer2,&length);CHECK(created && MEM32(created)==0x01010001 && MEM32(created+4)==created+12);

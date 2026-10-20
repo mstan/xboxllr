@@ -19,17 +19,19 @@ Rows have different sizes, so their count is not a completion percentage.
 | DB01 | Reach native dashboard graphics startup | Passed for reached startup | Actual native execution loads assets, opens native audio and passes the animation and inline NULL-texture boundaries. Latest run: `9cfa3b45...`, 255389 stopped-thread entries. |
 | DB02 | Consume the dashboard's original vertex layouts | Passed for reached layouts | Three original declaration-only layout classes consume packed normals/color/UV and cached transforms on the GPU. Pixel/reference and ownership checks pass; actual startup binds the original object and advances into mesh submission. Lighting remains disabled for this reached caller. |
 | DB03 | Draw the first real dashboard menu | **Passed** | Actual native runs show stable Memory/Music/Settings labels and controller hints. Source-proved correction separates raw projection from its viewport-adjusted output. See [transform cache](NATIVE-TRANSFORM-CACHE.md). |
-| DB04 | Make the ordinary menus usable | **Active** | Music opens and renders its item list. B returns into guarded original caller-owned resource destruction. Implement that original allocator/lifetime contract, then batch Music/Settings/Memory opening and back transitions. |
-| DB05 | Check dashboard audio and responsiveness | Pending | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
+| DB04 | Make the ordinary menus usable | **Passed for opening/back routes** | TCP-driven actual native Music/Settings/Memory opening and B return all pass; rendered screenshots inspected. Original allocator retirement now executes through generated native CPU. Deeper menu options remain unverified. |
+| DB05 | Check dashboard audio and responsiveness | **Active** | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
 | DB06 | Validate the native Credits mod | Pending | Open the bottom Credits entry in the actual native dashboard, verify the intended credits/legal content, then return to ordinary menus. |
 | DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
 | DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
 
-Current next action: **DB04**, original caller-owned resource destruction
-reached while returning from Music (`D3D_DestroyResource`, header `01515ff0`).
-DB03 now passes: correcting the source-proved projection/viewport destination
-restores the main menu labels. Music opens and its list renders, but its back
-transition does not pass yet. Settings/Memory routes remain unverified.
+Current next action: **DB05**, dashboard audio and responsiveness, followed by
+the native Credits mod. DB03 and the ordinary DB04 opening/back routes pass.
+The shared [original resource retirement](NATIVE-ORIGINAL-RESOURCE-RETIREMENT.md)
+service preserves original heap ownership and GPU completion. A 25-second TCP
+batch opened Music, Settings and Memory and returned home from all three;
+21 source/profile checks and 18 Windows checks passed. Deeper menu options
+remain unverified and should be exercised in a compatible batch.
 Use the shared [TCP input and screenshot controls](NATIVE-TCP-CONTROL.md) for
 the live investigation. Owner visual/navigation validation can provide a
 quick acceptance check once a usable menu is ready.
@@ -75,10 +77,10 @@ passes. Native edge coverage and source-proved host swath scheduling now
 pass reached startup; controller port zero opens. The resource wait now
 passes too. Current vertex attributes and XYZ FVF now pass, and the native
 dashboard renders its main menu after the raw/derived projection cache
-correction. Music opens, while returning reaches guarded original allocator
-resource destruction. The explicit offline virtual-link query passes. Complete
-menu navigation has not yet passed. This is implementation work; original hardware
-is not required for the current blocker. Entry counts are diagnostics, not a
+correction. Original allocator retirement now passes actual Music, Settings
+and Memory opening/back routes. The explicit offline virtual-link query passes.
+Deeper menu navigation, native Credits and audio/performance acceptance remain
+open; original hardware is not required for this work. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
 functions execute.
 
@@ -111,9 +113,9 @@ functions execute.
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
 
-There is no reliable total ETA or percentage until startup reaches the first
-menu and exposes the remaining runtime dependencies. Do not treat the current
-guard as the last blocker. Optional online/DVD/firmware paths and public-release
+The first menu and ordinary opening/back routes now pass. There is still no
+measured total ETA for the remaining audio, Credits and joint-title checks.
+Optional online/DVD/firmware paths and public-release
 licensing remain separately deferred; not every missing kernel import is a
 prerequisite for the offline menu.
 The [native-title deferral ledger](NATIVE-TITLE-DEFERRALS.md) records precision
@@ -122,11 +124,12 @@ delivery burndown.
 
 ## Current graphics batch evidence
 
-Latest: [transform cache](NATIVE-TRANSFORM-CACHE.md). Actual startup renders
-the main menu and opens Music. Returning reaches guarded original allocator
-resource destruction. Nineteen source/profile checks, three unchanged original
-helper executions and 18 combined Windows checks pass. All 118 CPU objects
-remain unchanged by this profile correction. The evidence below records
+Latest: [original resource retirement](NATIVE-ORIGINAL-RESOURCE-RETIREMENT.md),
+following the [transform cache](NATIVE-TRANSFORM-CACHE.md) correction. Actual
+native Music/Settings/Memory opening and all three B returns pass. Twenty-one
+source/profile checks and 18 combined Windows checks pass. All 118 CPU objects
+remain unchanged; the new capability calls existing generated native allocator
+bodies. The evidence below records
 preceding graphics checkpoints.
 
 The latest [indexed drawing batch](NATIVE-INDEXED-DRAWING.md) advances actual

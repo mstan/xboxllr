@@ -3,7 +3,7 @@
  * writes this storage, so Lock2 needs no emulated FIFO fence or CPU/GPU wait.
  * Physical/cache aliases use one canonical guest VA, as for native textures. */
 #define GRAPHICS_VERTEX_OBJECTS 256
-struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; unsigned borrowed,waiters; };
+struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; unsigned borrowed,waiters,retire_original; };
 static struct GraphicsVertexObject graphics_vertices[GRAPHICS_VERTEX_OBJECTS];
 static unsigned graphics_vertex_adopt(uint32_t header);
 static int graphics_vertex_defer_upload(void)
@@ -23,8 +23,10 @@ static int graphics_vertex_find(uint32_t header)
 }
 static struct GraphicsVertexObject *graphics_vertex(uint32_t header)
 {
+    if(graphics_resource_is_retiring(header))stop("vertex access during resource retirement",header);
     int slot=graphics_vertex_find(header);
     if(slot<0)slot=(int)graphics_vertex_adopt(header);
+    if(graphics_vertices[slot].retire_original)stop("vertex access during pending retirement",header);
     if(graphics_vertices[slot].borrowed &&
        (MEM32(header+4)!=(graphics_vertices[slot].data&0x0fffffffu) || ((MEM32(header)>>16)&7)))
         stop("borrowed vertex storage changed while owned",header);
@@ -63,6 +65,8 @@ static uint32_t graphics_vertex_allocate(uint32_t length)
 static void graphics_vertex_collect(struct GraphicsVertexObject *vertex)
 {
     if(vertex->refs || vertex->bindings || vertex->waiters)return;
+    if(vertex->external && (vertex->retire_original || !(MEM32(vertex->header)&0xffffu)))
+        graphics_original_retire_queue(vertex->header,vertex->data,pilot_gfx_resource_serial(PILOT_GFX_VERTEX,vertex->native),1);
     pilot_gfx_vertex_destroy(vertex->native);
     if(vertex->external) {
 #ifdef PILOT_SCHEDULING_LLE

@@ -3504,6 +3504,16 @@
     }
   ],
   "helpers": {
+    "resource_unregister": {
+      "address": 1344704,
+      "bytes": 75,
+      "sha256": "ecdf368dc0fa09ed09c45d9b2453fa11bd6e17f503f07883a2290c05977d1f80"
+    },
+    "resource_free": {
+      "address": 458233,
+      "bytes": 26,
+      "sha256": "25c9f6bcb01eb6e409b2054eceb4087116a4e532ed8d198af54b482b75129628"
+    },
     "state_initializer": {
       "address": 1352416,
       "sha256": "1d734924eeb7cd15c8ad78c9858a80127c84deb30418d0e64d5a4ff68f97e79c",

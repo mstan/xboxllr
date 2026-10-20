@@ -33,9 +33,14 @@ static void test_graphics_borrowed_vertices(const char *failure)
             ++MEM32(headers[0]);CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&headers[0])==2);
             CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&headers[0])==1);
         }
-        CHECK(!call_graphics(PILOT_D3D_D3DResource_Release,&headers[variant]));
-        CHECK(graphics_vertex_find(headers[variant])>=0); /* stream owns it */
+        /* Authored headers share an interior backing range; retain their
+         * caller reference rather than asking the XDK allocator to free it. */
+        CHECK((MEM32(headers[variant])&0xffff)==1);
         stream[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
+        AcquireSRWLockExclusive(&graphics_lock);
+        struct GraphicsVertexObject *owner=graphics_vertex(headers[variant]);owner->refs=0;
+        graphics_vertex_collect(owner); /* same host-view disposal as device teardown */
+        ReleaseSRWLockExclusive(&graphics_lock);
         CHECK(graphics_vertex_find(headers[variant])<0 && MEM32(headers[variant]+4)==((allocation+64)&0x0fffffffu));
         CHECK(physical_find(allocation,1)->borrowers==1-variant);
     }

@@ -3,6 +3,7 @@
 #include "graphics_borrowed_texture_contract_test.inc"
 #include "graphics_borrowed_vertex_contract_test.inc"
 #include "graphics_index_contract_test.inc"
+#include "graphics_original_retirement_contract_test.inc"
 static void test_graphics_command_null_textures(uint32_t base,const char *failure)
 {
     uint32_t create[]={2,2,1,1,0,0x12,3};
@@ -81,6 +82,9 @@ static void test_graphics_commands(const char *failure)
             test_graphics_fixed_declarations(NULL);test_graphics_indices(failure);
         }
         if(failure && !strncmp(failure,"destroy-",8))test_graphics_resource_destruction(failure);
+        if(failure && !strncmp(failure,"retire-",7)) {
+            test_graphics_fixed_declarations(NULL);test_graphics_original_retirement(failure);
+        }
         struct PilotInitializerState observed;CHECK(pilot_gfx_initializer_snapshot(&observed) && !observed.dither);
         MEM32(base)=0x41710;MEM32(base+4)=0;MEM32(base+8)=0x40310;MEM32(base+12)=1;
         MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_COMMANDS_CURRENT_OFFSET)=base+16;
@@ -105,6 +109,7 @@ static void test_graphics_commands(const char *failure)
         test_graphics_borrowed_vertices(NULL);
         test_graphics_indices(NULL);
         test_graphics_resource_destruction(NULL);
+        test_graphics_original_retirement(NULL);
         test_graphics_resource_wait();
         // This title does not expose the public InsertFence/BlockOnFence pair.
         // Exercise their real shared completion owner without admitting a

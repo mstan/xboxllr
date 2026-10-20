@@ -9,6 +9,16 @@
 #endif
 #include "graphics_profile.inc"
 static SRWLOCK graphics_lock=SRWLOCK_INIT;
+struct GraphicsResourceRetirement {uint32_t header,data,owner,active;uint64_t serial;struct GraphicsResourceRetirement *next;};
+static struct GraphicsResourceRetirement *graphics_retirements;
+static unsigned graphics_resource_retiring;
+static void graphics_original_retire_check(uint32_t header,uint32_t data,unsigned borrowers);
+static void graphics_original_retire_queue(uint32_t header,uint32_t data,uint64_t serial,unsigned borrowers);
+static int graphics_resource_is_retiring(uint32_t header)
+{
+    for(struct GraphicsResourceRetirement *r=graphics_retirements;r;r=r->next)if(r->header==header)return 1;
+    return 0;
+}
 #include "graphics_interpolation.inc"
 #ifdef PILOT_SCHEDULING_LLE
 /* Participating whole components acquire the real original recursive RTL
@@ -498,7 +508,7 @@ static void graphics_dispatch_impl(unsigned entry)
         if(graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding inline surface ownership",entry);
 #endif
-        if(graphics_clock_waiters || graphics_resource_waiters)stop("device release with active graphics waits",entry);
+        if(graphics_clock_waiters || graphics_resource_waiters || graphics_resource_retiring)stop("device release with active graphics waits/retirement",entry);
 #ifdef PILOT_SCHEDULING_LLE
         if(pilot_io_device_thread_component_active()) {
             graphics_present_drain();
@@ -573,6 +583,7 @@ static void graphics_dispatch_impl(unsigned entry)
         if(entry==graphics_resource_wait_entry()){graphics_resource_wait(arguments[0]);break;}
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
+    graphics_original_retire_drain();
     uint64_t unlocking=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     graphics_frame_audit_call(entry,arguments);

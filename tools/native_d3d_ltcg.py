@@ -261,6 +261,15 @@ def inspect(context,proof):
     if presentation is not None:binding["guest_presentation"]=presentation
     if 'command_buffer' in proof:
         binding['command_buffer']=command_facts(proof['command_buffer'],calls,codes,layout,require)
+    retirement={'resource_unregister','resource_free'}&set(proof['helpers'])
+    if retirement:
+        if retirement!={'resource_unregister','resource_free'}:raise ValueError('incomplete original resource allocator proof')
+        unregister=proof['helpers']['resource_unregister']['address'];free=proof['helpers']['resource_free']['address']
+        require('D3D_DestroyResource','call',hex(unregister));require('D3D_DestroyResource','call',hex(free))
+        require('D3D_DestroyResource','push','0xa1800000');require('D3D_DestroyResource','push','0x24800000')
+        require('resource_unregister','call',hex(free));require('resource_unregister','ret','4')
+        require('resource_free','test','byte ptr [esp + 0xb], 0x80');require('resource_free','ret','8')
+        binding['resource_retirement']=dict(version=1,unregister=unregister,tagged_free=free)
     return binding,*emit_text(binding,interface,behavior_mask)
 
 
@@ -314,6 +323,11 @@ def emit_text(binding,interface,behavior_mask):
         header += ['#define PILOT_D3D_GUEST_PRESENTATION_VERSION 1u',
                    f'#define PILOT_D3D_SAMPLE_AA_STATE {binding["guest_presentation"]["aa_state"]}u',
                    f'#define PILOT_D3D_SAMPLE_MASK_STATE {binding["guest_presentation"]["mask_state"]}u']
+    if 'resource_retirement' in binding:
+        retirement=binding['resource_retirement']
+        header += [f'#define PILOT_D3D_RESOURCE_RETIRE_VERSION {retirement["version"]}u',
+                   f'#define PILOT_D3D_RESOURCE_UNREGISTER 0x{retirement["unregister"]:x}u',
+                   f'#define PILOT_D3D_RESOURCE_TAGGED_FREE 0x{retirement["tagged_free"]:x}u']
     if 'original_create_driver_mask' in binding:
 
         header += [f'#define PILOT_D3D_CREATE_DRIVER_MASK 0x{binding["original_create_driver_mask"]:x}u']
@@ -365,6 +379,22 @@ def bind(context,proof):
     generated=context.generated;record=context.output/'d3d-binding.aot-private.json'
     texts={'pilot_d3d_bindings.h':header,'pilot_d3d_binding.c':wrapper}
     if (generated/'pilot_d3d_binding.c').exists():
+        if 'resource_retirement' in binding:
+            previous=copy.deepcopy(binding);previous.pop('resource_retirement')
+            for name in ('resource_unregister','resource_free'):previous['helpers'].pop(name)
+            prior_header='\n'.join(line for line in header.splitlines() if not line.startswith((
+                '#define PILOT_D3D_RESOURCE_RETIRE_VERSION ','#define PILOT_D3D_RESOURCE_UNREGISTER ',
+                '#define PILOT_D3D_RESOURCE_TAGGED_FREE ')))+'\n'
+            actual=json.loads(record.read_text())
+            if (actual==previous and context.manifest.get('d3d_binding')==actual and
+                    (generated/'pilot_d3d_binding.c').read_text()==wrapper and
+                    (generated/'pilot_d3d_bindings.h').read_text()==prior_header):
+                (generated/'pilot_d3d_bindings.h').write_text(header,encoding='utf-8',newline='\n')
+                record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+                context.manifest['d3d_binding']=binding
+                context.manifest['files']['pilot_d3d_bindings.h']=hashlib.sha256((generated/'pilot_d3d_bindings.h').read_bytes()).hexdigest()
+                context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+                return binding
         # Correct only the exact old input-as-output alias. inspect() has
         # proved the new destination from the unchanged original helper.
         if ('transforms' in binding['layout'].get('cache_fields',{}) and

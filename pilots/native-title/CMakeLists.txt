@@ -837,8 +837,11 @@ if(PILOT_D3D_SOURCE)
     if(pilot_inline_commands)
       pilot_add_test(NAME pilot_graphics_commands_runtime COMMAND pilot_contract_test graphics-commands)
       set_tests_properties(pilot_graphics_commands_runtime PROPERTIES TIMEOUT 15)
+      file(STRINGS "${PILOT_GENERATED}/pilot_d3d_bindings.h" pilot_original_retirement
+        REGEX "^#define PILOT_D3D_RESOURCE_RETIRE_VERSION ")
       pilot_add_test(NAME pilot_graphics_commands_guards COMMAND "${CMAKE_COMMAND}"
-        "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_commands_failures.cmake")
+        "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DORIGINAL_RETIREMENT=$<BOOL:${pilot_original_retirement}>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_commands_failures.cmake")
       set_tests_properties(pilot_graphics_commands_guards PROPERTIES TIMEOUT 30)
     endif()
     pilot_add_test(NAME pilot_graphics_abi COMMAND pilot_contract_test graphics)

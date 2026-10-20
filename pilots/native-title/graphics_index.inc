@@ -2,7 +2,7 @@
  * into commands; the native renderer snapshots them into GPU index storage.
  * Headers made by original code remain caller-owned, as for archive textures.
  */
-struct GraphicsIndexObject {uint32_t header,data,bytes,refs,bindings;unsigned borrowed;uint64_t last_use;unsigned waiters;};
+struct GraphicsIndexObject {uint32_t header,data,bytes,refs,bindings;unsigned borrowed;uint64_t last_use;unsigned waiters,retire_original;};
 static struct GraphicsIndexObject graphics_indices[256];
 static uint32_t graphics_native_index_header;
 static uint64_t graphics_index_draws;
@@ -13,9 +13,11 @@ static int graphics_index_find(uint32_t header)
 }
 static struct GraphicsIndexObject *graphics_index(uint32_t header)
 {
+    if(graphics_resource_is_retiring(header))stop("index access during resource retirement",header);
     int slot=graphics_index_find(header);
     if(slot>=0) {
         struct GraphicsIndexObject *object=&graphics_indices[slot];
+        if(object->retire_original)stop("index access during pending retirement",header);
         if(object->borrowed && (MEM32(header+4)!=object->data || ((MEM32(header)>>16)&7)!=1))
             stop("borrowed index storage changed while owned",header);
         return object;
@@ -46,6 +48,8 @@ static uint32_t graphics_index_allocate(uint32_t bytes)
 static void graphics_index_collect(struct GraphicsIndexObject *object)
 {
     if(object->refs || object->bindings || object->waiters)return;
+    if(object->borrowed && (object->retire_original || !(MEM32(object->header)&0xffffu)))
+        graphics_original_retire_queue(object->header,0,object->last_use,0);
     if(!object->borrowed)pool_free(object->header);
     memset(object,0,sizeof(*object));
 }

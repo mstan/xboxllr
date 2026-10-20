@@ -6,6 +6,7 @@ void pilot_d3d_dispatch(unsigned entry);
 #ifndef PILOT_SCHEDULING_LLE
 static RECOMP_TLS uint32_t graphics_abi_frames;
 static RECOMP_TLS unsigned graphics_abi_depth;
+static RECOMP_TLS uint32_t graphics_abi_callers[16];
 #endif
 static void graphics_abi_thread_retire(void)
 {
@@ -38,14 +39,23 @@ void pilot_d3d_dispatch_frame(unsigned entry,const uint32_t *arguments,
     }
     const uint32_t previous=g_esp,saved_ebx=g_ebx,saved_esi=g_esi,
                    saved_edi=g_edi,saved_ebp=g_ebp;
+    graphics_abi_callers[graphics_abi_depth]=previous;
     const uint32_t frame=graphics_abi_frames+(graphics_abi_depth++)*frame_bytes;
     MEM32(frame)=MEM32(previous);
     if(count)memcpy(memory+frame+4,arguments,count*4);
     g_esp=frame;
     pilot_d3d_dispatch(entry);
     if(g_esp!=frame+4+count*4)stop("graphics ABI canonical cleanup mismatch",entry);
-    --graphics_abi_depth;
+    graphics_abi_callers[--graphics_abi_depth]=0;
     g_esp=previous+4+original_stack_bytes;
     g_ebx=saved_ebx;g_esi=saved_esi;g_edi=saved_edi;g_ebp=saved_ebp;
+#endif
+}
+static uint32_t graphics_abi_caller_stack(void)
+{
+#ifndef PILOT_SCHEDULING_LLE
+    return graphics_abi_depth?graphics_abi_callers[graphics_abi_depth-1]:g_esp;
+#else
+    return g_esp;
 #endif
 }

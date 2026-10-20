@@ -215,6 +215,48 @@ class LTCGOriginalProofTests(unittest.TestCase):
                         self.assertEqual((generated/'pilot_d3d_binding.c').read_text(),wrapper)
                         with patch.object(Path,'write_text',side_effect=AssertionError('repeated write')):
                             self.assertEqual(bind_ltcg(context,{}),self.binding)
+    def test_original_allocator_helpers_are_source_proved_and_complete(self):
+        self.assertEqual(self.binding['resource_retirement'],dict(version=1,unregister=0x1484c0,tagged_free=0x6fdf9))
+        self.assertIn('#define PILOT_D3D_RESOURCE_RETIRE_VERSION 1u',self.header)
+        for helper in ('resource_unregister','resource_free'):
+            for mutation in ('missing','body','address'):
+                with self.subTest(helper=helper,mutation=mutation):
+                    proof=copy.deepcopy(self.proof)
+                    if mutation=='missing':proof['helpers'].pop(helper)
+                    elif mutation=='body':proof['helpers'][helper]['sha256']='0'*64
+                    else:proof['helpers'][helper]['address']+=4
+                    with self.assertRaises(ValueError):inspect(self.context,proof)
+
+    def test_exact_allocator_metadata_upgrade_preserves_cpu_sources_and_rejects_drift(self):
+        prefixes=('#define PILOT_D3D_RESOURCE_RETIRE_VERSION ',
+                  '#define PILOT_D3D_RESOURCE_UNREGISTER ','#define PILOT_D3D_RESOURCE_TAGGED_FREE ')
+        for drift in (None,'header','record','wrapper'):
+            with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:
+                output=Path(directory);generated=output/'gen';generated.mkdir()
+                previous=copy.deepcopy(self.binding);previous.pop('resource_retirement')
+                for helper in ('resource_unregister','resource_free'):previous['helpers'].pop(helper)
+                header='\n'.join(line for line in self.header.splitlines() if not line.startswith(prefixes))+'\n'
+                if drift=='header':header+='/* drift */\n'
+                if drift=='record':previous['device_object']+=4
+                wrapper=self.wrapper+('/* drift */\n' if drift=='wrapper' else '')
+                (generated/'pilot_d3d_bindings.h').write_text(header)
+                (generated/'pilot_d3d_binding.c').write_text(wrapper)
+                record=output/'d3d-binding.aot-private.json';record.write_text(json.dumps(previous))
+                context=SimpleNamespace(output=output,generated=generated,manifest={'files':{},'d3d_binding':previous},
+                                        manifest_path=output/'generation.aot-private.json')
+                before={p.name:p.read_bytes() for p in generated.iterdir()}
+                with patch('native_d3d_ltcg.inspect',return_value=(self.binding,self.header,self.wrapper)):
+                    if drift:
+                        with self.assertRaises(ValueError):bind_ltcg(context,self.proof)
+                        self.assertEqual(before,{p.name:p.read_bytes() for p in generated.iterdir()})
+                    else:
+                        bind_ltcg(context,self.proof)
+                        self.assertEqual((generated/'pilot_d3d_binding.c').read_text(),self.wrapper)
+                        self.assertEqual((generated/'pilot_d3d_bindings.h').read_text(),self.header)
+                        self.assertEqual(json.loads(record.read_text()),self.binding)
+                        with patch.object(Path,'write_text',side_effect=AssertionError('repeated write')):
+                            self.assertEqual(bind_ltcg(context,self.proof),self.binding)
+
     def test_register_and_original_stack_contracts_are_distinct(self):
         calls={c['name']:c for c in self.binding['calls']}
         create=calls['Direct3D_CreateDevice']

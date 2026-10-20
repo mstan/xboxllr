@@ -12,7 +12,7 @@ struct GraphicsTextureObject {
     /* Conservative owner hint: a CPU lock on this texture or any surface
      * sets it. A handoff clears it only after clearing the whole family. */
     unsigned family_exposed;
-    unsigned waiters;
+    unsigned waiters,retire_original;
 };
 static struct GraphicsTextureObject *graphics_textures;
 static unsigned graphics_texture_capacity;
@@ -39,12 +39,17 @@ static int graphics_texture_exposure_cache(void)
 
 static unsigned graphics_texture_slot(uint32_t header)
 {
+    if(graphics_resource_is_retiring(header))stop("texture access during resource retirement",header);
     unsigned key=((header>>4)^(header>>12))&255;
     unsigned cached=graphics_texture_lookup[key];
     if(header && cached && cached<=graphics_texture_capacity &&
-       graphics_textures[cached-1].header==header)return cached-1;
+       graphics_textures[cached-1].header==header) {
+        if(graphics_textures[cached-1].retire_original)stop("texture access during pending retirement",header);
+        return cached-1;
+    }
     for(unsigned i=0;i<graphics_texture_capacity;++i)
         if(graphics_textures[i].header==header && header) {
+            if(graphics_textures[i].retire_original)stop("texture access during pending retirement",header);
             graphics_texture_lookup[key]=i+1;return i;
         }
     unsigned slot=graphics_texture_adopt(header);
@@ -274,7 +279,13 @@ static void graphics_texture_collect(unsigned slot)
 {
     struct GraphicsTextureObject *object=&graphics_textures[slot];
     if(object->refs || object->bindings || object->waiters)return;
-    if(object->guest_owned){pilot_gfx_texture_destroy(object->native);graphics_texture_borrow_release(object);memset(object,0,sizeof(*object));return;}
+    if(object->guest_owned) {
+        if(object->retire_original || !(MEM32(object->header)&0xffffu)) {
+            if(!object->cpu_borrowed || object->parent)stop("original GPU alias retirement is unqualified",object->header);
+            graphics_original_retire_queue(object->header,object->data,pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,object->native),1);
+        }
+        pilot_gfx_texture_destroy(object->native);graphics_texture_borrow_release(object);memset(object,0,sizeof(*object));return;
+    }
     unsigned parent=object->parent;
     if(parent) {
         if(!object->usage || object->cpu_exposed)graphics_texture_upload(&graphics_textures[parent-1],object->level);
