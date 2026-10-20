@@ -142,6 +142,12 @@ int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
             if(stage==3)return 0;
             value-=3;break; /* Xbox BUMPENVMAP/LUMINANCE -> desktop 22/23. */
         }
+#ifdef PILOT_D3D_PHOBOS
+        /* These seven Xbox operations share the prepared native combiner's
+         * component equations. Later enum values diverge from desktop D3D;
+         * keep their admission separate. Alpha operations retain their scope. */
+        if(value>=8 && value<=14)break;
+#endif
         goto operation;
     case 14:host=D3DTSS_COLORARG1; goto argument;
     case 15:host=D3DTSS_COLORARG2; goto argument;

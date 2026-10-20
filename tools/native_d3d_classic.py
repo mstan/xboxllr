@@ -206,6 +206,19 @@ def inspect(context, proof):
                 raise ValueError('immediate entry has a different device owner: '+name)
         binding['immediate']=inspect_immediate(codes,interface,[c['name'] for c in calls],
             flush_helper_address=helper['address'],enabled=True)
+    if type(proof.get('float_beta_fvf',False)) is not bool:
+        raise ValueError('invalid float-beta FVF profile admission')
+    if proof.get('float_beta_fvf'):
+        # The full helper is already body-hash checked. Verify the float-beta
+        # descriptor/offset calculation rather than importing desktop index
+        # semantics for the otherwise ignored bit1000.
+        decoder={(i.mnemonic,i.op_str) for i in codes['fvf_decoder']}
+        required={('and','esi, 0xe'),('lea','edx, [esi - 6]'),('shr','edx, 1'),
+            ('inc','edx'),('mov','ecx, edx'),('shl','ecx, 4'),('or','ecx, 2'),
+            ('mov','dword ptr [eax + 0x28], 0xc'),('mov','dword ptr [eax + 0x2c], ecx'),
+            ('lea','edx, [edx*4 + 0xc]')}
+        if not required<=decoder:raise ValueError('unreviewed original float-beta FVF decoder')
+        binding['float_beta_fvf']={'version':1,'max_components':4,'ignored_mask':0x1000}
     return binding, *emit_text(binding,interface,0x40)
 
 

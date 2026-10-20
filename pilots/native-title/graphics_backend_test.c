@@ -8,6 +8,7 @@
 #include "graphics_draw_backend_test.inc"
 #include "graphics_completion_backend_test.inc"
 #include "graphics_fvf_backend_test.inc"
+#include "graphics_fvf_beta_backend_test.inc"
 #include "graphics_flat_backend_test.inc"
 #include "graphics_pixel_backend_test.inc"
 #include "graphics_movie_backend_test.inc"
@@ -30,6 +31,7 @@
 #include "graphics_texgen_backend_test.inc"
 #include "graphics_point_backend_test.inc"
 #include "graphics_immediate_backend_test.inc"
+#include "graphics_texture_ops_backend_test.inc"
 #include "graphics_fixed_backend_test.inc"
 #include "graphics_index_backend_test.inc"
 #include "graphics_edge_backend_test.inc"
@@ -169,6 +171,9 @@ int main(int argc,char **argv)
             CHECK(!test_fixed_resultarg());pilot_gfx_close();continue;
         }
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--texture-color-ops")) {
+            CHECK(!test_texture_color_ops());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--immediate")) {
             CHECK(!test_immediate_pixels());pilot_gfx_close();continue;
         }
@@ -243,6 +248,7 @@ int main(int argc,char **argv)
         CHECK(test_bump_pipeline()==0);
         CHECK(test_resource_bindings()==0);
         CHECK(test_fvf_pipeline()==0);
+        CHECK(!test_fvf_float_beta_layout());
         CHECK(test_packed_vertex_colors()==0);
         CHECK(test_native_draw_pipeline()==0);
         CHECK(test_flat_pipeline()==0);
@@ -259,6 +265,9 @@ int main(int argc,char **argv)
         /* Teardown also owns queries which the caller has not retired. A fast
          * GPU may finish immediately, so pending=true is not required. */
         CHECK(test_visibility()==0);
+#ifdef PILOT_D3D_PHOBOS
+        CHECK(!test_texture_color_ops());
+#endif
         CHECK(pilot_gfx_clear(1,0xff123456,1,0)==0);
         pilot_gfx_resource_busy(PILOT_GFX_SURFACE,0);
         pilot_gfx_close();

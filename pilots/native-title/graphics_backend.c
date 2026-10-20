@@ -1177,17 +1177,22 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
     }
     return status;
 }
-uint32_t pilot_gfx_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16])
+static uint32_t pilot_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16],int float_betas)
 {
     unsigned textures=(fvf>>8)&15,position=fvf&15;
-    if((position!=2 && position!=4) || (fvf&(position==4?0xf030u:0xf020u)) || textures>4) {
+    unsigned betas=float_betas && position>=6 && position<=12 && !(position&1)?(position-4)/2:0;
+    uint32_t forbidden=position==4?0xf030u:betas?0xe020u:0xf020u;
+    if((position!=2 && position!=4 && !betas) || (fvf&forbidden) || textures>4) {
         fprintf(stderr,"[D3D FVF] rejected format=%08x\n",fvf);
         pilot_d3d_backend_stop("unqualified FVF: expected XYZ or XYZRHW with admitted normal/colors/coordinates");
     }
     if((fvf>>16)>>(textures*2))pilot_d3d_backend_stop("FVF coordinate size without coordinate");
     struct PilotVertexElement layout[16]={0};
-    layout[0]=(struct PilotVertexElement){position==2?0x32:0x42,0,0};
-    unsigned extent=position==2?12:16;
+    layout[0]=(struct PilotVertexElement){position==4?0x42:0x32,0,0};
+    unsigned extent=position==4?16:12;
+    if(betas) {
+        layout[1]=(struct PilotVertexElement){(betas<<4)|2,0,extent};extent+=betas*4;
+    }
     /* The original FVF decoder uses FLOAT3 normals. Packed CMP normals are
      * a declaration format; the existing typed core supports both. */
     if(fvf&0x10){layout[2]=(struct PilotVertexElement){0x32,0,extent};extent+=12;}
@@ -1201,6 +1206,13 @@ uint32_t pilot_gfx_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16
     if(elements)memcpy(elements,layout,sizeof(layout));
     return extent;
 }
+uint32_t pilot_gfx_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16])
+{return pilot_fvf_layout(fvf,elements,0);}
+/* Explicit original-XDK declaration capability. The checked decoder describes
+ * all beta slots as FLOATn and ignores bit1000; desktop LASTBETA_UBYTE4 rules
+ * must not reinterpret those bytes. This API does not admit weighted draws. */
+uint32_t pilot_gfx_fvf_float_beta_layout(uint32_t fvf,struct PilotVertexElement elements[16])
+{return pilot_fvf_layout(fvf,elements,1);}
 uint32_t pilot_gfx_fvf_extent(uint32_t fvf){return pilot_gfx_fvf_layout(fvf,NULL);}
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y)
 {return pilot_gfx_fvf_placement(fvf,screen_x,screen_y,1,0);}

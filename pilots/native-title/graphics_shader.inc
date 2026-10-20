@@ -80,7 +80,13 @@ static void graphics_shader_bind(uint32_t handle)
         /* Zero is a valid empty declaration binding in the original XDK.
          * Draw submission still rejects it until a draw contract is qualified. */
         struct PilotVertexElement elements[16]={0};
-        if(handle)pilot_gfx_fvf_layout(handle,elements);
+        if(handle) {
+#ifdef PILOT_D3D_FVF_FLOAT_BETA_VERSION
+            pilot_gfx_fvf_float_beta_layout(handle,elements);
+#else
+            pilot_gfx_fvf_layout(handle,elements);
+#endif
+        }
         uint32_t object=PILOT_D3D_FVF_OBJECT,flags=(handle&15)==4?2:0,dimensions=0;
         FILE *capture_file=NULL;const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture) {

@@ -904,6 +904,8 @@ if(PILOT_D3D_SOURCE)
     pilot_add_test(NAME pilot_graphics_geometry_capacity COMMAND pilot_contract_test graphics-geometry-capacity)
     pilot_add_test(NAME pilot_graphics_immediate_abi COMMAND pilot_contract_test graphics-immediate)
     set_tests_properties(pilot_graphics_immediate_abi PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+    pilot_add_test(NAME pilot_graphics_fvf_beta_abi COMMAND pilot_contract_test graphics-fvf-beta)
+    set_tests_properties(pilot_graphics_fvf_beta_abi PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
     set_tests_properties(pilot_graphics_geometry_capacity PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
     pilot_add_test(NAME pilot_graphics_deferred_guards COMMAND "${CMAKE_COMMAND}"
       "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_deferred_failures.cmake")
