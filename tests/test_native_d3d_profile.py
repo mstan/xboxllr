@@ -1,6 +1,7 @@
 """Profile admission guards for the shared D3D binding adapter."""
 import copy
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -13,6 +14,8 @@ sys.path.insert(0,str(ROOT/'tools'))
 from native_binding import select_profile
 from native_d3d_binding import ADAPTER,bind,validate_profile
 from native_d3d_ltcg import ADAPTER as LTCG_ADAPTER
+from native_d3d_classic import ADAPTER as CLASSIC_ADAPTER
+from native_d3d_classic import inspect as inspect_classic,bind as bind_classic
 from native_d3d_ltcg import inspect,marshal
 from native_d3d_ltcg import bind as bind_ltcg
 from native_binding import Binding
@@ -20,6 +23,14 @@ from native_display_binding import bind as bind_display
 
 
 class GraphicsProfileTests(unittest.TestCase):
+    def test_classic_create_keeps_present_original_arguments(self):
+        params=[dict(type='psh',name=n) for n in ('Adapter','DeviceType','hFocusWindow','BehaviorFlags','pPresentationParameters','ppReturnedDeviceInterface')]
+        signature=dict(call='stdcall',params=params,stack_bytes=24)
+        row=dict(name='Direct3D_CreateDevice',signature=signature)
+        canonical,args,registers=marshal(row,{'Direct3D_CreateDevice':signature})
+        self.assertEqual(args,[f'MEM32(g_esp+{i}u)' for i in range(4,28,4)])
+        self.assertEqual(registers,{})
+
     def setUp(self):
         self.path=ROOT/'pilots/native-title/profiles/blinx-ntsc-u.json'
         self.title=json.loads(self.path.read_text())
@@ -56,7 +67,7 @@ class GraphicsProfileTests(unittest.TestCase):
             cls.return_value.require_profile.return_value={}
             with self.assertRaisesRegex(ValueError,'graphics profile'):
                 bind(Path('unopened.xbe'),Path('unwritten-output'),Path('unopened-symbols.json'))
-            cls.return_value.require_profile.assert_called_once_with('d3d',None,adapter=(ADAPTER,LTCG_ADAPTER))
+            cls.return_value.require_profile.assert_called_once_with('d3d',None,adapter=(ADAPTER,LTCG_ADAPTER,CLASSIC_ADAPTER))
             cls.return_value.digest.assert_not_called()
 
     def test_original_display_requires_pinned_entry_bodies(self):
@@ -70,6 +81,57 @@ class GraphicsProfileTests(unittest.TestCase):
             with patch.object(Path,'read_text',return_value=json.dumps({'xbe_sha256':self.title['xbe_sha256']})),self.assertRaisesRegex(ValueError,'original display body'):
                 bind_display(Path('not-opened.xbe'),Path('not-written'),Path('not-opened.json'))
             context.digest.assert_called_once()
+
+
+class ClassicOriginalProofTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        fixture=os.environ.get('XLLE_TEST_CLASSIC_PROJECT')
+        if not fixture:raise unittest.SkipTest('explicit owned classic title fixture is not selected')
+        project=Path(fixture);paths=json.loads((project/'local/paths.json').read_text())
+        cls.context=Binding(Path(paths['xbe']),Path(paths['generated']),Path(paths['xdk_symbols']))
+        cls.proof=json.loads((project/'config/revisions/ntsc-u/d3d-classic.json').read_text())
+        cls.binding,cls.header,cls.wrapper=inspect_classic(cls.context,cls.proof)
+
+    def test_owned_classic_layout_and_cpu_cleanup(self):
+        self.assertEqual(len(self.binding['calls']),131)
+        self.assertEqual(self.binding['render_cache']['count'],146)
+        calls={c['name']:c for c in self.binding['calls']}
+        self.assertEqual((calls['D3DDevice_GetTexture2']['source_signature']['stack_bytes'],calls['D3DDevice_GetTexture2']['original_stack_bytes']),(4,8))
+        self.assertEqual((calls['D3D_GetAdapterModeCount']['source_signature']['stack_bytes'],calls['D3D_GetAdapterModeCount']['original_stack_bytes']),(8,4))
+        self.assertIn('PILOT_D3D_GAMMA_CACHE_VERSION',self.header)
+
+    def test_changed_original_abi_layout_or_cache_declines(self):
+        changes=[lambda p:p['functions'][0]['body'].update(sha256='0'*64),
+                 lambda p:p['functions'][0]['signature'].update(stack_bytes=0),
+                 lambda p:p['render_cache']['map'].__setitem__(158,138),
+                 lambda p:p['layout'].update(vertex_constants=p['layout']['vertex_constants']+16),
+                 lambda p:p['layout']['cache_fields'].update(vertex_shader=0x388),
+                 lambda p:p['layout']['gamma_cache'].update(current=p['layout']['gamma_cache']['current']+4),
+                 lambda p:p.update(references=[r for r in p['references'] if r.get('field')!='packed_pixel_constants'])]
+        for change in changes:
+            with self.subTest(change=change):
+                proof=copy.deepcopy(self.proof);change(proof)
+                with self.assertRaises(ValueError):inspect_classic(self.context,proof)
+
+    def test_additive_gamma_proof_preserves_original_code_and_rejects_drift(self):
+        from native_d3d_ltcg import emit_text,INTERFACE
+        interface={r['name']:r for r in json.loads(INTERFACE.read_text())}
+        previous=copy.deepcopy(self.binding);previous['layout'].pop('gamma_cache');previous['helpers'].pop('gamma_initializer')
+        old_header,old_wrapper=emit_text(previous,interface,0x40)
+        for drift in (False,True):
+            with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:
+                context=copy.copy(self.context);context.output=Path(directory);context.generated=context.output/'gen';context.generated.mkdir()
+                context.manifest={'d3d_binding':previous,'files':{}};context.manifest_path=context.output/'generation.aot-private.json'
+                (context.output/'d3d-binding.aot-private.json').write_text(json.dumps(previous))
+                (context.generated/'pilot_d3d_bindings.h').write_text(old_header)
+                (context.generated/'pilot_d3d_binding.c').write_text(old_wrapper+('/* drift */' if drift else ''))
+                if drift:
+                    with patch.object(Path,'write_text',side_effect=AssertionError('write before rejection')),self.assertRaises(ValueError):bind_classic(context,self.proof)
+                else:
+                    self.assertEqual(bind_classic(context,self.proof),self.binding)
+                    self.assertEqual((context.generated/'pilot_d3d_binding.c').read_text(),old_wrapper)
+                    with patch.object(Path,'write_text',side_effect=AssertionError('repeated write')):self.assertEqual(bind_classic(context,self.proof),self.binding)
 
 
 class LTCGOriginalProofTests(unittest.TestCase):

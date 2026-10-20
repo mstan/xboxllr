@@ -24,7 +24,7 @@ static inline int pilot_initializer_value(uint32_t state,uint32_t value)
     }
 }
 static inline int pilot_initializer_format(uint32_t format)
-{return format==6 || format==7 || format==0x12 || format==0x1e;}
+{return format==6 || format==7 || format==0x11 || format==0x12 || format==0x1e;}
 static inline int pilot_initializer_observe(struct PilotInitializerState *state,uint32_t index,uint32_t value)
 {
     if(!state || !pilot_initializer_value(index,value))return 0;

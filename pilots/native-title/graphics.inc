@@ -3,6 +3,17 @@
  * stop before executing against a device owned by the native renderer. */
 #include "graphics_backend.h"
 #include "pilot_d3d_bindings.h"
+#ifdef PILOT_D3D_PROFILE_CLASSIC
+extern void pilot_original_d3d_D3D_GetAdapterModeCount(void);
+extern void pilot_original_d3d_D3D_EnumAdapterModes(void);
+extern void pilot_original_d3d_CMiniport_GetDisplayCapabilities(void);
+extern void pilot_original_d3d_D3D_GetDeviceCaps(void);
+extern void pilot_original_d3d_D3D_CheckDeviceFormat(void);
+extern void pilot_original_d3d_D3DDevice_SetLight(void);
+extern void pilot_original_d3d_D3DDevice_LightEnable(void);
+extern void pilot_original_d3d_D3DDevice_SetMaterial(void);
+extern void pilot_original_d3d_D3DDevice_GetGammaRamp(void);
+#endif
 #ifndef PILOT_D3D_CREATE_BEHAVIOR_MASK
 /* Compatibility with already generated headers for the original adapter. */
 #define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x40u
@@ -52,12 +63,14 @@ static const char *graphics_original_leave(void)
 static int graphics_active;
 #include "graphics_diagnostics.inc"
 static uint32_t graphics_parameters[17];
-static uint32_t graphics_headers,graphics_data[3],graphics_target,graphics_depth;
-static unsigned graphics_surface_refs[3];
+static uint32_t graphics_headers,graphics_data[4],graphics_target,graphics_depth;
+static unsigned graphics_surface_refs[4];
 static int32_t graphics_parameters_check(const uint32_t parameters[17])
 {
     int32_t status=pilot_gfx_parameters(parameters);if(status<0)return status;
-#ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
+#ifdef PILOT_D3D_PROFILE_CLASSIC
+    const unsigned version=2;
+#elif defined(PILOT_D3D_GUEST_PRESENTATION_VERSION)
     const unsigned version=PILOT_D3D_GUEST_PRESENTATION_VERSION;
 #else
     const unsigned version=0;
@@ -73,7 +86,7 @@ static PilotPresentation graphics_presentation(void)
 static unsigned graphics_surface_mask(void)
 {PilotPresentation p=graphics_presentation();return pilot_presentation_mask(&p);}
 static int graphics_surface_owned(unsigned index)
-{return index<3 && (graphics_surface_mask()&(1u<<index))!=0;}
+{return index<4 && (graphics_surface_mask()&(1u<<index))!=0;}
 
 #include "graphics_surfaces.h"
 static void graphics_surfaces_project(unsigned mode)
@@ -84,7 +97,7 @@ static void graphics_surfaces_project(unsigned mode)
 #endif
     const PilotSurfaceLayout layout={PILOT_D3D_PRESENTATION_COUNT,PILOT_D3D_PRESENTATION_COLORS,
         PILOT_D3D_PRESENTATION_DEPTH,PILOT_D3D_CURRENT_COLOR,PILOT_D3D_CURRENT_DEPTH};
-    if(graphics_parameters[3]!=1 || !pilot_surface_project_mask((uint32_t*)(memory+PILOT_D3D_DEVICE_OBJECT),
+    if(!pilot_surface_project_mask((uint32_t*)(memory+PILOT_D3D_DEVICE_OBJECT),
             PILOT_D3D_DEVICE_BYTES,&layout,graphics_headers,graphics_target,graphics_depth,mode,graphics_surface_mask()))
         stop("invalid presentation surface projection",mode);
 #else
@@ -98,7 +111,7 @@ static int32_t graphics_surface_backend_ref(void *context,unsigned index,int acq
 static void graphics_surfaces_reconcile(void)
 {
 #ifdef PILOT_D3D_SURFACE_PROJECTION_VERSION
-    uint32_t common[3];for(unsigned i=0;i<3;++i)common[i]=MEM32(graphics_headers+i*32);
+    uint32_t common[4];for(unsigned i=0;i<4;++i)common[i]=MEM32(graphics_headers+i*32);
     int error=pilot_surface_sync_mask(common,graphics_surface_refs,graphics_surface_mask(),graphics_surface_backend_ref,NULL);
     if(error)stop("invalid inline surface ownership",(uint32_t)error);
 #endif
@@ -116,8 +129,8 @@ static void graphics_surfaces_create(void)
     if (vm_allocate(&graphics_headers,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))
         stop("graphics surface header allocation failed",0);
     PilotPresentation presentation=graphics_presentation();
-    uint32_t format=(graphics_parameters[2]==6 || graphics_parameters[2]==0x12)?0x12:0x1e;
-    for (unsigned i=0;i<3;++i) {
+    uint32_t format=graphics_parameters[2]==0x11?0x11:(graphics_parameters[2]==6 || graphics_parameters[2]==0x12)?0x12:0x1e;
+    for (unsigned i=0;i<4;++i) {
         uint32_t *header=(uint32_t*)(memory+graphics_headers+i*32),extent[3];
         if(!pilot_presentation_surface(&presentation,i,extent)){memset(header,0,24);continue;}
         uint32_t width=extent[0],height=extent[1],pitch=extent[2];bytes=pitch*height;
@@ -133,7 +146,7 @@ static void graphics_surfaces_create(void)
 }
 static unsigned graphics_surface_index(uint32_t address)
 {
-    if (address!=graphics_headers && address!=graphics_headers+32 && address!=graphics_headers+64)
+    if (address<graphics_headers || address-graphics_headers>=128 || ((address-graphics_headers)&31))
         stop("unowned graphics surface",address);
     unsigned index=(address-graphics_headers)/32;
     if(!graphics_surface_owned(index))stop("absent presentation surface",address);return index;
@@ -192,7 +205,7 @@ static void graphics_resource_bindings_close(void)
 static void graphics_target_ref(uint32_t header,int acquire)
 {
     if(!header)return;
-    if(header==graphics_headers || header==graphics_headers+64)graphics_surface_ref(graphics_surface_index(header),acquire);
+    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64 || (graphics_surface_owned(3) && header==graphics_headers+96))graphics_surface_ref(graphics_surface_index(header),acquire);
     else graphics_texture_ref(graphics_texture_slot(header),acquire);
 }
 static void graphics_target_prepare(uint32_t header)
@@ -251,6 +264,25 @@ static void graphics_dispatch_impl(unsigned entry)
     if(pilot_verbose){fprintf(stderr,"[D3D] %s return=%08x",pilot_d3d_calls[entry].name,MEM32(g_esp));
     for (unsigned i=0;i<pilot_d3d_calls[entry].stack_bytes/4;i++) fprintf(stderr," %08x",arguments[i]);
     fprintf(stderr,"\n");}
+#ifdef PILOT_D3D_PROFILE_CLASSIC
+    /* Keep the source-qualified, CPU-only mode-table filters as generated
+     * native code. Their sole AV query is owned by the native kernel service;
+     * neither requires a renderer device nor submits original GPU commands. */
+    if(entry==PILOT_D3D_D3D_GetAdapterModeCount){graphics_original_table_query(pilot_original_d3d_D3D_GetAdapterModeCount,4);return;}
+    if(entry==PILOT_D3D_D3D_EnumAdapterModes){graphics_original_table_query(pilot_original_d3d_D3D_EnumAdapterModes,12);return;}
+    if(entry==PILOT_D3D_CMiniport_GetDisplayCapabilities){graphics_original_table_query(pilot_original_d3d_CMiniport_GetDisplayCapabilities,0);return;}
+    if(entry==PILOT_D3D_D3D_GetDeviceCaps){graphics_original_table_query(pilot_original_d3d_D3D_GetDeviceCaps,12);return;}
+    if(entry==PILOT_D3D_D3D_CheckDeviceFormat){graphics_original_table_query(pilot_original_d3d_D3D_CheckDeviceFormat,24);return;}
+    /* These original CPU routines own their cache allocation/list/dirty bits;
+     * they issue no GPU commands. Active fixed-function lighting still needs
+     * an admitted draw consumer and cannot silently become an unlit draw. */
+    if(entry==PILOT_D3D_D3DDevice_SetLight){graphics_original_table_query(pilot_original_d3d_D3DDevice_SetLight,8);return;}
+    if(entry==PILOT_D3D_D3DDevice_LightEnable){graphics_original_table_query(pilot_original_d3d_D3DDevice_LightEnable,8);return;}
+    if(entry==PILOT_D3D_D3DDevice_SetMaterial){graphics_original_table_query(pilot_original_d3d_D3DDevice_SetMaterial,4);return;}
+#ifdef PILOT_D3D_GAMMA_CACHE_VERSION
+    if(entry==PILOT_D3D_D3DDevice_GetGammaRamp){graphics_original_table_query(pilot_original_d3d_D3DDevice_GetGammaRamp,4);return;}
+#endif
+#endif
     if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank) {
         graphics_wait_vblank();
         g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
@@ -259,6 +291,10 @@ static void graphics_dispatch_impl(unsigned entry)
     AcquireSRWLockExclusive(&graphics_lock);
     uint64_t acquired=entered?dispatch_monotonic():0;
     if(entry==graphics_resource_wait_entry() && !graphics_active) {
+        ReleaseSRWLockExclusive(&graphics_lock);g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
+    }
+    if(entry==PILOT_D3D_D3DDevice_GetDeviceCaps && !graphics_active) {
+        memcpy(graphics_pointer(arguments[0],sizeof(pilot_d3d_device_caps)),pilot_d3d_device_caps,sizeof(pilot_d3d_device_caps));
         ReleaseSRWLockExclusive(&graphics_lock);g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
     }
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
@@ -321,10 +357,49 @@ static void graphics_dispatch_impl(unsigned entry)
         graphics_shader_constants(g_ecx,g_edx,arguments[0],0);break;
     case PILOT_D3D_D3DDevice_SetVertexShaderConstantNotInline:
         graphics_shader_constants(g_ecx,g_edx,arguments[0],graphics_shader_records());break;
+#ifdef PILOT_D3D_PROFILE_CLASSIC
+    case PILOT_D3D_D3DDevice_CreateVertexBuffer:
+    case PILOT_D3D_D3DDevice_CreateIndexBuffer: {
+        graphics_pointer(arguments[4],4);
+        uint32_t header=entry==PILOT_D3D_D3DDevice_CreateVertexBuffer?
+            graphics_vertex_allocate(arguments[0]):graphics_index_allocate(arguments[0]);
+        /* The original routines ignore Usage/FVF-or-Format/Pool, and publish
+         * the output only after allocation succeeds. Keep that caller ABI. */
+        if(header)MEM32(arguments[4])=header;
+        g_eax=header?0:0x8007000eu;break;
+    }
+    case PILOT_D3D_D3DDevice_GetTexture2: {
+        if(arguments[0]>=4)stop("unqualified texture query stage",arguments[0]);
+        graphics_pointer(arguments[1],4);
+        uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES+4*arguments[0]);
+        if(header)graphics_target_ref(header,1);
+        MEM32(arguments[1])=header;break;
+    }
+    case PILOT_D3D_D3DDevice_GetDepthStencilSurface:
+        graphics_pointer(arguments[0],4);MEM32(arguments[0])=graphics_depth;
+        if(graphics_depth)graphics_target_ref(graphics_depth,1);
+        g_eax=graphics_depth?0:0x88760866u;break;
+    case PILOT_D3D_D3DDevice_GetBackBuffer: {
+        if(arguments[0]!=0 && arguments[0]!=UINT32_MAX && !(arguments[0]==1 && graphics_presentation().copy_buffers==2))
+            stop("back buffer index outside single-buffer presentation",arguments[0]);
+        graphics_pointer(arguments[2],4);
+        unsigned index=arguments[0]==UINT32_MAX?1:arguments[0]==1?3:0;
+        uint32_t header=graphics_headers+32*index;
+        graphics_surface_ref(index,1);MEM32(arguments[2])=header;break;
+    }
+    case PILOT_D3D_D3DDevice_SetVertexShaderConstant: {
+        int64_t first=(int32_t)arguments[0];first+=96;
+        if(first<0 || first>=192 || !arguments[2] || arguments[2]>192-(uint32_t)first)
+            stop("unqualified stdcall vertex constant range",arguments[0]);
+        graphics_shader_constants((uint32_t)first,arguments[1],arguments[2]*4,graphics_shader_records());break;
+    }
+#endif
     case PILOT_D3D_D3DDevice_GetVertexShaderConstant:graphics_shader_get_constants(arguments);break;
     case PILOT_D3D_D3DDevice_CreateVertexBuffer2:g_eax=graphics_vertex_allocate(arguments[0]);break;
 #ifdef PILOT_D3D_INDEX_DATA_GLOBAL
+#ifndef PILOT_D3D_PROFILE_CLASSIC
     case PILOT_D3D_D3DDevice_CreateIndexBuffer2:g_eax=graphics_index_allocate(arguments[0]);break;
+#endif
     case PILOT_D3D_D3DDevice_SetIndices:graphics_index_bind(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3D_DestroyResource:graphics_resource_destroy(arguments[0]);break;
 #endif
@@ -348,7 +423,7 @@ static void graphics_dispatch_impl(unsigned entry)
         uint32_t mode[5]={graphics_parameters[0],graphics_parameters[1],
             graphics_parameters[11]?graphics_parameters[11]:60,0x40,
             (MEM32(graphics_headers+12)>>8)&255};
-#ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
+#if defined(PILOT_D3D_GUEST_PRESENTATION_VERSION) || defined(PILOT_D3D_PROFILE_CLASSIC)
         mode[3]=graphics_parameters[10];
 #endif
         memcpy(graphics_pointer(arguments[0],sizeof(mode)),mode,sizeof(mode)); break;
@@ -388,6 +463,16 @@ static void graphics_dispatch_impl(unsigned entry)
             graphics_surfaces_create();
             graphics_snapshot_init();
             graphics_transform_init();
+#ifdef PILOT_D3D_GAMMA_CACHE_VERSION
+            /* Original miniport initialization creates two identity ramps,
+             * each containing 256 bytes per channel. The original CPU getter
+             * reads this same cache; nonidentity setting remains guarded. */
+            for(unsigned bank=0;bank<2;++bank)for(unsigned channel=0;channel<3;++channel)
+                for(unsigned i=0;i<256;++i)MEM8(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_RAMPS+bank*768+channel*256+i)=(uint8_t)i;
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_CURRENT)=0;
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_PENDING)=0;
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_GAMMA_PENDING+4)=0;
+#endif
             AcquireSRWLockExclusive(&graphics_display_lock);
             graphics_display_profile=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_WAIT)!=NULL;
             graphics_display_open=1;
@@ -481,7 +566,7 @@ static void graphics_dispatch_impl(unsigned entry)
     }
     case PILOT_D3D_D3DResource_AddRef:
     case PILOT_D3D_D3DResource_Release:
-        if(arguments[0]==graphics_headers || arguments[0]==graphics_headers+32 || arguments[0]==graphics_headers+64)
+        if(arguments[0]==graphics_headers || arguments[0]==graphics_headers+32 || arguments[0]==graphics_headers+64 || (graphics_surface_owned(3) && arguments[0]==graphics_headers+96))
             g_eax=graphics_surface_ref(graphics_surface_index(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
         else if(graphics_index_find(arguments[0])>=0 ||
                 (MEM32(arguments[0])&0x01070000u)==0x01010000u)
@@ -506,7 +591,7 @@ static void graphics_dispatch_impl(unsigned entry)
 #endif
         graphics_surfaces_reconcile();
 #ifdef PILOT_D3D_SURFACE_PROJECTION_VERSION
-        if(graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
+        if(graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2] || graphics_surface_refs[3])
             stop("device release with outstanding inline surface ownership",entry);
 #endif
         if(graphics_clock_waiters || graphics_resource_waiters || graphics_resource_retiring)stop("device release with active graphics waits/retirement",entry);
@@ -520,7 +605,7 @@ static void graphics_dispatch_impl(unsigned entry)
         graphics_gpu_close();
         if(graphics_target!=graphics_headers || (graphics_depth && graphics_depth!=graphics_headers+64))
             graphics_set_targets(graphics_headers,graphics_parameters[8]?graphics_headers+64:0);
-        if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
+        if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2] || graphics_surface_refs[3])
             stop("device release with outstanding surface ownership",entry);
         graphics_surfaces_project(PILOT_SURFACE_CLEAR);
         graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_indices_close();graphics_shaders_release();graphics_pixels_release();
@@ -533,7 +618,7 @@ static void graphics_dispatch_impl(unsigned entry)
 #endif
         graphics_fence_next=1;graphics_fence_done=0;memset(graphics_fences,0,sizeof(graphics_fences));
         uint32_t bytes;
-        for (unsigned i=0;i<3;++i) {
+        for (unsigned i=0;i<4;++i) {
             bytes=0;
             if (graphics_data[i] && vm_free(&graphics_data[i],&bytes,MEM_RELEASE)) stop("surface VA release failed",i);
             graphics_data[i]=0;
@@ -569,7 +654,7 @@ static void graphics_dispatch_impl(unsigned entry)
     case PILOT_D3D_D3DDevice_Reset:
         graphics_surfaces_reconcile();
 #ifdef PILOT_D3D_SURFACE_PROJECTION_VERSION
-        if(graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
+        if(graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2] || graphics_surface_refs[3])
             stop("reset with outstanding inline surface ownership",entry);
 #endif
         g_eax=graphics_reset(arguments[0]);
@@ -582,6 +667,31 @@ static void graphics_dispatch_impl(unsigned entry)
         break;
     default:
         if(entry==graphics_resource_wait_entry()){graphics_resource_wait(arguments[0]);break;}
+        if(!strcmp(pilot_d3d_calls[entry].name,"D3DDevice_SetTextureState_ColorKeyColor")) {
+            graphics_texture_state(arguments[0],30,arguments[1],1);break;
+        }
+        if(!strcmp(pilot_d3d_calls[entry].name,"D3DDevice_SetTextureState_BorderColor")) {
+            graphics_texture_state(arguments[0],29,arguments[1],1);break;
+        }
+        {
+            static const struct {const char *name;unsigned state;} named[]={
+                {"D3DDevice_SetRenderState_LineWidth",157},
+                {"D3DDevice_SetRenderState_ShadowFunc",156},
+                {"D3DDevice_SetRenderState_BackFillMode",140},
+                {"D3DDevice_SetRenderState_TwoSidedLighting",141},
+                {"D3DDevice_SetRenderState_Dxt1NoiseEnable",159},
+                {"D3DDevice_SetRenderState_OcclusionCullEnable",161},
+                {"D3DDevice_SetRenderState_StencilCullEnable",162},
+                {"D3DDevice_SetRenderState_RopZCmpAlwaysRead",163},
+                {"D3DDevice_SetRenderState_RopZRead",164},
+                {"D3DDevice_SetRenderState_DoNotCullUncompressed",165}};
+            unsigned i;for(i=0;i<sizeof(named)/sizeof(*named);++i)
+                if(!strcmp(pilot_d3d_calls[entry].name,named[i].name))break;
+            if(i<sizeof(named)/sizeof(*named)){graphics_render_state(named[i].state,arguments[0],1);break;}
+        }
+        fprintf(stderr,"[D3D UNQUALIFIED] %s",pilot_d3d_calls[entry].name);
+        for(unsigned i=0;i<pilot_d3d_calls[entry].stack_bytes/4;++i)fprintf(stderr," %08x",arguments[i]);
+        fputc('\n',stderr);
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
     graphics_original_retire_drain();

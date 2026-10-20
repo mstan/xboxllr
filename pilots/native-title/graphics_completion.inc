@@ -73,7 +73,7 @@ static uint32_t graphics_fence_insert(void)
 static uint32_t graphics_resource_busy(uint32_t header)
 {
     uint32_t canonical=header,handle;unsigned kind;
-    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64) {
+    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64 || (graphics_surface_owned(3) && header==graphics_headers+96)) {
         kind=PILOT_GFX_SURFACE;handle=graphics_surface_index(header);
     } else if(graphics_index_find(header)>=0 || (MEM32(header)&0x01070000u)==0x01010000u) {
         struct GraphicsIndexObject *index=graphics_index(header);
@@ -114,7 +114,7 @@ static uint64_t graphics_resource_wait_retain(uint32_t header,struct GraphicsRes
     graphics_pointer(header,12);
     uint32_t canonical=header,handle=0,common=MEM32(header);unsigned kind=0,slot=0;
     if(graphics_clock_closing || graphics_resource_waiters==UINT_MAX)stop("resource wait during device close",header);
-    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64) {
+    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64 || (graphics_surface_owned(3) && header==graphics_headers+96)) {
         kind=PILOT_GFX_SURFACE;slot=handle=graphics_surface_index(header);
     } else if(graphics_index_find(header)>=0 || ((common>>16)&7)==1) {
         struct GraphicsIndexObject *object=graphics_index(header);slot=(unsigned)(object-graphics_indices);

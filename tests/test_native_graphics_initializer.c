@@ -34,6 +34,7 @@ static int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
 static int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 {(void)stage;(void)state;(void)value;return 1;}
 static void graphics_present_interval(uint32_t value){interval=value;}
+#include "graphics_state_cache.inc"
 #include "graphics_state.inc"
 int main(void)
 {

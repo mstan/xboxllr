@@ -65,6 +65,33 @@ static int test_guest_presentation(void)
         CHECK(pilot_gfx_reset(p)==0);ID3D11DeviceContext_OMGetRenderTargets(ctx,0,NULL,&depth);CHECK(!depth);
         CHECK(pilot_gfx_render_size(size) && size[0]==32 && size[1]==16);pilot_gfx_close();
     }
-    fprintf(stderr,"PASS guest Gaussian real raster/resolve pixels/readback, absent depth, legacy depth reset and recreate\n");return 0;
+    uint32_t copy[17]={16,8,0x11,2,0x11,3,0,0,1,0x2e,0x100,0,1,0,0,0,0};
+    CHECK(pilot_gfx_create(copy)==0);
+    CHECK(pilot_gfx_surface_ref(1,1)==1 && pilot_gfx_surface_ref(3,1)==1 && pilot_gfx_surface_ref(3,1)==2);
+    unsigned char source[16*8*4],front[sizeof(source)],previous[sizeof(source)];
+    uint32_t alias=0;
+    for(unsigned frame=0;frame<3;++frame) {
+        for(unsigned i=0;i<sizeof(source);i+=4){source[i]=(unsigned char)(17+frame*31);source[i+1]=(unsigned char)(71+frame*29);source[i+2]=139;source[i+3]=255;}
+        ID3D11Resource *scene=(ID3D11Resource*)rhi_d3d11_native_image(d3d8_GetSceneImage());
+        ID3D11DeviceContext_UpdateSubresource(d3d8_GetD3D11Context(),scene,0,NULL,source,16*4,0);
+        CHECK(pilot_gfx_present()==0);
+        CHECK(pilot_gfx_surface_readback(1,front,sizeof(front))==0 && !memcmp(front,source,sizeof(front)));
+        if(frame) {
+            CHECK(pilot_gfx_surface_readback(3,front,sizeof(front))==0 && !memcmp(front,previous,sizeof(front)));
+            CHECK(pilot_gfx_texture_readback(alias,0,front,sizeof(front))==0);
+            /* Xbox A8R8G8B8 lock bytes are BGRA; the diagnostic surface API
+             * above intentionally returns canonical RGBA pixels. */
+            for(unsigned i=0;i<sizeof(front);i+=4)
+                CHECK(front[i]==previous[i+2] && front[i+1]==previous[i+1] && front[i+2]==previous[i] && front[i+3]==previous[i+3]);
+            pilot_gfx_texture_destroy(alias);alias=0;
+        }
+        if(frame<2)CHECK(pilot_gfx_texture_alias(PILOT_GFX_SURFACE,1,0x12,&alias)==0);
+        memcpy(previous,source,sizeof(previous));
+    }
+    CHECK(pilot_gfx_surface_ref(1,0)==0 && pilot_gfx_surface_ref(3,0)==1 && pilot_gfx_surface_ref(3,0)==0);
+    CHECK(pilot_gfx_reset(copy)<0); /* Extended COPY Reset remains an explicit boundary. */
+    CHECK(pilot_gfx_surface_readback(1,front,sizeof(front))==0 && !memcmp(front,source,sizeof(front)));
+    pilot_gfx_close();
+    fprintf(stderr,"PASS guest Gaussian and COPY raster/scanout pixels, physical aliases/completion ownership, reference lifetime and recreate\n");return 0;
 }
 #endif

@@ -43,7 +43,8 @@ def marshal(row,interface):
     if row['name']=='Direct3D_CreateDevice':
         # The LTCG routine has no guest Adapter/DeviceType/window operands.
         # These are normalized host-service parameters, not observed guest args.
-        by_name.update(Adapter='0u',DeviceType='1u',hFocusWindow='0u')
+        for name, value in dict(Adapter='0u',DeviceType='1u',hFocusWindow='0u').items():
+            by_name.setdefault(name,value)
     args=[];registers={}
     for p in canonical['params']:
         source=by_name.get(p['name'])
@@ -310,15 +311,33 @@ def command_facts(p,calls,codes,layout,require):
 
 def emit_text(binding,interface,behavior_mask):
     calls=binding['calls'];layout=binding['layout'];cache=layout['cache_fields']
-    names={c['name'] for c in calls};absent=sorted(set(interface)-names)
+    names={c['name'] for c in calls}
+    required=set(interface)
+    absent=sorted(required-names)
     header=['#pragma once','#include <stdint.h>','enum PilotD3DEntry {']
     header += [f'    PILOT_D3D_{c["name"]},' for c in calls]
     header += ['    PILOT_D3D_COUNT,']
     header += [f'    PILOT_D3D_{name},' for name in absent]
     header += ['};','static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_d3d_calls[] = {']
     header += [f'{{"{c["name"]}",{c["address"]}u,{c["stack_bytes"]}u,{c["bytes"]}u,"{c["function_sha256"]}"}},' for c in calls]
-    header += ['};','#define PILOT_D3D_PROFILE_5849 1','#define PILOT_D3D_STATEBLOCK_AVAILABLE 0',
+    profile_define='PILOT_D3D_PROFILE_CLASSIC' if binding['adapter']=='xdk-d3d8-classic-cache-v1' else 'PILOT_D3D_PROFILE_5849'
+    header += ['};',f'#define {profile_define} 1','#define PILOT_D3D_STATEBLOCK_AVAILABLE 0',
                f'#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x{behavior_mask:x}u']
+    if 'render_cache' in binding:
+        mapping=binding['render_cache'];inverse=[0]*mapping['count']
+        for state,index in enumerate(mapping['map']):
+            if index>=0:inverse[index]=state
+        header += ['#define PILOT_D3D_RENDER_STATE_MAP_VERSION 1',
+                   f'#define PILOT_D3D_GUEST_RENDER_STATE_COUNT {mapping["count"]}',
+                   f'#define PILOT_D3D_RENDER_DEFAULT_COUNT {mapping["default_count"]}',
+                   'static const int16_t pilot_d3d_render_state_map[166]={'+','.join(map(str,mapping['map']))+'};',
+                   'static const uint16_t pilot_d3d_render_state_inverse[]={'+','.join(map(str,inverse))+'};',
+                   'static const uint8_t pilot_d3d_render_default_skips[]={'+','.join(str(int(i+57 in mapping['default_skips'])) for i in range(mapping['default_count']))+'};']
+    if 'packed_pixel_constants' in layout:
+        header += [f'#define PILOT_D3D_PIXEL_PACKED_CONSTANTS 0x{layout["packed_pixel_constants"]:x}u']
+    if 'gamma_cache' in layout:
+        header += ['#define PILOT_D3D_GAMMA_CACHE_VERSION 1']
+        header += [f'#define PILOT_D3D_GAMMA_{name.upper()} 0x{value:x}u' for name,value in layout['gamma_cache'].items()]
     if 'guest_presentation' in binding:
         header += ['#define PILOT_D3D_GUEST_PRESENTATION_VERSION 1u',
                    f'#define PILOT_D3D_SAMPLE_AA_STATE {binding["guest_presentation"]["aa_state"]}u',
@@ -374,8 +393,9 @@ def emit_text(binding,interface,behavior_mask):
     return '\n'.join(header)+'\n','\n'.join(wrapper)+'\n'
 
 
-def bind(context,proof):
-    binding,header,wrapper=inspect(context,proof)
+def bind(context,proof,*,inspector=None):
+    if inspector is None:inspector=inspect
+    binding,header,wrapper=inspector(context,proof)
     generated=context.generated;record=context.output/'d3d-binding.aot-private.json'
     texts={'pilot_d3d_bindings.h':header,'pilot_d3d_binding.c':wrapper}
     if (generated/'pilot_d3d_binding.c').exists():

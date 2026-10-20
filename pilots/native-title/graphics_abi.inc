@@ -59,3 +59,15 @@ static uint32_t graphics_abi_caller_stack(void)
     return g_esp;
 #endif
 }
+#ifdef PILOT_D3D_PROFILE_CLASSIC
+static void graphics_original_table_query(void (*query)(void),unsigned stack_bytes)
+{
+    /* Generated CPU routines use downward-growing Xbox stacks. The temporary
+     * service frame has no such stack reservation; borrow the actual caller's
+     * unchanged stdcall frame and validate its exact cleanup before returning. */
+    uint32_t service=g_esp,caller=graphics_abi_caller_stack();
+    g_esp=caller;query();
+    if(g_esp!=caller+4+stack_bytes)stop("original table query cleanup mismatch",g_esp);
+    g_esp=service+4+stack_bytes;
+}
+#endif

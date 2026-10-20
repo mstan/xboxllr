@@ -84,8 +84,8 @@ static unsigned char *pilot_saved_display;
 static uint32_t pilot_saved_width,pilot_saved_height;
 /* Slot 0 is the drawable back buffer; slot 1 retains the last presented image.
  * Xbox GetBackBuffer(-1) must not alias the image currently being drawn. */
-static ID3D11Texture2D *pilot_surfaces[3];
-static unsigned pilot_surface_refs[3];
+static ID3D11Texture2D *pilot_surfaces[4];
+static unsigned pilot_surface_refs[4];
 static ID3D11DepthStencilView *pilot_default_depth;
 static uint32_t pilot_color_target,pilot_depth_target;
 static struct PilotInitializerState pilot_initializer;
@@ -241,7 +241,7 @@ void pilot_gfx_close(void)
     free(pilot_textures);pilot_textures=NULL;pilot_texture_capacity=0;
     memset(pilot_sampling_views,0,sizeof(pilot_sampling_views));pilot_sampling_views_dirty=15;
     memset(pilot_sampling_formats,0,sizeof(pilot_sampling_formats));
-    for (unsigned i=0;i<3;++i) {
+    for (unsigned i=0;i<4;++i) {
         if (pilot_surface_refs[i]) pilot_d3d_backend_stop("device close with outstanding surface ownership");
         if (pilot_surfaces[i]) { ID3D11Texture2D_Release(pilot_surfaces[i]); pilot_surfaces[i]=NULL; }
         pilot_image_use_release(pilot_surface_use[i]);pilot_surface_use[i]=NULL;
@@ -336,10 +336,12 @@ int32_t pilot_gfx_create(const uint32_t p[17])
             {
                 desc.BindFlags=D3D11_BIND_SHADER_RESOURCE; desc.MiscFlags=0;
                 result=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&pilot_surfaces[1]);
+                if(SUCCEEDED(result) && pilot_presentation.copy_buffers==2)
+                    result=ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&desc,NULL,&pilot_surfaces[3]);
             }
         }
     }
-    if(SUCCEEDED(result))for(unsigned i=0;i<3;++i)if(pilot_surfaces[i]) {
+    if(SUCCEEDED(result))for(unsigned i=0;i<4;++i)if(pilot_surfaces[i]) {
         pilot_surface_use[i]=pilot_image_use_create();
         if(!pilot_surface_use[i]){result=E_OUTOFMEMORY;break;}
     }
@@ -355,6 +357,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
 {
 #ifdef PILOT_D3D_PHOBOS
     if(!pilot_device)return E_FAIL;
+    if(pilot_presentation.copy_buffers==2 || (p && p[3]==2))return E_NOTIMPL;
     HRESULT result=pilot_gfx_parameters(p);if(FAILED(result))return result;
     PilotPresentation previous=pilot_presentation,next;
     if(!pilot_presentation_parse(p,&next))return E_INVALIDARG;
@@ -500,6 +503,17 @@ int32_t pilot_gfx_transform(unsigned state,const float matrix[16])
 int32_t pilot_gfx_present(void)
 {
     if (!pilot_device) return E_FAIL;
+    if(pilot_presentation.copy_buffers==2) {
+        /* Keep each physical image and its completion owner together, just
+         * as the original COPY path exchanges Data/Lock in its two scanouts.
+         * Public AddRef counts belong to logical surface headers. */
+        for(unsigned i=0;i<pilot_surface_refs[1];++i)ID3D11Texture2D_Release(pilot_surfaces[1]);
+        for(unsigned i=0;i<pilot_surface_refs[3];++i)ID3D11Texture2D_Release(pilot_surfaces[3]);
+        ID3D11Texture2D *image=pilot_surfaces[1];pilot_surfaces[1]=pilot_surfaces[3];pilot_surfaces[3]=image;
+        struct PilotImageUse *use=pilot_surface_use[1];pilot_surface_use[1]=pilot_surface_use[3];pilot_surface_use[3]=use;
+        for(unsigned i=0;i<pilot_surface_refs[1];++i)ID3D11Texture2D_AddRef(pilot_surfaces[1]);
+        for(unsigned i=0;i<pilot_surface_refs[3];++i)ID3D11Texture2D_AddRef(pilot_surfaces[3]);
+    }
     const char *visible=getenv("XLLE_PILOT_VISIBLE");
     if(!pilot_visible && visible && !strcmp(visible,"1")) {
         ShowWindow(pilot_window,SW_SHOWNOACTIVATE);UpdateWindow(pilot_window);pilot_visible=1;
@@ -539,7 +553,7 @@ int32_t pilot_gfx_persist_display(const unsigned char *bgra,uint32_t width,uint3
 }
 int32_t pilot_gfx_surface_ref(unsigned surface,int acquire)
 {
-    if (surface>=3 || !pilot_surfaces[surface]) return E_INVALIDARG;
+    if (surface>=4 || !pilot_surfaces[surface]) return E_INVALIDARG;
     if (acquire) {
         ID3D11Texture2D_AddRef(pilot_surfaces[surface]); ++pilot_surface_refs[surface];
     } else {
@@ -649,7 +663,7 @@ uint64_t pilot_gfx_resource_serial(unsigned kind,uint32_t handle)
     switch(kind) {
     case PILOT_GFX_DEVICE:serial=pilot_submitted;break;
     case PILOT_GFX_SURFACE:
-        if(handle>=3 || !pilot_surfaces[handle])pilot_d3d_backend_stop("unowned surface completion query");
+        if(handle>=4 || !pilot_surfaces[handle])pilot_d3d_backend_stop("unowned surface completion query");
         serial=pilot_surface_use[handle]->serial;break;
     case PILOT_GFX_TEXTURE: {
         pilot_texture(handle);serial=pilot_textures[handle-1].use->serial;
@@ -884,7 +898,7 @@ int32_t pilot_gfx_texture_alias(unsigned kind,uint32_t source,uint32_t format,ui
 #ifdef PILOT_D3D_PHOBOS
     if(!pilot_device || !handle || format!=0x12)return E_NOTIMPL;
     ID3D11Texture2D *native=NULL;RhiImage *image=NULL;struct PilotImageUse *use=NULL;
-    if(kind==PILOT_GFX_SURFACE && source<2){native=pilot_surfaces[source];use=pilot_surface_use[source];}
+    if(kind==PILOT_GFX_SURFACE && source<4 && source!=2 && pilot_surfaces[source]){native=pilot_surfaces[source];use=pilot_surface_use[source];}
     else if(kind==PILOT_GFX_TEXTURE){D3D8Texture *t=pilot_texture(source);native=pilot_donor_texture(t);image=t->image;use=pilot_textures[source-1].use;}
     if(!native)return E_INVALIDARG;
     D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(native,&desc);
@@ -1311,7 +1325,7 @@ int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity)
 }
 int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t capacity)
 {
-    if (!pilot_device || !rgba || surface>=2 || !pilot_surfaces[surface]) return E_INVALIDARG;
+    if (!pilot_device || !rgba || (surface>=4 || surface==2) || !pilot_surfaces[surface]) return E_INVALIDARG;
     ID3D11Texture2D *back=pilot_surfaces[surface],*staging=NULL;
     ID3D11Texture2D_AddRef(back);
     D3D11_TEXTURE2D_DESC desc; ID3D11Texture2D_GetDesc(back,&desc);

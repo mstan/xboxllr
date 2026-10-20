@@ -12,7 +12,7 @@ int main(void)
     uint32_t p[17]={640,480,7,1,0x2222,1,0,0,0,0,0x20,0,1,0,0,0,0};
     PilotPresentation result;CHECK(pilot_presentation_parse(p,&result));
     CHECK(pilot_presentation_profile_admits(p,1) && !pilot_presentation_profile_admits(p,0));
-    CHECK(!pilot_presentation_profile_admits(p,2));
+    CHECK(!pilot_presentation_profile_admits(p,3));
     CHECK(pilot_presentation_mask(&result)==3 && pilot_presentation_axis(&result)==2);
     uint32_t size[3];CHECK(pilot_presentation_surface(&result,0,size));
     CHECK(size[0]==1280 && size[1]==960 && size[2]==5120);
@@ -43,5 +43,15 @@ int main(void)
     CHECK(device[8]==0x3000 && device[9]==0x3020 && device[16]==0x3040 && device[22]==0x3040);
     CHECK(pilot_surface_project_mask(device,sizeof(device),&layout,0,0,0,PILOT_SURFACE_CLEAR,7));
     CHECK(!device[4] && !device[8] && !device[9] && !device[16] && !device[20] && !device[22]);
-    puts("PASS guest Gaussian/legacy parameters, dimensions, descriptions, optional depth projection and reference ownership");return 0;
+    p[2]=0x11;p[3]=2;p[5]=3;p[9]=0x2e;p[10]=0x100;
+    CHECK(pilot_presentation_parse(p,&result) && pilot_presentation_profile_admits(p,2));
+    CHECK(!pilot_presentation_profile_admits(p,1) && !pilot_presentation_profile_admits(p,0));
+    CHECK(result.copy_buffers==2 && pilot_presentation_mask(&result)==15);
+    CHECK(pilot_presentation_surface(&result,3,size) && size[0]==640 && size[1]==480 && size[2]==1280);
+    CHECK(pilot_presentation_surface(&result,2,size) && size[2]==2560);
+    CHECK(pilot_surface_project_mask(device,sizeof(device),&layout,0x4000,0x4000,0x4040,PILOT_SURFACE_PUBLISH,15));
+    CHECK(device[4]==3 && device[8]==0x4000 && device[9]==0x4020 && device[10]==0x4060 && device[16]==0x4040);
+    CHECK(pilot_surface_project_mask(device,sizeof(device),&layout,0,0,0,PILOT_SURFACE_CLEAR,15) && !device[10]);
+    p[3]=3;CHECK(!pilot_presentation_parse(p,&result));p[3]=2;p[5]=1;CHECK(!pilot_presentation_parse(p,&result));
+    puts("PASS guest Gaussian/legacy/COPY parameters, dimensions, descriptions, surface projection and ownership");return 0;
 }

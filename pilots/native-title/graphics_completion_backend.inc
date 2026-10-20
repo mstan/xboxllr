@@ -12,7 +12,7 @@ static unsigned pilot_query_count,pilot_query_created;
  * presentation handle. Aliases retain this small owner across retirement and
  * reset; recording/querying use needs no search or GPU readback. */
 struct PilotImageUse {uint64_t serial;unsigned refs;};
-static struct PilotImageUse *pilot_surface_use[3];
+static struct PilotImageUse *pilot_surface_use[4];
 static struct PilotImageUse *pilot_image_use_create(void)
 {
     struct PilotImageUse *use=calloc(1,sizeof(*use));

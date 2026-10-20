@@ -61,7 +61,11 @@ def validate_profile(proof):
 def bind(xbe: Path, output: Path, symbols: Path, profile: Path | None = None):
     context=Binding(xbe,output,symbols)
     from native_d3d_ltcg import ADAPTER as LTCG_ADAPTER
-    proof=context.require_profile('d3d',profile,adapter=(ADAPTER,LTCG_ADAPTER))
+    from native_d3d_classic import ADAPTER as CLASSIC_ADAPTER
+    proof=context.require_profile('d3d',profile,adapter=(ADAPTER,LTCG_ADAPTER,CLASSIC_ADAPTER))
+    if proof.get('adapter')==CLASSIC_ADAPTER:
+        from native_d3d_classic import bind as bind_classic
+        return bind_classic(context,proof)
     if proof.get('adapter')==LTCG_ADAPTER:
         from native_d3d_ltcg import bind as bind_ltcg
         return bind_ltcg(context,proof)

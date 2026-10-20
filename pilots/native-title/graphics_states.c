@@ -28,6 +28,10 @@ static int render_state(uint32_t state,uint32_t value,int apply)
     case 65:case 76:case 112:case 117:case 137:case 142:case 149:
         return apply?pilot_gfx_initializer_set(state,value):pilot_gfx_initializer_admits(state,value);
     case 150:return apply?pilot_gfx_logic_op(value):0;
+    case 157:
+        /* The shared RHI rasterizes unit-width lines. Other widths must not
+         * return success while retaining that fixed native raster policy. */
+        return value==0x3f800000u;
     case 159:
         /* Preserve the caller's boolean cache contract using native compressed
          * sampling. Exact console noise pixels remain a documented open bound;
@@ -130,6 +134,8 @@ int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
     case 6:if((value&0x7f800000u)==0x7f800000u)return 0; host=D3DTSS_MIPMAPLODBIAS; break;
     case 7:host=D3DTSS_MAXMIPLEVEL; break;
     case 8:if(!value || value>16)return 0; host=D3DTSS_MAXANISOTROPY; break;
+    case 9:return value==0; /* Color key disabled; enabling remains guarded. */
+    case 30:return 1; /* Key color is inert while the only admitted op is disabled. */
     case 12:
         host=D3DTSS_COLOROP;
         if(value==25 || value==26) {

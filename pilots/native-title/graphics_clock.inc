@@ -127,7 +127,7 @@ static void graphics_vblank_deliver(uint64_t frame)
     }
     uint32_t flags=graphics_swap_flags(retired,frame);
     uint32_t callback=graphics_callback;
-    uint32_t data=graphics_headers+96;
+    uint32_t data=graphics_headers+((graphics_surface_mask()&8)?128:96);
     if(callback) {
         MEM32(data)=(uint32_t)frame;MEM32(data+4)=graphics_swap_completed;MEM32(data+8)=flags;
     }
@@ -335,6 +335,16 @@ static uint32_t graphics_present(void)
 #ifdef PILOT_TITLE_MODS
     if(title_mod && title_mod->present)title_mod->present();
 #endif
+    if(graphics_presentation().copy_buffers==2) {
+        /* Original COPY swaps the two scanout headers' Data/Lock fields;
+         * the raster image remains fixed. Physical completion follows storage. */
+        for(unsigned field=4;field<=8;field+=4) {
+            uint32_t saved=MEM32(graphics_headers+32+field);
+            MEM32(graphics_headers+32+field)=MEM32(graphics_headers+96+field);
+            MEM32(graphics_headers+96+field)=saved;
+        }
+        uint32_t saved=graphics_data[1];graphics_data[1]=graphics_data[3];graphics_data[3]=saved;
+    }
     int32_t hr=pilot_gfx_present();
     graphics_interpolation_start();
     /* DXGI_STATUS_OCCLUDED is a nonfailure: the desktop window is invisible,

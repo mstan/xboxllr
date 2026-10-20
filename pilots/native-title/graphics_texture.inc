@@ -229,7 +229,7 @@ static unsigned graphics_texture_adopt_alias(uint32_t header)
     unsigned kind=0,source=0;uint32_t expected_size=0,expected_format=0;
     if(((common>>16)&7)!=4 || !(common&0xffff) || ((format>>16)&15)!=1 || (format&0xf4)!=0x20)
         stop("unqualified caller-owned texture header",header);
-    for(unsigned i=0;i<2;++i)if(data==graphics_data[i]) {
+    for(unsigned i=0;i<4;++i)if(i!=2 && graphics_surface_owned(i) && data==graphics_data[i]) {
         kind=PILOT_GFX_SURFACE;source=i;expected_size=MEM32(graphics_headers+i*32+16);expected_format=(MEM32(graphics_headers+i*32+12)>>8)&255;
         break;
     }
@@ -415,13 +415,13 @@ static uint32_t graphics_texture_surface(uint32_t header,unsigned level)
 static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destination)
 {
     uint32_t format,flags=0;int known=0;
-    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64)format=(MEM32(header+12)>>8)&255;
+    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64 || (graphics_surface_owned(3) && header==graphics_headers+96))format=(MEM32(header+12)>>8)&255;
     else format=graphics_textures[graphics_texture_slot(header)].format;
     for(unsigned i=0;i<sizeof(pilot_d3d_surface_formats)/sizeof(pilot_d3d_surface_formats[0]);++i)
         if(pilot_d3d_surface_formats[i].format==format) {flags=pilot_d3d_surface_formats[i].flags;known=1;break;}
     if(!known)stop("unqualified surface description format",format);
     uint32_t usage=level?0:((flags&0x80)?1:((flags&0x40)?2:0));
-    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64) {
+    if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64 || (graphics_surface_owned(3) && header==graphics_headers+96)) {
         if(level)stop("display surface has no mip levels",level);
         uint32_t size=MEM32(header+16),width=(size&0xfff)+1,height=((size>>12)&0xfff)+1,pitch=((size>>24)+1)*64;
         unsigned index=graphics_surface_index(header);
