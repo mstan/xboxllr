@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "input_host.h"
 #include "input_sdl.h"
+#include "native_debug.h"
 #include "input_replay.inc"
 #include "input_control.inc"
 
@@ -20,7 +21,7 @@
  * Real OS keys are read only while this process owns the foreground window. */
 static INIT_ONCE input_host_once=INIT_ONCE_STATIC_INIT;
 static int input_host_keyboard;
-static int input_host_sdl,input_host_none;
+static int input_host_sdl,input_host_none,input_host_tcp;
 #ifdef PILOT_INPUT_REFERENCE_CLOCK
 static uint64_t input_host_reference_ms;
 uint32_t pilot_input_host_reference_time(uint64_t milliseconds)
@@ -43,6 +44,10 @@ static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID
     GetEnvironmentVariableA("XLLE_PILOT_INPUT",value,sizeof(value));
     input_host_keyboard=!strcmp(value,"keyboard");
     input_host_none=!strcmp(value,"none");
+    input_host_tcp=!strcmp(value,"tcp");
+    if(input_host_tcp && !pilot_debug_active()) {
+        fprintf(stderr,"[PILOT INPUT STOP] TCP controller requires an active listener\n");ExitProcess(2);
+    }
     if(!strcmp(value,"sdl")) {
         uint32_t error=pilot_input_sdl_start(getenv("XLLE_PILOT_INPUT_GUID"));
         if(error){fprintf(stderr,"[PILOT INPUT STOP] invalid SDL controller configuration error=%u\n",error);ExitProcess(2);}
@@ -104,6 +109,8 @@ static void input_host_convert(const XINPUT_GAMEPAD *source, uint8_t dest[18])
 uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 {
     input_host_is_keyboard();
+    if(!port && pilot_debug_input(gamepad))return ERROR_SUCCESS;
+    if(input_host_tcp){memset(gamepad,0,18);return port?ERROR_DEVICE_NOT_CONNECTED:ERROR_SUCCESS;}
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
     if(input_host_sdl)return pilot_input_sdl_state(port,gamepad);
     if(input_control_view) {
@@ -135,7 +142,7 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
     if(input_host_sdl)return pilot_input_sdl_caps(port,gamepad,rumble);
-    if(input_host_is_keyboard() || input_replay_count || input_control_view) {
+    if(input_host_is_keyboard() || input_replay_count || input_control_view || input_host_tcp) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         if(input_replay_count) {
             uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
@@ -143,7 +150,7 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
         }
         uint8_t keys[256];memset(keys,1,sizeof(keys));XINPUT_GAMEPAD pad;
         input_host_keyboard_convert(keys,&pad);
-        if(input_replay_count || input_control_view)pad.wButtons=0xffff;
+        if(input_replay_count || input_control_view || input_host_tcp)pad.wButtons=0xffff;
         /* Capabilities encode supported bits, not a positive axis position.
          * The virtual source can emit signed values spanning all 16 bits. */
         pad.sThumbLX=pad.sThumbLY=pad.sThumbRX=pad.sThumbRY=(SHORT)0xffff;
@@ -166,7 +173,7 @@ uint32_t pilot_input_host_rumble(unsigned port,uint16_t left,uint16_t right)
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
     if(input_host_sdl)return pilot_input_sdl_rumble(port,left,right);
-    if(input_host_is_keyboard() || input_replay_count || input_control_view) {
+    if(input_host_is_keyboard() || input_replay_count || input_control_view || input_host_tcp) {
         uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
         return status?status:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
     }

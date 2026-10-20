@@ -30,6 +30,9 @@ current-value input and XYZ FVF owners now pass actual startup. The bounded
 20-second run reaches its deadline without another unsupported-operation
 stop and renders the green dashboard background. Its 17 images do not show
 recognizable menu choices, so this progress does not pass the first-menu row.
+Use the shared [TCP input and screenshot controls](NATIVE-TCP-CONTROL.md) for
+the live investigation. Owner visual/navigation validation can provide a
+quick acceptance check once a usable menu is ready.
 
 Several later rows may mainly reuse existing code: controller input, native
 audio transport and Credits admission are already implemented. Their actual

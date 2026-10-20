@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "event_trace.h"
+#include "native_debug.h"
 #define RECOMP_GENERATED_CODE
 #include "recomp_types.h"
 #include "pilot_image.h"
@@ -1279,6 +1280,7 @@ int main(int argc,char **argv)
     if(trace && *trace) {char *end;trace_function=strtoul(trace,&end,0);if(*end || !trace_function)stop("invalid trace function address",0);}
     install_fault_handler();
     if (argc<2 || argc>5) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory] [local-storage-directory]\n"); return 1; }
+    if(pilot_debug_start(getenv("XLLE_PILOT_DEBUG_PORT")))stop("native TCP listener configuration/bind failed",0);
     if (argc>=3) {
         FILE *input=fopen(argv[2],"rb");
         if (!input || fread(eeprom,1,256,input)!=256 || fgetc(input)!=EOF) stop("invalid EEPROM input",0);

@@ -531,6 +531,24 @@ XLLE_PILOT_TRACE = "0"
         self.assertEqual(result['captures'], str(capture))
         self.assertEqual(env['XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS'], '1000')
 
+    def test_tcp_control_is_explicit_and_preserves_automated_launch_policy(self):
+        child = Mock(pid=123, returncode=0)
+        with patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
+            result = n.launch(self.data, self.paths, self.output, self.build, automated=True,
+                              seconds=2, source=self.source, debug_port=4381)
+        env = spawn.call_args.kwargs['env']
+        self.assertEqual(env['XLLE_PILOT_DEBUG_PORT'], '4381')
+        self.assertEqual(env['XLLE_PILOT_INPUT'], 'tcp')
+        self.assertEqual(env['XLLE_PILOT_AUDIO_OUTPUT_MUTE'], '1')
+        self.assertEqual(env['XLLE_PILOT_VISIBLE'], '0')
+        self.assertEqual(result['debug_endpoint'], '127.0.0.1:4381')
+        with patch.object(n.subprocess, 'Popen') as rejected:
+            for port in (0, -1, 65536, '4381', True):
+                with self.subTest(port=port), self.assertRaisesRegex(ValueError, 'debug port'):
+                    n.launch(self.data, self.paths, self.output, self.build, automated=True,
+                             seconds=2, source=self.source, debug_port=port)
+            rejected.assert_not_called()
+
     def test_changed_profile_cannot_be_reblessed_by_configuration(self):
         self.profile.write_text(self.profile.read_text() + '\n')
         with self.assertRaises(ValueError):

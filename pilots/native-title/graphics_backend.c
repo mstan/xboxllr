@@ -6,6 +6,7 @@
 #include <d3d11_3.h>
 #include "d3d8_combiners.h"
 #include "graphics_backend.h"
+#include "native_debug.h"
 #include "pilot_d3d_checks.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -511,7 +512,13 @@ int32_t pilot_gfx_present(void)
 #ifdef PILOT_D3D_PHOBOS
     pilot_visual_real_present=0;
 #endif
-    pilot_gpu_call_end("donor Swap",started);return result;
+    pilot_gpu_call_end("donor Swap",started);
+    if(SUCCEEDED(result))pilot_debug_frame();
+#ifndef PILOT_D3D_PHOBOS
+    uint64_t request=pilot_debug_capture_requested();
+    if(request)pilot_debug_capture_complete(request,NULL,0,0,E_NOTIMPL);
+#endif
+    return result;
 }
 int32_t pilot_gfx_persist_display(const unsigned char *bgra,uint32_t width,uint32_t height,uint32_t pitch)
 {

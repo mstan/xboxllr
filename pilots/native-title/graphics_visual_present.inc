@@ -124,6 +124,19 @@ static HRESULT pilot_visual_resolve_image(RhiView *scene,unsigned width,unsigned
     rhi_draw(3,0);RhiView *none=NULL;rhi_set_textures(9,1,&none);return S_OK;
 }
 #include "graphics_visual_interpolation.inc"
+static void pilot_debug_capture_presented(void)
+{
+    uint64_t request=pilot_debug_capture_requested();
+    if(!request || !pilot_visual_real_present)return;
+    uint32_t width=0,height=0;unsigned char *rgba=NULL;
+    int status=rhi_swapchain_readback(NULL,0,&width,&height);
+    uint64_t bytes=(uint64_t)width*height*4;
+    if(!status && width && height && bytes<=64*1024*1024) {
+        rgba=malloc((size_t)bytes);
+        status=rgba?rhi_swapchain_readback(rgba,width*4,&width,&height):E_OUTOFMEMORY;
+    } else status=E_INVALIDARG;
+    pilot_debug_capture_complete(request,rgba,width,height,status);free(rgba);
+}
 HRESULT pilot_d3d_visual_resolve(RhiView *scene,unsigned width,unsigned height,RhiView *output,D3D8DisplayFit fit,unsigned output_width,unsigned output_height)
 {
     if(!scene || !output || !fit.w || !fit.h || !output_width || !output_height)return E_INVALIDARG;
@@ -131,11 +144,17 @@ HRESULT pilot_d3d_visual_resolve(RhiView *scene,unsigned width,unsigned height,R
         scene=pilot_guest_resolved.sample;width=pilot_presentation.width;height=pilot_presentation.height;
     }
     int interpolate=pilot_visual.frame_mode==PILOT_FRAMES_INTERPOLATED && pilot_visual_scope && pilot_visual_real_present;
-    if(!pilot_visual.antialiasing && !interpolate)return d3d8_display_resolve(scene,width,height,output,fit);
+    if(!pilot_visual.antialiasing && !interpolate) {
+        HRESULT result=d3d8_display_resolve(scene,width,height,output,fit);
+        if(SUCCEEDED(result))pilot_debug_capture_presented();
+        return result;
+    }
     struct PilotVisualState saved;pilot_visual_state_save(&saved);
     HRESULT result=interpolate?pilot_visual_capture_frame(scene,width,height,fit,output_width,output_height):
         pilot_visual_resolve_image(scene,width,height,output,fit,output_width,output_height);
-    pilot_visual_state_restore(&saved);return result;
+    pilot_visual_state_restore(&saved);
+    if(SUCCEEDED(result))pilot_debug_capture_presented();
+    return result;
 }
 #else
 static void pilot_visual_close(void){}

@@ -469,9 +469,11 @@ def require_receipt(path, expected):
         raise ValueError("native build identity changed; configure and build the selected title again")
 
 
-def launch(data, paths, output, build, automated=False, seconds=None, detach=False, source=None, input_replay=None, capture=False):
+def launch(data, paths, output, build, automated=False, seconds=None, detach=False, source=None, input_replay=None, capture=False, debug_port=None):
     check_image(data["title"], paths)
     check_generated(output, data["title"])
+    if debug_port is not None and (type(debug_port) is not int or not 1 <= debug_port <= 65535):
+        raise ValueError("debug port must be in 1..65535")
     if seconds is not None and not automated:
         raise ValueError("bounded unattended runs require --automated; owner runs have no deadline")
     if automated and seconds is None:
@@ -517,6 +519,10 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         raise ValueError("native executable changed during staging; retry after build completes")
     environment = {k: v for k, v in os.environ.items() if not k.startswith("XLLE_PILOT_")}
     environment.update({key: str(value) for key, value in data.get("runtime", {}).items()})
+    if debug_port is not None:
+        environment["XLLE_PILOT_DEBUG_PORT"] = str(debug_port)
+        if automated and replay_bytes is None:
+            environment["XLLE_PILOT_INPUT"] = "tcp"
     if replay_bytes is not None:
         replay_path = stage / "input-replay.txt"
         replay_path.write_bytes(replay_bytes)
@@ -543,6 +549,8 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
                        automated=automated, output=str(run))
         if replay_bytes is not None:
             receipt.update(input_replay=str(replay_path), input_replay_sha256=stage_identity["input_replay_sha256"])
+        if debug_port is not None:
+            receipt["debug_endpoint"] = f"127.0.0.1:{debug_port}"
         if capture:
             receipt["captures"] = str(capture_directory)
         (run / "launch.json").write_text(json.dumps(receipt, indent=2) + "\n")
@@ -581,11 +589,12 @@ def main():
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--input-replay", type=Path, help="Freeze a native controller replay into this run's staging")
     parser.add_argument("--capture", action="store_true", help="Capture diagnostic present images; unsuitable for performance measurement")
+    parser.add_argument("--debug-port", type=int, help="Opt-in localhost native input/presented-screenshot server")
     args = parser.parse_args()
     if not 1 <= args.jobs <= 32 or (args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds <= 0)):
         parser.error("invalid job count or run duration")
-    if (args.input_replay is not None or args.capture) and args.action != "run":
-        parser.error("--input-replay and --capture apply only to run")
+    if (args.input_replay is not None or args.capture or args.debug_port is not None) and args.action != "run":
+        parser.error("--input-replay, --capture and --debug-port apply only to run")
     if args.with_checks and args.action != "build":
         parser.error("--with-checks applies only to build")
     if (args.action == "recover") != (args.recovery is not None):
@@ -623,7 +632,7 @@ def main():
         selected["executable_sha256"] = digest(executable(args.build_dir, data["title"]["executable"]))
         (args.build_dir / "native-title-build.json").write_text(json.dumps(selected, indent=2) + "\n")
     elif args.action == "run":
-        result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source, args.input_replay, args.capture)
+        result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source, args.input_replay, args.capture, args.debug_port)
         if result is not None and not result["stopped_at_deadline"]:
             return result["exit_code"]
     else:
