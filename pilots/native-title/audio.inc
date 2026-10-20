@@ -116,6 +116,7 @@ static void audio_device_check(uint32_t iface)
 {
     if(!audio_device || iface!=audio_device+PILOT_AUDIO_DEVICE_INTERFACE_OFFSET)stop("unowned audio device",iface);
 }
+#include "audio_listener.inc"
 static struct PilotAudioBuffer *audio_buffer(uint32_t iface)
 {
     for(unsigned i=0;i<256;++i)if(audio_buffers[i].base && iface==audio_buffers[i].base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET)return &audio_buffers[i];
@@ -147,6 +148,9 @@ static uint32_t audio_ref(uint32_t base,int acquire)
         audio_effects_free();
 #endif
         pool_free(audio_device);audio_device=0;
+#ifdef PILOT_AUDIO_LISTENER_VERSION
+        memset(&audio_listener,0,sizeof(audio_listener));
+#endif
     }
     return 0;
 }
@@ -393,6 +397,11 @@ void pilot_audio_dispatch(unsigned entry)
         audio_device_check(a[0]);result=audio_ref(audio_device,1);
     } else if(!strcmp(pilot_audio_calls[entry].name,"IDirectSound_GetCaps")) {
         audio_device_check(a[0]);audio_caps(a[1]);
+#ifdef PILOT_AUDIO_LISTENER_VERSION
+    } else if(audio_listener_dispatch(pilot_audio_calls[entry].name,a)) {
+        /* No spatial voices are admitted by audio_create_buffer. Listener
+         * updates preserve 2D samples, transport and explicit mix-bin routing. */
+#endif
     } else if(entry==PILOT_AUDIO_ObjectAddRef)result=audio_ref(a[0],1);
 #if PILOT_AUDIO_HAS_MIXBIN_HEADROOM
     else if(entry==PILOT_AUDIO_IDirectSound_SetMixBinHeadroom) {

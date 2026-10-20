@@ -34,11 +34,15 @@ static uint32_t audio_test_buffer_format(uint32_t device,uint32_t bytes,unsigned
 {return audio_test_buffer_format_flags(device,bytes,channels,bits,rate,mixbins,0xa0);}
 static uint32_t audio_test_buffer(uint32_t device,uint32_t bytes)
 {return audio_test_buffer_format(device,bytes,1,16,48000,0);}
+#include "audio_listener_contract_test.inc"
 static void test_audio(void)
 {
     vm_ensure();uint64_t committed=vm_committed(0,0x100000000ull);
     uint32_t device=audio_test_device(),buffer=audio_test_buffer(device,9600);
     struct PilotAudioBuffer *b=audio_buffer(buffer);
+#ifdef PILOT_AUDIO_LISTENER_VERSION
+    test_audio_listener(device,b);
+#endif
     CHECK(b->owned && b->bytes==9600 && b->headroom==600 && MEM32(audio_device+4)==2);
     MEM32(0x194fc)=0x11223344;MEM32(0x19510)=0x55667788;
     audio_caps(0x19500);
@@ -127,6 +131,9 @@ static void test_audio(void)
     a[1]=0;a[2]=9600;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0 && b->frequency==24000);
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,a)==0);
     a[0]=device;CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_Release,a)==0);
+#ifdef PILOT_AUDIO_LISTENER_VERSION
+    CHECK(!audio_listener.known && !audio_listener.applied_known && !audio_listener.dirty);
+#endif
     CHECK(vm_committed(0,0x100000000ull)==committed);
     puts("audio contract: actual PCM storage/playback/end/cursor/loop/stop, Xbox ABI, wrapped locks, settings and ownership passed");
 }

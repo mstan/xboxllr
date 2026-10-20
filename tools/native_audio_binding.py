@@ -26,6 +26,38 @@ SEMANTIC_ENTRIES = (
     'IDirectSoundBuffer_Pause',
 )
 
+LISTENER_CALLS = {'SetAllParameters':12, 'SetDistanceFactor':12,
+    'SetDopplerFactor':12, 'SetOrientation':32, 'SetPosition':20,
+    'SetRolloffFactor':12, 'SetVelocity':20, 'CommitDeferredSettings':4}
+
+def listener_binding(context, proof, calls, functions, data):
+    """Optional whole listener family; no implicit admission for older profiles."""
+    listener=proof.get('listener')
+    if listener is None:return None
+    if (not isinstance(listener,dict) or set(listener)!={'adapter','helpers'} or
+            listener['adapter']!='listener-parameters-2d-v1' or
+            set(listener['helpers'])!=set(LISTENER_CALLS)):
+        raise ValueError('incomplete native listener proof')
+    admitted={c['name']:c for c in calls};helpers={}
+    decoder=Cs(CS_ARCH_X86,CS_MODE_32)
+    for name,stack in LISTENER_CALLS.items():
+        public=admitted.get('IDirectSound_'+name);body=listener['helpers'][name]
+        if not public or public['stack_bytes']!=stack or body.get('stack_bytes')!=stack:
+            raise ValueError('listener ABI differs: '+name)
+        validate_body(body)
+        matches=[f for f in functions.values() if context.matches_body(f,body)]
+        if len(matches)!=1:raise ValueError('missing reviewed listener helper: '+name)
+        helper=matches[0];address=int(helper['start'],16)
+        code=list(decoder.disasm(data(address,helper['size']),address))
+        if {int(i.op_str or '0',0) for i in code if i.mnemonic=='ret'}!={stack}:
+            raise ValueError('listener helper cleanup differs: '+name)
+        wrapper=functions[public['address']]
+        targets={int(i.op_str,0) for i in decoder.disasm(data(public['address'],wrapper['size']),public['address'])
+                 if i.mnemonic=='call' and re.fullmatch('0x[0-9a-f]+',i.op_str)}
+        if address not in targets:raise ValueError('listener wrapper does not call its helper: '+name)
+        helpers[name]=dict(address=address,**body)
+    return dict(adapter=listener['adapter'],helpers=helpers)
+
 def bind(xbe,output,symbols,profile=None):
     context=Binding(xbe,output,symbols)
     proof=context.require_profile('audio',profile,adapter='dsound-objects-v1')
@@ -86,7 +118,9 @@ def bind(xbe,output,symbols,profile=None):
             pushes=[int(i.op_str,0) for i in code if i.mnemonic=='push' and re.fullmatch('0x[0-9a-f]+|[0-9]+',i.op_str)]
             if len(pushes)!=8 or pushes[:2]!=proof['seed_push_prefix'] or pushes[4:]!=proof['seed_push_suffix']:raise ValueError('unreviewed DSP seed ABI')
             dsp['seed']['value']=(pushes[2]<<32)|pushes[3]
+    listener=listener_binding(context,proof,calls,functions,data)
     binding=dict(xbe_sha256=context.image['sha256'],calls=calls,tables=tables,**layout,dsp_helpers=dsp)
+    if listener:binding['listener']=listener
     header=['#pragma once','#include <stdint.h>','enum PilotAudioEntry {']+[f'    PILOT_AUDIO_{c["name"]},' for c in calls]
     header+=['    PILOT_AUDIO_COUNT','};','static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_audio_calls[] = {']
     header+=[f'    {{"{c["name"]}", {c["address"]}u, {c["stack_bytes"]}u, {functions[c["address"]]["size"]}u, "{c["sha256"]}"}},' for c in calls]+['};']
@@ -110,6 +144,7 @@ def bind(xbe,output,symbols,profile=None):
     header+=[f'#define PILOT_AUDIO_HAS_MIXBIN_HEADROOM {int("IDirectSound_SetMixBinHeadroom" in proof["calls"])}']
     header+=[f'#define PILOT_AUDIO_HAS_NOTIFICATIONS {int("IDirectSoundBuffer_SetNotificationPositions" in proof["calls"])}']
     header+=[f'#define PILOT_AUDIO_HAS_PAUSE {int("IDirectSoundBuffer_Pause" in proof["calls"])}']
+    if listener:header+=['#define PILOT_AUDIO_LISTENER_VERSION 1u']
     if dsp:
         header+=[f'#define PILOT_AUDIO_DSP_SEED UINT64_C(0x{dsp["seed"]["value"]:016x})']
     header+=[f'#define PILOT_AUDIO_{key.upper()} {value}u' for key,value in layout.items()]
