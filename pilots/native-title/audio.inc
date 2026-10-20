@@ -84,6 +84,10 @@ struct PilotAudioBuffer {
     uint32_t mix_count,mix_bins[8];
     int32_t mix_volumes[32];
     int locked;
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+    unsigned spatial;
+    struct {uint32_t pending[28],applied[28],known,applied_known,dirty;} spatial_cache;
+#endif
 #if PILOT_AUDIO_HAS_NOTIFICATIONS
     unsigned notification_enabled,notification_count;
     struct PilotAudioNotification notifications[64];
@@ -91,6 +95,9 @@ struct PilotAudioBuffer {
 };
 static struct PilotAudioBuffer audio_buffers[256];
 static void *audio_pointer(uint32_t address,uint32_t bytes);
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+static void audio_spatial_commit_all(void);
+#endif
 static void audio_caps(uint32_t destination)
 {
     /* Native ownership, not desktop DirectSound caps. Report the maintained
@@ -123,6 +130,7 @@ static struct PilotAudioBuffer *audio_buffer(uint32_t iface)
     for(unsigned i=0;i<256;++i)if(audio_buffers[i].base && iface==audio_buffers[i].base+PILOT_AUDIO_BUFFER_INTERFACE_OFFSET)return &audio_buffers[i];
     stop("unowned audio buffer",iface);
 }
+#include "audio_spatial.inc"
 static uint32_t audio_ref(uint32_t base,int acquire)
 {
     struct PilotAudioBuffer *b=NULL;
@@ -282,11 +290,19 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
 {
     const uint32_t *desc=audio_pointer(descriptor,PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES);audio_pointer(output,4);
     uint32_t allowed=0x20u|0x80u|0x40000u;
-#if PILOT_AUDIO_HAS_NOTIFICATIONS && defined(PILOT_AUDIO_DSP) && !defined(PILOT_AUDIO_REFERENCE)
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+    allowed|=0x10u|0x20000u;
+#endif
+#if defined(PILOT_AUDIO_DSP) && !defined(PILOT_AUDIO_REFERENCE)
+    /* A notification-capable buffer can exist without any registered events.
+     * A title with no imported notification setter still uses that flag. */
     allowed|=0x100u;
 #endif
-    if(desc[0]!=PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES || desc[1]&~allowed || desc[5])
+    if(desc[0]!=PILOT_AUDIO_BUFFER_DESCRIPTOR_BYTES || desc[1]&~allowed || desc[5]) {
+        fprintf(stderr,"[AUDIO DESCRIPTOR] size=%u flags=%08x allowed=%08x bytes=%u format=%08x mix=%08x input=%08x\n",
+            desc[0],desc[1],allowed,desc[2],desc[3],desc[4],desc[5]);
         stop("unqualified sound buffer flags/mix bins",desc[1]);
+    }
     uint32_t format=desc[3];audio_pointer(format,18);
     unsigned tag=MEM16(format),channels=MEM16(format+2),rate=MEM32(format+4),bits=MEM16(format+14),align=MEM16(format+12);
     int supported=tag==1 && (bits==8 || bits==16) && align==channels*(bits/8) && MEM32(format+8)==rate*align && !MEM16(format+16);
@@ -307,6 +323,11 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
     unsigned slot;for(slot=0;slot<256 && audio_buffers[slot].base;++slot){}
     if(slot==256)return (int32_t)0x8007000e;
     struct PilotAudioBuffer buffer={0};buffer.channels=channels;buffer.rate=rate;buffer.bits=bits;buffer.frequency=rate;
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+    buffer.spatial=desc[1]&0x20010u;
+    if((buffer.spatial&0x20000u) && !(buffer.spatial&0x10u))stop("mute-at-distance requires a spatial source",desc[1]);
+    if(buffer.spatial && channels!=1)stop("spatial source requires qualified mono storage",channels);
+#endif
 #if PILOT_AUDIO_HAS_NOTIFICATIONS
     buffer.notification_enabled=(desc[1]&0x100)!=0;
 #endif
@@ -415,8 +436,11 @@ void pilot_audio_dispatch(unsigned entry)
 #endif
 #ifdef PILOT_AUDIO_LISTENER_VERSION
     } else if(audio_listener_dispatch(pilot_audio_calls[entry].name,a)) {
-        /* No spatial voices are admitted by audio_create_buffer. Listener
-         * updates preserve 2D samples, transport and explicit mix-bin routing. */
+        /* Listener updates preserve ordinary 2D samples and routing. */
+#endif
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+    } else if(audio_spatial_dispatch(pilot_audio_calls[entry].name,a)) {
+        /* Source-proved cache updates; the active output guard remains. */
 #endif
     } else if(entry==PILOT_AUDIO_ObjectAddRef)result=audio_ref(a[0],1);
 #if PILOT_AUDIO_HAS_MIXBIN_HEADROOM
@@ -462,6 +486,9 @@ void pilot_audio_dispatch(unsigned entry)
                entry!=PILOT_AUDIO_IDirectSoundBuffer_SetPitch)stop("audio operation requires buffer storage",a[0]);
             switch(entry) {
             case PILOT_AUDIO_IDirectSoundBuffer_Play:
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+                if(b->spatial)stop("spatial audio output owner unqualified",a[0]);
+#endif
                 if(a[1] || a[2] || (a[3]&~3u) || b->locked)stop("unqualified sound play arguments",a[3]);
                 result=audio_upload(b,b->host,memory+b->data,0,b->bytes);
                 if(result>=0 && (a[3]&2))result=pilot_audio_buffer_seek(b->host,0);

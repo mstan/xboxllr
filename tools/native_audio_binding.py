@@ -9,6 +9,7 @@ import struct
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from native_binding import Binding, validate_body
 from native_audio_i3dl2 import bind_i3dl2
+from native_audio_spatial import bind_spatial
 
 # Semantic enum names used by the shared runtime. Absent title APIs get unique
 # out-of-range values; they do not acquire a wrapper or a callable table row.
@@ -121,9 +122,11 @@ def bind(xbe,output,symbols,profile=None):
             dsp['seed']['value']=(pushes[2]<<32)|pushes[3]
     listener=listener_binding(context,proof,calls,functions,data)
     i3dl2=bind_i3dl2(context,proof,functions,data)
+    spatial=bind_spatial(context,proof,calls,functions,data)
     binding=dict(xbe_sha256=context.image['sha256'],calls=calls,tables=tables,**layout,dsp_helpers=dsp)
     if listener:binding['listener']=listener
     if i3dl2:binding['i3dl2']=i3dl2
+    if spatial:binding['spatial']=spatial
     header=['#pragma once','#include <stdint.h>','enum PilotAudioEntry {']+[f'    PILOT_AUDIO_{c["name"]},' for c in calls]
     header+=['    PILOT_AUDIO_COUNT','};','static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_audio_calls[] = {']
     header+=[f'    {{"{c["name"]}", {c["address"]}u, {c["stack_bytes"]}u, {functions[c["address"]]["size"]}u, "{c["sha256"]}"}},' for c in calls]+['};']
@@ -148,6 +151,7 @@ def bind(xbe,output,symbols,profile=None):
     header+=[f'#define PILOT_AUDIO_HAS_NOTIFICATIONS {int("IDirectSoundBuffer_SetNotificationPositions" in proof["calls"])}']
     header+=[f'#define PILOT_AUDIO_HAS_PAUSE {int("IDirectSoundBuffer_Pause" in proof["calls"])}']
     if listener:header+=['#define PILOT_AUDIO_LISTENER_VERSION 1u']
+    if spatial:header+=['#define PILOT_AUDIO_SPATIAL_CACHE_VERSION 1u']
     if i3dl2:header+=['#define PILOT_AUDIO_I3DL2_VERSION 1u',
         f'#define PILOT_AUDIO_I3DL2_INITIALIZE 0x{i3dl2["initialize"]:x}u',
         f'#define PILOT_AUDIO_I3DL2_CALCULATE 0x{i3dl2["calculate"]:x}u']

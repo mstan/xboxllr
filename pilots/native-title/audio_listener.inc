@@ -18,6 +18,9 @@ static void audio_listener_commit(void)
     memcpy(audio_listener.applied,audio_listener.pending,sizeof(audio_listener.pending));
     audio_listener.applied_known=audio_listener.known;
     audio_listener.dirty=0;
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+    audio_spatial_commit_all();
+#endif
 }
 static int audio_listener_dispatch(const char *name,const uint32_t *a)
 {

@@ -775,6 +775,10 @@ int main(int argc,char **argv)
 #endif
 #ifdef PILOT_AUDIO_NATIVE
         if (!strcmp(argv[1],"audio")) { test_audio(); return 0; }
+#ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
+        if (!strcmp(argv[1],"audio-spatial-cache")) {test_audio_spatial(0);return 0;}
+        if (!strcmp(argv[1],"audio-spatial-play")) {test_audio_spatial(1);return 1;}
+#endif
 #ifdef PILOT_AUDIO_REFERENCE
         if (!strcmp(argv[1],"audio-reference-runtime")) { test_audio_reference_runtime();return 0; }
         if (!strcmp(argv[1],"reference-tsc")) { test_reference_tsc(0);return 0; }

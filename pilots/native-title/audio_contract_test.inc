@@ -35,6 +35,7 @@ static uint32_t audio_test_buffer_format(uint32_t device,uint32_t bytes,unsigned
 static uint32_t audio_test_buffer(uint32_t device,uint32_t bytes)
 {return audio_test_buffer_format(device,bytes,1,16,48000,0);}
 #include "audio_listener_contract_test.inc"
+#include "audio_spatial_contract_test.inc"
 static void test_audio(void)
 {
     vm_ensure();uint64_t committed=vm_committed(0,0x100000000ull);
