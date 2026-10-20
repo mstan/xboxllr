@@ -27,6 +27,7 @@ int pilot_gfx_multisample(unsigned enable,uint32_t mask);
 int pilot_gfx_edge_antialias(unsigned enabled);
 uint32_t pilot_gfx_feedback_mask(void);
 int32_t pilot_gfx_create(const uint32_t parameters[17]);
+int32_t pilot_gfx_title(const char *utf8); /* Startup-only host window caption. */
 int32_t pilot_gfx_parameters(const uint32_t parameters[17]);
 int32_t pilot_gfx_reset(const uint32_t parameters[17]);
 void pilot_gfx_close(void);

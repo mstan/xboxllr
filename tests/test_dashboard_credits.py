@@ -1,5 +1,6 @@
 """Authored scripts exercise mod navigation; retail XAP/VM validation is separate."""
 from pathlib import Path
+import json
 import shutil
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from dashboard_credits_mod import block, credit_pages, menu_geometry, menu_script, viewer
+from dashboard_credits_viewer import document_lines, VISIBLE_LINES
 
 
 GEOMETRY = '''
@@ -48,12 +50,12 @@ class CreditsTests(unittest.TestCase):
         _, names = menu_geometry(GEOMETRY)
         generated = menu_script(SCRIPT, names, ['Credits'], [0])
         self.assertIn('var xllrCreditsActive;', generated)
-        self.assertIn('var xllrCreditsPage;', generated)
+        self.assertIn('var xllrCreditsLine;', generated)
         self.assertNotIn('var xllrCreditsActive =', generated)
-        self.assertNotIn('var xllrCreditsPage =', generated)
+        self.assertNotIn('var xllrCreditsLine =', generated)
         load = function(generated, 'function onLoad()')
         self.assertLess(load.index('xllrCreditsActive = false;'), load.index('UpdateMainMenu();'))
-        self.assertLess(load.index('xllrCreditsPage = 0;'), load.index('UpdateMainMenu();'))
+        self.assertLess(load.index('xllrCreditsLine = 0;'), load.index('UpdateMainMenu();'))
 
     def test_geometry_keeps_original_and_mesh_urls(self):
         modified, names = menu_geometry(GEOMETRY)
@@ -88,7 +90,10 @@ class CreditsTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is optional for generated-script logic checks")
     def test_generated_controller_logic_and_menu_highlights(self):
         _, names = menu_geometry(GEOMETRY)
-        pages = ["Matthew Stanley", "Other credits", "License one", "continued", "License two"]
+        pages = ["Credits\nMatthew Stanley\n" + "\n".join(f"First credit line {i}" for i in range(40)),
+                 "Credits\nOther credits\n" + "\n".join(f"Second credit line {i}" for i in range(40)),
+                 "License one\n" + "\n".join(f"License A line {i}" for i in range(40)),
+                 "License one\ncontinued", "License two\n" + "\n".join(f"License B line {i}" for i in range(40))]
         generated = menu_script(SCRIPT, names, pages, [0, 1, 2, 4])
         menu = function(generated, "function UpdateMainMenu()")
         load = function(generated, "function onLoad()")
@@ -106,6 +111,8 @@ function node() { return { name: '', visible: true, SetRotation(...value) { this
 var menuNodes = new Proxy({}, { get(target, key) { return target[key] ??= node(); } });
 var theMainMenu = { children: [{ children: [menuNodes] }] };
 var theMessageInline = { children: [{ MessageText: { text: '' } }] };
+var theMessageLayer = {transparency: 1}, xllrCreditsLayer = {transparency: 1};
+var xllrCreditsBody = {text: ''}, xllrCreditsPosition = {text: ''};
 var nCurMainMenuItem = 0, g_bXOnDashExists = true;
 var originalUpdates = 0, originalSelections = 0, originalMessages = 0, closes = 0;
 function originalMenuUpdate() { originalUpdates++; }
@@ -118,6 +125,9 @@ function PlaySoundA() {}
 function TellUser(text) { theMessageInline.children[0].MessageText.text = text; }
 function CloseMessage() { closes++; }
 '''
+        lines, starts = document_lines(pages, [0, 1, 2, 4])
+        program += 'var expectedLines = ' + json.dumps(lines) + ';\n'
+        program += 'var expectedStarts = ' + json.dumps(starts) + ';\n'
         program += viewer(pages, [0, 1, 2, 4]) + menu + "\nfunction select() {\n" + select + "; OnADown();\n}\n"
         program += "\nfunction controller(event) {\n" + handlers + "; eval(event + '()');\n}\n"
         program += r'''
@@ -128,16 +138,25 @@ for (var online of [true, false]) {
     assert.equal(menuNodes.xllrCredits_SettingsPanelMaterial.name, 'GameHilite');
     assert.equal(menuNodes.game_select_pod_inner.visible, false);
     assert.equal(menuNodes.theMenuItems.rotation[3], online ? 0.75 : 0.9);
-    select(); assert.equal(xllrCreditsPage, 0);
-    assert.ok(theMessageInline.children[0].MessageText.text.startsWith('Matthew Stanley'));
-    controller('OnMoveDown'); assert.equal(xllrCreditsPage, 1);
-    controller('OnMoveDown'); assert.equal(xllrCreditsPage, 2);
-    controller('OnMoveDown'); assert.equal(xllrCreditsPage, 4);
-    controller('OnMoveRight'); assert.equal(xllrCreditsPage, 4);
-    controller('OnMoveUp'); assert.equal(xllrCreditsPage, 2);
-    controller('OnMoveLeft'); assert.equal(xllrCreditsPage, 1);
-    controller('OnADown'); assert.equal(xllrCreditsPage, 2);
-    controller('OnBDown'); assert.equal(xllrCreditsActive, false);
+    select(); assert.equal(xllrCreditsLine, 0);
+    assert.ok(xllrCreditsBody.text.includes('Matthew Stanley'));
+    assert.equal(xllrCreditsLayer.transparency, 0);
+    assert.equal(theMessageLayer.transparency, 1);
+    controller('OnMoveUp'); assert.equal(xllrCreditsLine, 0);
+    controller('OnMoveDown'); assert.equal(xllrCreditsLine, 1);
+    controller('OnMoveUp'); assert.equal(xllrCreditsLine, 0);
+    controller('OnMoveRight'); assert.equal(xllrCreditsLine, expectedStarts[1]);
+    controller('OnMoveLeft'); assert.equal(xllrCreditsLine, 0);
+    controller('OnADown'); assert.equal(xllrCreditsLine, 13);
+    for (var i = 0; i <= expectedLines.length - 14; i++) {
+        xllrCreditsLine = i;
+        XllrCreditsRefresh();
+        assert.equal(xllrCreditsBody.text, expectedLines.slice(i, i + 14).join('\n'));
+    }
+    controller('OnMoveDown'); assert.equal(xllrCreditsLine, expectedLines.length - 14);
+    controller('OnADown'); assert.equal(xllrCreditsLine, expectedLines.length - 14);
+    assert.equal(xllrCreditsPosition.text, '100%');
+    controller('OnBDown'); assert.equal(xllrCreditsActive, false); assert.equal(xllrCreditsLayer.transparency, 1);
     assert.equal(nCurMainMenuItem, 4);
     nCurMainMenuItem = 0; UpdateMainMenu(); select();
     assert.equal(menuNodes.xllrCredits_game_select_pod_inner03.visible, false);

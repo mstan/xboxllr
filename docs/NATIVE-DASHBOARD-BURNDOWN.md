@@ -18,30 +18,27 @@ Rows have different sizes, so their count is not a completion percentage.
 |---|---|---|---|
 | DB01 | Reach native dashboard graphics startup | Passed for reached startup | Actual native execution loads assets, opens native audio and passes the animation and inline NULL-texture boundaries. Latest run: `9cfa3b45...`, 255389 stopped-thread entries. |
 | DB02 | Consume the dashboard's original vertex layouts | Passed for reached layouts | Three original declaration-only layout classes consume packed normals/color/UV and cached transforms on the GPU. Pixel/reference and ownership checks pass; actual startup binds the original object and advances into mesh submission. Lighting remains disabled for this reached caller. |
-| DB03 | Draw the first real dashboard menu | **Passed** | Actual native runs show stable Memory/Music/Settings labels and controller hints. Source-proved correction separates raw projection from its viewport-adjusted output. See [transform cache](NATIVE-TRANSFORM-CACHE.md). |
+| DB03 | Draw the first real dashboard menu | **Passed, including alignment correction** | Original raw/derived projection caches remain separate. Programmable vertices now undo the guest sample-space scale, restoring the rings/mesh alignment with labels in Gaussian mode. Actual native captures and real GPU pixel fixtures pass. See [guest presentation](NATIVE-GUEST-PRESENTATION-2026-10-19.md). |
 | DB04 | Make the ordinary menus usable | **Passed for opening/back routes** | TCP-driven actual native Music/Settings/Memory opening and B return all pass; rendered screenshots inspected. Original allocator retirement now executes through generated native CPU. Deeper menu options remain unverified. |
-| DB05 | Check dashboard audio and responsiveness | **Active** | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
-| DB06 | Validate the native Credits mod | Pending | Open the bottom Credits entry in the actual native dashboard, verify the intended credits/legal content, then return to ordinary menus. |
+| DB05 | Check dashboard audio and responsiveness | **Technical checks passed; owner listening deferred to handoff** | Real four-second GP output is finite, nonzero stereo without clipping; ordinary Music opening/back passes during capture. A separate six-second interval measures 59.34 presents/s with no diagnostic capture during measurement. Owner reports the preview is snappy; subjective audio acceptance remains unverified. |
+| DB06 | Validate the native Credits mod | **Passed for sampled routes** | Bottom Credits entry opens a large scrolling reader with Matthew first, then the referenced projects and full indexed notices. Real stick scrolling, A page advance, section jumps, B return and subsequent Settings opening/back pass with inspected rendered images. |
 | DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
 | DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
 
-Current next action: **DB05**, dashboard audio and responsiveness, followed by
-the native Credits mod. DB03 and the ordinary DB04 opening/back routes pass.
-The shared [original resource retirement](NATIVE-ORIGINAL-RESOURCE-RETIREMENT.md)
-service preserves original heap ownership and GPU completion. A 25-second TCP
-batch opened Music, Settings and Memory and returned home from all three;
-21 source/profile checks and 18 Windows checks passed. Deeper menu options
-remain unverified and should be exercised in a compatible batch.
-Use the shared [TCP input and screenshot controls](NATIVE-TCP-CONTROL.md) for
-the live investigation. Owner visual/navigation validation can provide a
-quick acceptance check once a usable menu is ready.
+Current next action: **DB07**, FINAL dashboard linking and the isolated
+same-framework Blinx regression, then normal-window previews. The shared
+[original resource retirement](NATIVE-ORIGINAL-RESOURCE-RETIREMENT.md) service
+preserves original heap ownership and GPU completion. A 25-second TCP batch
+opened Music, Settings and Memory and returned home from all three. A second
+batch passes the new scrolling reader and subsequent ordinary-menu return.
+Twenty-one source/profile checks, eighteen combined Windows checks and four
+Credits generator/script checks pass. Deeper menu options remain unverified.
+Use the shared [TCP controls](NATIVE-TCP-CONTROL.md) for bounded batch QA.
 
-Several later rows may mainly reuse existing code: controller input, native
-audio transport and Credits admission are already implemented. Their actual
-menu behavior remains unverified. Batch their acceptance checks after the
-menu is usable. Blinx needs the focused same-framework regression listed in
-DB07, not repetition of the complete earlier stage audit. These are likely
-smaller integration/verification tasks, not promises of zero remaining work.
+Blinx needs the focused same-framework regression listed in DB07, not repetition
+of the complete earlier stage audit. Human listening and deeper menu coverage
+remain explicit limits; neither changes the passed native execution, sampled
+visual alignment or controller-delivered menu/reader behavior.
 
 Keep object adoption, input conversion and transform handling in one compatible
 graphics batch. Record the implementation, focused checks, actual run and next
@@ -79,8 +76,9 @@ passes too. Current vertex attributes and XYZ FVF now pass, and the native
 dashboard renders its main menu after the raw/derived projection cache
 correction. Original allocator retirement now passes actual Music, Settings
 and Memory opening/back routes. The explicit offline virtual-link query passes.
-Deeper menu navigation, native Credits and audio/performance acceptance remain
-open; original hardware is not required for this work. Entry counts are diagnostics, not a
+Deeper menu navigation and the same-framework final handoff remain open;
+native Credits and technical audio/performance checks now pass. Original
+hardware is not required for this work. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
 functions execute.
 
@@ -109,8 +107,8 @@ functions execute.
 | Shared resource waits | Implemented; reached startup passes | Source-proved register ABI, real GPU serial/event waits, bound/parent resource semantics and private retention across last public Release; see [resource waits](NATIVE-RESOURCE-WAITS.md). |
 | Current vertex inputs and XYZ FVF | Implemented; actual startup passes | Shared live current-value GPU buffer, packet producers, source-decoded FVF and cached fixed-function shaders; 15 combined checks pass. See [vertex inputs](NATIVE-VERTEX-INPUTS.md). |
 | First rendered native menu | Passed | Stable labels/hints after source-proved raw/derived projection separation; see [transform cache](NATIVE-TRANSFORM-CACHE.md) |
-| Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
-| Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
+| Usable dashboard | Passed for sampled offline routes | Music/Settings/Memory opening and B return, real audio progression and measured near-60-Hz presentation pass. Deeper options and subjective audio remain unverified. |
+| Native Credits mod | Passed for sampled scrolling-reader routes | Shared immutable-image section-data admission, full notice generation, actual large reader, stick/page/section navigation and return to Settings pass. |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
 
 The first menu and ordinary opening/back routes now pass. There is still no

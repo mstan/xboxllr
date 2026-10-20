@@ -114,6 +114,7 @@ static struct { uint32_t va; CRITICAL_SECTION host; } critical_sections[256];
 static unsigned critical_count;
 static SRWLOCK critical_lock=SRWLOCK_INIT;
 
+#include "stop_capture.inc"
 __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 {
 #ifdef PILOT_AUDIO_DEVICE_LLE
@@ -139,6 +140,7 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
     for (unsigned i = recent_pos - count; i < recent_pos; ++i)
         fprintf(stderr, " %08x", recent[i & 31]);
     fprintf(stderr, "\n");
+    stop_capture();
     fflush(stderr);
     ExitProcess(2);
 }
@@ -1256,6 +1258,9 @@ static void load_image(const char *path)
 int main(int argc,char **argv)
 {
     fprintf(stderr,"[TITLE] id=%s name=%s route=native-title\n",PILOT_TITLE_ID,PILOT_TITLE_NAME);
+#if defined(PILOT_D3D_NATIVE) && defined(PILOT_TITLE_RUNTIME_PROFILE)
+    if(pilot_gfx_title(PILOT_TITLE_NAME)<0)stop("invalid title window name",0);
+#endif
 #ifdef PILOT_NATIVE_OPTIMIZATION
     fprintf(stderr,"[PILOT BUILD] native_optimization=%s\n",PILOT_NATIVE_OPTIMIZATION);
 #endif

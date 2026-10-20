@@ -57,5 +57,20 @@ Start/A, successful 640x480 presented PNG captures, input release and continued
 execution until its 30-second deadline. The images still lack menu labels;
 this initial run validates the remote tooling, not menu acceptance. The later
 [transform-cache correction](NATIVE-TRANSFORM-CACHE.md) restores the labels;
-TCP controls then open Music and expose a guarded back transition. Eighteen combined
-Windows checks and 35 title-driver checks pass.
+TCP controls then validate Music/Settings/Memory opening and all three B returns
+after the [original allocator retirement](NATIVE-ORIGINAL-RESOURCE-RETIREMENT.md)
+fix. The native Credits mod also passes first-page, page/section navigation,
+B return and subsequent Settings navigation using this transport. Eighteen
+combined Windows checks and 35 title-driver checks pass.
+
+For private fatal-startup diagnosis, `XLLE_PILOT_STOP_CAPTURE` may name a new
+exclusive output file. On the first guarded stop the native runtime records
+registers, committed readable pages in low 64 MiB guest RAM and a bounded
+caller-stack window. It skips guard/uncommitted pages and never overwrites an
+existing file. The disabled path performs no capture allocations or writes.
+The binary starts with eleven little-endian DWORDs (magic `0x50545358`, version
+1, EAX/ECX/EDX/ESP/EBX/ESI/EDI/EBP/FS base), then repeated guest-VA/byte-length
+pairs and page bytes. This is best-effort failure evidence, not a savestate.
+It contains private original data and must never be committed or published.
+This diagnostic recovered the original XAP compiler's string-literal error
+and allowed the reader's bounded chunk size to be corrected directly.

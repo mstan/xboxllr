@@ -15,6 +15,15 @@
 static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
 static HWND pilot_window;
+static WCHAR pilot_window_title[256]=L"Xbox native reference";
+int32_t pilot_gfx_title(const char *utf8)
+{
+    if(pilot_window)return E_UNEXPECTED;
+    if(!utf8 || !*utf8)return E_INVALIDARG;
+    WCHAR title[256];
+    if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,utf8,-1,title,256))return E_INVALIDARG;
+    memcpy(pilot_window_title,title,(wcslen(title)+1)*sizeof(WCHAR));return S_OK;
+}
 static int pilot_visible;
 static PilotPresentation pilot_presentation={0,0,0x11,1,0};
 int pilot_d3d_has_auto_depth(void){return pilot_presentation.depth!=0;}
@@ -278,7 +287,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     RECT client=pilot_client_rectangle(p[0],p[1]);
     /* Hidden until scene qualification; a successful hidden present is not
      * treated as title cadence evidence. Tests read actual GPU output. */
-    if(!pilot_window)pilot_window=CreateWindowW(window_class.lpszClassName,L"Xbox native reference",WS_OVERLAPPEDWINDOW,
+    if(!pilot_window)pilot_window=CreateWindowW(window_class.lpszClassName,pilot_window_title,WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,CW_USEDEFAULT,client.right-client.left,client.bottom-client.top,NULL,NULL,window_class.hInstance,NULL);
     if (!pilot_window) return HRESULT_FROM_WIN32(GetLastError());
     if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,

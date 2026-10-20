@@ -3,7 +3,39 @@
 Owner request, 2026-10-18; tracked in `beads-xbox.1.136`. Dashboard boot and
 performance remain tracked separately in `beads-xbox.1.17`.
 
-## Current result and limits
+## Native preview, 2026-10-20
+
+The current generated-native dashboard uses the same shared CPU/services and
+graphics route as Blinx. The original XBE remains immutable; the two revised
+archives and their source-selected section-data registry are a separate mod.
+The former paged message dialog is replaced by an independently authored large
+Credits/license reader. Up/Down or the left stick scroll by line, holding the
+stick repeats, A advances a viewport, Left/Right jump sections, and B returns.
+The original message owner retains modal input/focus and ordinary-menu return.
+
+The reader submits only fourteen visible document lines. Eight-line literals
+respect the retail compiler's 1023-character limit; three adjacent chunks cover
+every possible visible window. Identical notices appear once in the reader,
+while every component's complete source notice remains copied and indexed by
+document line. The private current document has 7393 lines. These numbers
+describe this dependency set, not a fixed public-release notice inventory.
+
+Four authored generator/script checks cover every window across chunk edges,
+clamping, section jumps, controls, return and preserved original geometry.
+Actual native run `20261019-235605-lsdxdoti`, executable `d87f8617...`, passes
+first-page rendering, single-line and held-stick scroll, A advance, section
+jumps, B return, and subsequent Settings opening/back. Rendered images were
+inspected. No claim is made that every legal line was visually inspected.
+The previous footer/OK overlap is resolved by the dedicated reader layer.
+
+The shared programmable-vertex sample-space correction also restores the
+dashboard mesh/menu alignment observed in the owner's preview. See
+[guest presentation](NATIVE-GUEST-PRESENTATION-2026-10-19.md) and the current
+[dashboard burndown](NATIVE-DASHBOARD-BURNDOWN.md) for final build/joint-title
+acceptance status. Public distribution and license resolution remain separate
+release work; these private assets are not a distributable dashboard package.
+
+## Earlier full-machine result and limits
 
 The private Dashboard 1.0.5960 input is hash selected. The annotation tool
 finds 298 script-method address candidates from its actual metadata and

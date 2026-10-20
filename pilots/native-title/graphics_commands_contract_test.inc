@@ -4,6 +4,7 @@
 #include "graphics_borrowed_vertex_contract_test.inc"
 #include "graphics_index_contract_test.inc"
 #include "graphics_original_retirement_contract_test.inc"
+#include "graphics_sample_space_contract_test.inc"
 static void test_graphics_command_null_textures(uint32_t base,const char *failure)
 {
     uint32_t create[]={2,2,1,1,0,0x12,3};
@@ -105,6 +106,7 @@ static void test_graphics_commands(const char *failure)
         CHECK(pilot_gfx_initializer_snapshot(&observed) && !observed.dither && graphics_commands.methods==3 && graphics_fence_next==fences);
         test_graphics_command_null_textures(base,NULL);CHECK(graphics_commands.methods==7);
         test_graphics_fixed_declarations(NULL);
+        test_graphics_sample_space();
         uint32_t borrowed_data=test_graphics_borrowed_textures(NULL);
         test_graphics_borrowed_vertices(NULL);
         test_graphics_indices(NULL);
@@ -124,6 +126,12 @@ static void test_graphics_commands(const char *failure)
         CHECK(MEM32(0x19800)==1 && MEM32(0x19920)==1 && MEM32(0x19a40)==1);
         CHECK(!graphics_commands.base && test_write_faults(base) && vm_committed(0,0x100000000ull)==resident);
     }
+#ifdef PILOT_D3D_GUEST_PRESENTATION_VERSION
+    MEM32(0x19000+4*4)=0x2222;CHECK(!call_graphics(PILOT_D3D_Direct3D_CreateDevice,create));
+    test_graphics_sample_space();
+    call_graphics(PILOT_D3D_D3DDevice_Release,NULL);graphics_abi_thread_retire();
+    CHECK(vm_committed(0,0x100000000ull)==resident);
+#endif
     puts("PASS actual inline graphics owner: register/stack ABI, original default projection, queued-state visibility, ordered API drain, no duplicate replay, recycle/kickoff without fence retirement, real fence completion, two complete lifetimes");
 }
 #endif

@@ -76,6 +76,27 @@ surface descriptions or replace the guest resolve.
 
 ## Focused validation
 
+### Programmable vertex sample coordinates, 2026-10-20
+
+The original SDK viewport constants and programmable shader outputs use guest
+sample-space pixels. In Gaussian mode that scale is two in each dimension.
+The native clip conversion previously divided those outputs by logical extent
+alone, enlarging and offsetting 3D menu geometry while fixed-function text
+remained correctly placed. The shared draw consumer now divides by the original
+pixel scale and logical viewport together; host enhancement scaling remains
+owned by the backend. Scale-one Blinx behavior is algebraically unchanged.
+
+A real GPU fixture submits an authored original NV2A MOV program using sample
+coordinates and checks an interior white pixel and an outside black pixel.
+It runs through two legacy device lifetimes and a separate actual Gaussian
+lifetime, with resolved readback after presentation and teardown accounting.
+Eighteen combined Windows checks pass in 9.17 seconds. Actual native home-menu
+captures show corrected artwork/label alignment against the earlier original
+execution reference. The owner-reported alignment error is resolved for those
+sampled scenes; this does not qualify exact silicon sample-center precision.
+
+### Earlier component validation
+
 - Twelve D3D profile/ABI/migration tests pass, including actual original bodies,
   helper/field/sample drift rejection and exact header upgrades.
 - MSVC `/O2 /W4 /WX` portable fixture passes parameter rejection, raster/logical

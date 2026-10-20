@@ -251,10 +251,14 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     uint32_t viewport[6];if(pilot_gfx_get_viewport(viewport)<0)stop("missing draw viewport",0);
     float low,high;memcpy(&low,viewport+4,4);memcpy(&high,viewport+5,4);
     float depth=graphics_float(TRANSFORM_FIELD(DEPTH_SCALE));
-    if(!viewport[2] || !viewport[3] || !(high>low) || !(depth>0))stop("unqualified draw viewport range",0);
-    float scale[]={2.0f/viewport[2],-2.0f/viewport[3],1/((high-low)*depth),1};
-    float offset[]={-1-viewport[0]*scale[0],1-viewport[1]*scale[1],-low/(high-low),0};
-    offset[0]+=(1-mod_x_scale)*mod_x_anchor*scale[0];scale[0]*=mod_x_scale;
+    float sx=graphics_float(TRANSFORM_FIELD(PIXEL_SCALE)),sy=graphics_float(TRANSFORM_FIELD(PIXEL_SCALE)+4);
+    if(!viewport[2] || !viewport[3] || !(high>low) || !(depth>0) || !(sx>0) || !(sy>0) || !isfinite(sx) || !isfinite(sy))stop("unqualified draw viewport range",0);
+    /* Original programs emit sample-space pixels using the SDK viewport
+     * scale/offset. Undo that guest sample scale before native clip space;
+     * elective host upscaling is a separate backend viewport operation. */
+    float scale[]={2.0f/(viewport[2]*sx),-2.0f/(viewport[3]*sy),1/((high-low)*depth),1};
+    float offset[]={-1-viewport[0]*sx*scale[0],1-viewport[1]*sy*scale[1],-low/(high-low),0};
+    offset[0]+=(1-mod_x_scale)*mod_x_anchor*sx*scale[0];scale[0]*=mod_x_scale;
     if(pilot_gfx_shader_raster(scale,offset)<0)stop("native raster constants failed",0);
     if(!up_data && !indices)scene_reference=graphics_draw_capture(args);
     }
