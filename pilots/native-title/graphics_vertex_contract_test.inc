@@ -10,7 +10,7 @@ static void test_graphics_vertices(void)
         uint32_t header=call_graphics(PILOT_D3D_D3DDevice_CreateVertexBuffer2,&length);
         CHECK(header && MEM32(header)==0x01000001u && !MEM32(header+8));
         uint32_t lock[]={header,0},data=call_graphics(PILOT_D3D_D3DVertexBuffer_Lock2,lock);
-        CHECK(data==MEM32(header+4));
+        CHECK(data==(MEM32(header+4)|0x80000000u) && physical_find(data,length));
         unsigned char *expected=malloc(length),*readback=malloc(length);
         CHECK(expected && readback);
         for(unsigned i=0;i<length;++i)expected[i]=(unsigned char)(i*79+pass*31);
@@ -26,7 +26,7 @@ static void test_graphics_vertices(void)
         CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&header)==2 && MEM32(header)==0x01000002u);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==1);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0);
-        CHECK(!vm_find(data,length) && !vm_find(header,12));
+        CHECK(!physical_find(data,length) && !vm_find(header,12));
         CHECK(vm_committed(0,0x100000000ull)==resident);
         free(expected);free(readback);
     }

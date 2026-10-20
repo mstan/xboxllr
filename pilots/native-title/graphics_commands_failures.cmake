@@ -1,4 +1,4 @@
-foreach(kind unknown record texture-live texture-reference texture-enabled declaration-shape declaration-change declaration-lighting borrowed-shape borrowed-extent borrowed-change borrowed-free vertex-change vertex-free index-shape index-change index-cache index-range index-base device-reference)
+foreach(kind unknown record texture-live texture-reference texture-enabled declaration-shape declaration-change declaration-lighting borrowed-shape borrowed-extent borrowed-change borrowed-free vertex-change vertex-free index-shape index-change index-cache index-range index-base device-reference destroy-reference destroy-bound)
   execute_process(COMMAND "${PROGRAM}" "graphics-commands-${kind}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 12)
   if(NOT "${result}" STREQUAL "2")
@@ -8,6 +8,8 @@ foreach(kind unknown record texture-live texture-reference texture-enabled decla
     set(expected "unqualified inline graphics command at 000017fc")
   elseif(kind STREQUAL "device-reference")
     set(expected "invalid device reference acquisition")
+  elseif(kind STREQUAL "destroy-reference" OR kind STREQUAL "destroy-bound")
+    set(expected "destruction requires the last unbound resource reference")
   elseif(kind STREQUAL "record")
     set(expected "unqualified inline command-buffer owner/recording mode")
   elseif(kind STREQUAL "declaration-shape")

@@ -40,19 +40,22 @@ static uint32_t graphics_vertex_allocate(uint32_t length)
     struct GraphicsVertexObject vertex={0};
     vertex.bytes=length; vertex.refs=1; uint32_t bytes=4096;
     if(vm_allocate(&vertex.header,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))return 0;
-    bytes=length;
-    if(vm_allocate(&vertex.data,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)) {
+    /* Original CreateVertexBuffer2 stores a physical offset; Lock2 and inline
+     * CPU consumers set bit31 to read the cached alias. Ordinary virtual data
+     * cannot satisfy that contract even when native Lock happens to work. */
+    vertex.data=physical_allocate(length,0,0x03ffffffu,4096,PAGE_READWRITE|PAGE_WRITECOMBINE);
+    if(!vertex.data) {
         bytes=0; if(vm_free(&vertex.header,&bytes,MEM_RELEASE))stop("vertex header cleanup failed",vertex.header);
         return 0;
     }
     int32_t result=pilot_gfx_vertex_create(length,&vertex.native);
     if(result<0) {
-        bytes=0; if(vm_free(&vertex.data,&bytes,MEM_RELEASE))stop("vertex data cleanup failed",vertex.data);
+        physical_free(vertex.data);
         bytes=0; if(vm_free(&vertex.header,&bytes,MEM_RELEASE))stop("vertex header cleanup failed",vertex.header);
         if((uint32_t)result!=0x8007000eu)stop("native vertex allocation failed",(uint32_t)result);
         return 0;
     }
-    MEM32(vertex.header)=0x01000001u; MEM32(vertex.header+4)=vertex.data; MEM32(vertex.header+8)=0;
+    MEM32(vertex.header)=0x01000001u; MEM32(vertex.header+4)=vertex.data&0x0fffffffu; MEM32(vertex.header+8)=0;
     graphics_vertices[slot]=vertex;
     fprintf(stderr,"[VERTEX CREATE] header=%08x data=%08x bytes=%u\n",vertex.header,vertex.data,length);
     return vertex.header;
@@ -73,9 +76,8 @@ static void graphics_vertex_collect(struct GraphicsVertexObject *vertex)
 #endif
         memset(vertex,0,sizeof(*vertex));return;
     }
+    physical_free(vertex->data);
     uint32_t bytes=0;
-    if(vm_free(&vertex->data,&bytes,MEM_RELEASE))stop("vertex data release failed",vertex->data);
-    bytes=0;
     if(vm_free(&vertex->header,&bytes,MEM_RELEASE))stop("vertex header release failed",vertex->header);
     memset(vertex,0,sizeof(*vertex));
 }

@@ -60,6 +60,11 @@ flat/smooth colors, positive/negative bases, unaligned words and index `0xffff`.
 Existing nonindexed renderer and programmable-shader/reference checks pass in
 the same batch. All 104 generated CPU objects were retained.
 
+The subsequent [mesh resource batch](NATIVE-MESH-RESOURCES.md) recovers the
+missing original CPU entries and fixes created-vertex cached aliases and
+native-owned temporary retirement. The older checkpoint below remains its
+original evidence.
+
 Actual native execution submits a 6,624-index mesh spanning 1,223 vertices,
 passes device `AddRef`, and creates subsequent mesh index/vertex buffers. The
 next stop is a missing native indirect CPU entry at `d258f`, an original mesh

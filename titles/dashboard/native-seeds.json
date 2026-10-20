@@ -42,6 +42,90 @@
     "evidence": "matrix-stack Release; constructor table138F0 slot2"
   },
   {
+    "start": "0x000D250F",
+    "end": "0x000D252B",
+    "size": 28,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:1,0x139a8:1; all54 slots audited."
+  },
+  {
+    "start": "0x000D252B",
+    "end": "0x000D256B",
+    "size": 64,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:18,0x139a8:18; all54 slots audited."
+  },
+  {
+    "start": "0x000D258F",
+    "end": "0x000D25AB",
+    "size": 28,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:14,0x139a8:14; all54 slots audited."
+  },
+  {
+    "start": "0x000D25AB",
+    "end": "0x000D25E4",
+    "size": 57,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:19,0x139a8:19; all54 slots audited."
+  },
+  {
+    "start": "0x000D2743",
+    "end": "0x000D2756",
+    "size": 19,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:7,0x139a8:7; all54 slots audited."
+  },
+  {
+    "start": "0x000D2756",
+    "end": "0x000D277B",
+    "size": 37,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:12,0x139a8:12; all54 slots audited."
+  },
+  {
+    "start": "0x000D2E4D",
+    "end": "0x000D2E57",
+    "size": 10,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:4,0x139a8:4; all54 slots audited."
+  },
+  {
+    "start": "0x000D2E57",
+    "end": "0x000D2E61",
+    "size": 10,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:5,0x139a8:5; all54 slots audited."
+  },
+  {
+    "start": "0x000D2E61",
+    "end": "0x000D2E6B",
+    "size": 10,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:6,0x139a8:6; all54 slots audited."
+  },
+  {
+    "start": "0x000D2EA5",
+    "end": "0x000D2ECA",
+    "size": 37,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:13,0x139a8:13; all54 slots audited."
+  },
+  {
+    "start": "0x000D2ECA",
+    "end": "0x000D2EDF",
+    "size": 21,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:16,0x139a8:16; all54 slots audited."
+  },
+  {
+    "start": "0x000D2EDF",
+    "end": "0x000D2EE4",
+    "size": 5,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:15,0x13938:17,0x13938:20,0x139a8:15,0x139a8:17,0x139a8:20; all54 slots audited."
+  },
+  {
+    "start": "0x000D6451",
+    "end": "0x000D648D",
+    "size": 60,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:2; all54 slots audited."
+  },
+  {
+    "start": "0x000D93B4",
+    "end": "0x000D93BE",
+    "size": 10,
+    "evidence": "Mesh virtual method; original constructor tables13938/139a8, slots 0x13938:8,0x139a8:8; all54 slots audited."
+  },
+  {
     "start": "0x000F53F2",
     "end": "0x000F5439",
     "size": 71,

@@ -18,21 +18,21 @@ Rows have different sizes, so their count is not a completion percentage.
 |---|---|---|---|
 | DB01 | Reach native dashboard graphics startup | Passed for reached startup | Actual native execution loads assets, opens native audio and passes the animation and inline NULL-texture boundaries. Latest run: `9cfa3b45...`, 255389 stopped-thread entries. |
 | DB02 | Consume the dashboard's original vertex layouts | Passed for reached layouts | Three original declaration-only layout classes consume packed normals/color/UV and cached transforms on the GPU. Pixel/reference and ownership checks pass; actual startup binds the original object and advances into mesh submission. Lighting remains disabled for this reached caller. |
-| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Indexed mesh submission and device references now pass. Recover the reached native mesh-lock helper and audit its original virtual-method table for compatible missing roots. |
+| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Indexed drawing, mesh CPU methods, cached vertex aliases and native-owned temporary destruction now pass. Next: the reached edge-antialiasing request and its native draw consumer. |
 | DB04 | Make the ordinary menus usable | Pending | Exercise controller navigation, opening/back transitions and supported offline menu paths; record failures explicitly. Determine concrete routes from the actual menu after DB03. |
 | DB05 | Check dashboard audio and responsiveness | Pending | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
 | DB06 | Validate the native Credits mod | Pending | Open the bottom Credits entry in the actual native dashboard, verify the intended credits/legal content, then return to ordinary menus. |
 | DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
 | DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
 
-Current next action: **DB03**, recover native mesh virtual methods. Shared
-index ownership/submission and original device references pass their source,
-GPU and lifetime checks. Actual startup submits a 6,624-index mesh spanning
-1,223 vertices and creates further mesh buffers. The next indirect CPU target
-is `d258f`: a 26-byte original mesh-lock wrapper calling the already admitted
-vertex-buffer lock. Prove its constructor/table membership and audit related
-missing roots as one recovery batch. Preserve the existing optimized CPU
-objects and explicit faults for unproved targets.
+Current next action: **DB03**, edge antialiasing. The original text/mesh path
+now passes a complete batch of 14 missing native virtual entries, the real
+physical/cached vertex-data alias and native-owned temporary destruction.
+The latest run reaches render state 151 with value one. Compare the original
+state and reached consumer, including the active guest Gaussian presentation,
+then implement an actual native effect or explicitly justified precision
+policy. Do not simply ignore the request or claim a menu frame from component
+pixels. Batch compatible reached raster dependencies under this row.
 
 Keep object adoption, input conversion and transform handling in one compatible
 graphics batch. Record the implementation, focused checks, actual run and next
@@ -61,8 +61,10 @@ typed GPU wrapper around the existing fixed-function core, with packed normal,
 color/UV and original cached transforms. Original archive textures and vertex
 buffers now retain their real contiguous CPU backing and use existing native
 uploads/buffers. Shared indexed binding/drawing now submits a real mesh;
-device `AddRef` and nonfinal/final release semantics pass. Actual startup next
-reaches missing native mesh-lock target `d258f`. The explicit
+device `AddRef` and nonfinal/final release semantics pass. Fourteen original
+mesh virtual methods are now native; created vertex data uses the correct
+cached physical alias, and original destruction of native-owned temporaries
+passes. Actual startup next reaches enabled edge antialiasing. The explicit
 offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
@@ -89,7 +91,8 @@ functions execute.
 | Original declaration-only vertex layouts | Implemented; actual binding passes | Three source layouts, packed normals/color/UV, unchanged original objects, repeated lifetimes and cached transforms; real GPU pixels versus expanded-input reference pass |
 | Original archive resource ownership | Implemented; actual texture/vertex consumption reached | Caller headers/storage retained, real contiguous backing leases, existing GPU uploads, CPU edits, mip chains, original references and release guards pass |
 | Native indexed drawing and device references | Implemented; actual submission passes | Original index headers/data publication, base projection and real GPU indices; 12 Windows and 17 source/profile checks pass. See [indexed drawing](NATIVE-INDEXED-DRAWING.md). |
-| First rendered native menu | Current blocker | Recover the reached mesh-lock virtual target and related source-proved missing roots; no actual menu frame yet |
+| Native mesh methods and resource aliases | Implemented; actual conversion/temporary retirement passes | 14 roots/396 bytes from 54 original table slots; shared created-vertex physical/cached alias and native-owned destruction; 12 Windows checks pass. See [mesh resources](NATIVE-MESH-RESOURCES.md). |
+| First rendered native menu | Current blocker | Admit the reached edge-AA state and draw consumer; no actual menu frame yet |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -104,6 +107,12 @@ questions and deliberately unavailable enhancements separately from this
 delivery burndown.
 
 ## Current graphics batch evidence
+
+Latest: [mesh resources](NATIVE-MESH-RESOURCES.md). The current executable
+`f2caf6a8420cc42d...` passes the earlier missing mesh methods and storage fault,
+then reaches enabled edge AA. Twelve Windows checks pass in 8.92 seconds;
+13 extent and six dispatch checks also pass. No menu frame yet. The evidence
+below records the preceding graphics checkpoints.
 
 The latest [indexed drawing batch](NATIVE-INDEXED-DRAWING.md) advances actual
 execution beyond the index and device-reference boundaries described below.

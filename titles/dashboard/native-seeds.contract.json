@@ -1,6 +1,6 @@
 {
   "xbe_sha256": "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d",
-  "seed_sha256": "b16b6832cfa78841c0776ab3c963aeb42c8008aeef7e51fa981720ca50f95421",
+  "seed_sha256": "869dfa2047f015afebf18f1454d87962483299c031c3ae5462244446a865650e",
   "source": "Exact original image constructor/vtable and complete original function bodies; no borrowed revision addresses.",
   "scope": "Static source-derived indirect roots; not evidence that execution reached every method. Native CPU lowering preserves original implementations.",
   "body_sha256": {
@@ -11,8 +11,52 @@
     "0x000D0617": "ef68644dac8e5594bd26c78cbd4ba02104de14690066efe8a7460b17abea679a",
     "0x000D0996": "f0c56d0a29f7eeef8f1cdccfd060b3089d7d39f4fac74ad4e8cc70553a4f0eae",
     "0x000F53F2": "2a8170b61c41a06663d8a4876de5c52ccee8164f3ac1b99b56868011a03fd316",
-    "0x0004EAF0": "b67f0bb20d3226048fc467ee8c7354c82809549d934490673fc13c1572419df0"
+    "0x0004EAF0": "b67f0bb20d3226048fc467ee8c7354c82809549d934490673fc13c1572419df0",
+    "0x000D250F": "98a44d07bbd1e11176f81376ca2cad9d1b5afd04a3a6d87c33ab87e53c3b1da9",
+    "0x000D252B": "0682f2621b357c57f05cd9f346d02cf9ee967b912c2f53254ef85d245acb64f4",
+    "0x000D258F": "0ce4e217e700e1a4d56d5e01c1c5e6a1fed8c18948612f155d0460b471db9de4",
+    "0x000D25AB": "084fc258b1f6c8c48bd02f1d2dd6c3475bb9a4446744cbd7844613f125332c30",
+    "0x000D2743": "0b6d045274ad7246893165770bf82a8ec561bc1dc64f328ced65a3113e4f3715",
+    "0x000D2756": "eb580a8f6bfd715de7a5e7e2cae019a359ea7d058db2b94e7ebcac3bfe8ebdb0",
+    "0x000D2E4D": "c1b8178f41a316e1fbb8e899694f631b04187203643252d6bcadbcacf686983b",
+    "0x000D2E57": "a4b3e7e2842b7ce796f2e98157d6a0e310912650956696caca7fe4b0469dc53f",
+    "0x000D2E61": "57f638fb5e54a74ee301951749846111a7fbf8cd5a199f7351118faac1c5ad86",
+    "0x000D2EA5": "706b439e50bc75f1ae735f7fe50069e720e1f882b1483afa228583d0eee4bfaf",
+    "0x000D2ECA": "1a3badc4396bc0782eef591d891f05958fb391e694e65d8e7b39c1b816aab1f1",
+    "0x000D2EDF": "5fed5afb29946811bf02359627a94bc01d08d31b779528feaadde3866af9c855",
+    "0x000D6451": "d43b39a37a2636a1d810bcb3fd6f9fc420db07662b5202635d74d9dcffcba393",
+    "0x000D93B4": "bed1917a7a9d46812e1463da79ce3b76126e3c2f2be1e20c65b7524ba836e54d"
   },
   "matrix_stack_table_sha256": "86d3a339e33cebf2856fe1e1edeed4c9268c04458e1f6ad0733226bf5b235766",
-  "animation_table_sha256": "7a1072e2d9317fc7a50a5f809dea354db09144c0983231b8eb098e828c303da8"
+  "animation_table_sha256": "7a1072e2d9317fc7a50a5f809dea354db09144c0983231b8eb098e828c303da8",
+  "mesh_tables": [
+    {
+      "address": "0x13938",
+      "slots": 27,
+      "sha256": "c1a46285a1b4a68ef7ec6f06ca8a50c2c1dedf4cd054290fab81219eb9906df8"
+    },
+    {
+      "address": "0x139a8",
+      "slots": 27,
+      "sha256": "245a37bdcc3442e9dae6ea2faf98ac413f7c2383a362c7ec46ca1e6d393f880e"
+    }
+  ],
+  "mesh_constructors": [
+    {
+      "start": "0x000D247E",
+      "end": "0x000D250F",
+      "sha256": "ef6442c52d10bcea20351f62ee1643b3d7787bef67f91612fe237c522f5a753b",
+      "table_stores": [
+        "000d2488 mov dword ptr [esi], 0x13938"
+      ]
+    },
+    {
+      "start": "0x000D2D4C",
+      "end": "0x000D2DDD",
+      "sha256": "ce5bda23985cc33c043040e5a624a93d8265ef5e4a55d97f7587333e5c21f070",
+      "table_stores": [
+        "000d2d56 mov dword ptr [esi], 0x139a8"
+      ]
+    }
+  ]
 }

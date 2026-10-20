@@ -171,6 +171,7 @@ static void graphics_target_prepare(uint32_t header);
 #include "graphics_original_callbacks.inc"
 #endif
 #include "graphics_persistence.inc"
+#include "graphics_resource_destroy.inc"
 static void graphics_resource_bindings_close(void)
 {
     for(unsigned i=0;i<4;++i)graphics_texture_bind(i,0);
@@ -311,6 +312,7 @@ static void graphics_dispatch_impl(unsigned entry)
 #ifdef PILOT_D3D_INDEX_DATA_GLOBAL
     case PILOT_D3D_D3DDevice_CreateIndexBuffer2:g_eax=graphics_index_allocate(arguments[0]);break;
     case PILOT_D3D_D3DDevice_SetIndices:graphics_index_bind(arguments[0],arguments[1]);break;
+    case PILOT_D3D_D3D_DestroyResource:graphics_resource_destroy(arguments[0]);break;
 #endif
     case PILOT_D3D_D3DVertexBuffer_Lock2:g_eax=graphics_vertex_lock(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DResource_Register:graphics_vertex_register(arguments[0],arguments[1]);break;
