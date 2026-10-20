@@ -129,6 +129,8 @@ struct PilotBlendStats {uint32_t draws,copies,allocations,shader_compilations,or
 void pilot_gfx_blend_stats(struct PilotBlendStats *stats);
 int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4]);
 int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count);
+/* Little-endian Xbox uint16 indices, including unaligned CPU storage. */
+int32_t pilot_gfx_draw_indexed(unsigned primitive,unsigned count,const void *indices,int32_t base);
 int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vertices,unsigned stride);
 uint32_t pilot_gfx_fvf_extent(uint32_t fvf);
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y);

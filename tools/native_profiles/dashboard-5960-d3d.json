@@ -3569,6 +3569,8 @@
     "vertex_start": 1948,
     "vertex_constants": 1401640,
     "resource_fence": 44,
+    "index_data_global": 1404712,
+    "device_references": 2360,
     "texture_mode": 12,
     "yuv_state": 160,
     "transform_fields": {

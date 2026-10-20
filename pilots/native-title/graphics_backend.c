@@ -134,6 +134,7 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_visibility_backend.inc"
 #include "graphics_quad_backend.inc"
 #include "graphics_fan_backend.inc"
+#include "graphics_index_backend.inc"
 #include "graphics_flat_backend.inc"
 #include "graphics_depth_texture_backend.inc"
 
@@ -215,6 +216,7 @@ void pilot_gfx_close(void)
     pilot_completion_close();
     pilot_quad_close();
     pilot_fan_close();
+    pilot_index_close();
     pilot_flat_close();
     pilot_depth_texture_close();
     pilot_visual_close();
@@ -1142,7 +1144,7 @@ int32_t pilot_gfx_fvf_placement(uint32_t fvf,float screen_x,float screen_y,float
     pilot_d3d_fvf_prepare(fvf,scale,offset);return S_OK;
 }
 #include "graphics_blend_backend.inc"
-int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count)
+static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned count,const void *indices,int32_t base)
 {
 #ifdef PILOT_D3D_PHOBOS
     pilot_donor_blend_candidate(0);
@@ -1170,7 +1172,7 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
         }
     }
 #ifdef PILOT_D3D_PHOBOS
-    pilot_donor_blend_candidate(pilot_gfx_blend_candidate_geometry(primitive,first,count));
+    pilot_donor_blend_candidate(!indices && pilot_gfx_blend_candidate_geometry(primitive,first,count));
 #endif
     pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
@@ -1181,6 +1183,11 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
         return flat_result;
     }
     int flat_quad=primitive==8 && d3d8_GetRenderStates()[D3DRS_SHADEMODE]==1;
+    unsigned index_words=0;
+    if(indices) {
+        HRESULT hr=pilot_index_prepare(primitive,indices,count,flat_quad,&index_words);
+        if(FAILED(hr))return hr;
+    }
     if(flat_quad)topology=D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ;
     ID3D11DeviceContext_IASetPrimitiveTopology(context,topology);
 #ifdef PILOT_D3D_PHOBOS
@@ -1197,7 +1204,14 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
         ID3D11DeviceContext_OMSetBlendState(context,NULL,NULL,saved_mask);
     }
 #endif
-    if(primitive==7)pilot_fan_draw(first,count);
+    if(indices) {
+        ID3D11Buffer *previous=NULL;DXGI_FORMAT format;UINT offset;
+        ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
+        ID3D11DeviceContext_IASetIndexBuffer(context,pilot_index_buffer,DXGI_FORMAT_R32_UINT,0);
+        ID3D11DeviceContext_DrawIndexed(context,index_words,0,base);
+        ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);
+        if(previous)ID3D11Buffer_Release(previous);
+    } else if(primitive==7)pilot_fan_draw(first,count);
     else if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);
     else ID3D11DeviceContext_Draw(context,count,first);
 #ifdef PILOT_D3D_PHOBOS
@@ -1217,6 +1231,10 @@ int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count
     if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
     return S_OK;
 }
+int32_t pilot_gfx_draw_vertices(unsigned primitive,unsigned first,unsigned count)
+{return pilot_gfx_draw_submit(primitive,first,count,NULL,0);}
+int32_t pilot_gfx_draw_indexed(unsigned primitive,unsigned count,const void *indices,int32_t base)
+{return indices?pilot_gfx_draw_submit(primitive,0,count,indices,base):E_INVALIDARG;}
 uint32_t pilot_gfx_width(void) { return pilot_guest_width?pilot_guest_width:d3d8_GetBackbufferWidth(); }
 int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vertices,unsigned stride)
 {

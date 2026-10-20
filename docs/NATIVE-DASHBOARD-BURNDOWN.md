@@ -18,20 +18,21 @@ Rows have different sizes, so their count is not a completion percentage.
 |---|---|---|---|
 | DB01 | Reach native dashboard graphics startup | Passed for reached startup | Actual native execution loads assets, opens native audio and passes the animation and inline NULL-texture boundaries. Latest run: `9cfa3b45...`, 255389 stopped-thread entries. |
 | DB02 | Consume the dashboard's original vertex layouts | Passed for reached layouts | Three original declaration-only layout classes consume packed normals/color/UV and cached transforms on the GPU. Pixel/reference and ownership checks pass; actual startup binds the original object and advances into mesh submission. Lighting remains disabled for this reached caller. |
-| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Original archive texture and vertex ownership now pass; the next required batch is indexed mesh binding/submission. |
+| DB03 | Draw the first real dashboard menu | **Active** | Actual native run presents a recognizable menu with visible, stable content; retain an image and run log. Indexed mesh submission and device references now pass. Recover the reached native mesh-lock helper and audit its original virtual-method table for compatible missing roots. |
 | DB04 | Make the ordinary menus usable | Pending | Exercise controller navigation, opening/back transitions and supported offline menu paths; record failures explicitly. Determine concrete routes from the actual menu after DB03. |
 | DB05 | Check dashboard audio and responsiveness | Pending | Verify audio progression/output and measure native responsiveness under ordinary load; resolve freezes and material stalls. A created audio device alone does not pass this row. |
 | DB06 | Validate the native Credits mod | Pending | Open the bottom Credits entry in the actual native dashboard, verify the intended credits/legal content, then return to ordinary menus. |
 | DB07 | Validate both titles on the final shared framework | Pending | Accept a FINAL dashboard build and run isolated Blinx attract, Stage 1/save/Results/reload, adaptive 21:9/32:9 and Retry checks against the same framework revision. Preserve existing owner builds and saves. |
 | DB08 | Hand both builds to the owner | Pending | Leave usable dashboard and Blinx previews ready in normal windows with normal audio and no automated deadline; provide locations and remaining nonessential deferrals. |
 
-Current next action: **DB03**, indexed mesh submission. Actual startup now
-adopts its original declaration-only vertex object, a nine-level compressed
-archive texture and an archive vertex buffer through shared native owners.
-It next reaches `D3DDevice_SetIndices`; this and `DrawIndexedVertices` have
-exact-image ABI/body admissions but need shared runtime consumers. Implement
-index binding, original index storage/offset rules and real indexed drawing
-together, preserving existing nonindexed Blinx draws and resource lifetimes.
+Current next action: **DB03**, recover native mesh virtual methods. Shared
+index ownership/submission and original device references pass their source,
+GPU and lifetime checks. Actual startup submits a 6,624-index mesh spanning
+1,223 vertices and creates further mesh buffers. The next indirect CPU target
+is `d258f`: a 26-byte original mesh-lock wrapper calling the already admitted
+vertex-buffer lock. Prove its constructor/table membership and audit related
+missing roots as one recovery batch. Preserve the existing optimized CPU
+objects and explicit faults for unproved targets.
 
 Keep object adoption, input conversion and transform handling in one compatible
 graphics batch. Record the implementation, focused checks, actual run and next
@@ -59,8 +60,9 @@ four stages. Original declaration-only vertex objects now bind through a
 typed GPU wrapper around the existing fixed-function core, with packed normal,
 color/UV and original cached transforms. Original archive textures and vertex
 buffers now retain their real contiguous CPU backing and use existing native
-uploads/buffers. Actual startup advances to `D3DDevice_SetIndices`; shared
-indexed binding/drawing is the next compatible graphics batch. The explicit
+uploads/buffers. Shared indexed binding/drawing now submits a real mesh;
+device `AddRef` and nonfinal/final release semantics pass. Actual startup next
+reaches missing native mesh-lock target `d258f`. The explicit
 offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
@@ -86,7 +88,8 @@ functions execute.
 | Inline NULL texture bindings | Implemented; reached startup passes | Four stages, shared resources, original reference reconciliation, native unbind/rebind, two lifetimes and invalid-owner guards pass |
 | Original declaration-only vertex layouts | Implemented; actual binding passes | Three source layouts, packed normals/color/UV, unchanged original objects, repeated lifetimes and cached transforms; real GPU pixels versus expanded-input reference pass |
 | Original archive resource ownership | Implemented; actual texture/vertex consumption reached | Caller headers/storage retained, real contiguous backing leases, existing GPU uploads, CPU edits, mip chains, original references and release guards pass |
-| First rendered native menu | Current blocker | Shared index binding and indexed mesh submission; no actual menu frame yet |
+| Native indexed drawing and device references | Implemented; actual submission passes | Original index headers/data publication, base projection and real GPU indices; 12 Windows and 17 source/profile checks pass. See [indexed drawing](NATIVE-INDEXED-DRAWING.md). |
+| First rendered native menu | Current blocker | Recover the reached mesh-lock virtual target and related source-proved missing roots; no actual menu frame yet |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -101,6 +104,13 @@ questions and deliberately unavailable enhancements separately from this
 delivery burndown.
 
 ## Current graphics batch evidence
+
+The latest [indexed drawing batch](NATIVE-INDEXED-DRAWING.md) advances actual
+execution beyond the index and device-reference boundaries described below.
+Its executable `3bdb9b59d8d13ce6...` logs a real 6,624-index/1,223-vertex draw,
+then reaches missing native mesh-lock wrapper `d258f`. Menu rendering remains
+unverified. Ordinary-menu qualification must also check actual archive/resource
+retirement; component tests for borrowed host views preserve caller storage.
 
 - Source-proved declaration constructor `5c740` and tables `176660`, `176674`
   and `176688`: three original input layouts, without interpreting packed

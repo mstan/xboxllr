@@ -157,6 +157,7 @@ static void *graphics_pointer(uint32_t address,uint32_t bytes)
 #include "graphics_texture.inc"
 #include "graphics_movie_capture.inc"
 #include "graphics_vertex.inc"
+#include "graphics_index.inc"
 #include "graphics_shader.inc"
 #include "graphics_pixel.inc"
 #include "graphics_stateblock.inc"
@@ -174,6 +175,7 @@ static void graphics_resource_bindings_close(void)
 {
     for(unsigned i=0;i<4;++i)graphics_texture_bind(i,0);
     for(unsigned i=0;i<16;++i)graphics_vertex_bind(i,0,0);
+    graphics_index_bind(0,0);
 }
 static void graphics_target_ref(uint32_t header,int acquire)
 {
@@ -306,6 +308,10 @@ static void graphics_dispatch_impl(unsigned entry)
         graphics_shader_constants(g_ecx,g_edx,arguments[0],graphics_shader_records());break;
     case PILOT_D3D_D3DDevice_GetVertexShaderConstant:graphics_shader_get_constants(arguments);break;
     case PILOT_D3D_D3DDevice_CreateVertexBuffer2:g_eax=graphics_vertex_allocate(arguments[0]);break;
+#ifdef PILOT_D3D_INDEX_DATA_GLOBAL
+    case PILOT_D3D_D3DDevice_CreateIndexBuffer2:g_eax=graphics_index_allocate(arguments[0]);break;
+    case PILOT_D3D_D3DDevice_SetIndices:graphics_index_bind(arguments[0],arguments[1]);break;
+#endif
     case PILOT_D3D_D3DVertexBuffer_Lock2:g_eax=graphics_vertex_lock(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DResource_Register:graphics_vertex_register(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DDevice_CreateTexture2:g_eax=graphics_texture_allocate(arguments);break;
@@ -350,6 +356,9 @@ static void graphics_dispatch_impl(unsigned entry)
         if (!(g_eax&0x80000000u)) {
             graphics_persistence_clear();
             graphics_active=1; memcpy(graphics_parameters,staged,sizeof(staged));
+#ifdef PILOT_D3D_DEVICE_REFERENCES
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES)=1;
+#endif
             MEM32(PILOT_D3D_PRESENT_INTERVAL)=staged[12];
             graphics_clock_origin=graphics_clock_now();
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
@@ -411,6 +420,9 @@ static void graphics_dispatch_impl(unsigned entry)
         graphics_texture_state(arguments[0],arguments[1],arguments[2],1);break;
     case PILOT_D3D_D3DDevice_DrawVertices:
         graphics_draw_common(arguments,0,0);break;
+#ifdef PILOT_D3D_INDEX_DATA_GLOBAL
+    case PILOT_D3D_D3DDevice_DrawIndexedVertices:graphics_draw_indexed(arguments);break;
+#endif
     case PILOT_D3D_D3DDevice_DrawVerticesUP: {
         uint32_t draw[]={arguments[0],0,arguments[1]};
         graphics_draw_common(draw,arguments[2],arguments[3]);break;
@@ -455,12 +467,27 @@ static void graphics_dispatch_impl(unsigned entry)
     case PILOT_D3D_D3DResource_Release:
         if(arguments[0]==graphics_headers || arguments[0]==graphics_headers+32 || arguments[0]==graphics_headers+64)
             g_eax=graphics_surface_ref(graphics_surface_index(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
+        else if(graphics_index_find(arguments[0])>=0 ||
+                (MEM32(arguments[0])&0x01070000u)==0x01010000u)
+            g_eax=graphics_index_ref(arguments[0],entry==PILOT_D3D_D3DResource_AddRef);
         else if(graphics_vertex_find(arguments[0])>=0 ||
                 (MEM32(arguments[0])&0x01070000u)==0x01000000u)
             g_eax=graphics_vertex_ref(arguments[0],entry==PILOT_D3D_D3DResource_AddRef);
         else g_eax=graphics_texture_ref(graphics_texture_slot(arguments[0]),entry==PILOT_D3D_D3DResource_AddRef);
         break;
+#ifdef PILOT_D3D_DEVICE_REFERENCES
+    case PILOT_D3D_D3DDevice_AddRef: {
+        uint32_t field=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES,refs=MEM32(field);
+        if(!refs || refs==UINT32_MAX)stop("invalid device reference acquisition",refs);
+        MEM32(field)=g_eax=refs+1;break;
+    }
+#endif
     case PILOT_D3D_D3DDevice_Release: {
+#ifdef PILOT_D3D_DEVICE_REFERENCES
+        uint32_t field=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES,refs=MEM32(field);
+        if(!refs)stop("invalid device reference release",refs);
+        if(refs>1){MEM32(field)=g_eax=refs-1;break;}
+#endif
         graphics_surfaces_reconcile();
 #ifdef PILOT_D3D_SURFACE_PROJECTION_VERSION
         if(graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
@@ -480,11 +507,14 @@ static void graphics_dispatch_impl(unsigned entry)
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding surface ownership",entry);
         graphics_surfaces_project(PILOT_SURFACE_CLEAR);
-        graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();
+        graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_indices_close();graphics_shaders_release();graphics_pixels_release();
 #ifdef PILOT_D3D_COMMANDS_VERSION
         graphics_commands_close();
 #endif
         pilot_gfx_close(); graphics_active=0;
+#ifdef PILOT_D3D_DEVICE_REFERENCES
+        memset(memory+PILOT_D3D_DEVICE_OBJECT,0,PILOT_D3D_DEVICE_BYTES);
+#endif
         graphics_fence_next=1;graphics_fence_done=0;memset(graphics_fences,0,sizeof(graphics_fences));
         uint32_t bytes;
         for (unsigned i=0;i<3;++i) {

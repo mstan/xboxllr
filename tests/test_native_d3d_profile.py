@@ -114,6 +114,47 @@ class LTCGOriginalProofTests(unittest.TestCase):
             proof=copy.deepcopy(self.proof);proof['command_buffer'][key]=value
             with self.subTest(key=key),self.assertRaises(ValueError):inspect(self.context,proof)
 
+    def test_index_data_publication_is_proved_from_original_setter(self):
+        self.assertEqual(self.binding['layout']['index_data_global'],0x156f28)
+        self.assertIn('#define PILOT_D3D_INDEX_DATA_GLOBAL 0x156f28u',self.header)
+        proof=copy.deepcopy(self.proof);proof['layout']['index_data_global']+=4
+        with self.assertRaisesRegex(ValueError,'layout/reference'):
+            inspect(self.context,proof)
+
+    def test_device_reference_field_is_proved_from_both_original_methods(self):
+        self.assertEqual(self.binding['layout']['device_references'],0x938)
+        self.assertIn('#define PILOT_D3D_DEVICE_REFERENCES 0x938u',self.header)
+        proof=copy.deepcopy(self.proof);proof['layout']['device_references']+=4
+        with self.assertRaisesRegex(ValueError,'layout/reference'):
+            inspect(self.context,proof)
+
+    def test_exact_index_metadata_upgrade_retains_existing_source_and_guards_drift(self):
+        for drift in (None,'header','record','wrapper'):
+            with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:
+                output=Path(directory);generated=output/'gen';generated.mkdir()
+                previous=copy.deepcopy(self.binding);previous['layout'].pop('index_data_global')
+                header='\n'.join(line for line in self.header.splitlines()
+                                 if not line.startswith('#define PILOT_D3D_INDEX_DATA_GLOBAL '))+'\n'
+                if drift=='header':header+='/* drift */\n'
+                if drift=='record':previous['device_object']+=4
+                wrapper=self.wrapper+('/* drift */\n' if drift=='wrapper' else '')
+                (generated/'pilot_d3d_bindings.h').write_text(header)
+                (generated/'pilot_d3d_binding.c').write_text(wrapper)
+                record=output/'d3d-binding.aot-private.json';record.write_text(json.dumps(previous))
+                context=SimpleNamespace(output=output,generated=generated,manifest={'files':{},'d3d_binding':previous},
+                                        manifest_path=output/'generation.aot-private.json')
+                before={p.name:p.read_bytes() for p in generated.iterdir()}
+                with patch('native_d3d_ltcg.inspect',return_value=(self.binding,self.header,self.wrapper)):
+                    if drift:
+                        with self.assertRaises(ValueError):bind_ltcg(context,self.proof)
+                        self.assertEqual(before,{p.name:p.read_bytes() for p in generated.iterdir()})
+                    else:
+                        bind_ltcg(context,self.proof)
+                        self.assertEqual((generated/'pilot_d3d_bindings.h').read_text(),self.header)
+                        self.assertEqual((generated/'pilot_d3d_binding.c').read_text(),self.wrapper)
+                        self.assertEqual(json.loads(record.read_text()),self.binding)
+                        bind_ltcg(context,self.proof)
+
     def test_exact_command_metadata_upgrade_preserves_wrappers_and_is_idempotent(self):
         for drift in (None,'header','record','wrapper','remove'):
             with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:

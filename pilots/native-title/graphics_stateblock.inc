@@ -42,6 +42,7 @@ static void graphics_block_ref(uint32_t kind,uint32_t header,int acquire)
 {
     if(kind==0)graphics_texture_ref(graphics_texture_slot(header),acquire);
     else if(kind==3)graphics_vertex_ref(header,acquire);
+    else if(kind==4)graphics_index_ref(header,acquire);
     else {
         int owned=0;
         for(unsigned i=0;i<256;++i)
@@ -120,7 +121,7 @@ static uint32_t graphics_block_create(const uint32_t *args)
     for(unsigned i=0;i<4;++i)if(mask[i]){uint32_t h=MEM32(SNAPSHOT_FIELD(TEXTURES)+i*4);++data[0];WORD(i);WORD(h);KEEP(0,h);}
     if(mask[4]){data[1]=1;WORD(pixel);KEEP(1,pixel);}
     if(mask[5]){data[2]=1;WORD(vertex);if(vertex&1)KEEP(2,vertex-1);}
-    if(mask[6]){uint32_t h=MEM32(SNAPSHOT_FIELD(INDICES));data[3]=1;WORD(MEM32(SNAPSHOT_FIELD(BASE_VERTEX)));WORD(h);KEEP(3,h);}
+    if(mask[6]){uint32_t h=MEM32(SNAPSHOT_FIELD(INDICES));data[3]=1;WORD(MEM32(SNAPSHOT_FIELD(BASE_VERTEX)));WORD(h);KEEP(4,h);}
     for(unsigned i=0;i<16;++i)if(mask[7+i]){uint32_t h=MEM32(PILOT_D3D_STREAMS+i*12+8);++data[4];WORD(i);WORD(MEM32(PILOT_D3D_STREAMS+i*12));WORD(h);KEEP(3,h);}
     for(unsigned i=0;i<16;++i)if(mask[23+i] && pixel){++data[5];WORD(i);COPY(SNAPSHOT_FIELD(PIXEL_CONSTANTS)+i*16,4);}
     /* Original capture excludes the first 96 reserved vertex constants. */

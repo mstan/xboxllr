@@ -61,6 +61,10 @@ static uint32_t graphics_resource_busy(uint32_t header)
     uint32_t canonical=header,handle;unsigned kind;
     if(header==graphics_headers || header==graphics_headers+32 || header==graphics_headers+64) {
         kind=PILOT_GFX_SURFACE;handle=graphics_surface_index(header);
+    } else if(graphics_index_find(header)>=0 || (MEM32(header)&0x01070000u)==0x01010000u) {
+        struct GraphicsIndexObject *index=graphics_index(header);
+        if(index->bindings || pilot_gfx_checkpoint_busy(index->last_use))return 1;
+        MEM32(header+8)=0;return 0;
     } else if(graphics_vertex_find(header)>=0) {
         kind=PILOT_GFX_VERTEX;handle=graphics_vertex(header)->native;
     } else {

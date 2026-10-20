@@ -104,7 +104,7 @@ static void graphics_frame_capture_draw(unsigned shader,unsigned count,float x_s
         raster.viewport[3],raster.viewport[4],raster.viewport[5],raster.scissor_enabled,
         raster.scissor[0],raster.scissor[1],raster.scissor[2],raster.scissor[3],raster.source_width,raster.source_height);
 }
-static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)
+static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_t up_stride,const void *indices,unsigned index_count,int32_t base)
 {
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     graphics_frame_audit.capture_sequence=0;
@@ -112,9 +112,16 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     uint64_t profile=graphics_service_profile_enabled() && !dispatch_in_dpc?dispatch_monotonic():0;
     if(profile)++graphics_service_profile.draw_calls;
     unsigned primitive=args[0],first=args[1],count=args[2];
+    unsigned submitted=indices?index_count:count;
     if(!count || (uint64_t)first+count>UINT32_MAX)stop("invalid draw range",count);
-    if((primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || count<3 ||
-        (primitive==5 && count%3) || (primitive==8 && count%4))stop("unqualified primitive/count",primitive);
+    if((primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || submitted<3 ||
+        (primitive==5 && submitted%3) || (primitive==8 && submitted%4))stop("unqualified primitive/count",primitive);
+    const char *draw_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW),*fvf_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
+    if(indices && ((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture)))
+        stop("indexed draw input capture outside qualified diagnostic scope",primitive);
+#ifdef PILOT_GRAPHICS_FRAME_AUDIT
+    if(indices && graphics_frame_inputs.file)stop("indexed frame input capture outside qualified diagnostic scope",primitive);
+#endif
     if(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_PIXEL_SHADER) &&
         pilot_gfx_pixel_program((const uint32_t*)(memory+PILOT_D3D_RENDER_STATES),
             MEM32(PILOT_D3D_RENDER_STATES+136*4))<0)stop("unsupported native pixel draw",0);
@@ -223,14 +230,15 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     float offset[]={-1-viewport[0]*scale[0],1-viewport[1]*scale[1],-low/(high-low),0};
     offset[0]+=(1-mod_x_scale)*mod_x_anchor*scale[0];scale[0]*=mod_x_scale;
     if(pilot_gfx_shader_raster(scale,offset)<0)stop("native raster constants failed",0);
-    if(!up_data)scene_reference=graphics_draw_capture(args);
+    if(!up_data && !indices)scene_reference=graphics_draw_capture(args);
     }
     graphics_draw_profile_step(&profile,4);
     graphics_frame_capture_draw(shader,count,mod_x_scale,mod_x_anchor,1);
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
-    graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);
+    if(!indices)graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);
 #endif
-    int32_t result=up_data?pilot_gfx_draw_memory(primitive,count,memory+up_data,up_stride):pilot_gfx_draw_vertices(primitive,first,count);
+    int32_t result=indices?pilot_gfx_draw_indexed(primitive,index_count,indices,base):
+        up_data?pilot_gfx_draw_memory(primitive,count,memory+up_data,up_stride):pilot_gfx_draw_vertices(primitive,first,count);
     graphics_draw_profile_step(&profile,5);
     if(result<0)stop("native vertex draw failed",(uint32_t)result);
     if(scene_reference)graphics_scene_finish(scene_reference);
@@ -238,4 +246,31 @@ static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_
     if(pilot_verbose)fprintf(stderr,"[DRAW SUBMIT] primitive=%u first=%u count=%u\n",primitive,first,count);
     graphics_frame_capture_draw(shader,count,mod_x_scale,mod_x_anchor,0);
     graphics_draw_profile_step(&profile,6);
+}
+static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)
+{graphics_draw_submit(args,up_data,up_stride,NULL,0,0);}
+static void graphics_draw_indexed(const uint32_t args[3])
+{
+    unsigned count=args[1];
+    if(!count || count>32u*1024*1024)stop("invalid indexed draw count",count);
+    const unsigned char *indices=graphics_pointer(args[2],count*2);
+    unsigned low=UINT16_MAX,high=0;
+    for(unsigned i=0;i<count;++i) {
+        unsigned value=(unsigned)indices[i*2]|((unsigned)indices[i*2+1]<<8);
+        if(value<low)low=value;if(value>high)high=value;
+    }
+    int32_t base=(int32_t)MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_BASE_VERTEX);
+    int64_t first=(int64_t)base+low,last=(int64_t)base+high;
+    if(first<0 || last>=UINT32_MAX)stop("indexed base/vertex range overflow",(uint32_t)base);
+    uint32_t draw[]={args[0],(uint32_t)first,high-low+1};
+    /* The existing draw owner checks and uploads only the live stream span;
+     * indices stay indices all the way to native DrawIndexed. */
+    graphics_draw_submit(draw,0,0,indices,count,base);
+    if(!graphics_index_draws++)fprintf(stderr,"[INDEXED DRAW] primitive=%u indices=%u base=%d first=%u span=%u\n",
+        args[0],count,base,draw[1],draw[2]);
+    uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_INDICES);
+    if(header) {
+        struct PilotGpuProgress progress;pilot_gfx_completion_stats(&progress);
+        graphics_index(header)->last_use=progress.submitted;
+    }
 }

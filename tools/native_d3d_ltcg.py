@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import re
 import struct
+from itertools import combinations
 from capstone import Cs,CS_ARCH_X86,CS_MODE_32
 
 ADAPTER='xdk-d3d8-ltcg-5849-v1'
@@ -204,6 +205,21 @@ def inspect(context,proof):
     if variables['D3DRS_YuvEnable']!=layout['render_states']+layout['yuv_state']*4:
         raise ValueError('unreviewed YUV state index')
     cache=layout['cache_fields'];transform=layout['transform_fields']
+    if 'index_data_global' in layout:
+        index_data=layout['index_data_global']
+        if (type(index_data) is not int or index_data%4 or not any(
+                s['address']<=index_data and index_data+4<=s['address']+s['size'] for s in context.image['sections'])):
+            raise ValueError('unreviewed index data publication global')
+        require('D3DDevice_SetIndices','mov',f'dword ptr [{hex(index_data)}], eax')
+        require('D3DDevice_SetIndices','mov',f'dword ptr [{hex(index_data)}], 0')
+    if 'device_references' in layout:
+        offset=layout['device_references']
+        if type(offset) is not int or offset%4 or offset<0 or offset+4>layout['device_bytes']:
+            raise ValueError('unreviewed device reference field')
+        require('D3DDevice_AddRef','mov',f'ecx, dword ptr [eax + {hex(offset)}]')
+        require('D3DDevice_AddRef','mov',f'dword ptr [eax + {hex(offset)}], ecx')
+        require('D3DDevice_Release','mov',f'eax, dword ptr [edi + {hex(offset)}]')
+        require('D3DDevice_Release','mov',f'dword ptr [edi + {hex(offset)}], eax')
     for field,name,mnemonic,template in (
             ('pixel_shader','D3DDevice_SetPixelShader','mov','dword ptr [ebx + {offset}], eax'),
             ('vertex_object','D3DDevice_SetVertexShader','mov','dword ptr [esi + {offset}], edi'),
@@ -309,6 +325,8 @@ def emit_text(binding,interface,behavior_mask):
              'VERTEX_CONSTANTS_GLOBAL':layout['vertex_constants'],'RESOURCE_FENCE':layout['resource_fence'],
              'RESOURCE_TEXTURE_MODE':layout['texture_mode'],'SCREEN_BIAS':layout['screen_bias']}
     defines.update({'TRANSFORM_'+k.upper():v for k,v in layout['transform_fields'].items()})
+    if 'index_data_global' in layout:defines['INDEX_DATA_GLOBAL']=layout['index_data_global']
+    if 'device_references' in layout:defines['DEVICE_REFERENCES']=layout['device_references']
     defines.update({'SNAPSHOT_'+k.upper():v for k,v in cache.items()})
     if 'presentation_fields' in layout:
         header += ['#define PILOT_D3D_SURFACE_PROJECTION_VERSION 1u']
@@ -339,6 +357,24 @@ def bind(context,proof):
     generated=context.generated;record=context.output/'d3d-binding.aot-private.json'
     texts={'pilot_d3d_bindings.h':header,'pilot_d3d_binding.c':wrapper}
     if (generated/'pilot_d3d_binding.c').exists():
+        additions={'index_data_global':'INDEX_DATA_GLOBAL','device_references':'DEVICE_REFERENCES'}
+        available=[key for key in additions if key in binding['layout']]
+        for count in range(1,len(available)+1):
+            for missing in combinations(available,count):
+                previous=copy.deepcopy(binding)
+                for key in missing:previous['layout'].pop(key)
+                removed=tuple('#define PILOT_D3D_'+additions[key]+' ' for key in missing)
+                previous_header='\n'.join(line for line in header.splitlines() if not line.startswith(removed))+'\n'
+                actual=json.loads(record.read_text())
+                if (actual==previous and context.manifest.get('d3d_binding')==actual and
+                        (generated/'pilot_d3d_binding.c').read_text()==wrapper and
+                        (generated/'pilot_d3d_bindings.h').read_text()==previous_header):
+                    (generated/'pilot_d3d_bindings.h').write_text(header,encoding='utf-8',newline='\n')
+                    record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+                    context.manifest['d3d_binding']=binding
+                    context.manifest['files']['pilot_d3d_bindings.h']=hashlib.sha256((generated/'pilot_d3d_bindings.h').read_bytes()).hexdigest()
+                    context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+                    return binding
         if 'command_buffer' in binding:
             previous=copy.deepcopy(binding);previous.pop('command_buffer')
             actual=json.loads(record.read_text())

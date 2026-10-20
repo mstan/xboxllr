@@ -2,6 +2,7 @@
 #include "graphics_fixed_contract_test.inc"
 #include "graphics_borrowed_texture_contract_test.inc"
 #include "graphics_borrowed_vertex_contract_test.inc"
+#include "graphics_index_contract_test.inc"
 static void test_graphics_command_null_textures(uint32_t base,const char *failure)
 {
     uint32_t create[]={2,2,1,1,0,0x12,3};
@@ -49,6 +50,15 @@ static void test_graphics_commands(const char *failure)
     uint32_t create[]={0,1,0,PILOT_D3D_CREATE_BEHAVIOR_MASK,0x19000,0x19100};
     for(unsigned lifetime=0;lifetime<2;++lifetime) {
         CHECK(!call_graphics(PILOT_D3D_Direct3D_CreateDevice,create));
+        CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES)==1);
+        if(failure && !strcmp(failure,"device-reference")) {
+            MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES)=UINT32_MAX;
+            call_graphics(PILOT_D3D_D3DDevice_AddRef,NULL);CHECK(0);
+        }
+        CHECK(call_graphics(PILOT_D3D_D3DDevice_AddRef,NULL)==2);
+        ++MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES); /* original inline reference */
+        CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==2 && graphics_active);
+        CHECK(call_graphics(PILOT_D3D_D3DDevice_Release,NULL)==1 && graphics_active);
         CHECK(graphics_commands.base && MEM32(PILOT_D3D_COMMANDS_REQUEST_GLOBAL)==PILOT_D3D_COMMANDS_REQUEST_DEFAULT);
         uint32_t request=MEM32(PILOT_D3D_COMMANDS_REQUEST_GLOBAL),args[]={request/2,request};
         g_esp=0x18000;MEM32(g_esp)=0x12340;
@@ -62,6 +72,9 @@ static void test_graphics_commands(const char *failure)
         if(failure && !strncmp(failure,"borrowed-",9))test_graphics_borrowed_textures(failure);
         if(failure && !strncmp(failure,"vertex-",7)) {
             test_graphics_fixed_declarations(NULL);test_graphics_borrowed_vertices(failure);
+        }
+        if(failure && !strncmp(failure,"index-",6)) {
+            test_graphics_fixed_declarations(NULL);test_graphics_indices(failure);
         }
         struct PilotInitializerState observed;CHECK(pilot_gfx_initializer_snapshot(&observed) && !observed.dither);
         MEM32(base)=0x41710;MEM32(base+4)=0;MEM32(base+8)=0x40310;MEM32(base+12)=1;
@@ -85,6 +98,7 @@ static void test_graphics_commands(const char *failure)
         test_graphics_fixed_declarations(NULL);
         uint32_t borrowed_data=test_graphics_borrowed_textures(NULL);
         test_graphics_borrowed_vertices(NULL);
+        test_graphics_indices(NULL);
         // This title does not expose the public InsertFence/BlockOnFence pair.
         // Exercise their real shared completion owner without admitting a
         // nonexistent guest wrapper just to make a fixture pass.
@@ -92,6 +106,7 @@ static void test_graphics_commands(const char *failure)
         uint32_t fence=graphics_fence_insert();graphics_fence_wait(fence);
         ReleaseSRWLockExclusive(&graphics_lock);
         call_graphics(PILOT_D3D_D3DDevice_Release,NULL);graphics_abi_thread_retire();
+        CHECK(!MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_REFERENCES));
         CHECK(physical_find(borrowed_data,1) && !physical_find(borrowed_data,1)->borrowers && MEM32(0x19600)==0x01040003);
         physical_free(borrowed_data);
         CHECK(MEM32(0x19800)==1 && MEM32(0x19920)==1 && MEM32(0x19a40)==1);
