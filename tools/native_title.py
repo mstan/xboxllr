@@ -457,6 +457,8 @@ def main():
     parser.add_argument("--cmake", type=Path, default=Path("C:/Program Files/CMake/bin/cmake.exe") if os.name == "nt" else Path("cmake"))
     parser.add_argument("--generator", default="Visual Studio 17 2022" if os.name == "nt" else "Ninja")
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--with-checks", action="store_true",
+                        help="Build the title and native iteration check executables in one build graph; does not run tests")
     parser.add_argument("--link-profile", choices=("FINAL", "ITERATIVE"),
                         help="Select build-only linking policy; ITERATIVE keeps optimized CPU code on MSVC")
     parser.add_argument("--automated", action="store_true")
@@ -469,6 +471,8 @@ def main():
         parser.error("invalid job count or run duration")
     if (args.input_replay is not None or args.capture) and args.action != "run":
         parser.error("--input-replay and --capture apply only to run")
+    if args.with_checks and args.action != "build":
+        parser.error("--with-checks applies only to build")
     source, data = definition(args.title)
     if args.link_profile:
         data["build"]["PILOT_NATIVE_LINK_PROFILE"] = args.link_profile
@@ -493,8 +497,9 @@ def main():
     elif args.action == "build":
         selected = identity(source, data, args.generated, paths)
         require_receipt(args.build_dir / "native-title-configure.json", selected)
+        target = "pilot_native_iteration" if args.with_checks else "xlle_native_title"
         subprocess.run([str(args.cmake), "--build", str(args.build_dir), "--config", "Release",
-                        "--target", "xlle_native_title", "--parallel", str(args.jobs)], check=True)
+                        "--target", target, "--parallel", str(args.jobs)], check=True)
         selected["executable_sha256"] = digest(executable(args.build_dir, data["title"]["executable"]))
         (args.build_dir / "native-title-build.json").write_text(json.dumps(selected, indent=2) + "\n")
     elif args.action == "run":

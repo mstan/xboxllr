@@ -17,9 +17,10 @@ request and begins loading ambient audio. Native mutex startup now passes and
 the native audio device opens. Its mix-bin headroom setup now passes; the
 notification-enabled ADPCM ambient buffers are created and all three sets of
 workers issue subsequent stream reads. The periodic native delay now passes;
-the main thread opens the dashboard font and loads another section. The next
-stop is the bound but unimplemented native `IDirectSoundBuffer_Pause` service.
-The explicit offline virtual-link query now passes. No native menu
+the main thread opens the dashboard font and loads another section. Ordinary
+audio pause/resume now passes, and the remaining startup sound-effect buffers
+load. The next stop is a graphics command-buffer request,
+`D3D_MakeRequestedSpace`. The explicit offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -38,7 +39,8 @@ functions execute.
 | Native ambient buffer notifications | Setup and subsequent reads reached; audible QA pending | Three original ambient ADPCM buffers/workers progress; component checks cover real sample-position events and retained ownership |
 | Native worker timing and thread waits | Reached delay passes; teardown components pass | Real delay and CPU handoff, actual thread-exit waits and bounded paired signal/wait; 21 combined checks pass |
 | Offline virtual link-state query | Passed for unattached policy | Original wrapper mask/ABI/context and native provider/lifetime checks pass; actual startup advances beyond the link query |
-| First rendered native menu | Current blocker | Startup reaches `IDirectSoundBuffer_Pause`; its native buffer state transition remains required |
+| Native ordinary audio pause/resume | Implemented; actual startup passes | Original software rules, real PCM/ADPCM queued-sample retention, notifications and three backend checks pass; synchronized mode remains guarded |
+| First rendered native menu | Current blocker | Startup reaches `D3D_MakeRequestedSpace`; resolve its command-buffer contract through the shared graphics owner |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -325,6 +327,18 @@ fault semantics and kernel-version identity are retained as LLE-D08/D09 in the
 behavior remains implementation work in `.1.137`.
 
 ## Delivery order
+
+The [ordinary audio pause batch](NATIVE-AUDIO-PAUSE.md) passes the actual startup
+boundary. Executable `5f226640...` loads the remaining sound effects and stops
+at `D3D_MakeRequestedSpace`, with 254179 stopped-title-thread entries, exit 2
+before its deadline and no captured menu. Eleven combined Windows checks pass
+in 2.03 seconds, including real XAudio2 queued samples after a paused ring edit,
+DirectSound and maintained APU voice state. Ten profile and 34 driver checks
+pass. Only the audio metadata header changed among 119 generated files; all
+103 generated CPU objects were reused. The shared `build --with-checks` route
+now builds compatible targets and writes the launch receipt in one invocation;
+the final fixture-edit rebuild took 2.35 seconds under the observed host load.
+This is not a controlled speedup comparison or final runtime performance claim.
 
 The link-status batch now passes its actual startup boundary using an explicitly
 unattached virtual adapter. The [link contract](NATIVE-NETWORK-LINK.md) preserves

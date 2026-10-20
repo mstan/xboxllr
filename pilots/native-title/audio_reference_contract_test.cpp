@@ -16,6 +16,27 @@ static const char *advance(void *context,uint32_t frames)
     CHECK(!reference_advance_frames(frames));
     return input->fail_after_audio?"expected partial consumer failure":nullptr;
 }
+static void test_pause_reference(void)
+{
+    CHECK(!pilot_audio_open());CHECK(!reference_capture_epoch(0));void *voice=nullptr;
+    CHECK(!pilot_audio_buffer_create(4096,2,48000,16,&voice));
+    CHECK(pilot_audio_buffer_pause(voice,1)==1 && !pilot_audio_buffer_pause(voice,0));
+    CHECK(!pilot_audio_buffer_play(voice,1) && !reference_advance_frames(64));
+    ReferenceAudioSourceState before{},after{};CHECK(!reference_source_state(voice,&before));
+    CHECK(!pilot_audio_buffer_pause(voice,1));uint32_t status;
+    CHECK(!pilot_audio_buffer_status(voice,&status) && status==6);
+    CHECK(!reference_advance_frames(4800) && !reference_source_state(voice,&after));
+    CHECK(after.cbo_bytes==before.cbo_bytes && after.source_frames_fetched==before.source_frames_fetched);
+    CHECK(pilot_audio_buffer_pause(voice,2)<0);
+    CHECK(!pilot_audio_buffer_pause(voice,0) && !reference_advance_frames(64));
+    CHECK(!reference_source_state(voice,&after) && after.cbo_bytes==before.cbo_bytes+256);
+    CHECK(!pilot_audio_buffer_status(voice,&status) && status==5);
+    CHECK(!pilot_audio_buffer_pause(voice,1) && !pilot_audio_buffer_seek(voice,0));
+    CHECK(!reference_advance_frames(64) && !reference_source_state(voice,&after) && !after.cbo_bytes);
+    CHECK(!pilot_audio_buffer_status(voice,&status) && status==6);
+    CHECK(!pilot_audio_buffer_stop(voice) && pilot_audio_buffer_pause(voice,1)==1);
+    pilot_audio_buffer_destroy(voice);pilot_audio_close();
+}
 int main()
 {
     Input input;PilotReferenceClock clock{};
@@ -68,5 +89,6 @@ int main()
     offset.ticks=UINT64_MAX;CHECK(!pilot_reference_clock_step(&epoch,0));
     counter=0x1122334455667788ull;
     CHECK(pilot_reference_clock_tsc(&epoch,&counter) && counter==0x1122334455667788ull);
-    puts("PASS actual APU/headroom/routing/cursors; pure clock reads; detach/reopen epoch; failed consumer stops before time publication");
+    test_pause_reference();
+    puts("PASS actual APU/headroom/routing/cursors and voice-pause state; pure clock reads; detach/reopen epoch; failed consumer stops before time publication");
 }

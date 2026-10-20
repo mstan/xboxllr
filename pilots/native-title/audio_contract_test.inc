@@ -83,6 +83,7 @@ static void test_audio(void)
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetCurrentPosition,a)==0);
     CHECK(MEM32(a[1])==stopped_cursor && MEM32(a[2])==stopped_write);
 #ifdef PILOT_AUDIO_DSP
+    if(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion<PILOT_AUDIO_COUNT) {
     a[1]=2400;a[2]=2400;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
     a[1]=1;CHECK((int32_t)audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)<0);
     a[1]=0;a[2]=0;a[3]=3;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
@@ -95,6 +96,7 @@ static void test_audio(void)
     }
     CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Stop,a)==0);
     a[1]=0;a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
+    }
 #endif
     a[1]=(uint32_t)-1800;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetVolume,a)==0 && b->volume==-1800);
     a[1]=300;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetHeadroom,a)==0 && b->headroom==300);
@@ -105,7 +107,9 @@ static void test_audio(void)
     a[1]=caller;a[2]=9600;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0);
     CHECK(!b->owned && b->data==caller && b->frequency==24000 && test_write_faults(old));
     CHECK(pilot_audio_buffer_copy(b->host,0,samples,9600,1)==0 && !memcmp(samples,memory+caller,9600));
-    a[1]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetPitch,a)==0 && b->frequency==48000);
+    if(PILOT_AUDIO_IDirectSoundBuffer_SetPitch<PILOT_AUDIO_COUNT) {
+        a[1]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetPitch,a)==0 && b->frequency==48000);
+    }
     a[0]=device;CHECK(audio_test_call(PILOT_AUDIO_IDirectSound_Release,a)==1); /* buffer retains device */
     a[0]=buffer;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Release,a)==0 && !audio_device);
     CHECK(!test_write_faults(caller));bytes=0;CHECK(!vm_free(&caller,&bytes,MEM_RELEASE));

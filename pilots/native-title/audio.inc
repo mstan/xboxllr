@@ -30,6 +30,9 @@
 #ifndef PILOT_AUDIO_HAS_NOTIFICATIONS
 #define PILOT_AUDIO_HAS_NOTIFICATIONS 0
 #endif
+#ifndef PILOT_AUDIO_HAS_PAUSE
+#define PILOT_AUDIO_HAS_PAUSE 0
+#endif
 #ifdef PILOT_AUDIO_ADPCM
 #include "xbox_adpcm.h"
 #endif
@@ -414,6 +417,11 @@ void pilot_audio_dispatch(unsigned entry)
                 if(result>=0 && (a[3]&2))result=pilot_audio_buffer_seek(b->host,0);
                 if(result>=0)result=pilot_audio_buffer_play(b->host,a[3]&1);break;
             case PILOT_AUDIO_IDirectSoundBuffer_Stop:result=pilot_audio_buffer_stop(b->host);break;
+#if PILOT_AUDIO_HAS_PAUSE
+            case PILOT_AUDIO_IDirectSoundBuffer_Pause:
+                if(a[1]>1)stop("synchronized/unknown audio pause mode is unqualified",a[1]);
+                result=pilot_audio_buffer_pause(b->host,a[1]);break;
+#endif
             case PILOT_AUDIO_IDirectSoundBuffer_GetStatus: {
                 uint32_t status;audio_pointer(a[1],4);result=pilot_audio_buffer_status(b->host,&status);
                 if(result>=0)MEM32(a[1])=status;break;

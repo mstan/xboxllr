@@ -256,6 +256,7 @@ static int test_write_faults(uint32_t va)
 #include "audio_detach_contract_test.inc"
 #include "audio_adpcm_contract_test.inc"
 #include "audio_notification_contract_test.inc"
+#include "audio_pause_contract_test.inc"
 #endif
 static void test_memory(void)
 {
@@ -637,6 +638,9 @@ int main(int argc,char **argv)
 #endif
 #if PILOT_AUDIO_HAS_NOTIFICATIONS && !defined(PILOT_AUDIO_REFERENCE)
     if(argc==2 && !strcmp(argv[1],"audio-notifications")){test_audio_notifications();return 0;}
+#endif
+#if PILOT_AUDIO_HAS_PAUSE && !defined(PILOT_AUDIO_REFERENCE)
+    if(argc==2 && !strcmp(argv[1],"audio-pause")){test_audio_pause();return 0;}
 #endif
     if(argc==2 && !strcmp(argv[1],"audio-detach")){test_audio_detach();return 0;}
 #ifdef PILOT_AUDIO_ADPCM

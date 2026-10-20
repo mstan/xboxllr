@@ -100,6 +100,16 @@ when changing the title definition, generated admissions, private build inputs
 or link policy. CMake handles ordinary build-script dependency regeneration;
 explicit configuration is useful after adding notice source files (below).
 
+`build --with-checks` builds the shared `pilot_native_iteration` target and
+writes the normal executable-bound receipt in one invocation. This target
+includes the title, runtime contract fixture and, for XAudio2 builds, the
+independent audio reference/DirectSound fixtures. It builds check executables;
+run the selected CTests separately. A failed build does not refresh the launch
+receipt. This keeps a single dependency traversal for compatible targets and
+avoids a second receipt-only application build. Ordinary `build` continues to
+build just the title. Use the same four-job and ITERATIVE policy throughout
+the development loop; retain FINAL acceptance for delivery.
+
 Notice trees remain part of each native build. Their individual output files
 and source dependencies now drive copying, including builds with no relink.
 Unchanged inputs need no copy command or content comparison. Changed files and

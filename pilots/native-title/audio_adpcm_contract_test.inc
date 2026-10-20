@@ -63,8 +63,15 @@ static void test_audio_adpcm(void)
             CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetCurrentPosition,a)==0 && MEM32(a[1])==i*align);
         }
         a[1]=bytes;CHECK((int32_t)audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetCurrentPosition,a)<0);
-        a[1]=2*align;a[2]=4*align;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
-        a[1]=bytes;a[2]=1;CHECK((int32_t)audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)<0);
+        int partial_loop=PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion<PILOT_AUDIO_COUNT;
+        if(partial_loop) {
+            a[1]=2*align;a[2]=4*align;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
+            a[1]=bytes;a[2]=1;CHECK((int32_t)audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)<0);
+        } else {
+            // Full-ring playback includes the predictor edited in the earlier
+            // partial-lock check; restore its constant value before mixing.
+            MEM16(b->data+align)=1000;
+        }
         a[1]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetHeadroom,a)==0);
         a[1]=a[2]=0;a[3]=3;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
         float average[32];audio_test_observe(average,0);
@@ -73,8 +80,8 @@ static void test_audio_adpcm(void)
         for(unsigned c=2;c<32;++c)CHECK(fabs(average[c])<0.000001);
         for(unsigned i=0;i<10;++i) {
             a[1]=0x19300;a[2]=0x19304;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetCurrentPosition,a)==0);
-            CHECK(MEM32(a[1])>=2*align && MEM32(a[1])<6*align && !(MEM32(a[1])%align));
-            CHECK(MEM32(a[2])>=2*align && MEM32(a[2])<6*align && !(MEM32(a[2])%align));Sleep(7);
+            CHECK(MEM32(a[1])>=(partial_loop?2*align:0) && MEM32(a[1])<(partial_loop?6*align:bytes) && !(MEM32(a[1])%align));
+            CHECK(MEM32(a[2])>=(partial_loop?2*align:0) && MEM32(a[2])<(partial_loop?6*align:bytes) && !(MEM32(a[2])%align));Sleep(7);
         }
         CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Stop,a)==0);
         /* Caller-owned compressed storage remains alive after buffer/device release. */
@@ -83,8 +90,10 @@ static void test_audio_adpcm(void)
         memcpy(memory+source,memory+b->data,bytes);a[1]=source;a[2]=bytes;
         CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0);
         CHECK(!b->owned && b->data==source && test_write_faults(old));adpcm_test_readback(b);
-        a[1]=a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
-        a[3]=2;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
+        if(partial_loop) {
+            a[1]=a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetLoopRegion,a)==0);
+        }
+        a[1]=a[2]=0;a[3]=2;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_Play,a)==0);
         Sleep(100);a[1]=0x19300;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_GetStatus,a)==0 && !MEM32(a[1]));
         a[1]=a[2]=0;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetBufferData,a)==0);
         CHECK(!b->host && !b->bytes && !b->data && !test_write_faults(source));

@@ -6,10 +6,12 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <dsound.h>
+#include <stdlib.h>
 #include <string.h>
 #include "audio_backend.h"
 static IDirectSound8 *audio_host;
 static IDirectSoundBuffer *audio_primary;
+struct AudioBuffer {IDirectSoundBuffer *voice;int playing,looping,paused;};
 
 int32_t pilot_audio_open(void)
 {
@@ -44,17 +46,21 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
     desc.dwFlags=DSBCAPS_GLOBALFOCUS|DSBCAPS_GETCURRENTPOSITION2|DSBCAPS_CTRLVOLUME|DSBCAPS_CTRLFREQUENCY;
     IDirectSoundBuffer *buffer=NULL;
     HRESULT hr=IDirectSound8_CreateSoundBuffer(audio_host,&desc,&buffer,NULL);
-    if(SUCCEEDED(hr))*out=buffer;
+    if(SUCCEEDED(hr)) {
+        struct AudioBuffer *owned=calloc(1,sizeof(*owned));
+        if(!owned){IDirectSoundBuffer_Release(buffer);return E_OUTOFMEMORY;}
+        owned->voice=buffer;*out=owned;
+    }
     return hr;
 }
 void pilot_audio_buffer_destroy(void *buffer)
 {
-    if(buffer)IDirectSoundBuffer_Release((IDirectSoundBuffer*)buffer);
+    struct AudioBuffer *b=buffer;if(b){IDirectSoundBuffer_Release(b->voice);free(b);}
 }
 int32_t pilot_audio_buffer_copy(void *buffer,uint32_t offset,void *data,uint32_t bytes,int readback)
 {
     if(!buffer || !data || !bytes)return E_INVALIDARG;
-    IDirectSoundBuffer *b=buffer;void *p1=NULL,*p2=NULL;DWORD n1=0,n2=0;
+    IDirectSoundBuffer *b=((struct AudioBuffer*)buffer)->voice;void *p1=NULL,*p2=NULL;DWORD n1=0,n2=0;
     HRESULT hr=IDirectSoundBuffer_Lock(b,offset,bytes,&p1,&n1,&p2,&n2,0);
     if(FAILED(hr))return hr;
     if(n1+n2!=bytes)hr=E_FAIL;
@@ -63,23 +69,36 @@ int32_t pilot_audio_buffer_copy(void *buffer,uint32_t offset,void *data,uint32_t
     HRESULT unlock=IDirectSoundBuffer_Unlock(b,p1,n1,p2,n2);
     return FAILED(hr)?hr:unlock;
 }
-int32_t pilot_audio_buffer_play(void *b,int looping)
-{ return IDirectSoundBuffer_Play((IDirectSoundBuffer*)b,0,0,looping?DSBPLAY_LOOPING:0); }
-int32_t pilot_audio_buffer_stop(void *b)
-{ return IDirectSoundBuffer_Stop((IDirectSoundBuffer*)b); }
-int32_t pilot_audio_buffer_status(void *b,uint32_t *status)
+int32_t pilot_audio_buffer_play(void *opaque,int looping)
+{ struct AudioBuffer *b=opaque;HRESULT hr=IDirectSoundBuffer_Play(b->voice,0,0,looping?DSBPLAY_LOOPING:0);
+  if(SUCCEEDED(hr)){b->playing=1;b->looping=!!looping;b->paused=0;}return hr; }
+int32_t pilot_audio_buffer_stop(void *opaque)
+{ struct AudioBuffer *b=opaque;HRESULT hr=IDirectSoundBuffer_Stop(b->voice);
+  if(SUCCEEDED(hr))b->playing=b->paused=0;return hr; }
+int32_t pilot_audio_buffer_status(void *opaque,uint32_t *status)
 {
-    DWORD native=0;HRESULT hr=IDirectSoundBuffer_GetStatus((IDirectSoundBuffer*)b,&native);
+    struct AudioBuffer *b=opaque;DWORD native=0;HRESULT hr=IDirectSoundBuffer_GetStatus(b->voice,&native);
     if(FAILED(hr))return hr;
     if(native&DSBSTATUS_BUFFERLOST)return DSERR_BUFFERLOST; /* Xbox bit 2 means paused. */
     if(native&~(DSBSTATUS_PLAYING|DSBSTATUS_LOOPING))return E_UNEXPECTED;
-    *status=native;return hr;
+    if(!b->paused && !(native&DSBSTATUS_PLAYING))b->playing=0;
+    *status=b->paused?2u|(b->looping?4u:0u):native;return hr;
+}
+int32_t pilot_audio_buffer_pause(void *opaque,uint32_t mode)
+{
+    struct AudioBuffer *b=opaque;uint32_t status;
+    if(!b)return E_INVALIDARG;if(mode>1)return E_NOTIMPL;
+    HRESULT hr=pilot_audio_buffer_status(b,&status);if(FAILED(hr))return hr;
+    if(!b->playing)return (int32_t)mode;
+    if(b->paused==!!mode)return S_OK;
+    hr=mode?IDirectSoundBuffer_Stop(b->voice):IDirectSoundBuffer_Play(b->voice,0,0,b->looping?DSBPLAY_LOOPING:0);
+    if(SUCCEEDED(hr))b->paused=!!mode;return hr;
 }
 int32_t pilot_audio_buffer_position(void *b,uint32_t *play,uint32_t *write)
-{ return IDirectSoundBuffer_GetCurrentPosition((IDirectSoundBuffer*)b,(DWORD*)play,(DWORD*)write); }
+{ return IDirectSoundBuffer_GetCurrentPosition(((struct AudioBuffer*)b)->voice,(DWORD*)play,(DWORD*)write); }
 int32_t pilot_audio_buffer_seek(void *b,uint32_t position)
-{ return IDirectSoundBuffer_SetCurrentPosition((IDirectSoundBuffer*)b,position); }
+{ return IDirectSoundBuffer_SetCurrentPosition(((struct AudioBuffer*)b)->voice,position); }
 int32_t pilot_audio_buffer_volume(void *b,int32_t volume)
-{ return IDirectSoundBuffer_SetVolume((IDirectSoundBuffer*)b,volume); }
+{ return IDirectSoundBuffer_SetVolume(((struct AudioBuffer*)b)->voice,volume); }
 int32_t pilot_audio_buffer_frequency(void *b,uint32_t frequency)
-{ return IDirectSoundBuffer_SetFrequency((IDirectSoundBuffer*)b,frequency); }
+{ return IDirectSoundBuffer_SetFrequency(((struct AudioBuffer*)b)->voice,frequency); }

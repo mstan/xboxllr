@@ -26,6 +26,10 @@ int32_t pilot_audio_capture_wait(uint32_t milliseconds);
 uint32_t pilot_audio_capture_end(void);
 #endif
 int32_t pilot_audio_buffer_stop(void *buffer);
+/* Ordinary Xbox Pause: 0 resumes, 1 pauses; source position/loop/queued data
+ * survive. An inactive buffer returns the mode unchanged. Mode2 requires the
+ * separate synchronized-playback owner and is not admitted by this interface. */
+int32_t pilot_audio_buffer_pause(void *buffer,uint32_t mode);
 int32_t pilot_audio_buffer_status(void *buffer,uint32_t *status);
 int32_t pilot_audio_buffer_position(void *buffer,uint32_t *play,uint32_t *write);
 int32_t pilot_audio_buffer_seek(void *buffer,uint32_t position);

@@ -77,7 +77,7 @@ struct Engine {
  uint32_t physical(Buffer*b,uint32_t offset)const{return word(sge+(b->start+offset/4096)*8)+(offset&4095);}
  int32_t copy(Buffer*b,uint32_t offset,void*p,uint32_t n,bool read){auto*q=(uint8_t*)p;while(n){uint32_t step=std::min({n,4096-(offset&4095),b->bytes-offset});uint32_t a=physical(b,offset);if(read)memcpy(q,ram.data()+a,step);else memcpy(ram.data()+a,q,step);n-=step;q+=step;offset=(offset+step)%b->bytes;}return OK;}
  bool emit(unsigned n){float mix[1024]{};
-  for(auto*b:voices)if(b&&b->live&&b->playing){float source[64]{};uint32_t count=0;bool ended=false;
+  for(auto*b:voices)if(b&&b->live&&b->playing&&!(word(object(b)+0x54)&(1u<<18))){float source[64]{};uint32_t count=0;bool ended=false;
    source_work=true;bool ok=b->frequency==48000?apu.source_frames((uint16_t)b->voice,source,n,count,ended):apu.resample_source((uint16_t)b->voice,source,n,count,ended);
    source_work=false;b->binding_clean=false;if(!ok||!apu.mix_2d_samples((uint16_t)b->voice,source,count,mix))return false;
    if(!capture.flush_read()){fault="reference capture source flush failed";return false;}
@@ -118,7 +118,11 @@ int32_t pilot_audio_buffer_play(void*p,int looping){if(ready())return FAIL;auto*
  if(looping&&(engine->word(engine->object(b)+0x58)&0xffffff)>=(b->loop_start+b->loop_bytes)/b->align)return UNSUPPORTED;
  b->loop=!!looping;b->playing=true;engine->select(b);uint32_t f=engine->word(engine->object(b)+4);engine->reg(0x20304,(f&~(1u<<25))|(b->loop?1u<<25:0));engine->region_config(b);engine->active(b,true);return engine->event(b,4)&&engine->fault.empty()?OK:FAIL;}
 int32_t pilot_audio_buffer_stop(void*p){if(ready())return FAIL;auto*b=buffer(p);if(!b)return INVALID;if(b->drained)return UNSUPPORTED;b->saved_byte=(engine->word(engine->object(b)+0x58)&0xffffff)*b->align;engine->active(b,false);b->playing=false;return engine->event(b,5)?OK:FAIL;}
-int32_t pilot_audio_buffer_status(void*p,uint32_t*out){if(ready())return FAIL;auto*b=buffer(p);if(!b||!out)return INVALID;*out=b->playing?(b->loop?5:1):0;return OK;}
+int32_t pilot_audio_buffer_pause(void*p,uint32_t mode){if(ready())return FAIL;auto*b=buffer(p);if(!b)return INVALID;if(mode>1)return UNSUPPORTED;if(!b->playing)return (int32_t)mode;
+ // Original software publishes VOICE_PAUSE bit18 without changing source CBO,
+ // loop or converter history. The reference consumes that actual voice word.
+ engine->reg(0x20140,b->voice|(mode?1u<<18:0));return engine->fault.empty()&&engine->event(b,9,mode)?OK:FAIL;}
+int32_t pilot_audio_buffer_status(void*p,uint32_t*out){if(ready())return FAIL;auto*b=buffer(p);if(!b||!out)return INVALID;*out=b->playing?((engine->word(engine->object(b)+0x54)&(1u<<18)?2u:1u)|(b->loop?4u:0u)):0;return OK;}
 int32_t pilot_audio_buffer_position(void*p,uint32_t*play,uint32_t*write){if(ready())return FAIL;auto*b=buffer(p);if(!b)return INVALID;if(b->drained)return UNSUPPORTED;uint32_t read=b->playing?(engine->word(engine->object(b)+0x58)&0xffffff)*b->align:b->saved_byte;uint32_t next=b->saved_byte;if(b->playing){uint32_t safe=read+32*b->align;next=b->loop&&read>=b->loop_start&&read<b->loop_start+b->loop_bytes?b->loop_start+safe%b->loop_bytes:safe%b->bytes;}if(play)*play=read;if(write)*write=next;return OK;}
 int32_t pilot_audio_buffer_seek(void*p,uint32_t at){if(ready())return FAIL;auto*b=buffer(p);if(!b||at>=b->bytes||at%b->align)return INVALID;if(b->loop&&at>=b->loop_start+b->loop_bytes)return UNSUPPORTED;engine->select(b);engine->reg(0x203d8,at/b->align);b->drained=false;b->binding_clean=true;if(!b->playing)b->saved_byte=at;return engine->event(b,7)&&engine->fault.empty()?OK:FAIL;}
 int32_t pilot_audio_buffer_loop_region(void*p,uint32_t start,uint32_t bytes){if(ready())return FAIL;auto*b=buffer(p);if(!b||start>=b->bytes||start%b->align)return INVALID;if(!bytes)bytes=b->bytes-start;if(bytes>b->bytes-start||bytes%b->align)return INVALID;

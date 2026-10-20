@@ -165,7 +165,7 @@ struct Buffer final:public IXAudio2VoiceCallback {
     UINT32 loop_start=0,loop_end=0;
     UINT64 baseline=0;
     UINT64 capture_id=0;
-    bool playing=false,looping=false,submitted_end=false;
+    bool playing=false,paused=false,looping=false,submitted_end=false;
     PilotAudioNotification notifications[64]{};
     unsigned notification_count=0;
     UINT64 notification_bytes=0;
@@ -267,7 +267,7 @@ static HRESULT fill(Buffer *b)
     if(FAILED(b->error))return b->error;
     if(!b->playing)return S_OK;
     notifications_progress(b);
-    if(b->submitted_end)return S_OK;
+    if(b->paused || b->submitted_end)return S_OK;
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s,XAUDIO2_VOICE_NOSAMPLESPLAYED);
     if(!s.BuffersQueued)audio_stream_record(b,"empty");
     UINT32 frames=b->frequency/100;if(!frames)frames=1;if(frames>512)frames=512;
@@ -628,13 +628,14 @@ static XAUDIO2_VOICE_STATE refresh(Buffer *b)
 {
     notifications_progress(b);
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
-    if(b->playing && b->submitted_end && !s.BuffersQueued){b->playing=false;b->origin=b->next=0;b->baseline=s.SamplesPlayed;b->notification_bytes=0;b->submitted_end=false;audio_ingress_record(b,4,0,nullptr,0);}
+    if(b->playing && !b->paused && b->submitted_end && !s.BuffersQueued){b->playing=false;b->origin=b->next=0;b->baseline=s.SamplesPlayed;b->notification_bytes=0;b->submitted_end=false;audio_ingress_record(b,4,0,nullptr,0);}
     return s;
 }
 int32_t pilot_audio_buffer_play(void *opaque,int looping)
 {
     auto *b=static_cast<Buffer*>(opaque);Guard guard;
     refresh(b);
+    b->paused=false;
     if(b->playing && b->looping!=!!looping){UINT32 at=position(b);b->looping=!!looping;return seek(b,at,true);}
     b->looping=!!looping;b->playing=true;
     audio_ingress_record(b,4,0,nullptr,0);
@@ -649,18 +650,38 @@ static HRESULT seek(Buffer *b,UINT32 at,bool play)
     if(FAILED(hr))return hr;
     XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
     b->origin=b->next=at;b->baseline=s.SamplesPlayed;b->notification_bytes=0;b->submitted_end=false;b->playing=play;
+    if(!play)b->paused=false;
     audio_ingress_record(b,4,0,nullptr,0);
-    if(play){hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();SetEvent(wake);}
+    if(play && !b->paused){hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();SetEvent(wake);}
     audio_stream_record(b,play?"seek-playing":"seek-stopped",at);
     return hr;
 }
 int32_t pilot_audio_buffer_stop(void *opaque)
 {auto *b=static_cast<Buffer*>(opaque);Guard guard;return seek(b,position(b),false);}
+int32_t pilot_audio_buffer_pause(void *opaque,uint32_t mode)
+{
+    auto *b=static_cast<Buffer*>(opaque);
+    if(!b)return E_INVALIDARG;if(mode>1)return E_NOTIMPL;
+    Guard guard;refresh(b);if(FAILED(b->error))return b->error;
+    if(!b->playing)return (int32_t)mode;
+    if(b->paused==!!mode)return S_OK;
+    HRESULT hr;
+    if(mode) {
+        // Stop preserves XAudio2's queued PCM and real SamplesPlayed epoch.
+        // Flush/seek would discard already-owned streaming data and callbacks.
+        hr=b->voice->Stop();if(SUCCEEDED(hr))b->paused=true;
+    } else {
+        b->paused=false;hr=fill(b);if(SUCCEEDED(hr))hr=b->voice->Start();
+        if(FAILED(hr))b->paused=true;else SetEvent(wake);
+    }
+    notifications_progress(b);audio_stream_record(b,mode?"pause":"resume");
+    return hr;
+}
 int32_t pilot_audio_buffer_status(void *opaque,uint32_t *status)
 {
     auto *b=static_cast<Buffer*>(opaque);if(!status)return E_POINTER;Guard guard;
     refresh(b);
-    *status=b->playing?(b->looping?5:1):0;return b->error;
+    *status=b->playing?((b->paused?2u:1u)|(b->looping?4u:0u)):0;return b->error;
 }
 int32_t pilot_audio_buffer_position(void *opaque,uint32_t *play,uint32_t *write)
 {auto *b=static_cast<Buffer*>(opaque);Guard guard;refresh(b);if(play)*play=position(b);if(write)*write=b->next;audio_stream_record(b,"position");return b->error;}

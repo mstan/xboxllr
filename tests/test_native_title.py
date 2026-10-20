@@ -13,6 +13,25 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_combined_build_is_one_invocation_and_failure_cannot_refresh_receipt(self):
+        pathsfile=self.root/'paths.json'
+        pathsfile.write_text(json.dumps({key:str(value) for key,value in self.paths.items()}))
+        (self.build/'native-title-configure.json').write_text(json.dumps(n.identity(self.source,self.data,self.output,self.paths)))
+        arguments=['native_title.py','build','--title',str(self.source),'--paths',str(pathsfile),
+                   '--generated',str(self.output),'--build-dir',str(self.build),'--with-checks']
+        with patch.object(sys,'argv',arguments),patch.object(n.subprocess,'run') as runner:
+            self.assertIsNone(n.main())
+        runner.assert_called_once()
+        command=runner.call_args.args[0]
+        self.assertEqual(command[command.index('--target')+1],'pilot_native_iteration')
+        receipt=self.build/'native-title-build.json'
+        selected=json.loads(receipt.read_text())
+        self.assertEqual(selected['executable_sha256'],n.digest(self.binary))
+        before=receipt.read_bytes();self.binary.write_bytes(b'changed authored binary')
+        with patch.object(sys,'argv',arguments),patch.object(n.subprocess,'run',side_effect=subprocess.CalledProcessError(1,command)),self.assertRaises(subprocess.CalledProcessError):
+            n.main()
+        self.assertEqual(receipt.read_bytes(),before)
+
     def test_link_policy_preserves_generation_and_has_distinct_build_identity(self):
         original = n.identity(self.source, self.data, self.output)
         preparation = n.preparation_identity(self.source, self.data, self.output)
