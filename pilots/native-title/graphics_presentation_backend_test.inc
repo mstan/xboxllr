@@ -12,7 +12,7 @@ static int test_guest_presentation(void)
         ID3D11DeviceContext_OMGetRenderTargets(ctx,0,NULL,&depth);CHECK(!depth && !pilot_donor_default_depth());
         CHECK(pilot_gfx_surface_ref(2,1)<0 && pilot_gfx_targets(0,UINT32_MAX)<0);
         CHECK(pilot_gfx_clear(2,0,1,0)<0);
-        CHECK(pilot_gfx_multisample(1,UINT32_MAX) && !pilot_gfx_multisample(0,UINT32_MAX) && !pilot_gfx_multisample(1,1));
+        CHECK(pilot_gfx_multisample(1,UINT32_MAX) && pilot_gfx_multisample(0,UINT32_MAX) && !pilot_gfx_multisample(2,UINT32_MAX) && !pilot_gfx_multisample(1,1));
         uint32_t size[2];CHECK(pilot_gfx_render_size(size) && size[0]==32 && size[1]==16);
         uint32_t viewport[]={0,0,16,8,0,0x3f800000};CHECK(pilot_gfx_viewport(viewport)==0);
         D3D11_VIEWPORT actual;UINT count=1;ID3D11DeviceContext_RSGetViewports(ctx,&count,&actual);

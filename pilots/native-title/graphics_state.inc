@@ -14,7 +14,7 @@ static void graphics_render_state(uint32_t state,uint32_t value,int cache)
         stop("unqualified render-state value",state);
     }
     if(cache) {
-        if(state==65 || state==112 || state==117 || state==137 || state==142 || state==149) {
+        if(state==65 || state==76 || state==112 || state==117 || state==137 || state==142 || state==149) {
             if(!pilot_initializer_cache((uint32_t*)(memory+PILOT_D3D_RENDER_STATES),166,state,value))
                 stop("invalid initializer cache update",state);
         } else MEM32(PILOT_D3D_RENDER_STATES+4*state)=value;

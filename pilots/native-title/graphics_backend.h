@@ -24,6 +24,7 @@ int pilot_gfx_command_submit(void);
 int pilot_gfx_initializer_snapshot(struct PilotInitializerState *out);
 int pilot_gfx_initializer_consumer(unsigned program,uint32_t primitive,uint32_t fvf);
 int pilot_gfx_multisample(unsigned enable,uint32_t mask);
+int pilot_gfx_edge_antialias(unsigned enabled);
 uint32_t pilot_gfx_feedback_mask(void);
 int32_t pilot_gfx_create(const uint32_t parameters[17]);
 int32_t pilot_gfx_parameters(const uint32_t parameters[17]);

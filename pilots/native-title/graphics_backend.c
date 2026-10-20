@@ -136,6 +136,7 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_fan_backend.inc"
 #include "graphics_index_backend.inc"
 #include "graphics_flat_backend.inc"
+#include "graphics_edge_backend.inc"
 #include "graphics_depth_texture_backend.inc"
 
 void pilot_gfx_pixel_fixed(void)
@@ -218,6 +219,7 @@ void pilot_gfx_close(void)
     pilot_fan_close();
     pilot_index_close();
     pilot_flat_close();
+    pilot_edge_close();
     pilot_depth_texture_close();
     pilot_visual_close();
     pilot_logic_copy=pilot_requested_blend=0;
@@ -408,6 +410,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     pilot_blend_default_depth_shape=pilot_surfaces[2] && pilot_blend_depth_shape(pilot_surfaces[2],0);
     pilot_blend_transient=pilot_blend_transient_proof=0;
     pilot_color_target=0;pilot_depth_target=next.depth?UINT32_MAX:0;pilot_default_color_format=p[2];
+    pilot_edge_close();
     memset(&pilot_initializer,0,sizeof(pilot_initializer));pilot_initializer.precision_policy=PILOT_COLOR_NATIVE_RGBA8;
     pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
     /* Guest Reset reallocates console presentation storage. The host window
@@ -1093,6 +1096,7 @@ void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf)
 {
     if (!pilot_device) return E_FAIL;
+    if(pilot_edge_requested)return E_NOTIMPL; /* The internal donor UP path owns its raster setup. */
     if((pilot_initializer.controls || pilot_initializer.dither) &&
        !pilot_gfx_initializer_consumer(0,primitive==4?5:primitive==5?6:0,fvf))return E_NOTIMPL;
     pilot_gfx_shader_fixed_binding();
@@ -1152,6 +1156,7 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
     if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
     if(pilot_initializer.dither && !pilot_initializer_target_format())return E_NOTIMPL;
     uint32_t feedback=pilot_feedback_validate();
+    if(pilot_edge_requested && feedback)return E_NOTIMPL;
     D3D11_PRIMITIVE_TOPOLOGY topology;
     if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     else if(primitive==6 && count>=3)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
@@ -1195,6 +1200,9 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
     if(copied!=feedback)pilot_d3d_backend_stop("feedback copy did not cover bound aliases");
     ID3D11BlendState *saved_blend=NULL;FLOAT saved_factors[4]={0};UINT saved_mask=0;
     int explicit_blend=pilot_donor_blend_active();
+    if(pilot_edge_requested && explicit_blend) {
+        pilot_donor_blend_candidate(0);return E_NOTIMPL;
+    }
     if(explicit_blend) {
         if(copied)pilot_d3d_backend_stop("explicit blend cannot share an aliased sampling draw");
         RhiView *view=pilot_donor_blend_destination();
@@ -1204,6 +1212,13 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
         ID3D11DeviceContext_OMSetBlendState(context,NULL,NULL,saved_mask);
     }
 #endif
+    struct PilotEdgeDraw edge_draw;
+    HRESULT edge_result=pilot_edge_begin(&edge_draw);if(FAILED(edge_result)) {
+#ifdef PILOT_D3D_PHOBOS
+        pilot_donor_blend_candidate(0);
+#endif
+        return edge_result;
+    }
     if(indices) {
         ID3D11Buffer *previous=NULL;DXGI_FORMAT format;UINT offset;
         ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
@@ -1214,6 +1229,7 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
     } else if(primitive==7)pilot_fan_draw(first,count);
     else if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);
     else ID3D11DeviceContext_Draw(context,count,first);
+    pilot_edge_end(&edge_draw);
 #ifdef PILOT_D3D_PHOBOS
     if(explicit_blend) {
         ID3D11ShaderResourceView *none=NULL;
@@ -1371,11 +1387,13 @@ int32_t pilot_gfx_reference_target_readback(unsigned depth,void *data,uint32_t c
     ID3D11Texture2D_Release(source);return status;
 }
 
-/* The finite admitted SSAA path covers all raster texels and has no host MSAA
- * mask. Disabling/changing its sample topology needs another qualified path. */
+/* Both admitted guest modes are non-multisampled rasters (ordinary or 2x2
+ * supersampled). Original SetRenderTarget leaves device bit 0x8000 clear
+ * for SSAA, so either requested enable value leaves that raster unchanged.
+ * Partial masks and actual guest MSAA formats remain unqualified. */
 int pilot_gfx_multisample(unsigned enable,uint32_t mask)
 {
-    if(!pilot_device || enable!=1 || mask!=UINT32_MAX)return 0;
+    if(!pilot_device || enable>1 || mask!=UINT32_MAX)return 0;
     return pilot_presentation.sample_type==0x11 || pilot_presentation.sample_type==0x2222;
 }
 

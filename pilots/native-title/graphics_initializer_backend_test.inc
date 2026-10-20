@@ -19,6 +19,11 @@ static int test_initializer_states(void)
     CHECK(!pilot_gfx_command_method(0x1c0c,0,0) && !pilot_gfx_command_method(0x1b10,0,0));
     pilot_gfx_texture_destroy(sampled);
     struct PilotInitializerState untouched;CHECK(pilot_gfx_initializer_snapshot(&untouched) && !untouched.dither);
+    CHECK(pilot_gfx_command_method(0x9f8,15,0));
+    struct PilotInitializerState probe;CHECK(pilot_gfx_initializer_snapshot(&probe) && !memcmp(&probe,&untouched,sizeof(probe)));
+    CHECK(pilot_gfx_command_method(0x9f8,15,1) && pilot_gfx_command_method(0x9f8,4,1));
+    CHECK(pilot_gfx_initializer_snapshot(&probe) && probe.swath_width==4 && probe.raster_schedule_policy==PILOT_RASTER_HOST_AUTOMATIC);
+    CHECK(!pilot_gfx_command_method(0x9f8,5,1));
     uint32_t buffer=0,data[4]={1,2,3,4},read[4];
     CHECK(!pilot_gfx_vertex_create(sizeof(data),&buffer));pilot_gfx_vertex_upload(buffer,data,sizeof(data));
     CHECK(pilot_gfx_command_method(0x1710,0,0) && pilot_gfx_command_method(0x1710,0,1));
@@ -65,7 +70,7 @@ static int test_initializer_states(void)
     CHECK(pilot_gfx_reset(bad)<0);
     struct PilotInitializerState retained;CHECK(pilot_gfx_initializer_snapshot(&retained) && !memcmp(&retained,&observed,sizeof(retained)));
     CHECK(pilot_gfx_reset(p)==0 && pilot_gfx_initializer_snapshot(&observed));
-    CHECK(observed.precision_policy==PILOT_COLOR_NATIVE_RGBA8 && !observed.dither && !observed.controls && !observed.zero_bias);
+    CHECK(observed.precision_policy==PILOT_COLOR_NATIVE_RGBA8 && !observed.dither && !observed.controls && !observed.zero_bias && !observed.raster_schedule_policy);
     pilot_gfx_close();CHECK(!pilot_gfx_initializer_snapshot(&observed));
     /* The reached guest Gaussian/no-depth presentation uses the same owned
      * RGBA8 precision policy after its real 2x raster and logical resolve. */

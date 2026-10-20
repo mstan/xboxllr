@@ -21,7 +21,11 @@ static void test_graphics_fvf(void)
     }
     call_graphics(PILOT_D3D_D3DDevice_SetVertexShader,&previous);
     CHECK(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_OBJECT)==previous-1);
+#ifdef PILOT_D3D_PHOBOS
+    uint32_t enabled=1;call_graphics(PILOT_D3D_D3DDevice_SetRenderState_EdgeAntiAlias,&enabled);
+    CHECK(MEM32(PILOT_D3D_RENDER_STATES+151*4)==1);
+#endif
     uint32_t disabled=0;call_graphics(PILOT_D3D_D3DDevice_SetRenderState_EdgeAntiAlias,&disabled);
-    CHECK(MEM32(PILOT_D3D_RENDER_STATES+151*4)==0 && !pilot_gfx_xbox_render_state(151,1));
+    CHECK(MEM32(PILOT_D3D_RENDER_STATES+151*4)==0 && !pilot_gfx_xbox_render_state(151,2));
     fprintf(stderr,"PASS: FVF formats, query/cache ABI, programmable shader restoration, preserved constants and explicit edge-AA disable\n");
 }

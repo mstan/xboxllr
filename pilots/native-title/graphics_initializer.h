@@ -7,13 +7,16 @@
  * pixel matrix. NATIVE_RGBA8 uses the real native UNORM8 conversion; exact
  * console dither/rounding is a separately tracked precision deferral. */
 enum PilotColorPrecisionPolicy { PILOT_COLOR_NATIVE_RGBA8=1 };
+enum PilotRasterSchedulePolicy { PILOT_RASTER_HOST_AUTOMATIC=1 };
 struct PilotInitializerState {
     uint32_t precision_policy,dither,normalize,vertex_blend,ambient_source,point_min,zero_bias,controls;
+    uint32_t swath_width,raster_schedule_policy;
 };
 static inline int pilot_initializer_value(uint32_t state,uint32_t value)
 {
     switch(state) {
     case 65:return value<=1;
+    case 76:return value==4 || value==15;
     case 112:return value==0 || value==2;
     case 117:return value==0 || value==0x3f800000u;
     case 137:case 142:case 149:return value==0;
@@ -28,6 +31,7 @@ static inline int pilot_initializer_observe(struct PilotInitializerState *state,
     state->precision_policy=PILOT_COLOR_NATIVE_RGBA8;
     switch(index) {
     case 65:state->dither=value;break;
+    case 76:state->swath_width=value;state->raster_schedule_policy=PILOT_RASTER_HOST_AUTOMATIC;break;
     case 112:state->ambient_source=value;state->controls|=1;break;
     case 117:state->point_min=value;state->controls|=2;break;
     case 137:state->vertex_blend=value;state->controls|=4;break;
@@ -69,6 +73,7 @@ static inline int pilot_graphics_simple_decode(uint32_t method,uint32_t *state)
     case 0x40368:*state=71;break;case 0x4036c:*state=72;break;
     case 0x40370:*state=145;break;case 0x40374:*state=68;break;
     case 0x40378:*state=69;break;case 0x4037c:*state=66;break;
+    case 0x409f8:*state=76;break;
     default:return 0;
     }
     return 1;

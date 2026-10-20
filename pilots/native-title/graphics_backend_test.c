@@ -26,6 +26,7 @@
 #include "graphics_initializer_backend_test.inc"
 #include "graphics_fixed_backend_test.inc"
 #include "graphics_index_backend_test.inc"
+#include "graphics_edge_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -131,6 +132,7 @@ int main(int argc,char **argv)
 #ifdef PILOT_D3D_PHOBOS
     if(argc==2 && !strcmp(argv[1],"--fixed-declarations"))return test_fixed_declarations();
     if(argc==2 && !strcmp(argv[1],"--indexed"))return test_indexed_pipeline();
+    if(argc==2 && !strcmp(argv[1],"--edge-antialias"))return test_edge_antialias();
     if(argc==2 && !strcmp(argv[1],"--initializer-states"))return test_initializer_states();
     if(argc==2 && !strcmp(argv[1],"--guest-presentation"))return test_guest_presentation();
     if(argc==2 && !strcmp(argv[1],"--visual"))return test_visual_mod_resources();

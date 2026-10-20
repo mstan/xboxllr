@@ -25,7 +25,7 @@ static int render_state(uint32_t state,uint32_t value,int apply)
 {
     uint32_t host,converted=value;
     switch(state) {
-    case 65:case 112:case 117:case 137:case 142:case 149:
+    case 65:case 76:case 112:case 117:case 137:case 142:case 149:
         return apply?pilot_gfx_initializer_set(state,value):pilot_gfx_initializer_admits(state,value);
     case 150:return apply?pilot_gfx_logic_op(value):0;
     case 159:
@@ -86,9 +86,7 @@ static int render_state(uint32_t state,uint32_t value,int apply)
         break;
     case 148:host=D3DRS_TEXTUREFACTOR; break;
     case 151:
-        /* The admitted non-MSAA native rasterizer disables both edge modes.
-         * Enabling Xbox polygon smoothing needs a separate qualified path. */
-        if(value)return 0;host=D3DRS_EDGEANTIALIAS;break;
+        return value<=1 && (!apply || pilot_gfx_edge_antialias(value));
     default:return 0;
     }
     goto apply;
