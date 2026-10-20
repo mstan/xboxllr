@@ -18,6 +18,8 @@ static const struct ShaderFormat shader_formats[]={
     {0x12,4,DXGI_FORMAT_R32_FLOAT,"float"},{0x22,8,DXGI_FORMAT_R32G32_FLOAT,"float2"},
     {0x32,12,DXGI_FORMAT_R32G32B32_FLOAT,"float3"},{0x42,16,DXGI_FORMAT_R32G32B32A32_FLOAT,"float4"},
     {0x40,4,DXGI_FORMAT_R8G8B8A8_UNORM,"float4"},{0x16,4,DXGI_FORMAT_R32_UINT,"uint"},
+    /* NV2A UB_OGL / XDK PBYTE4: normalized byte order, unlike BGRA D3DCOLOR. */
+    {0x44,4,DXGI_FORMAT_R8G8B8A8_UNORM,"float4"},
     {0x15,2,DXGI_FORMAT_R16_SINT,"int"},{0x25,4,DXGI_FORMAT_R16G16_SINT,"int2"},
     {0x45,8,DXGI_FORMAT_R16G16B16A16_SINT,"int4"},
     {0x11,2,DXGI_FORMAT_R16_SNORM,"float"},{0x21,4,DXGI_FORMAT_R16G16_SNORM,"float2"},

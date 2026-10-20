@@ -29,6 +29,11 @@ static int check_program(const uint32_t *code,unsigned count,const struct PilotV
         if(type==0x40) {
             uint32_t color=0x80503010u+sample*0x010203u;memcpy(bytes,&color,4);
             value[0]=((color>>16)&255)/255.0f;value[1]=((color>>8)&255)/255.0f;value[2]=(color&255)/255.0f;value[3]=(color>>24)/255.0f;
+        } else if(type==0x44) {
+            static const unsigned char edges[]={0,1,127,128,254,255,64,192};
+            for(unsigned j=0;j<4;++j) {
+                bytes[j]=edges[(sample+j)%8];value[j]=bytes[j]/255.0f;
+            }
         } else if(type==0x16) {
             int x=512+(int)sample,y=-256+(int)sample,z=128-(int)sample;
             uint32_t packed=((uint32_t)x&2047)|(((uint32_t)y&2047)<<11)|(((uint32_t)z&1023)<<22);memcpy(bytes,&packed,4);
@@ -334,6 +339,9 @@ int main(int argc,char **argv)
         struct PilotVertexElement elements[16]={0};
         elements[0]=(struct PilotVertexElement){0x42,0,0};elements[1]=(struct PilotVertexElement){0x16,0,16};
         elements[2]=(struct PilotVertexElement){0x40,0,20};elements[3]=(struct PilotVertexElement){0x25,1,0};
+        CHECK(check_program(code,6,elements,"typed-multistream-paired-moves")==0);
+        elements[2].type=0x44;
+        CHECK(pilot_gfx_vertex_type_size(0x44)==4);
         CHECK(check_program(code,6,elements,"typed-multistream-paired-moves")==0);
     }
     pilot_gfx_close();return 0;
