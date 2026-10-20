@@ -124,7 +124,7 @@ static uint32_t graphics_texture_allocate(const uint32_t *args)
     int yuv=format==0x24 || format==0x25;
     int linear=format==0x11 || format==0x12 || format==0x1e || format==0x2e || yuv;
     if(yuv && (usage || (width&1)))stop("unqualified packed YUV texture dimensions/usage",width);
-    if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format==0 || (format>=4 && format<=7)) || format==0xc || format==0xe || format==0xf || format==0x28))
+    if(args[2]!=1 || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) || args[6]!=3 || !(linear || (format==0 || (format>=2 && format<=7)) || format==0xc || format==0xe || format==0xf || format==0x28))
         stop("unqualified texture type/usage/format",format);
     if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))
         stop("unqualified texture dimensions",width);
@@ -194,7 +194,7 @@ static unsigned graphics_texture_adopt_cpu(uint32_t header)
     if(((common>>16)&7)!=4 || !(common&0xffff) || (format&0xfc)!=0x28 || !(format&3) || (format&3)==3 ||
        (format&0xf0000000u) || size || log_width>12 || log_height>12 ||
        !texture.levels || texture.levels>(log_width>log_height?log_width:log_height)+1 ||
-       !((texture.format>=4 && texture.format<=7) || texture.format==0xc ||
+       !((texture.format>=2 && texture.format<=7) || texture.format==0xc ||
          texture.format==0xe || texture.format==0xf || texture.format==0x28) ||
        data>=64u*1024*1024)
         stop("unqualified caller-owned CPU texture layout",header);

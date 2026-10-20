@@ -14,6 +14,22 @@ static void texture_test_swizzle(unsigned char *destination,const unsigned char 
         texture_test_swizzle(destination,source,stride,bpp,left+width/2,top,width/2,height,cursor);
     }
 }
+static void test_graphics_1555_storage(void)
+{
+    uint64_t resident=vm_committed(0,0x100000000ull);
+    for(unsigned format=2;format<=3;++format) {
+        uint32_t create[]={8,4,1,0,0,format,3};
+        uint32_t header=call_graphics(PILOT_D3D_D3DDevice_CreateTexture2,create);CHECK(header);
+        struct GraphicsTextureObject *texture=&graphics_textures[graphics_texture_slot(header)];
+        CHECK(texture->levels==4 && texture->bytes==86 && graphics_texture_bpp(texture)==2);
+        CHECK(MEM32(header+12)==(0x02340029|(format<<8)) && !MEM32(header+16));
+        CHECK(graphics_level_offset(texture,1)==64 && graphics_level_offset(texture,2)==80 &&
+            graphics_level_offset(texture,3)==84 && graphics_level_bytes(texture,3)==2);
+        CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0);
+    }
+    CHECK(vm_committed(0,0x100000000ull)==resident);
+    fprintf(stderr,"PASS 1555 guest storage: original headers, two-byte rectangular/full mip layout and allocation retirement\n");
+}
 static void test_graphics_target_binding(void)
 {
     uint64_t resident=vm_committed(0,0x100000000ull);

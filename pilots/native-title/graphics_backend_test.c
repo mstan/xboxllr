@@ -19,6 +19,7 @@
 #include "graphics_blend_backend_test.inc"
 #include "graphics_resultarg_backend_test.inc"
 #include "graphics_g8b8_backend_test.inc"
+#include "graphics_1555_backend_test.inc"
 #include "graphics_l8_backend_test.inc"
 #include "graphics_pixel_bump_backend_test.inc"
 #include "graphics_fan_backend_test.inc"
@@ -154,6 +155,9 @@ int main(int argc,char **argv)
         }
         if(argc==2 && !strcmp(argv[1],"--g8b8")) {
             CHECK(!test_g8b8_texture());pilot_gfx_close();continue;
+        }
+        if(argc==2 && !strcmp(argv[1],"--1555")) {
+            CHECK(!test_1555_textures());pilot_gfx_close();continue;
         }
         if(argc==2 && !strcmp(argv[1],"--fan")) {
             CHECK(!test_native_fan());pilot_gfx_close();continue;

@@ -125,6 +125,7 @@ static void test_graphics(int focused_fixture)
             if(focused_fixture==1)test_graphics_depth_sampling_header();
             else if(focused_fixture==2)test_graphics_x8_texture_lifetime();
             else if(focused_fixture==3)test_graphics_present_status();
+            else if(focused_fixture==9)test_graphics_1555_storage();
             else test_graphics_deferred_relevance((unsigned)focused_fixture-4);
             CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));

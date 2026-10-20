@@ -835,7 +835,7 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
     int linear=format==0x11 || format==0x12 || format==0x1e || format==0x2e || yuv;
     if(!width || !height || width>4096 || height>4096 || (!linear && ((width&(width-1)) || (height&(height-1)))))return E_NOTIMPL;
     if(!levels || levels>13 || (linear && levels!=1) || (format==0x2e?usage!=2:(usage && (usage!=1 || !linear))) ||
-       !(linear || (format==0 || (format>=4 && format<=7)) || format==0xc || format==0xe || format==0xf || format==0x28))return E_NOTIMPL;
+       !(linear || (format==0 || (format>=2 && format<=7)) || format==0xc || format==0xe || format==0xf || format==0x28))return E_NOTIMPL;
     unsigned slot;
     for(slot=0;slot<pilot_texture_capacity && pilot_textures[slot].object;++slot) {}
     if(slot==pilot_texture_capacity) {
@@ -971,6 +971,10 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         const BYTE *src=data;const BYTE *dst=lock.pBits;
         for(UINT i=0;i<width*height && !changed;++i)
             changed=dst[i*4]!=src[i*2] || dst[i*4+1]!=src[i*2+1];
+    } else if(texture->d3d8_format==3) {
+        const BYTE *src=data;const BYTE *dst=lock.pBits;
+        for(UINT i=0;i<width*height && !changed;++i)
+            changed=dst[i*2]!=src[i*2] || dst[i*2+1]!=(src[i*2+1]|0x80);
     } else for(UINT row=0;row<rows && !changed;++row)changed=memcmp((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
     if(!changed) {
         texture->locked=FALSE; return; /* No changed CPU work to upload. */
@@ -983,7 +987,15 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
             dst[i*4]=dst[i*4+2]=src[i*2];
             dst[i*4+1]=dst[i*4+3]=src[i*2+1];
         }
-    } else for(UINT row=0;row<rows;++row)memcpy((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
+    } else {
+        for(UINT row=0;row<rows;++row)memcpy((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
+        /* X1R5G5B5 samples opaque even when the CPU's ignored X bit is zero.
+         * Native B5G5R5A1 uses that bit as alpha. Only the native upload copy
+         * changes; preserve caller bytes and compare with this bit masked in
+         * on subsequent uploads so unchanged XRGB does not re-upload. */
+        if(texture->d3d8_format==3)for(UINT i=0;i<width*height;++i)
+            ((BYTE*)lock.pBits)[i*2+1]|=0x80;
+    }
     pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
