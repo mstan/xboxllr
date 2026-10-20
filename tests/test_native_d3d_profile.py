@@ -105,6 +105,41 @@ class LTCGOriginalProofTests(unittest.TestCase):
         self.assertEqual(self.binding['layout']['device_object'],0x153bd0)
         self.assertEqual(self.binding['layout']['cache_fields']['vertex_object'],0x794)
 
+    def test_inline_command_policy_is_proved_from_original_defaults_and_boundaries(self):
+        self.assertEqual(self.binding['command_buffer']['request_default'],0x8000)
+        self.assertEqual(self.binding['command_buffer']['capacity_default'],0x80000)
+        for key,value in [('margin',512),('current_offset',4),('limit_offset',8),
+                          ('request_global',0x157238),('request_default',0x4000),
+                          ('capacity_default',0x40000),('reserve','D3DDevice_MakeSpace'),('record_mask',8)]:
+            proof=copy.deepcopy(self.proof);proof['command_buffer'][key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):inspect(self.context,proof)
+
+    def test_exact_command_metadata_upgrade_preserves_wrappers_and_is_idempotent(self):
+        for drift in (None,'header','record','wrapper','remove'):
+            with self.subTest(drift=drift),tempfile.TemporaryDirectory() as directory:
+                output=Path(directory);generated=output/'gen';generated.mkdir()
+                previous=copy.deepcopy(self.binding);previous.pop('command_buffer')
+                header='\n'.join(line for line in self.header.splitlines() if not line.startswith('#define PILOT_D3D_COMMANDS_'))+'\n'
+                if drift=='header':header+='/* unreviewed */\n'
+                if drift=='record':previous['device_object']+=4
+                wrapper=self.wrapper+('/* unreviewed */\n' if drift=='wrapper' else '')
+                selected=previous if drift=='remove' else self.binding
+                recorded=self.binding if drift=='remove' else previous
+                (generated/'pilot_d3d_bindings.h').write_text(self.header if drift=='remove' else header)
+                (generated/'pilot_d3d_binding.c').write_text(wrapper)
+                (output/'d3d-binding.aot-private.json').write_text(json.dumps(recorded))
+                context=SimpleNamespace(output=output,generated=generated,manifest={'files':{},'d3d_binding':recorded},
+                                        manifest_path=output/'generation.aot-private.json')
+                before={p.name:p.read_bytes() for p in generated.iterdir()}
+                with patch('native_d3d_ltcg.inspect',return_value=(selected,self.header,self.wrapper)):
+                    if drift:
+                        with self.assertRaises(ValueError):bind_ltcg(context,{})
+                        self.assertEqual(before,{p.name:p.read_bytes() for p in generated.iterdir()})
+                    else:
+                        self.assertEqual(bind_ltcg(context,{}),self.binding)
+                        self.assertEqual((generated/'pilot_d3d_binding.c').read_text(),wrapper)
+                        with patch.object(Path,'write_text',side_effect=AssertionError('repeated write')):
+                            self.assertEqual(bind_ltcg(context,{}),self.binding)
     def test_register_and_original_stack_contracts_are_distinct(self):
         calls={c['name']:c for c in self.binding['calls']}
         create=calls['Direct3D_CreateDevice']

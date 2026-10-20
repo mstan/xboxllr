@@ -235,7 +235,44 @@ def inspect(context,proof):
                  layout=layout,calls=calls,helpers=proof['helpers'],stateblock=False,
                  native_create_behavior_mask=behavior_mask,original_create_driver_mask=driver_mask,**facts)
     if presentation is not None:binding["guest_presentation"]=presentation
+    if 'command_buffer' in proof:
+        binding['command_buffer']=command_facts(proof['command_buffer'],calls,codes,layout,require)
     return binding,*emit_text(binding,interface,behavior_mask)
+
+
+def command_facts(p,calls,codes,layout,require):
+    fields={'version','reserve','space','kickoff','request_global','capacity_global',
+            'request_default','capacity_default','current_offset','limit_offset','flags_offset','record_mask','margin'}
+    if not isinstance(p,dict) or set(p)!=fields or any(type(v) is not int for k,v in p.items() if k not in ('reserve','space','kickoff')):
+        raise ValueError('incomplete inline command-buffer profile')
+    if (p['version'],p['current_offset'],p['limit_offset'],p['flags_offset'],p['record_mask'])!=(1,0,4,8,4):
+        raise ValueError('unsupported inline command-buffer layout')
+    if (p['margin']<4 or p['margin']%4 or p['capacity_default']>1024*1024 or
+        p['request_default']<=p['margin'] or p['request_default']%8 or
+        p['capacity_default']<p['request_default'] or p['capacity_default']%4 or
+        any(not 0<v<=0xfffffffc or v%4 for v in (p['request_global'],p['capacity_global']))):
+        raise ValueError('invalid inline command-buffer policy')
+    by_name={c['name']:c for c in calls}
+    if any(type(p[k]) is not str or p[k] not in by_name for k in ('reserve','space','kickoff')):
+        raise ValueError('missing original inline command-buffer boundaries')
+    if len({p[k] for k in ('reserve','space','kickoff')})!=3:
+        raise ValueError('aliased inline command-buffer boundaries')
+    if (by_name[p['reserve']]['stack_bytes'],by_name[p['space']]['stack_bytes'],by_name[p['kickoff']]['stack_bytes'])!=(8,0,0):
+        raise ValueError('unreviewed inline command-buffer ABI')
+    if by_name[p['kickoff']]['register_sources']!={'ecx':'g_ecx'}:
+        raise ValueError('unreviewed inline kickoff CDevice argument')
+    for name in ('request','capacity'):
+        require('Direct3D_CreateDevice','mov',f'dword ptr [{hex(p[name+"_global"])}], {hex(p[name+"_default"])}')
+    require(p['reserve'],'mov',f'esi, dword ptr [{hex(layout["device_global"])}]')
+    require(p['reserve'],'mov','edi, dword ptr [esi]')
+    require(p['reserve'],'mov','dword ptr [esi + 4], eax')
+    require(p['reserve'],'test','byte ptr [esi + 8], 4')
+    require(p['reserve'],'add',f'eax, {hex((-p["margin"])&0xffffffff)}')
+    require(p['space'],'mov',f'eax, dword ptr [{hex(p["request_global"])}]')
+    require(p['space'],'shr','eax, 1')
+    require(p['space'],'call',hex(int(by_name[p['reserve']]['address'],16)))
+    require(p['kickoff'],'mov','eax, dword ptr [ecx]')
+    return copy.deepcopy(p)
 
 
 def emit_text(binding,interface,behavior_mask):
@@ -256,6 +293,11 @@ def emit_text(binding,interface,behavior_mask):
     if 'original_create_driver_mask' in binding:
 
         header += [f'#define PILOT_D3D_CREATE_DRIVER_MASK 0x{binding["original_create_driver_mask"]:x}u']
+    if 'command_buffer' in binding:
+        for name,value in binding['command_buffer'].items():
+            if name in ('reserve','space','kickoff'):
+                header += [f'#define PILOT_D3D_COMMANDS_{name.upper()}_ENTRY PILOT_D3D_{value}']
+            else:header += [f'#define PILOT_D3D_COMMANDS_{name.upper()} 0x{value:x}u']
     defines={'DEVICE_GLOBAL':layout['device_global'],'DEVICE_OBJECT':layout['device_object'],
              'DEVICE_BYTES':layout['device_bytes'],'VERTEX_SHADER_OFFSET':cache['vertex_object'],
              'RENDER_STATES':layout['render_states'],'TEXTURE_STATES':layout['texture_states'],
@@ -297,6 +339,20 @@ def bind(context,proof):
     generated=context.generated;record=context.output/'d3d-binding.aot-private.json'
     texts={'pilot_d3d_bindings.h':header,'pilot_d3d_binding.c':wrapper}
     if (generated/'pilot_d3d_binding.c').exists():
+        if 'command_buffer' in binding:
+            previous=copy.deepcopy(binding);previous.pop('command_buffer')
+            actual=json.loads(record.read_text())
+            previous_header='\n'.join(line for line in header.splitlines()
+                                      if not line.startswith('#define PILOT_D3D_COMMANDS_'))+'\n'
+            if (actual==previous and context.manifest.get('d3d_binding')==actual and
+                (generated/'pilot_d3d_binding.c').read_text()==wrapper and
+                (generated/'pilot_d3d_bindings.h').read_text()==previous_header):
+                (generated/'pilot_d3d_bindings.h').write_text(header,encoding='utf-8',newline='\n')
+                record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+                context.manifest['d3d_binding']=binding
+                context.manifest['files']['pilot_d3d_bindings.h']=hashlib.sha256((generated/'pilot_d3d_bindings.h').read_bytes()).hexdigest()
+                context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+                return binding
         previous_presentation=copy.deepcopy(binding)
         previous_presentation.pop('guest_presentation',None)
         previous_presentation.get('helpers',{}).pop('resolve_setup',None)

@@ -3596,6 +3596,21 @@
       "current_depth": 6664
     }
   },
+  "command_buffer": {
+    "version": 1,
+    "reserve": "D3D_MakeRequestedSpace",
+    "space": "D3DDevice_MakeSpace",
+    "kickoff": "CDevice_KickOff",
+    "request_global": 1405492,
+    "capacity_global": 1405496,
+    "request_default": 32768,
+    "capacity_default": 524288,
+    "current_offset": 0,
+    "limit_offset": 4,
+    "flags_offset": 8,
+    "record_mask": 4,
+    "margin": 516
+  },
   "normalization": {
     "Direct3D_CreateDevice": {
       "Adapter": 0,

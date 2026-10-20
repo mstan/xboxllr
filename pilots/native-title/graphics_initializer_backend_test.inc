@@ -2,6 +2,18 @@
 static int test_initializer_states(void)
 {
     uint32_t p[17]={64,64,7,1,0x11,1,0,0,1,0x2e,0,60,1};CHECK(pilot_gfx_create(p)==0);
+    CHECK(!pilot_gfx_command_method(0x1710,1,0));
+    CHECK(!pilot_gfx_command_method(0x304,2,0));
+    CHECK(!pilot_gfx_command_method(0x7fc,0,0));
+    CHECK(pilot_gfx_command_method(0x310,1,0));
+    struct PilotInitializerState untouched;CHECK(pilot_gfx_initializer_snapshot(&untouched) && !untouched.dither);
+    uint32_t buffer=0,data[4]={1,2,3,4},read[4];
+    CHECK(!pilot_gfx_vertex_create(sizeof(data),&buffer));pilot_gfx_vertex_upload(buffer,data,sizeof(data));
+    CHECK(pilot_gfx_command_method(0x1710,0,0) && pilot_gfx_command_method(0x1710,0,1));
+    CHECK(!pilot_gfx_vertex_readback(buffer,read,sizeof(read)) && !memcmp(data,read,sizeof(read)));
+    data[0]=9;data[3]=8;pilot_gfx_vertex_upload_range(buffer,data,4,4);
+    CHECK(!pilot_gfx_vertex_readback(buffer,read,sizeof(read)) && !memcmp(data,read,sizeof(read)));
+    pilot_gfx_vertex_destroy(buffer);
     const uint32_t packets[][2]={{0x4037c,0x1d01},{0x4035c,1},{0x40300,0},{0x40344,1},{0x40348,0},
         {0x40354,0x203},{0x40340,0},{0x4033c,0x207},{0x40310,1},{0x40304,1}};
     for(unsigned i=0;i<sizeof(packets)/sizeof(*packets);++i){uint32_t state;CHECK(pilot_graphics_simple_decode(packets[i][0],&state));CHECK(pilot_gfx_xbox_render_state(state,packets[i][1]));}

@@ -19,8 +19,9 @@ notification-enabled ADPCM ambient buffers are created and all three sets of
 workers issue subsequent stream reads. The periodic native delay now passes;
 the main thread opens the dashboard font and loads another section. Ordinary
 audio pause/resume now passes, and the remaining startup sound-effect buffers
-load. The next stop is a graphics command-buffer request,
-`D3D_MakeRequestedSpace`. The explicit offline virtual-link query passes. No native menu
+load. The shared inline command-buffer owner now passes the reached
+`D3D_MakeRequestedSpace` request. The next stop is a missing indirect native
+CPU target, `0004eaf0`. The explicit offline virtual-link query passes. No native menu
 frame has been captured. This is implementation work; original hardware
 is not required for the current blocker. Entry counts are diagnostics, not a
 completion percentage: replacing an original subsystem changes how many
@@ -40,7 +41,8 @@ functions execute.
 | Native worker timing and thread waits | Reached delay passes; teardown components pass | Real delay and CPU handoff, actual thread-exit waits and bounded paired signal/wait; 21 combined checks pass |
 | Offline virtual link-state query | Passed for unattached policy | Original wrapper mask/ABI/context and native provider/lifetime checks pass; actual startup advances beyond the link query |
 | Native ordinary audio pause/resume | Implemented; actual startup passes | Original software rules, real PCM/ADPCM queued-sample retention, notifications and three backend checks pass; synchronized mode remains guarded |
-| First rendered native menu | Current blocker | Startup reaches `D3D_MakeRequestedSpace`; resolve its command-buffer contract through the shared graphics owner |
+| Inline graphics command-buffer owner | Implemented; reached space request passes | Profile-proved layout/defaults, real packet delivery/refetch/fences and repeated lifetime checks pass; unsupported methods remain guarded |
+| First rendered native menu | Current blocker | Startup reaches missing indirect native CPU target `0004eaf0`; extend title-owned discovery/native generation |
 | Usable dashboard | Pending | Verify menu navigation, controller, audio and performance; resolve reached failures |
 | Native Credits mod | Loader implemented; navigation pending | Shared section-data mod admission, real preload/reload fixtures and private registry generation pass; actual Credits navigation follows a usable baseline |
 | Blinx on the same framework revision | Pending | Rebuild separately, then focused gameplay/save/mod regression |
@@ -327,6 +329,16 @@ fault semantics and kernel-version identity are retained as LLE-D08/D09 in the
 behavior remains implementation work in `.1.137`.
 
 ## Delivery order
+
+The [inline command-buffer batch](NATIVE-INLINE-GRAPHICS.md) advances the actual
+dashboard beyond MakeRequestedSpace. Executable `461f0c76...` stops at unresolved
+indirect target `0004eaf0`, with 254635 stopped-title-thread entries, exit 2 before
+the deadline and no captured menu. Fourteen original/profile/migration checks,
+strict GCC/MSVC parser builds and eleven combined Windows checks pass (2.46s).
+The new owner preserves API/packet ordering and uses real native GPU fences;
+staging-buffer reuse does not claim GPU completion. All 103 generated CPU
+objects remain unchanged. The next batch concerns missing native function
+roots, not original-hardware validation.
 
 The [ordinary audio pause batch](NATIVE-AUDIO-PAUSE.md) passes the actual startup
 boundary. Executable `5f226640...` loads the remaining sound effects and stops

@@ -21,18 +21,18 @@ static uint32_t stencil_value(uint32_t value)
     case 0x8507:return 7; case 0x8508:return 8; default:return 0;
     }
 }
-int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
+static int render_state(uint32_t state,uint32_t value,int apply)
 {
     uint32_t host,converted=value;
     switch(state) {
     case 65:case 112:case 117:case 137:case 142:case 149:
-        return pilot_gfx_initializer_set(state,value);
-    case 150:return pilot_gfx_logic_op(value);
+        return apply?pilot_gfx_initializer_set(state,value):pilot_gfx_initializer_admits(state,value);
+    case 150:return apply?pilot_gfx_logic_op(value):0;
     case 159:
         /* Preserve the caller's boolean cache contract using native compressed
          * sampling. Exact console noise pixels remain a documented open bound;
          * this retains the pilot's existing native sampling approximation. */
-        if(value>1)return 0;pilot_gfx_noise_state(value);return 1;
+        if(value>1 || !apply)return 0;pilot_gfx_noise_state(value);return 1;
     case 57:host=D3DRS_ZFUNC; goto compare;
     case 58:host=D3DRS_ALPHAFUNC; goto compare;
     case 59:host=D3DRS_ALPHABLENDENABLE; goto check_boolean;
@@ -97,7 +97,16 @@ compare: converted=compare_value(value); if(!converted)return 0; goto apply;
 blend: converted=blend_value(value); if(!converted)return 0; goto apply;
 stencil: converted=stencil_value(value); if(!converted)return 0; goto apply;
 floating: if((value&0x7f800000u)==0x7f800000u)return 0;
-apply: pilot_gfx_set_state(host,converted); return 1;
+apply: if(apply)pilot_gfx_set_state(host,converted); return 1;
+}
+int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
+{return render_state(state,value,1);}
+int pilot_gfx_command_method(uint32_t method,uint32_t value,int apply)
+{
+    if(method==0x1710)return !value && pilot_gfx_vertex_cache_break(apply);
+    uint32_t state;
+    if(!pilot_graphics_simple_decode(0x40000u|method,&state))return 0;
+    return render_state(state,value,apply);
 }
 int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 {

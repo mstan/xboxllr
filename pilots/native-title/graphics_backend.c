@@ -99,7 +99,7 @@ struct PilotNativeTexture {
 };
 static struct PilotNativeTexture *pilot_textures;
 static unsigned pilot_texture_capacity;
-static struct { IDirect3DVertexBuffer8 *object; int uploaded; uint64_t last_use; } pilot_vertices[256];
+static struct { IDirect3DVertexBuffer8 *object; int uploaded,refetch; uint64_t last_use; } pilot_vertices[256];
 static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
 static uint32_t pilot_bound_strides[16];
 static unsigned pilot_blend_default_shape,pilot_blend_transient,pilot_blend_transient_proof,pilot_blend_draws;
@@ -565,12 +565,12 @@ void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
 {
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
     if(!data || bytes!=vertex->size) pilot_d3d_backend_stop("invalid vertex upload range");
-    if(pilot_vertices[handle-1].uploaded && !memcmp(vertex->sys_mem,data,bytes)) return;
+    if(pilot_vertices[handle-1].uploaded && !pilot_vertices[handle-1].refetch && !memcmp(vertex->sys_mem,data,bytes)) return;
     BYTE *destination=NULL;
     pilot_d3d_require(vertex->iface.lpVtbl->Lock(&vertex->iface,0,bytes,&destination,0),__FILE__,__LINE__);
     memcpy(destination,data,bytes);
     pilot_d3d_require(vertex->iface.lpVtbl->Unlock(&vertex->iface),__FILE__,__LINE__);
-    pilot_vertices[handle-1].uploaded=1;
+    pilot_vertices[handle-1].uploaded=1;pilot_vertices[handle-1].refetch=0;
     pilot_vertices[handle-1].last_use=pilot_mark_work();
 }
 void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t offset,uint32_t bytes)
@@ -582,7 +582,7 @@ void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t off
      * draw-consumed vertices; retain our multistream bindings and ownership. */
     static int ranges=-1;
     if(ranges<0) {const char *setting=getenv("XLLE_PILOT_VERTEX_RANGES");ranges=!(setting && !strcmp(setting,"0"));}
-    if(!ranges || !pilot_vertices[handle-1].uploaded) {
+    if(!ranges || !pilot_vertices[handle-1].uploaded || pilot_vertices[handle-1].refetch) {
         pilot_gfx_vertex_upload(handle,data,vertex->size);return;
     }
     const BYTE *source=(const BYTE*)data+offset;
@@ -1381,12 +1381,30 @@ static int pilot_initializer_zero_bias(void)
     if(FAILED(result))return 0;
     ID3D11DeviceContext_RSSetState(context,zero);ID3D11RasterizerState_Release(zero);return 1;
 }
-int pilot_gfx_initializer_set(uint32_t state,uint32_t value)
+int pilot_gfx_initializer_admits(uint32_t state,uint32_t value)
 {
     if(!pilot_device || !pilot_initializer_value(state,value))return 0;
     if(state==65 && value && !pilot_initializer_target_format())return 0;
     if(state==149 && !pilot_initializer_zero_bias())return 0;
-    return pilot_initializer_observe(&pilot_initializer,state,value);
+    return 1;
+}
+int pilot_gfx_initializer_set(uint32_t state,uint32_t value)
+{return pilot_gfx_initializer_admits(state,value) && pilot_initializer_observe(&pilot_initializer,state,value);}
+int pilot_gfx_vertex_cache_break(int apply)
+{
+    if(!pilot_device)return 0;
+    // Whole native draws have no partially assembled primitive. Discard only
+    // source-upload reuse: the next draw snapshots/refetches its vertex bytes.
+    // Existing GPU draws retain their ordered D3D11 resources and work.
+    if(apply)for(unsigned i=0;i<sizeof(pilot_vertices)/sizeof(*pilot_vertices);++i)
+        if(pilot_vertices[i].object)pilot_vertices[i].refetch=1;
+    return 1;
+}
+int pilot_gfx_command_submit(void)
+{
+    if(!pilot_device)return 0;
+    ID3D11DeviceContext_Flush(d3d8_GetD3D11Context());
+    return SUCCEEDED(ID3D11Device_GetDeviceRemovedReason(d3d8_GetD3D11Device()));
 }
 int pilot_gfx_initializer_snapshot(struct PilotInitializerState *out)
 {

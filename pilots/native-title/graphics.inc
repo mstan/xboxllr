@@ -229,6 +229,7 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
 }
 
 #include "graphics_reset.inc"
+#include "graphics_commands.inc"
 static void graphics_dispatch_impl(unsigned entry)
 {
     if (entry>=PILOT_D3D_COUNT) stop("invalid graphics entry",entry);
@@ -245,12 +246,28 @@ static void graphics_dispatch_impl(unsigned entry)
     uint64_t acquired=entered?dispatch_monotonic():0;
     if (entry!=PILOT_D3D_Direct3D_CreateDevice && !graphics_active)
         stop("graphics entry before native creation",pilot_d3d_calls[entry].address);
+#ifdef PILOT_D3D_COMMANDS_VERSION
+    if(entry==PILOT_D3D_COMMANDS_KICKOFF_ENTRY && g_ecx!=PILOT_D3D_DEVICE_OBJECT)
+        stop("inline kickoff has unowned CDevice",g_ecx);
+    if(graphics_active && entry!=PILOT_D3D_COMMANDS_RESERVE_ENTRY && entry!=PILOT_D3D_COMMANDS_SPACE_ENTRY)
+        graphics_commands_flush();
+#endif
     if(entry!=PILOT_D3D_D3DDevice_InsertCallback)graphics_gpu_barrier();
     uint64_t barrier=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     graphics_frame_inputs_before(entry,arguments);
 #endif
     switch(entry) {
+#ifdef PILOT_D3D_COMMANDS_VERSION
+    case PILOT_D3D_COMMANDS_RESERVE_ENTRY:
+        g_eax=graphics_commands_reserve(arguments[0],arguments[1]);break;
+    case PILOT_D3D_COMMANDS_SPACE_ENTRY: {
+        uint32_t window=MEM32(PILOT_D3D_COMMANDS_REQUEST_GLOBAL);
+        g_eax=graphics_commands_reserve(window/2,window);break;
+    }
+    case PILOT_D3D_COMMANDS_KICKOFF_ENTRY:
+        if(!pilot_gfx_command_submit())stop("inline native kickoff failed",0);break;
+#endif
     case PILOT_D3D_D3DDevice_SetTransform:graphics_transform_set(arguments[0],arguments[1]);break;
     case PILOT_D3D_D3DDevice_InsertCallback:
         graphics_gpu_insert(arguments[0],arguments[1],arguments[2]);break;
@@ -351,6 +368,9 @@ static void graphics_dispatch_impl(unsigned entry)
             graphics_display_open=1;
             ReleaseSRWLockExclusive(&graphics_display_lock);
             MEM32(PILOT_D3D_DEVICE_GLOBAL)=PILOT_D3D_DEVICE_OBJECT;
+#ifdef PILOT_D3D_COMMANDS_VERSION
+            graphics_commands_open();
+#endif
             if (arguments[5]) MEM32(arguments[5])=PILOT_D3D_DEVICE_OBJECT;
         } else {
             MEM32(PILOT_D3D_DEVICE_GLOBAL)=0;
@@ -459,7 +479,11 @@ static void graphics_dispatch_impl(unsigned entry)
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2])
             stop("device release with outstanding surface ownership",entry);
         graphics_surfaces_project(PILOT_SURFACE_CLEAR);
-        graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();pilot_gfx_close(); graphics_active=0;
+        graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_shaders_release();graphics_pixels_release();
+#ifdef PILOT_D3D_COMMANDS_VERSION
+        graphics_commands_close();
+#endif
+        pilot_gfx_close(); graphics_active=0;
         graphics_fence_next=1;graphics_fence_done=0;memset(graphics_fences,0,sizeof(graphics_fences));
         uint32_t bytes;
         for (unsigned i=0;i<3;++i) {

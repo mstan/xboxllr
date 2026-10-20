@@ -779,6 +779,10 @@ int main(int argc,char **argv)
         if (!strncmp(argv[1],"input-",6)) { test_input_failure(argv[1]+6); return 0; }
 #endif
 #ifdef PILOT_D3D_NATIVE
+#ifdef PILOT_D3D_COMMANDS_VERSION
+        if(!strcmp(argv[1],"graphics-commands")){test_graphics_commands(NULL);return 0;}
+        if(!strncmp(argv[1],"graphics-commands-",18)){test_graphics_commands(argv[1]+18);return 1;}
+#endif
         if (!strcmp(argv[1],"graphics-scheduler")) { test_graphics_guest_scheduler(); return 0; }
         if (!strcmp(argv[1],"graphics")) { test_graphics(0); return 0; }
         if (!strcmp(argv[1],"graphics-depth-argb")) { test_graphics(1); return 0; }

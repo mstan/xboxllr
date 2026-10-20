@@ -17,6 +17,10 @@ void pilot_gfx_interpolation_stats(struct PilotInterpolationStats *out);
 #include "graphics_presentation.h"
 #include "graphics_initializer.h"
 int pilot_gfx_initializer_set(uint32_t state,uint32_t value);
+int pilot_gfx_initializer_admits(uint32_t state,uint32_t value);
+int pilot_gfx_command_method(uint32_t method,uint32_t value,int apply);
+int pilot_gfx_vertex_cache_break(int apply);
+int pilot_gfx_command_submit(void);
 int pilot_gfx_initializer_snapshot(struct PilotInitializerState *out);
 int pilot_gfx_initializer_consumer(unsigned program,uint32_t primitive,uint32_t fvf);
 int pilot_gfx_multisample(unsigned enable,uint32_t mask);
