@@ -356,6 +356,17 @@ int32_t pilot_audio_effects_install(PilotDsp *graph)
     HRESULT hr=engine->StartEngine();if(FAILED(hr))effects->graph=old;
     return hr;
 }
+int32_t pilot_audio_effects_patch(PilotDsp *graph,unsigned effect,unsigned count,const PilotDspPatch *patches)
+{
+    Guard guard;
+    if(!engine || !effects || !graph || effects->graph!=graph)return E_INVALIDARG;
+    // Complete the current quantum; change the complete batch between Process
+    // calls without resetting the graph, queued source data or effect history.
+    engine->StopEngine();
+    int accepted=pilot_dsp_effect_patch(graph,effect,count,patches);
+    HRESULT hr=engine->StartEngine();
+    return FAILED(hr)?hr:accepted?S_OK:E_INVALIDARG;
+}
 static int32_t audio_capture_begin(float *samples,uint32_t frames,int after_effects,
                                   CaptureStamp *stamps,UINT32 stamp_capacity)
 {

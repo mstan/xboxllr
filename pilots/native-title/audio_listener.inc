@@ -12,6 +12,9 @@ static struct {
 } audio_listener;
 static void audio_listener_commit(void)
 {
+#if defined(PILOT_AUDIO_I3DL2_VERSION) && defined(PILOT_AUDIO_DSP)
+    audio_i3dl2_commit();
+#endif
     memcpy(audio_listener.applied,audio_listener.pending,sizeof(audio_listener.pending));
     audio_listener.applied_known=audio_listener.known;
     audio_listener.dirty=0;

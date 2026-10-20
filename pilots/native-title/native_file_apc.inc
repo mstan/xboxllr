@@ -90,23 +90,12 @@ static void native_apc_call(const struct NativeFileApc *apc)
     recomp_func_t body=recomp_lookup(routine);uint32_t top=g_esp;
     if(!body || dispatch_in_dpc || top<16 || !wait_range(top-16,16,1) || native_apc_depth>=16)
         stop("unqualified native file APC callback frame",routine);
-    uint32_t regs[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp,g_fs_base,g_seh_ebp,g_icall_saved_esp,g_icall_dispatch_form,next_kernel_ordinal};
-    RecompXmm xmm[]={g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7};
-    RecompMmx mm[]={g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7};
-    double fp[8];memcpy(fp,g_fp_stack,sizeof(fp));
-    int fp_top=g_fp_top,fp_cmp=g_fp_cmp,df=g_df;
-    uint16_t cw=g_fp_control_word,cc=g_fp_cc;fenv_t environment;
-    if(fegetenv(&environment))stop("APC CPU environment capture failed",routine);
+    struct NativeCpuContext saved;native_cpu_save(&saved);const uint32_t *regs=saved.regs;
     ++native_apc_depth;g_esp=top-16;MEM32(g_esp)=0;memcpy(memory+g_esp+4,arguments,sizeof(arguments));
     body();--native_apc_depth;
     if(g_esp!=top || g_ebx!=regs[4] || g_esi!=regs[5] || g_edi!=regs[6] || g_fs_base!=regs[8])
         stop("native file APC stdcall cleanup differs",routine);
-    g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_esp=regs[3];g_ebx=regs[4];g_esi=regs[5];g_edi=regs[6];g_ebp=regs[7];
-    g_fs_base=regs[8];g_seh_ebp=regs[9];g_icall_saved_esp=regs[10];g_icall_dispatch_form=regs[11];next_kernel_ordinal=regs[12];
-    g_xmm0=xmm[0];g_xmm1=xmm[1];g_xmm2=xmm[2];g_xmm3=xmm[3];g_xmm4=xmm[4];g_xmm5=xmm[5];g_xmm6=xmm[6];g_xmm7=xmm[7];
-    g_mm0=mm[0];g_mm1=mm[1];g_mm2=mm[2];g_mm3=mm[3];g_mm4=mm[4];g_mm5=mm[5];g_mm6=mm[6];g_mm7=mm[7];
-    memcpy(g_fp_stack,fp,sizeof(fp));g_fp_top=fp_top;g_fp_cmp=fp_cmp;g_df=df;g_fp_control_word=cw;g_fp_cc=cc;
-    if(fesetenv(&environment))stop("APC CPU environment restore failed",routine);
+    native_cpu_restore(&saved);
 }
 static void native_apc_deliver(void)
 {

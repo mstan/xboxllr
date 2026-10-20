@@ -23,6 +23,8 @@ struct PilotDsp {
     uint8_t *scratch;
     uint32_t scratch_bytes,next,control,irq;
     uint32_t call_pc;
+    uint8_t *shadow;
+    uint32_t count,ranges[64][2]; /* X-word start and byte extent. */
     uint64_t blocks,nodes;
 };
 static uint32_t word(const void *p) {uint32_t v;memcpy(&v,p,4);return v;}
@@ -100,7 +102,7 @@ PilotDspImage *pilot_dsp_decode(const void *source,uint32_t bytes,uint64_t seed,
     image->program_base=code<=3072?0x400:0;
     image->call_pc=code<=3072?0:LARGE_GRAPH_CALL;
     image->descriptor=desc;image->count=count;image->scratch_bytes=SCRATCH_PREFIX+scratch;
-    image->storage_bytes=SCRATCH_OFFSET+image->scratch_bytes+8+32*count;
+    image->storage_bytes=SCRATCH_OFFSET+image->scratch_bytes+8+32*count+state*4;
     if(error)*error=NULL;
     return image;
 fail:
@@ -192,12 +194,16 @@ PilotDsp *pilot_dsp_create(const PilotDspImage *image,void *storage,uint32_t gue
     d->call_pc=image->call_pc;
     d->p[d->call_pc]=0x0d0000|image->program_base;d->p[d->call_pc+1]=0x87; /* Real JSR/RTS then STOP. */
     uint32_t *desc=(uint32_t*)((uint8_t*)storage+pilot_dsp_descriptor_offset(image));
+    d->shadow=(uint8_t*)(desc+2+8*image->count);d->count=image->count;
+    memcpy(d->shadow,image->decoded+CODE_OFFSET+image->code_words*4,image->state_words*4);
     desc[0]=image->count;desc[1]=image->scratch_bytes-SCRATCH_PREFIX;
     for(uint32_t i=0;i<image->count;++i) {
         const uint8_t *m=image->decoded+image->descriptor+8+32*i;uint32_t *map=desc+2+8*i;
         for(unsigned j=0;j<8;++j)map[j]=word(m+4*j);
         map[0]=guest_base+P_OFFSET+image->program_base*4+map[0]-CODE_OFFSET;
-        map[2]=guest_base+X_OFFSET+image->state_base*4+map[2]-(CODE_OFFSET+image->code_words*4);
+        uint32_t state_offset=map[2]-(CODE_OFFSET+image->code_words*4);
+        d->ranges[i][0]=image->state_base+state_offset/4;d->ranges[i][1]=map[3];
+        map[2]=guest_base+(uint32_t)(d->shadow-(uint8_t*)storage)+state_offset;
         map[4]+=guest_base+Y_OFFSET;map[6]+=guest_base+SCRATCH_OFFSET;
     }
     Dsp56300MemoryRegion pr[]={BUFFER(0,4096,d->p),GUARD(4096,0x1000000)};
@@ -225,3 +231,27 @@ void pilot_dsp_process(PilotDsp *d,const uint32_t mix[1024],uint32_t output[192]
 }
 uint64_t pilot_dsp_blocks(const PilotDsp *d){return d->blocks;}
 uint64_t pilot_dsp_dma_nodes(const PilotDsp *d){return d->nodes;}
+static int effect_range(const PilotDsp *d,unsigned effect,uint32_t offset,uint32_t bytes)
+{
+    return d && effect<d->count && !(offset&3) && !(bytes&3) &&
+        offset<=d->ranges[effect][1] && bytes<=d->ranges[effect][1]-offset;
+}
+static uint32_t effect_shadow_offset(const PilotDsp *d,unsigned effect)
+{return (d->ranges[effect][0]-d->ranges[0][0])*4;}
+int pilot_dsp_effect_read(const PilotDsp *d,unsigned effect,uint32_t offset,void *data,uint32_t bytes)
+{
+    if(!data || !effect_range(d,effect,offset,bytes))return 0;
+    memcpy(data,d->shadow+effect_shadow_offset(d,effect)+offset,bytes);return 1;
+}
+int pilot_dsp_effect_patch(PilotDsp *d,unsigned effect,unsigned count,const struct PilotDspPatch *patches)
+{
+    if(!patches || !count || count>16)return 0;
+    for(unsigned i=0;i<count;++i)
+        if(!patches[i].data || !effect_range(d,effect,patches[i].offset,patches[i].bytes))return 0;
+    for(unsigned i=0;i<count;++i) {
+        const struct PilotDspPatch *p=&patches[i];
+        memcpy(d->shadow+effect_shadow_offset(d,effect)+p->offset,p->data,p->bytes);
+        memcpy((uint8_t*)(d->x+d->ranges[effect][0])+p->offset,p->data,p->bytes);
+    }
+    return 1;
+}

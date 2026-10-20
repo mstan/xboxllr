@@ -17,6 +17,11 @@ void pilot_dsp_destroy(PilotDsp *dsp);
 void pilot_dsp_process(PilotDsp *dsp,const uint32_t mix[1024],uint32_t output[192]);
 uint64_t pilot_dsp_blocks(const PilotDsp *dsp);
 uint64_t pilot_dsp_dma_nodes(const PilotDsp *dsp);
+/* CPU shadow state is separate from live GP execution. A patch batch validates
+ * every range before changing either owner. The caller must exclude Process. */
+struct PilotDspPatch {uint32_t offset,bytes;const void *data;};
+int pilot_dsp_effect_read(const PilotDsp *dsp,unsigned effect,uint32_t offset,void *data,uint32_t bytes);
+int pilot_dsp_effect_patch(PilotDsp *dsp,unsigned effect,unsigned count,const struct PilotDspPatch *patches);
 #ifdef __cplusplus
 }
 #endif

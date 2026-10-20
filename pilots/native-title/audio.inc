@@ -116,6 +116,7 @@ static void audio_device_check(uint32_t iface)
 {
     if(!audio_device || iface!=audio_device+PILOT_AUDIO_DEVICE_INTERFACE_OFFSET)stop("unowned audio device",iface);
 }
+#include "audio_i3dl2.inc"
 #include "audio_listener.inc"
 static struct PilotAudioBuffer *audio_buffer(uint32_t iface)
 {
@@ -150,6 +151,9 @@ static uint32_t audio_ref(uint32_t base,int acquire)
         pool_free(audio_device);audio_device=0;
 #ifdef PILOT_AUDIO_LISTENER_VERSION
         memset(&audio_listener,0,sizeof(audio_listener));
+#endif
+#if defined(PILOT_AUDIO_I3DL2_VERSION) && defined(PILOT_AUDIO_DSP)
+        memset(&audio_i3dl2,0,sizeof(audio_i3dl2));
 #endif
     }
     return 0;
@@ -325,6 +329,10 @@ static int32_t audio_create_buffer(uint32_t descriptor,uint32_t output)
 static int32_t audio_download_effects(const uint32_t *a)
 {
     audio_device_check(a[0]);
+#ifdef PILOT_AUDIO_I3DL2_VERSION
+    if(audio_i3dl2.dirty || audio_i3dl2.known)
+        stop("effects replacement with I3DL2 parameters requires original lifecycle qualification",a[2]);
+#endif
     if(a[4])audio_pointer(a[4],4);
     const char *error=NULL;
     PilotDspImage *image=pilot_dsp_decode(audio_pointer(a[1],a[2]),a[2],PILOT_AUDIO_DSP_SEED,&error);
@@ -397,6 +405,14 @@ void pilot_audio_dispatch(unsigned entry)
         audio_device_check(a[0]);result=audio_ref(audio_device,1);
     } else if(!strcmp(pilot_audio_calls[entry].name,"IDirectSound_GetCaps")) {
         audio_device_check(a[0]);audio_caps(a[1]);
+#ifdef PILOT_AUDIO_I3DL2_VERSION
+    } else if(!strcmp(pilot_audio_calls[entry].name,"IDirectSound_SetI3DL2Listener")) {
+#ifdef PILOT_AUDIO_DSP
+        result=audio_i3dl2_set(a);
+#else
+        stop("I3DL2 parameters require the qualified native GP graph owner",entry);
+#endif
+#endif
 #ifdef PILOT_AUDIO_LISTENER_VERSION
     } else if(audio_listener_dispatch(pilot_audio_calls[entry].name,a)) {
         /* No spatial voices are admitted by audio_create_buffer. Listener

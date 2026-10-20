@@ -37,7 +37,8 @@ static void full_bank_fixture(void)
     const unsigned descriptor=state_at+state*4,bytes=descriptor+48;
     uint32_t *data=calloc(1,bytes);CHECK(data);
     data[0x804/4]=words;data[0x808/4]=state_at;data[0x80c/4]=state;data[0x810/4]=3;
-    const uint32_t prefix[]={0x65f400,0x80,0x44f400,0x123456,0x65f400,0xc00,0x021584};
+    const uint32_t prefix[]={0x65f400,0x80,0x44f400,0x123456,0x65f400,0xc00,0x021584,
+        0x44f400,0x987654,0x65f400,0xffb,0x021584};
     memcpy((uint8_t*)data+0x818,prefix,sizeof(prefix));data[(state_at-4)/4]=0x0c;
     data[(descriptor-4)/4]=0xabcdef;
     uint32_t *desc=data+descriptor/4;desc[0]=1;
@@ -52,13 +53,25 @@ static void full_bank_fixture(void)
     uint32_t capacity=pilot_dsp_storage_bytes(image);uint8_t *storage=malloc(capacity+16);CHECK(storage);
     memset(storage+capacity,0x6b,16);PilotDsp *d=pilot_dsp_create(image,storage,0x10000000);CHECK(d);
     uint32_t *actual=(uint32_t*)(storage+pilot_dsp_descriptor_offset(image));
-    CHECK(actual[2]==0x10000000 && actual[4]==0x10004200);
+    CHECK(actual[2]==0x10000000 && actual[4]==0x10000000+pilot_dsp_descriptor_offset(image)+40);
     uint32_t mix[1024]={0},out[192];
     for(unsigned block=0;block<3;++block) {
         pilot_dsp_process(d,mix,out);CHECK(out[4]==0x123456);
-        CHECK(((uint32_t*)(storage+0x4000))[4095]==0xabcdef);
+        CHECK(((uint32_t*)(storage+0x4000))[4095]==0x987654);
     }
     CHECK(pilot_dsp_blocks(d)==3);
+    uint32_t tail=0xffffffff;CHECK(pilot_dsp_effect_read(d,0,(4096-0x80-1)*4,&tail,4) && tail==0xabcdef);
+    /* The real program changed live X[4095]; its CPU shadow stays independent. */
+    uint32_t replacement=0x1234,other=0x9876;
+    struct PilotDspPatch patches[]={{(4096-0x80-1)*4,4,&replacement},{(4096-0x80)*4,4,&other}};
+    CHECK(!pilot_dsp_effect_patch(d,0,2,patches));
+    CHECK(((uint32_t*)(storage+0x4000))[4095]==0x987654);
+    CHECK(pilot_dsp_effect_read(d,0,patches[0].offset,&tail,4) && tail==0xabcdef);
+    CHECK(pilot_dsp_effect_patch(d,0,1,patches));
+    CHECK(((uint32_t*)(storage+0x4000))[4095]==replacement);
+    pilot_dsp_process(d,mix,out);CHECK(((uint32_t*)(storage+0x4000))[4095]==0x987654);
+    CHECK(pilot_dsp_effect_read(d,0,patches[0].offset,&tail,4) && tail==replacement);
+    CHECK(!pilot_dsp_effect_read(d,1,0,&tail,4) && !pilot_dsp_effect_read(d,0,1,&tail,4));
     for(unsigned i=0;i<16;++i)CHECK(storage[capacity+i]==0x6b);
     pilot_dsp_destroy(d);pilot_dsp_image_destroy(image);free(storage);
     data[0x804/4]=4094;CHECK(!pilot_dsp_decode(data,bytes,123,&error));free(data);
@@ -84,7 +97,8 @@ int main(int argc,char **argv)
         fprintf(stderr,"unsupported core feature unexpectedly returned\n");return 1;
     }
     uint32_t *desc=(uint32_t*)(storage+pilot_dsp_descriptor_offset(image));
-    CHECK(desc[0]==1 && desc[1]==0 && desc[2]==0x10001000 && desc[4]==0x10004200 && desc[8]==0x10016000);
+    CHECK(desc[0]==1 && desc[1]==0 && desc[2]==0x10001000 &&
+          desc[4]==0x10000000+pilot_dsp_descriptor_offset(image)+40 && desc[8]==0x10016000);
     uint32_t in[1024],out[192];for(unsigned i=0;i<1024;++i)in[i]=i*103;
     for(unsigned n=0;n<100;++n){pilot_dsp_process(d,in,out);CHECK(out[4]==0x123456);for(unsigned i=0;i<192;++i)if(i!=4)CHECK(out[i]==in[i]);}
     CHECK(pilot_dsp_blocks(d)==100 && pilot_dsp_dma_nodes(d)==0);
@@ -140,7 +154,18 @@ int main(int argc,char **argv)
     void *voice=NULL;CHECK(pilot_audio_buffer_create(512,2,44100,16,&voice)==0);
     int16_t pcm[256];for(unsigned i=0;i<256;++i)pcm[i]=(int16_t)((i%32)*16-256);
     CHECK(pilot_audio_buffer_copy(voice,0,pcm,sizeof(pcm),0)==0);
-    CHECK(pilot_audio_buffer_play(voice,1)==0);Sleep(250);
+    CHECK(pilot_audio_buffer_play(voice,1)==0);Sleep(125);
+    if(argc!=4) {
+        uint32_t value=0x2345,observed=0;
+        struct PilotDspPatch patches[]={{0,4,&value},{20,4,&value}};
+        CHECK(pilot_audio_effects_patch(d,0,2,patches)<0);
+        CHECK(pilot_dsp_effect_read(d,0,0,&observed,4) && !observed);
+        CHECK(!pilot_audio_effects_patch(d,0,1,patches));
+        CHECK(pilot_dsp_effect_read(d,0,0,&observed,4) && observed==value);
+        /* This authored program ignores its state prefix. A real running
+         * source/GP quantum survives the atomic update without graph reset. */
+    }
+    Sleep(125);
     uint32_t status=0,cursor=0,write=0;CHECK(pilot_audio_buffer_status(voice,&status)==0 && status==5);
     CHECK(pilot_audio_buffer_position(voice,&cursor,&write)==0 && cursor<512 && write<512);
     CHECK(pilot_audio_buffer_stop(voice)==0);pilot_audio_buffer_destroy(voice);pilot_audio_close();

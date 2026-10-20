@@ -597,6 +597,7 @@ static void query_setting(void)
 #endif
 #include "system_time.inc"
 #include "event_objects.inc"
+#include "native_cpu_context.inc"
 #include "native_file_apc.inc"
 #ifdef PILOT_IO_DEVICE_LLE
 #include "io_device_lle.h"

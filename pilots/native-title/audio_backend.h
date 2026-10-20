@@ -38,6 +38,8 @@ int32_t pilot_audio_buffer_frequency(void *buffer,uint32_t frequency);
 #ifdef PILOT_AUDIO_DSP
 struct PilotDsp;
 int32_t pilot_audio_effects_install(struct PilotDsp *graph);
+struct PilotDspPatch;
+int32_t pilot_audio_effects_patch(struct PilotDsp *graph,unsigned effect,unsigned count,const struct PilotDspPatch *patches);
 #endif
 #ifdef __cplusplus
 }

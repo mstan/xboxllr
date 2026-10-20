@@ -146,6 +146,7 @@ int32_t pilot_audio_buffer_mixbins(void*p,unsigned count,const uint32_t*bins,con
  b->mix_count=count;for(unsigned i=0;i<count;++i){b->mix_bins[i]=bins[i];b->mix_volumes[i]=volumes[i];}engine->mix_config(b);return engine->fault.empty()?OK:FAIL;
 }
 int32_t pilot_audio_effects_install(PilotDsp*graph){if(ready())return FAIL;if(!graph)return INVALID;engine->graph=graph;engine->reset_carry();return OK;}
+int32_t pilot_audio_effects_patch(PilotDsp*graph,unsigned effect,unsigned count,const PilotDspPatch*patches){if(ready())return FAIL;if(!graph||engine->graph!=graph)return INVALID;return pilot_dsp_effect_patch(graph,effect,count,patches)?OK:INVALID;}
 int32_t reference_effects_detach(PilotDsp*expected){if(ready())return FAIL;if(!expected||engine->graph!=expected)return INVALID;engine->graph=nullptr;engine->reset_carry();return OK;}
 int32_t pilot_audio_capture_begin(float*samples,uint32_t frames,int after){if(ready())return FAIL;if(!samples||!frames||engine->tap)return INVALID;engine->tap=samples;engine->tap_capacity=frames;engine->tap_frames=0;engine->post=!!after;return OK;}
 uint32_t pilot_audio_capture_end(void){if(ready())return 0;uint32_t n=engine->tap_frames;engine->tap=nullptr;engine->tap_capacity=0;return n;}
