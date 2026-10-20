@@ -718,7 +718,12 @@ if(EXISTS "${PILOT_GENERATED}/pilot_input_bindings.h")
   target_compile_definitions(pilot_contract_test PRIVATE PILOT_INPUT_NATIVE)
   pilot_add_test(NAME pilot_input_contract COMMAND pilot_contract_test input)
   set_tests_properties(pilot_input_contract PROPERTIES TIMEOUT 20)
+  file(STRINGS "${PILOT_GENERATED}/pilot_input_bindings.h" pilot_input_feedback_absent
+    REGEX "^#define PILOT_INPUT_HAS_FEEDBACK 0$")
   foreach(kind manual event closed unknown)
+    if(kind STREQUAL "event" AND pilot_input_feedback_absent)
+      continue()
+    endif()
     pilot_add_test(NAME pilot_input_stops_${kind} COMMAND "${CMAKE_COMMAND}"
       "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DKIND=${kind}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/input_failures.cmake")

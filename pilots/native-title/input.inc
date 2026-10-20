@@ -49,6 +49,11 @@ static SRWLOCK input_lock=SRWLOCK_INIT;
 static uint32_t input_next_handle=0xc5000001u;
 static unsigned input_capacity=4;
 static int input_initialized;
+/* XInitDevices starts USB enumeration; it does not publish all host ports
+ * synchronously. Match Cxbx-Reloaded's bounded 500 ms HLE initialization phase
+ * without sleeping or creating a polling thread. Exact console timing remains
+ * separate from the query/connection contract. */
+static uint64_t input_enumeration_deadline;
 
 static void input_buffer(uint32_t va,unsigned size)
 {
@@ -96,6 +101,10 @@ static void input_disconnect(unsigned port)
 }
 static void input_sample(unsigned port,uint64_t now,int force)
 {
+    if(input_enumeration_deadline) {
+        if(now<input_enumeration_deadline)return;
+        input_enumeration_deadline=0;
+    }
     struct PilotInputPort *p=&input_ports[port];
     if (!force && now<p->next_poll) return;
     uint8_t state[18]; uint32_t status=pilot_input_host_state(port,state);
@@ -207,9 +216,11 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
         memset(memory+PILOT_INPUT_g_DeviceType_Gamepad,0,12);
         memset(memory+PILOT_INPUT_g_DeviceType_MU,0,12);
         memset(memory+PILOT_INPUT_g_DeviceType_IRDongle,0,12);
-        input_initialized=1; input_refresh();
-        fprintf(stderr,"[INPUT INIT] native-host gamepads=%x capacity=%u MU=0 IR=0\n",
-                MEM32(PILOT_INPUT_g_DeviceType_Gamepad),input_capacity);
+        uint64_t now=dispatch_monotonic();
+        if(now>UINT64_MAX-5000000)stop("input enumeration clock overflow",entry);
+        input_enumeration_deadline=now+5000000;
+        input_initialized=1;
+        fprintf(stderr,"[INPUT INIT] native-host enumeration=pending capacity=%u MU=0 IR=0\n",input_capacity);
         break;
     }
     case PILOT_INPUT_XGetDevices: {
@@ -296,9 +307,8 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
 #endif
 #if PILOT_INPUT_HAS_ENUMERATION_STATUS
     case PILOT_INPUT_XGetDeviceEnumerationStatus:
-        /* Native host polling completes synchronously and has no pending USB
-         * enumeration request. Initialization is checked before this switch. */
-        input_refresh(); result=0; break;
+        /* Queries observe the same pending startup owner as Open/GetDevices. */
+        input_refresh(); result=input_enumeration_deadline?1:0; break;
 #endif
 #if PILOT_INPUT_HAS_DEVICE_DESCRIPTION
     case PILOT_INPUT_XInputGetDeviceDescription:

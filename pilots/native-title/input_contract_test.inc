@@ -386,7 +386,31 @@ static void input_test_setup(void)
     }
     MEM32(0x19000)=PILOT_INPUT_g_DeviceType_Gamepad; MEM32(0x19004)=4;
     MEM32(0x19008)=PILOT_INPUT_g_DeviceType_MU; MEM32(0x1900c)=2;
+    unsigned before_enumeration=input_test_state_calls;
     input_test_call(PILOT_INPUT_XInitDevices,2,0x19000,0,0);
+    uint32_t type=PILOT_INPUT_g_DeviceType_Gamepad,out=0x1a020;
+    uint64_t deadline=input_enumeration_deadline;CHECK(deadline);
+    CHECK(input_test_state_calls==before_enumeration && !MEM32(type) && !MEM32(type+4) && !MEM32(type+8));
+    CHECK(!input_test_call(PILOT_INPUT_XGetDeviceChanges,type,out,out+4,0));
+    CHECK(!MEM32(out) && !MEM32(out+4));
+    CHECK(!input_test_call(PILOT_INPUT_XGetDevices,type,0,0,0));
+    CHECK(!input_test_call(PILOT_INPUT_XInputOpen,type,0,0,0) && input_test_last_error==1167);
+#if PILOT_INPUT_HAS_ENUMERATION_STATUS
+    CHECK(input_test_call(PILOT_INPUT_XGetDeviceEnumerationStatus,0,0,0,0)==1);
+#endif
+    input_sample(0,deadline-1,1);
+    CHECK(input_test_state_calls==before_enumeration && input_enumeration_deadline==deadline);
+    input_sample(0,deadline,1);
+    CHECK(input_test_state_calls==before_enumeration+1 && !input_enumeration_deadline);
+    CHECK(MEM32(type)==1 && MEM32(type+4)==1 && !MEM32(type+8));
+    CHECK(input_test_call(PILOT_INPUT_XGetDeviceChanges,type,out,out+4,0)==1);
+    CHECK(MEM32(out)==1 && !MEM32(out+4));
+    CHECK(!input_test_call(PILOT_INPUT_XGetDeviceChanges,type,out,out+4,0));
+    CHECK(!MEM32(out) && !MEM32(out+4));
+#if PILOT_INPUT_HAS_ENUMERATION_STATUS
+    CHECK(!input_test_call(PILOT_INPUT_XGetDeviceEnumerationStatus,0,0,0,0));
+#endif
+    fprintf(stderr,"PASS asynchronous native input enumeration: no early polls/handles, before/exact deadline, real initial insertion once\n");
 }
 static void test_input(void)
 {
@@ -423,6 +447,7 @@ static void test_input(void)
     uint8_t last_state[22];memcpy(last_state,memory+out,22);
     input_ports[0].next_poll=UINT64_MAX;
 
+#if PILOT_INPUT_HAS_CAPABILITIES
     memset(memory+out-1,0xcc,28);
     CHECK(input_test_call(PILOT_INPUT_XInputGetCapabilities,handle,out,0,0)==0);
     const uint8_t expected_caps[25]={2,0,0,255,0,255,255,255,255,255,255,255,255,
@@ -433,7 +458,9 @@ static void test_input(void)
     CHECK(MEM8(out)==2 && MEM8(out+25)==0xcc);
     for (unsigned i=1;i<25;++i) CHECK(MEM8(out+i)==0);
     input_test_caps_status=0;
+#endif
 
+#if PILOT_INPUT_HAS_FEEDBACK
     memset(memory+out-1,0xa5,72); MEM32(out+4)=0;
     MEM16(out+66)=12345; MEM16(out+68)=54321;
     CHECK(input_test_call(PILOT_INPUT_XInputSetState,handle,out,0,0)==0);
@@ -443,6 +470,7 @@ static void test_input(void)
     input_test_rumble_status=5;
     CHECK(input_test_call(PILOT_INPUT_XInputSetState,handle,out,0,0)==5 && MEM32(out)==5);
     input_test_rumble_status=0;
+#endif
 
     /* Removal/reinsertion observed between enumeration queries reports BOTH.
      * A stale handle must never silently acquire the replacement controller. */
@@ -483,7 +511,8 @@ static void test_input(void)
     MEM32(type)=5;MEM32(type+4)=15;MEM32(type+8)=10;
     CHECK(input_test_call(PILOT_INPUT_XGetDevices,type,0,0,0)==5);
     CHECK(MEM32(type)==5 && !MEM32(type+4) && MEM32(type+8)==5);
-    puts("input contract: 22/25/70-byte ABI, mapping, poll cache, hotplug, stale handles, real feedback errors and 100 lifetimes passed");
+    printf("input contract: 22-byte state, mapping, poll cache, hotplug, stale handles and 100 lifetimes passed; capabilities=%u feedback=%u\n",
+        PILOT_INPUT_HAS_CAPABILITIES,PILOT_INPUT_HAS_FEEDBACK);
 }
 static void test_input_failure(const char *kind)
 {
