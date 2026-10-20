@@ -115,7 +115,7 @@ static void graphics_frame_capture_draw(unsigned shader,const uint32_t args[3],u
         raster.viewport[3],raster.viewport[4],raster.viewport[5],raster.scissor_enabled,
         raster.scissor[0],raster.scissor[1],raster.scissor[2],raster.scissor[3],raster.source_width,raster.source_height);
 }
-static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_t up_stride,const void *indices,unsigned index_count,int32_t base)
+static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,uint32_t up_stride,const void *indices,unsigned index_count,int32_t base,const void *host_vertices)
 {
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     graphics_frame_audit.capture_sequence=0;
@@ -124,7 +124,8 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     if(profile)++graphics_service_profile.draw_calls;
     unsigned primitive=args[0],first=args[1],count=args[2];
     unsigned submitted=indices?index_count:count;
-    int unit_points=primitive==1 && !indices && !up_data;
+    int memory_vertices=up_data || host_vertices;
+    int unit_points=primitive==1 && !indices && !memory_vertices;
     if(!count || (uint64_t)first+count>UINT32_MAX)stop("invalid draw range",count);
     if((!unit_points && primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || (!unit_points && submitted<3) ||
         (primitive==5 && submitted%3) || (primitive==8 && submitted%4)) {
@@ -138,6 +139,10 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
         stop("unqualified primitive/count",primitive);
     }
     const char *draw_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW),*fvf_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
+    if(host_vertices && (indices || up_data || first ||
+        (draw_capture && *draw_capture) || (fvf_capture && *fvf_capture) ||
+        graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FRAME)))
+        stop("unqualified immediate input serialization/source",primitive);
     if(indices && ((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture)))
         stop("indexed draw input capture outside qualified diagnostic scope",primitive);
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
@@ -149,6 +154,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     graphics_target_prepare(graphics_target);graphics_target_prepare(graphics_depth);
     graphics_draw_profile_step(&profile,0);
     uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
+    if(host_vertices && (shader&15)!=4)stop("unqualified immediate vertex shader",shader);
     struct GraphicsShader *declaration=(shader&1)?graphics_shader(shader):NULL;
     int fixed_fvf=!(shader&1) && (shader&15)==2;
     int fixed=(declaration && declaration->fixed) || fixed_fvf;
@@ -181,10 +187,10 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     uint32_t extents[16]={0};unsigned streams;
     if(shader&1)streams=pilot_gfx_shader_streams(extents);
     else {extents[0]=pilot_gfx_fvf_extent(shader);streams=1;}
-    if(up_data) {
+    if(memory_vertices) {
         if(streams!=1 || !up_stride || up_stride<extents[0] || (uint64_t)count*up_stride>UINT32_MAX)
             stop("invalid user-pointer draw stream",up_stride);
-        graphics_pointer(up_data,count*up_stride);
+        if(up_data)graphics_pointer(up_data,count*up_stride);
     }
     const char *feedback_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FEEDBACK);
     if(pilot_gfx_feedback_mask() && feedback_capture && *feedback_capture && up_data) {
@@ -197,7 +203,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
             fwrite(memory+PILOT_D3D_TEXTURE_STATES,128*4,1,file)!=1 || fwrite(memory+up_data,count*up_stride,1,file)!=1 || fclose(file))
             stop("feedback capture write",0);
     }
-    for(unsigned i=0;i<16;++i)if(!up_data && (streams&(1u<<i))) {
+    for(unsigned i=0;i<16;++i)if(!memory_vertices && (streams&(1u<<i))) {
         uint32_t cache=PILOT_D3D_STREAMS+i*12,stride=MEM32(cache);
         struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(cache+8));
         if(((uint64_t)first+count-1)*stride+extents[i]>vertex->bytes)stop("draw reads beyond vertex resource",i);
@@ -225,7 +231,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
 #ifdef PILOT_TITLE_MODS
     if(title_mod && title_mod->draw) {
         uint32_t stride=up_stride,data=up_data,position_type=fixed_fvf?0x32:0x42,position_offset=0;
-        if(!up_data && (streams&1)) {
+        if(!memory_vertices && (streams&1)) {
             stride=MEM32(PILOT_D3D_STREAMS);
             data=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8))->data+first*stride;
         }
@@ -235,7 +241,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
             position_offset=MEM32(descriptor+4);position_type=MEM32(descriptor+8);
         }
         struct PilotTitleModDraw draw={MEM32(g_esp),shader,primitive,count,graphics_target==graphics_headers,
-            data?memory+data+position_offset:NULL,stride,position_type,1,0,
+            host_vertices?(const unsigned char*)host_vertices+position_offset:data?memory+data+position_offset:NULL,stride,position_type,1,0,
             graphics_render_read(143),graphics_render_read(64)};
         title_mod->draw(&draw);
         if(!(draw.x_scale>0 && draw.x_scale<=1 && isfinite(draw.x_anchor)))
@@ -258,6 +264,7 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
         if(graphics_render_read(92))stop("pretransformed fog is unqualified",shader);
         if(pilot_gfx_fvf_placement(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
             graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4),mod_x_scale,mod_x_anchor)<0)stop("native FVF preparation failed",shader);
+        if(host_vertices && pilot_gfx_immediate_fvf(shader)<0)stop("native immediate FVF preparation failed",shader);
         const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture && !up_data) {
             struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8));
@@ -282,14 +289,15 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     float offset[]={-1-viewport[0]*sx*scale[0],1-viewport[1]*sy*scale[1],-low/(high-low),0};
     offset[0]+=(1-mod_x_scale)*mod_x_anchor*sx*scale[0];scale[0]*=mod_x_scale;
     if(pilot_gfx_shader_raster(scale,offset)<0)stop("native raster constants failed",0);
-    if(!up_data && !indices)scene_reference=graphics_draw_capture(args);
+    if(!memory_vertices && !indices)scene_reference=graphics_draw_capture(args);
     }
     graphics_draw_profile_step(&profile,4);
     graphics_frame_capture_draw(shader,args,up_data,up_stride,indices,index_count,base,mod_x_scale,mod_x_anchor,1);
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
-    if(!indices)graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);
+    if(!indices && !host_vertices)graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);
 #endif
     int32_t result=indices?pilot_gfx_draw_indexed(primitive,index_count,indices,base):
+        host_vertices?pilot_gfx_draw_memory(primitive,count,host_vertices,up_stride):
         up_data?pilot_gfx_draw_memory(primitive,count,memory+up_data,up_stride):pilot_gfx_draw_vertices(primitive,first,count);
     graphics_draw_profile_step(&profile,5);
     if(result<0)stop("native vertex draw failed",(uint32_t)result);
@@ -299,6 +307,8 @@ static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_
     graphics_frame_capture_draw(shader,args,up_data,up_stride,indices,index_count,base,mod_x_scale,mod_x_anchor,0);
     graphics_draw_profile_step(&profile,6);
 }
+static void graphics_draw_submit(const uint32_t args[3],uint32_t up_data,uint32_t up_stride,const void *indices,unsigned index_count,int32_t base)
+{graphics_draw_submit_source(args,up_data,up_stride,indices,index_count,base,NULL);}
 static void graphics_draw_common(const uint32_t args[3],uint32_t up_data,uint32_t up_stride)
 {graphics_draw_submit(args,up_data,up_stride,NULL,0,0);}
 static void graphics_draw_indexed(const uint32_t args[3])

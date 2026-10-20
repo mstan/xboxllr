@@ -321,6 +321,9 @@ def emit_text(binding,interface,behavior_mask):
     header += ['};','static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_d3d_calls[] = {']
     header += [f'{{"{c["name"]}",{c["address"]}u,{c["stack_bytes"]}u,{c["bytes"]}u,"{c["function_sha256"]}"}},' for c in calls]
     header += ['};']
+    if 'immediate' in binding:
+        from native_d3d_immediate import emit_defines
+        header += emit_defines(binding['immediate'])
     if binding.get('cpu_services'):
         by_name={c['name']:c for c in calls};selected=binding['cpu_services'];indices={name:i for i,name in enumerate(selected)}
         header += ['#define PILOT_D3D_NATIVE_CPU_SERVICE_VERSION 1',

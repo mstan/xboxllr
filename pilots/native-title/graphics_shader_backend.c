@@ -18,7 +18,7 @@ struct NativeShader {
     struct PilotVertexElement elements[16];
     unsigned used,current;
     unsigned blend_recipe;
-    uint32_t fixed_fvf,source_fvf;
+    uint32_t fixed_fvf,source_fvf,immediate_fvf;
 };
 static struct NativeShader native_shaders[256];
 static ID3D11Buffer *native_constants_buffer;
@@ -139,6 +139,7 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
     return S_OK;
 }
 #include "graphics_fixed_backend.inc"
+#include "graphics_immediate_backend.inc"
 void pilot_gfx_shader_destroy(uint32_t handle)
 {
     struct NativeShader *shader=native_shader(handle);

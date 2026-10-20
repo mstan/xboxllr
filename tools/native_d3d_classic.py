@@ -194,6 +194,18 @@ def inspect(context, proof):
                 {p['reserve'],p['space'],p['kickoff']} != {'D3D_MakeRequestedSpace_8','D3DDevice_MakeSpace','CDevice_KickOff'}):
             raise ValueError('unreviewed classic inline command-buffer policy')
         binding['command_buffer']=copy.deepcopy(p)
+    if type(proof.get('immediate',False)) is not bool:
+        raise ValueError('invalid immediate graphics profile admission')
+    if proof.get('immediate'):
+        from native_d3d_immediate import inspect as inspect_immediate
+        helper=proof['helpers'].get('immediate_flush')
+        if helper is None:raise ValueError('immediate Begin requires its original state-flush helper')
+        for name in ('D3DDevice_Begin','D3DDevice_End','D3DDevice_SetVertexData2f','D3DDevice_SetVertexData4f'):
+            if not any(i.mnemonic=='mov' and i.op_str==f'esi, dword ptr [{hex(layout["device_global"])}]'
+                       for i in codes.get(name,())):
+                raise ValueError('immediate entry has a different device owner: '+name)
+        binding['immediate']=inspect_immediate(codes,interface,[c['name'] for c in calls],
+            flush_helper_address=helper['address'],enabled=True)
     return binding, *emit_text(binding,interface,0x40)
 
 
@@ -202,7 +214,10 @@ def bind(context, proof):
     validated=inspect(context,proof)
     binding,header,wrapper=validated
     record=context.output/'d3d-binding.aot-private.json'
-    if record.exists():
+    # Full preparation deliberately removes generated wrappers before binding
+    # freshly translated bodies. Its retained record is historical evidence,
+    # not a request to upgrade wrapper files which no longer exist.
+    if record.exists() and (context.generated/'pilot_d3d_binding.c').exists():
         previous=json.loads(record.read_text())
         def retained(old,new):
             if isinstance(old,dict):return isinstance(new,dict) and all(k in new and retained(v,new[k]) for k,v in old.items())
@@ -211,8 +226,14 @@ def bind(context, proof):
         if previous!=binding and previous.get('adapter')==ADAPTER and retained(previous,binding):
             interface={r['name']:r for r in json.loads(INTERFACE.read_text())}
             old_header,old_wrapper=emit_text(previous,interface,0x40)
+            old_headers=[old_header]
+            if not any(c['name']=='D3DDevice_CreateIndexBuffer2' for c in previous['calls']):
+                # Older canonical inventories omitted this optional enum even
+                # though cross-profile contract fixtures refer to it. Only an
+                # absent entry after COUNT may be added without an ABI change.
+                old_headers.append(old_header.replace('    PILOT_D3D_D3DDevice_CreateIndexBuffer2,\n',''))
             if (context.manifest.get('d3d_binding')!=previous or
-                    (context.generated/'pilot_d3d_bindings.h').read_text()!=old_header or
+                    (context.generated/'pilot_d3d_bindings.h').read_text() not in old_headers or
                     (context.generated/'pilot_d3d_binding.c').read_text()!=old_wrapper):
                 raise ValueError('existing classic source/metadata drifted before additive proof')
             # Only independently inspected additive original facts can upgrade

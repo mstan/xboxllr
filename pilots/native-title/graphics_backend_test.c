@@ -29,6 +29,7 @@
 #include "graphics_initializer_backend_test.inc"
 #include "graphics_texgen_backend_test.inc"
 #include "graphics_point_backend_test.inc"
+#include "graphics_immediate_backend_test.inc"
 #include "graphics_fixed_backend_test.inc"
 #include "graphics_index_backend_test.inc"
 #include "graphics_edge_backend_test.inc"
@@ -168,6 +169,9 @@ int main(int argc,char **argv)
             CHECK(!test_fixed_resultarg());pilot_gfx_close();continue;
         }
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--immediate")) {
+            CHECK(!test_immediate_pixels());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--pixel-bump")) {
             CHECK(!test_pixel_bump());pilot_gfx_close();continue;
         }

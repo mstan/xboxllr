@@ -1104,6 +1104,16 @@
     ]
   },
   {
+    "name": "D3DDevice_CreateIndexBuffer2",
+    "stack_bytes": 4,
+    "params": [
+      {
+        "type": "psh",
+        "name": "Length"
+      }
+    ]
+  },
+  {
     "name": "D3DDevice_SetVertexData2f",
     "stack_bytes": 12,
     "params": [

@@ -179,6 +179,7 @@ static void graphics_target_prepare(uint32_t header);
 #include "graphics_frame_audit.inc"
 #include "graphics_draw.inc"
 #include "graphics_completion.inc"
+#include "graphics_immediate.inc"
 #include "graphics_gpu_callback.inc"
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
 #include "graphics_original_callbacks.inc"
@@ -256,6 +257,9 @@ static void graphics_dispatch_impl(unsigned entry)
 #ifdef PILOT_D3D_NATIVE_CPU_SERVICE_VERSION
     int cpu_service=pilot_d3d_native_cpu_service_index[entry];
     if(cpu_service>=0) {
+#ifdef PILOT_D3D_IMMEDIATE_VERSION
+        if(graphics_immediate.primitive)stop("unqualified original CPU graphics call inside immediate batch",entry);
+#endif
         if((unsigned)cpu_service>=PILOT_D3D_NATIVE_CPU_SERVICE_COUNT)stop("invalid native CPU service index",entry);
         graphics_original_cpu_service(pilot_d3d_native_cpu_services[cpu_service].function,
                                       pilot_d3d_native_cpu_services[cpu_service].stack_bytes);return;
@@ -287,6 +291,9 @@ static void graphics_dispatch_impl(unsigned entry)
     uint64_t barrier=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     graphics_frame_inputs_before(entry,arguments);
+#endif
+#ifdef PILOT_D3D_IMMEDIATE_VERSION
+    if(graphics_immediate_dispatch(entry,arguments))goto graphics_dispatch_done;
 #endif
     switch(entry) {
 #ifdef PILOT_D3D_COMMANDS_VERSION
@@ -652,6 +659,7 @@ static void graphics_dispatch_impl(unsigned entry)
 #ifdef PILOT_D3D_COMMANDS_VERSION
         graphics_commands_close();
 #endif
+        pilot_immediate_close(&graphics_immediate);
         pilot_gfx_close(); graphics_active=0;
 #ifdef PILOT_D3D_DEVICE_REFERENCES
         memset(memory+PILOT_D3D_DEVICE_OBJECT,0,PILOT_D3D_DEVICE_BYTES);
@@ -734,6 +742,9 @@ static void graphics_dispatch_impl(unsigned entry)
         fputc('\n',stderr);
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
+#ifdef PILOT_D3D_IMMEDIATE_VERSION
+graphics_dispatch_done:
+#endif
     graphics_original_retire_drain();
     uint64_t unlocking=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT

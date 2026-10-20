@@ -42,6 +42,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
 #include "graphics_resource_wait_contract_test.inc"
 #include "graphics_commands_contract_test.inc"
 #include "graphics_capacity_contract_test.inc"
+#include "graphics_immediate_contract_test.inc"
 static void test_graphics_guest_scheduler(void)
 {
     GRAPHICS_TEST_REQUIRE("graphics scheduler callbacks/fences",PILOT_D3D_D3DDevice_InsertCallback,
@@ -128,6 +129,7 @@ static void test_graphics(int focused_fixture)
             else if(focused_fixture==3)test_graphics_present_status();
             else if(focused_fixture==9)test_graphics_1555_storage();
             else if(focused_fixture==10)test_graphics_geometry_capacity();
+            else if(focused_fixture==11 || focused_fixture==12)test_graphics_immediate_vertices(focused_fixture==12);
             else test_graphics_deferred_relevance((unsigned)focused_fixture-4);
             CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));

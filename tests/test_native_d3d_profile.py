@@ -140,6 +140,28 @@ class ClassicOriginalProofTests(unittest.TestCase):
                     with patch.object(Path,'write_text',side_effect=AssertionError('repeated write')):self.assertEqual(bind_classic(context,self.proof),self.binding)
 
 
+class ClassicFreshGenerationTests(unittest.TestCase):
+    def test_fresh_generated_bodies_bind_despite_retained_prior_record(self):
+        # A normal prepare regenerates original bodies and removes wrappers,
+        # but retains the last binding record for provenance. An additive proof
+        # must not require now-absent wrappers or an old admission in the fresh
+        # manifest. Exercise the real wrapper/body publication after inspection.
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory);generated=output/'gen';generated.mkdir()
+            old={'adapter':CLASSIC_ADAPTER,'calls':[{'symbol':'sub_00001234','name':'D3DDevice_Begin'}],'helpers':{}}
+            selected=copy.deepcopy(old);selected['immediate']={'version':1}
+            (output/'d3d-binding.aot-private.json').write_text(json.dumps(old))
+            source=generated/'recomp_0000.c';source.write_text('void sub_00001234(void)\n{\n}\n')
+            context=SimpleNamespace(output=output,generated=generated,manifest={'files':{}},
+                manifest_path=output/'generation.aot-private.json')
+            with patch('native_d3d_classic.inspect',return_value=(selected,'new header\n','new wrapper\n')):
+                self.assertEqual(bind_classic(context,{}),selected)
+            self.assertIn('void pilot_original_d3d_D3DDevice_Begin(void)',source.read_text())
+            self.assertEqual((generated/'pilot_d3d_bindings.h').read_text(),'new header\n')
+            self.assertEqual(context.manifest['d3d_binding'],selected)
+            self.assertEqual(json.loads((output/'d3d-binding.aot-private.json').read_text()),selected)
+
+
 class LTCGOriginalProofTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
