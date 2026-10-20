@@ -885,6 +885,8 @@ if(PILOT_D3D_SOURCE)
     pilot_add_test(NAME pilot_graphics_deferred_relevance COMMAND pilot_contract_test graphics-deferred-relevance)
     pilot_add_test(NAME pilot_graphics_1555_storage COMMAND pilot_contract_test graphics-1555-storage)
     set_tests_properties(pilot_graphics_1555_storage PROPERTIES TIMEOUT 15)
+    pilot_add_test(NAME pilot_graphics_geometry_capacity COMMAND pilot_contract_test graphics-geometry-capacity)
+    set_tests_properties(pilot_graphics_geometry_capacity PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
     pilot_add_test(NAME pilot_graphics_deferred_guards COMMAND "${CMAKE_COMMAND}"
       "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_deferred_failures.cmake")
     set_tests_properties(pilot_graphics_deferred_relevance pilot_graphics_deferred_guards PROPERTIES TIMEOUT 20)

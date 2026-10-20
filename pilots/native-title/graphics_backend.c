@@ -109,7 +109,9 @@ struct PilotNativeTexture {
 };
 static struct PilotNativeTexture *pilot_textures;
 static unsigned pilot_texture_capacity;
-static struct { IDirect3DVertexBuffer8 *object; int uploaded,refetch; uint64_t last_use; } pilot_vertices[256];
+struct PilotNativeVertex { IDirect3DVertexBuffer8 *object; int uploaded,refetch; uint64_t last_use; };
+static struct PilotNativeVertex *pilot_vertices;
+static unsigned pilot_vertex_capacity;
 static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
 static uint32_t pilot_bound_strides[16];
 static unsigned pilot_blend_default_shape,pilot_blend_transient,pilot_blend_transient_proof,pilot_blend_draws;
@@ -235,8 +237,9 @@ void pilot_gfx_close(void)
     pilot_visual_close();
     pilot_logic_copy=pilot_requested_blend=0;
     pilot_gfx_shaders_close();
-    for (unsigned i=0;i<256;++i)
+    for (unsigned i=0;i<pilot_vertex_capacity;++i)
         if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
+    free(pilot_vertices);pilot_vertices=NULL;pilot_vertex_capacity=0;
     for (unsigned i=0;i<pilot_texture_capacity;++i)
         if(pilot_textures[i].object) pilot_d3d_backend_stop("device close with outstanding texture ownership");
     free(pilot_textures);pilot_textures=NULL;pilot_texture_capacity=0;
@@ -565,7 +568,7 @@ int32_t pilot_gfx_surface_ref(unsigned surface,int acquire)
 }
 static D3D8VertexBuffer *pilot_vertex(uint32_t handle)
 {
-    if(!handle || handle>256 || !pilot_vertices[handle-1].object)
+    if(!handle || handle>pilot_vertex_capacity || !pilot_vertices[handle-1].object)
         pilot_d3d_backend_stop("unowned native vertex buffer");
     return (D3D8VertexBuffer*)pilot_vertices[handle-1].object;
 }
@@ -573,8 +576,16 @@ int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle)
 {
     if(!pilot_device || !handle || !bytes || bytes>64u*1024*1024) return E_INVALIDARG;
     unsigned slot;
-    for(slot=0;slot<256 && pilot_vertices[slot].object;++slot) {}
-    if(slot==256) return E_OUTOFMEMORY;
+    for(slot=0;slot<pilot_vertex_capacity && pilot_vertices[slot].object;++slot) {}
+    if(slot==pilot_vertex_capacity) {
+        unsigned old=pilot_vertex_capacity;
+        if(old>UINT_MAX/2/sizeof(*pilot_vertices))return E_OUTOFMEMORY;
+        unsigned capacity=old?old*2:256;
+        struct PilotNativeVertex *next=realloc(pilot_vertices,capacity*sizeof(*next));
+        if(!next)return E_OUTOFMEMORY;
+        memset(next+old,0,(capacity-old)*sizeof(*next));
+        pilot_vertices=next;pilot_vertex_capacity=capacity;
+    }
     IDirect3DVertexBuffer8 *object=NULL;
     HRESULT hr=d3d8_CreateVertexBufferImpl(bytes,0,0,&object);
     if(FAILED(hr)) return hr;
@@ -1495,7 +1506,7 @@ int pilot_gfx_vertex_cache_break(int apply)
     // Whole native draws have no partially assembled primitive. Discard only
     // source-upload reuse: the next draw snapshots/refetches its vertex bytes.
     // Existing GPU draws retain their ordered D3D11 resources and work.
-    if(apply)for(unsigned i=0;i<sizeof(pilot_vertices)/sizeof(*pilot_vertices);++i)
+    if(apply)for(unsigned i=0;i<pilot_vertex_capacity;++i)
         if(pilot_vertices[i].object)pilot_vertices[i].refetch=1;
     return 1;
 }

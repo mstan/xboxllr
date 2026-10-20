@@ -3,12 +3,24 @@
  * Headers made by original code remain caller-owned, as for archive textures.
  */
 struct GraphicsIndexObject {uint32_t header,data,bytes,refs,bindings;unsigned borrowed;uint64_t last_use;unsigned waiters,retire_original;};
-static struct GraphicsIndexObject graphics_indices[256];
+static struct GraphicsIndexObject *graphics_indices;
+static unsigned graphics_index_capacity;
+static unsigned graphics_index_unused(void)
+{
+    for(unsigned i=0;i<graphics_index_capacity;++i)if(!graphics_indices[i].header)return i;
+    unsigned old=graphics_index_capacity;
+    if(old>UINT_MAX/2/sizeof(*graphics_indices))return UINT_MAX;
+    unsigned capacity=old?old*2:256;
+    struct GraphicsIndexObject *next=realloc(graphics_indices,capacity*sizeof(*next));
+    if(!next)return UINT_MAX;
+    memset(next+old,0,(capacity-old)*sizeof(*next));
+    graphics_indices=next;graphics_index_capacity=capacity;return old;
+}
 static uint32_t graphics_native_index_header;
 static uint64_t graphics_index_draws;
 static int graphics_index_find(uint32_t header)
 {
-    for(unsigned i=0;header && i<256;++i)if(graphics_indices[i].header==header)return (int)i;
+    for(unsigned i=0;header && i<graphics_index_capacity;++i)if(graphics_indices[i].header==header)return (int)i;
     return -1;
 }
 static struct GraphicsIndexObject *graphics_index(uint32_t header)
@@ -26,8 +38,9 @@ static struct GraphicsIndexObject *graphics_index(uint32_t header)
     if((common&0x01070000u)!=0x01010000u || !(common&0xffff) ||
        (uint64_t)header+12>UINT32_MAX || data!=header+12)
         stop("unqualified caller-owned index header",header);
-    for(slot=0;slot<256 && graphics_indices[slot].header;++slot){}
-    if(slot==256)stop("index ownership slots exhausted",header);
+    unsigned unused=graphics_index_unused();
+    if(unused==UINT_MAX)stop("index ownership allocation failed",header);
+    slot=(int)unused;
     /* The original 12-byte header contains no byte length. Borrowed headers
      * cannot invent one from a surrounding heap page. Every consumed index
      * range still traverses the actual guest mapping at submission. */
@@ -38,8 +51,8 @@ static struct GraphicsIndexObject *graphics_index(uint32_t header)
 static uint32_t graphics_index_allocate(uint32_t bytes)
 {
     if(bytes>64u*1024*1024-12)return 0;
-    unsigned slot;for(slot=0;slot<256 && graphics_indices[slot].header;++slot){}
-    if(slot==256)return 0;
+    unsigned slot=graphics_index_unused();
+    if(slot==UINT_MAX){fprintf(stderr,"[INDEX ALLOCATION] ownership metadata allocation failed: slots=%u bytes=%u\n",graphics_index_capacity,bytes);return 0;}
     uint32_t header=pool_allocate(bytes+12,0x58444e49u);if(!header)return 0;
     MEM32(header)=0x01010001;MEM32(header+4)=header+12;MEM32(header+8)=0;
     graphics_indices[slot]=(struct GraphicsIndexObject){header,header+12,bytes,1,0,0,0};
@@ -91,9 +104,10 @@ static void graphics_index_bind(uint32_t header,uint32_t base)
 static void graphics_indices_close(void)
 {
     graphics_index_draws=0;
-    for(unsigned i=0;i<256;++i)if(graphics_indices[i].header) {
+    for(unsigned i=0;i<graphics_index_capacity;++i)if(graphics_indices[i].header) {
         if(graphics_indices[i].bindings || !graphics_indices[i].borrowed)
             stop("device close with outstanding index ownership",graphics_indices[i].header);
         memset(&graphics_indices[i],0,sizeof(graphics_indices[i]));
     }
+    free(graphics_indices);graphics_indices=NULL;graphics_index_capacity=0;
 }

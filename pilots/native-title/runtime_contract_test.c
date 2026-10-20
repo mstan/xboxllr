@@ -810,6 +810,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"graphics-deferred-invalid-lighting")) { test_graphics(7); return 1; }
         if (!strcmp(argv[1],"graphics-deferred-invalid-point")) { test_graphics(8); return 1; }
         if (!strcmp(argv[1],"graphics-1555-storage")) { test_graphics(9); return 0; }
+        if (!strcmp(argv[1],"graphics-geometry-capacity")) { test_graphics(10); return 0; }
         if (!strcmp(argv[1],"graphics-present-device-removed") || !strcmp(argv[1],"graphics-present-device-reset")) {
             test_desktop_override=1;
             test_desktop_result=!strcmp(argv[1],"graphics-present-device-removed")?(int32_t)0x887a0005u:(int32_t)0x887a0007u;

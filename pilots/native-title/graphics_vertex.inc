@@ -2,9 +2,28 @@
  * snapshots changed bytes into its GPU buffer before drawing; no GPU operation
  * writes this storage, so Lock2 needs no emulated FIFO fence or CPU/GPU wait.
  * Physical/cache aliases use one canonical guest VA, as for native textures. */
-#define GRAPHICS_VERTEX_OBJECTS 256
 struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; unsigned borrowed,waiters,retire_original; };
-static struct GraphicsVertexObject graphics_vertices[GRAPHICS_VERTEX_OBJECTS];
+static struct GraphicsVertexObject *graphics_vertices;
+static unsigned graphics_vertex_capacity;
+/* Handles and wait leases retain indices, never pointers into this table.
+ * Grow only while the graphics owner lock is held, before obtaining a slot. */
+static unsigned graphics_vertex_unused(void)
+{
+    for(unsigned i=0;i<graphics_vertex_capacity;++i)if(!graphics_vertices[i].header)return i;
+    unsigned old=graphics_vertex_capacity;
+    if(old>UINT_MAX/2/sizeof(*graphics_vertices))return UINT_MAX;
+    unsigned capacity=old?old*2:256;
+    struct GraphicsVertexObject *next=realloc(graphics_vertices,capacity*sizeof(*next));
+    if(!next)return UINT_MAX;
+    memset(next+old,0,(capacity-old)*sizeof(*next));
+    graphics_vertices=next;graphics_vertex_capacity=capacity;return old;
+}
+static void graphics_vertices_close(void)
+{
+    for(unsigned i=0;i<graphics_vertex_capacity;++i)
+        if(graphics_vertices[i].header)stop("device close with outstanding vertex ownership",graphics_vertices[i].header);
+    free(graphics_vertices);graphics_vertices=NULL;graphics_vertex_capacity=0;
+}
 static unsigned graphics_vertex_adopt(uint32_t header);
 static int graphics_vertex_defer_upload(void)
 {
@@ -17,7 +36,7 @@ static int graphics_vertex_defer_upload(void)
 }
 static int graphics_vertex_find(uint32_t header)
 {
-    for(unsigned i=0;i<GRAPHICS_VERTEX_OBJECTS;++i)
+    for(unsigned i=0;i<graphics_vertex_capacity;++i)
         if(header && graphics_vertices[i].header==header) return (int)i;
     return -1;
 }
@@ -36,9 +55,11 @@ static uint32_t graphics_vertex_allocate(uint32_t length)
 {
     if(!length)stop("unqualified zero-length vertex buffer",length);
     if(length>64u*1024*1024) return 0; /* Cannot fit the configured guest RAM. */
-    unsigned slot;
-    for(slot=0;slot<GRAPHICS_VERTEX_OBJECTS && graphics_vertices[slot].header;++slot) {}
-    if(slot==GRAPHICS_VERTEX_OBJECTS) return 0;
+    unsigned slot=graphics_vertex_unused();
+    if(slot==UINT_MAX) {
+        fprintf(stderr,"[VERTEX ALLOCATION] ownership metadata allocation failed: slots=%u bytes=%u\n",graphics_vertex_capacity,length);
+        return 0;
+    }
     struct GraphicsVertexObject vertex={0};
     vertex.bytes=length; vertex.refs=1; uint32_t bytes=4096;
     if(vm_allocate(&vertex.header,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))return 0;
@@ -133,9 +154,8 @@ static uint32_t graphics_vertex_lock(uint32_t header,uint32_t flags)
 }
 static unsigned graphics_vertex_borrow(uint32_t header,uint32_t address,uint32_t refs,unsigned borrowed)
 {
-    unsigned slot;
-    for(slot=0;slot<GRAPHICS_VERTEX_OBJECTS && graphics_vertices[slot].header;++slot) {}
-    if(slot==GRAPHICS_VERTEX_OBJECTS)stop("registered vertex resource slots exhausted",header);
+    unsigned slot=graphics_vertex_unused();
+    if(slot==UINT_MAX)stop("registered vertex ownership allocation failed",header);
     uint32_t bytes;uint64_t original_reference=0;
 #ifdef PILOT_SCHEDULING_LLE
     if(!pilot_io_device_contiguous_resource_query((uint32_t)address,1,&bytes))

@@ -648,7 +648,7 @@ static void graphics_dispatch_impl(unsigned entry)
         if (graphics_surface_refs[0] || graphics_surface_refs[1] || graphics_surface_refs[2] || graphics_surface_refs[3])
             stop("device release with outstanding surface ownership",entry);
         graphics_surfaces_project(PILOT_SURFACE_CLEAR);
-        graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_indices_close();graphics_shaders_release();graphics_pixels_release();
+        graphics_resource_bindings_close();graphics_texture_aliases_close();graphics_blocks_release();graphics_indices_close();graphics_vertices_close();graphics_shaders_release();graphics_pixels_release();
 #ifdef PILOT_D3D_COMMANDS_VERSION
         graphics_commands_close();
 #endif
