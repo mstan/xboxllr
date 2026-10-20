@@ -156,8 +156,19 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     uint32_t shader=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER);
     if(host_vertices && (shader&15)!=4)stop("unqualified immediate vertex shader",shader);
     struct GraphicsShader *declaration=(shader&1)?graphics_shader(shader):NULL;
-    int fixed_fvf=!(shader&1) && (shader&15)==2;
+    int beta_fvf=0;
+#ifdef PILOT_D3D_FVF_FLOAT_BETA_VERSION
+    beta_fvf=!(shader&1) && (shader&15)>=6 && (shader&15)<=12;
+#endif
+    int fixed_fvf=!(shader&1) && ((shader&15)==2 || beta_fvf);
     int fixed=(declaration && declaration->fixed) || fixed_fvf;
+    if(beta_fvf) {
+        uint32_t blend=graphics_render_read(137);
+        if(blend)stop("unqualified active beta-FVF vertex blending",blend);
+        /* Publish the observed disabled state even if its original cache did
+         * not change from the initializer baseline. No guest cache is written. */
+        graphics_render_state(137,0,0);
+    }
     if(unit_points) {
         /* Native POINTLIST is a one-pixel raster primitive. Other point sizes,
          * sprites, attenuation and programmable size outputs need their own
@@ -186,7 +197,7 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     FILE *scene_reference=NULL;
     uint32_t extents[16]={0};unsigned streams;
     if(shader&1)streams=pilot_gfx_shader_streams(extents);
-    else {extents[0]=pilot_gfx_fvf_extent(shader);streams=1;}
+    else {extents[0]=graphics_fvf_layout(shader,NULL);streams=1;}
     if(memory_vertices) {
         if(streams!=1 || !up_stride || up_stride<extents[0] || (uint64_t)count*up_stride>UINT32_MAX)
             stop("invalid user-pointer draw stream",up_stride);
@@ -258,7 +269,8 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
         for(unsigned i=0;i<10;++i)
             if(pilot_gfx_transform(i,(const float*)(memory+TRANSFORM_STATE(TRANSFORMS)+i*64))<0)
                 stop("native fixed-function transform synchronization failed",i);
-        int32_t result=fixed_fvf?pilot_gfx_fvf_prepare_fixed(shader):pilot_gfx_shader_prepare_fixed(declaration->native);
+        int32_t result=beta_fvf?pilot_gfx_fvf_prepare_unblended(shader):
+            fixed_fvf?pilot_gfx_fvf_prepare_fixed(shader):pilot_gfx_shader_prepare_fixed(declaration->native);
         if(result<0)stop("native fixed-function preparation failed",shader);
     } else if(!(shader&1)) {
         if(graphics_render_read(92))stop("pretransformed fog is unqualified",shader);

@@ -148,6 +148,7 @@ int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vert
 uint32_t pilot_gfx_fvf_extent(uint32_t fvf);
 uint32_t pilot_gfx_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16]);
 uint32_t pilot_gfx_fvf_float_beta_layout(uint32_t fvf,struct PilotVertexElement elements[16]);
+int32_t pilot_gfx_fvf_prepare_unblended(uint32_t fvf);
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y);
 unsigned pilot_gfx_shader_streams(uint32_t extents[16]);
 void pilot_gfx_pixel_fixed(void);

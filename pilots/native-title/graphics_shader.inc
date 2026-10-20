@@ -8,6 +8,14 @@ struct GraphicsShader {
     uint32_t original_descriptor[0x114/4];
 };
 static struct GraphicsShader graphics_shaders[256];
+static uint32_t graphics_fvf_layout(uint32_t fvf,struct PilotVertexElement elements[16])
+{
+#ifdef PILOT_D3D_FVF_FLOAT_BETA_VERSION
+    return pilot_gfx_fvf_float_beta_layout(fvf,elements);
+#else
+    return pilot_gfx_fvf_layout(fvf,elements);
+#endif
+}
 static uint32_t graphics_vertex_constants_address(void)
 {
 #ifdef PILOT_D3D_VERTEX_CONSTANTS_GLOBAL
@@ -80,13 +88,7 @@ static void graphics_shader_bind(uint32_t handle)
         /* Zero is a valid empty declaration binding in the original XDK.
          * Draw submission still rejects it until a draw contract is qualified. */
         struct PilotVertexElement elements[16]={0};
-        if(handle) {
-#ifdef PILOT_D3D_FVF_FLOAT_BETA_VERSION
-            pilot_gfx_fvf_float_beta_layout(handle,elements);
-#else
-            pilot_gfx_fvf_layout(handle,elements);
-#endif
-        }
+        if(handle)graphics_fvf_layout(handle,elements);
         uint32_t object=PILOT_D3D_FVF_OBJECT,flags=(handle&15)==4?2:0,dimensions=0;
         FILE *capture_file=NULL;const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture) {

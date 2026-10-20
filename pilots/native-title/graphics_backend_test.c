@@ -9,6 +9,7 @@
 #include "graphics_completion_backend_test.inc"
 #include "graphics_fvf_backend_test.inc"
 #include "graphics_fvf_beta_backend_test.inc"
+#include "graphics_fvf_unblended_backend_test.inc"
 #include "graphics_flat_backend_test.inc"
 #include "graphics_pixel_backend_test.inc"
 #include "graphics_movie_backend_test.inc"
@@ -171,6 +172,9 @@ int main(int argc,char **argv)
             CHECK(!test_fixed_resultarg());pilot_gfx_close();continue;
         }
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--fvf-unblended")) {
+            CHECK(!test_fvf_unblended_pixels());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--texture-color-ops")) {
             CHECK(!test_texture_color_ops());pilot_gfx_close();continue;
         }
@@ -267,6 +271,7 @@ int main(int argc,char **argv)
         CHECK(test_visibility()==0);
 #ifdef PILOT_D3D_PHOBOS
         CHECK(!test_texture_color_ops());
+        CHECK(!test_fvf_unblended_pixels());
 #endif
         CHECK(pilot_gfx_clear(1,0xff123456,1,0)==0);
         pilot_gfx_resource_busy(PILOT_GFX_SURFACE,0);

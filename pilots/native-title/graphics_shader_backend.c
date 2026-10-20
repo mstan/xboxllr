@@ -139,6 +139,7 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
     return S_OK;
 }
 #include "graphics_fixed_backend.inc"
+#include "graphics_fvf_unblended_backend.inc"
 #include "graphics_immediate_backend.inc"
 void pilot_gfx_shader_destroy(uint32_t handle)
 {
