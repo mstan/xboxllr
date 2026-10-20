@@ -13,6 +13,22 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_unavailable_runtime_media_does_not_block_local_build_paths(self):
+        pathsfile=self.root/'paths.json'
+        pathsfile.write_text(json.dumps(dict(xbe='authored.xbe',media_root='offline-media',
+            state_dir='state-parent/../state')))
+        original_resolve=Path.resolve;canonicalized=[]
+        def resolve(selected,*args,**kwargs):
+            if selected.name=='offline-media':raise OSError(1326,'share authentication unavailable')
+            canonicalized.append(selected)
+            return original_resolve(selected,*args,**kwargs)
+        with patch.object(Path,'resolve',resolve):
+            selected=n.private_paths(pathsfile)
+        self.assertEqual(selected['media_root'],self.root/'offline-media')
+        self.assertEqual(selected['xbe'],self.xbe.resolve())
+        self.assertEqual(selected['state_dir'],self.root/'state')
+        self.assertIn(self.root/'state-parent/../state',canonicalized)
+
     def test_combined_build_is_one_invocation_and_failure_cannot_refresh_receipt(self):
         pathsfile=self.root/'paths.json'
         pathsfile.write_text(json.dumps({key:str(value) for key,value in self.paths.items()}))

@@ -91,7 +91,11 @@ def definition(path):
 def private_paths(path):
     path = Path(path).resolve()
     values = json.loads(path.read_text(encoding="utf-8"))
-    return {key: (path.parent / value).resolve() for key, value in values.items()
+    # Runtime content can live on an unavailable share. Build/configure only
+    # need its path spelling; actual mount/image verification owns access at
+    # launch. Keep writable state and build inputs physically canonicalized.
+    return {key: (Path(os.path.abspath(path.parent / value)) if key=='media_root'
+                  else (path.parent / value).resolve()) for key, value in values.items()
             if isinstance(value, str) and value}
 
 
