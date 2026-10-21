@@ -18,7 +18,7 @@ static void adpcm_test_readback(struct PilotAudioBuffer *b)
 {
     int16_t actual[8*64*2],expected[8*64*2];
     for(unsigned i=0;i<8;++i)
-        CHECK(xbox_adpcm_decode_block(memory+b->data+i*b->block_align,b->block_align,b->channels,
+        CHECK(xlle_apu_decode_adpcm(memory+b->data+i*b->block_align,b->block_align,b->channels,
                                      expected+i*64*b->channels,64*b->channels));
     CHECK(pilot_audio_buffer_copy(b->host,0,actual,8*64*b->channels*2,1)==0);
     CHECK(!memcmp(actual,expected,8*64*b->channels*2));

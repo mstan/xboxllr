@@ -33,6 +33,16 @@ public-source release review is complete.
 
 ## Priorities
 
+| Release work | Status |
+| --- | --- |
+| Player-facing game pages, framework overview, screenshots and credits | Complete and pushed |
+| Requested repository rename and private game remotes | Complete; framework public visibility awaits source review |
+| Replace the runtime's GPL ADPCM codec with the maintained permissive adapter | Implemented; reference, actual mixer and native JSRF smoke checks pass |
+| Generated CPU helper provenance and selected renderer implementation | File-level review/replacement remains open |
+| Shared release packaging and minimal first-run setup | Open |
+| Native Linux host/backends and title execution | Open |
+| Final clean-profile packages and release publication | Open |
+
 1. **Resolve shared distribution and platform gates.** Inventory the exact
    shipping profile, incorporated code, notices and user-supplied inputs. Keep
    the owner's current non-GPL shipping policy unless explicitly changed.
@@ -52,8 +62,11 @@ public-source release review is complete.
 
 The existing [license scope](../LICENSE-SCOPE.md) explicitly excludes the
 GPL-dependent private pilot from the intended non-GPL product. Current native
-profiles still use attributed GPL fork components, including renderer/runtime
-and audio material. Acknowledgments and bundled notices do not remove that
+profiles still use attributed fork components with unresolved renderer/runtime
+shipping provenance. Native-title ADPCM now uses the existing permissive
+dr_wav adapter; its GPL counterpart is comparison-only, as recorded in the
+[codec integration](NATIVE-ADPCM-RELEASE-2026-10-21.md).
+Acknowledgments and bundled notices do not remove any remaining
 restriction. Review the actual selected dependency graph: do not assume a native
 HLE-only profile links Unicorn merely because the legacy full-system build does.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and launch any declared native title through the shared XboxLLR runtime.
+"""Build and launch any declared native title through the shared xboxllr runtime.
 
 Title definitions contain identity, selected services and content policy. Private
 paths and generated CPU code stay outside the definition and release sources.
@@ -214,7 +214,7 @@ def configure_command(data, paths, output, build, cmake, generator, jobs, source
     options.setdefault("PILOT_NATIVE_LINK_PROFILE", "FINAL")
     options.update(XBOXLLR_BUILD_MODE="NATIVE_TITLE", PILOT_GENERATED=str(Path(output) / "gen"),
                    PILOT_EXECUTABLE_NAME=data["title"]["executable"], PILOT_COMPILE_JOBS=str(jobs),
-                   PILOT_SECTION_MOD_SOURCE="", PILOT_TITLE_MOD_SOURCE="")
+                   PILOT_SECTION_MOD_SOURCE="", PILOT_TITLE_MOD_SOURCE="", PILOT_ADPCM_SOURCE="")
     if data.get('mods', {}).get('registry'):
         if source is None:
             raise ValueError('title registry configuration requires its title definition')

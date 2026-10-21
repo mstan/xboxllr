@@ -11,7 +11,7 @@
 #include "audio_backend.h"
 #include "machine/apu.hpp"
 #ifdef PILOT_AUDIO_ADPCM
-#include "xbox_adpcm.h"
+#include "machine/apu_adpcm.h"
 #endif
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"audio source comparison line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 int main() {
@@ -41,7 +41,7 @@ int main() {
         }
 #ifdef PILOT_AUDIO_ADPCM
         if(adpcm)for(unsigned block=0;block<32;++block)
-            CHECK(xbox_adpcm_decode_block(data.data()+block*36*channels,36*channels,channels,
+            CHECK(xlle_apu_decode_adpcm(data.data()+block*36*channels,36*channels,channels,
                   native_pcm.data()+block*64*channels,64*channels));
 #endif
         auto put=[&](unsigned a,uint32_t v){std::memcpy(ram.data()+a,&v,4);};

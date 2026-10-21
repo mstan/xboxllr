@@ -1,5 +1,11 @@
 # Third-party attribution
 
+Current native-title ADPCM, October 21, 2026: production audio uses the existing
+MIT-0 dr_wav adapter; the NoRain/Phobos codec below is now comparison-only.
+See the [integration and measured evidence](docs/NATIVE-ADPCM-RELEASE-2026-10-21.md).
+Historical import records remain intact. This change does not clear the other
+private pilot dependencies for the intended shipping product.
+
 Third-party material keeps the terms of its authors. The owner's PolyForm grant
 does not override these licenses. This inventory records the directly fetched
 dependencies and the EEPROM port; transitive and incorporated-source provenance

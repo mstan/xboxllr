@@ -13,6 +13,16 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_adpcm_comparison_input_is_optional_and_clears_cached_selection(self):
+        command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Ninja', 4)
+        self.assertIn('-DPILOT_ADPCM_SOURCE=', command)
+        reference = self.root / 'private-adpcm-reference'
+        reference.mkdir()
+        command = n.configure_command(self.data, {'adpcm_source': reference}, self.output,
+                                      self.build, 'cmake', 'Ninja', 4)
+        self.assertIn('-DPILOT_ADPCM_SOURCE=' + str(reference), command)
+        self.assertNotIn('-DPILOT_ADPCM_SOURCE=', command)
+
     def test_framework_change_cannot_launch_a_stale_binary(self):
         self.framework.return_value=dict(revision='changed authored framework')
         with patch.object(n.subprocess,'Popen') as spawn,self.assertRaisesRegex(ValueError,'identity changed'):

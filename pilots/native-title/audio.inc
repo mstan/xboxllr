@@ -37,7 +37,7 @@
 #define PILOT_AUDIO_HAS_PAUSE 0
 #endif
 #ifdef PILOT_AUDIO_ADPCM
-#include "xbox_adpcm.h"
+#include "machine/apu_adpcm.h"
 #endif
 #ifdef PILOT_AUDIO_DSP
 #include "audio_dsp.h"
@@ -260,7 +260,7 @@ static int32_t audio_upload(struct PilotAudioBuffer *b,void *host,const void *da
     uint32_t samples=(last-first)*64*b->channels;
     int16_t *decoded=malloc(samples*2);if(!decoded)return (int32_t)0x8007000e;
     for(uint32_t block=first;block<last;++block)
-        if(!xbox_adpcm_decode_block((const uint8_t*)data+block*b->block_align,b->block_align,b->channels,
+        if(!xlle_apu_decode_adpcm((const uint8_t*)data+block*b->block_align,b->block_align,b->channels,
                                    decoded+(block-first)*64*b->channels,64*b->channels)) {
             free(decoded);return (int32_t)0x88780032;
         }
