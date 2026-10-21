@@ -201,14 +201,17 @@ static void graphics_target_ref(uint32_t header,int acquire)
 static void graphics_target_prepare(uint32_t header)
 {
     if(!header || header==graphics_headers || header==graphics_headers+64)return;
-    struct GraphicsTextureObject *s=&graphics_textures[graphics_texture_slot(header)];
-    if(!s->parent)stop("target preparation requires a surface",header);
-    struct GraphicsTextureObject *t=&graphics_textures[s->parent-1];
+    unsigned slot=graphics_texture_slot(header);
+    struct GraphicsTextureObject *s=&graphics_textures[slot];
+    if(!s->parent && !s->standalone_surface)stop("target preparation requires a surface",header);
+    unsigned owner=s->parent?s->parent:slot+1;
+    struct GraphicsTextureObject *t=&graphics_textures[owner-1];
+    if(t->cpu_borrowed)graphics_texture_refresh_alias(owner-1);
     if(graphics_texture_exposure_cache() && !t->family_exposed)return;
     unsigned exposed=t->cpu_exposed;
-    for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].parent==s->parent)exposed|=graphics_textures[i].cpu_exposed;
+    for(unsigned i=0;i<graphics_texture_capacity;++i)if(graphics_textures[i].parent==owner)exposed|=graphics_textures[i].cpu_exposed;
     if(exposed)graphics_texture_upload(t,0);
-    for(unsigned i=0;i<graphics_texture_capacity;++i)if(&graphics_textures[i]==t || graphics_textures[i].parent==s->parent)graphics_textures[i].cpu_exposed=0;
+    for(unsigned i=0;i<graphics_texture_capacity;++i)if(&graphics_textures[i]==t || graphics_textures[i].parent==owner)graphics_textures[i].cpu_exposed=0;
     t->family_exposed=0;
 }
 static void graphics_set_targets(uint32_t color,uint32_t depth)
@@ -225,8 +228,8 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
     }
     if(depth && depth!=graphics_headers+64) {
         struct GraphicsTextureObject *s=&graphics_textures[graphics_texture_slot(depth)];
-        if(!s->parent || s->usage!=2 || s->level)stop("unqualified depth target",depth);
-        struct GraphicsTextureObject *t=&graphics_textures[s->parent-1];depth_native=t->native;
+        if((!s->parent && !s->standalone_surface) || s->usage!=2 || s->level)stop("unqualified depth target",depth);
+        struct GraphicsTextureObject *t=s->parent?&graphics_textures[s->parent-1]:s;depth_native=t->native;
         graphics_target_prepare(depth);
     }
     if(pilot_gfx_targets(color_native,depth_native)<0)stop("native render/depth target binding failed",color);

@@ -4,10 +4,10 @@
  */
 struct GraphicsTextureObject {
     uint32_t header,data,bytes,width,height,levels,format,refs,native,usage,cpu_exposed;
-    unsigned parent,level; /* parent is slot+1 for a surface view, zero for texture */
+    unsigned parent,level; /* parent is slot+1 for a view, zero for a storage owner */
     unsigned bindings;
     unsigned guest_owned,alias_kind,alias_source,alias_format,alias_size;
-    unsigned cpu_borrowed;
+    unsigned cpu_borrowed,standalone_surface;
     uint64_t original_reference;
     /* Conservative owner hint: a CPU lock on this texture or any surface
      * sets it. A handoff clears it only after clearing the whole family. */
@@ -196,8 +196,11 @@ static unsigned graphics_texture_adopt_cpu(uint32_t header)
        !texture.levels || texture.levels>(log_width>log_height?log_width:log_height)+1 ||
        !((texture.format>=2 && texture.format<=7) || texture.format==0xc ||
          texture.format==0xe || texture.format==0xf || texture.format==0x28) ||
-       data>=64u*1024*1024)
+        data>=64u*1024*1024) {
+        fprintf(stderr,"[TEXTURE BORROW REJECT] header=%08x common=%08x data=%08x format=%08x size=%08x\n",
+            header,common,data,format,size);
         stop("unqualified caller-owned CPU texture layout",header);
+    }
     texture.width=1u<<log_width;texture.height=1u<<log_height;
     if(graphics_texture_block(&texture) && (texture.width<4 || texture.height<4))
         stop("compressed caller texture base below native block size",header);
@@ -222,6 +225,45 @@ static unsigned graphics_texture_adopt_cpu(uint32_t header)
     unsigned slot=graphics_texture_unused();graphics_textures[slot]=texture;
     fprintf(stderr,"[TEXTURE BORROW] header=%08x data=%08x cpu=%08x %ux%u levels=%u format=%02x bytes=%u\n",
         header,data,texture.data,texture.width,texture.height,texture.levels,texture.format,texture.bytes);
+    return slot;
+}
+static unsigned graphics_surface_adopt_cpu(uint32_t header)
+{
+    /* Original standalone surfaces have a caller-owned header and contiguous
+     * storage, without a parent texture. Retain that storage while a native
+     * depth target exists; neither its address nor its lifetime becomes ours. */
+    uint32_t common=MEM32(header),data=MEM32(header+4),format=MEM32(header+12),size=MEM32(header+16);
+    uint32_t width=(size&4095)+1,height=((size>>12)&4095)+1,pitch=((size>>24)+1)*64;
+    if(((common>>16)&7)!=5 || !(common&0xffff) ||
+       (format&0xfffffffcu)!=0x00012e28u || !(format&3) || (format&3)==3 ||
+       !size || pitch!=((width*4+63)&~63u) || data>=64u*1024*1024)
+        stop("unqualified caller-owned depth surface layout",header);
+    struct GraphicsTextureObject surface={0};
+    surface.header=header;surface.data=data|0x80000000u;surface.bytes=pitch*height;
+    surface.width=width;surface.height=height;surface.levels=1;surface.format=0x2e;surface.usage=2;
+    surface.refs=common&0xffff;surface.guest_owned=surface.cpu_borrowed=surface.standalone_surface=1;
+    surface.alias_format=format;surface.alias_size=size;
+#ifdef PILOT_SCHEDULING_LLE
+    uint32_t available=0;
+    if(!pilot_io_device_contiguous_resource_reference(surface.data,surface.bytes,&surface.original_reference,&available) ||
+       available<surface.bytes)stop("caller depth surface requires original physical backing",header);
+#else
+    AcquireSRWLockExclusive(&vm_lock);
+    struct PhysicalAllocation *allocation=physical_find(surface.data,surface.bytes);
+    if(!allocation || allocation->borrowers==UINT32_MAX)stop("caller depth surface requires owned physical backing",header);
+    ++allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
+#endif
+    int32_t result=pilot_gfx_texture_create_usage(width,height,1,surface.format,surface.usage,&surface.native);
+    if(result<0) {
+        graphics_texture_borrow_release(&surface);
+        stop("native borrowed depth surface creation failed",(uint32_t)result);
+    }
+    /* Import the initial caller bytes once. Subsequent GPU writes survive
+     * unbind/rebind; ordinary CPU-lock exposure remains explicit. */
+    surface.cpu_exposed=surface.family_exposed=1;
+    unsigned slot=graphics_texture_unused();graphics_textures[slot]=surface;
+    fprintf(stderr,"[DEPTH SURFACE BORROW] header=%08x data=%08x %ux%u pitch=%u bytes=%u\n",
+        header,data,width,height,pitch,surface.bytes);
     return slot;
 }
 static unsigned graphics_texture_adopt_alias(uint32_t header)
@@ -255,6 +297,7 @@ static unsigned graphics_texture_adopt_alias(uint32_t header)
 static unsigned graphics_texture_adopt(uint32_t header)
 {
     graphics_pointer(header,20);
+    if(((MEM32(header)>>16)&7)==5)return graphics_surface_adopt_cpu(header);
     return ((MEM32(header+12)>>8)&255)==0x12?
         graphics_texture_adopt_alias(header):graphics_texture_adopt_cpu(header);
 }
@@ -350,7 +393,7 @@ static void graphics_texture_bind(unsigned stage,uint32_t header)
 #endif
     if(header) {
         unsigned slot=graphics_texture_refresh_alias(graphics_texture_slot(header));struct GraphicsTextureObject *texture=&graphics_textures[slot];
-        if(texture->parent)stop("texture binding requires a texture",header);
+        if(texture->parent || texture->standalone_surface)stop("texture binding requires a texture",header);
         graphics_texture_sample_prepare(slot);native=texture->native;
         mode=MEM32(header+12)&0x20f4u;
         if((mode&0x2000u) && texture->format>=0x2a && texture->format<=0x31)mode=(mode&~0x2000u)|0x40000000u;
@@ -439,7 +482,7 @@ static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destin
     }
     struct GraphicsTextureObject *object=&graphics_textures[graphics_texture_slot(header)];
     if(level>=object->levels)stop("texture description level out of range",level);
-    uint32_t description[]={object->format,object->parent?1:3,usage,graphics_level_bytes(object,level),0x11,
+    uint32_t description[]={object->format,(object->parent || object->standalone_surface)?1:3,usage,graphics_level_bytes(object,level),0x11,
         graphics_level_width(object,level),graphics_level_height(object,level)};
     memcpy(graphics_pointer(destination,sizeof(description)),description,sizeof(description));
 }
