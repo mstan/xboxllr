@@ -275,10 +275,12 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
             fixed_fvf?pilot_gfx_fvf_prepare_fixed(shader):pilot_gfx_shader_prepare_fixed(declaration->native);
         if(result<0)stop("native fixed-function preparation failed",shader);
     } else if(!(shader&1)) {
-        if(graphics_render_read(92))stop("pretransformed fog is unqualified",shader);
         if(pilot_gfx_fvf_placement(shader,graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)),
             graphics_float(TRANSFORM_FIELD(SCREEN_OFFSET)+4),mod_x_scale,mod_x_anchor)<0)stop("native FVF preparation failed",shader);
         if(host_vertices && pilot_gfx_immediate_fvf(shader)<0)stop("native immediate FVF preparation failed",shader);
+        if(graphics_render_read(92) &&
+            pilot_gfx_fvf_fog(shader,(const float*)(memory+TRANSFORM_STATE(TRANSFORMS)+64),host_vertices!=NULL)<0)
+            stop("unqualified pretransformed fog input/mode",shader);
         const char *capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
         if(capture && *capture && !up_data) {
             struct GraphicsVertexObject *vertex=graphics_vertex(MEM32(PILOT_D3D_STREAMS+8));

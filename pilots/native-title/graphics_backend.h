@@ -50,6 +50,7 @@ int pilot_gfx_presentation(uint32_t numerator,uint32_t denominator,uint32_t heig
 int pilot_gfx_client_size(uint32_t size[2]);
 int pilot_gfx_frame_shape(uint32_t numerator,uint32_t denominator);
 int32_t pilot_gfx_fvf_placement(uint32_t fvf,float screen_x,float screen_y,float x_scale,float x_anchor);
+int32_t pilot_gfx_fvf_fog(uint32_t fvf,const float projection[16],int immediate);
 int32_t pilot_gfx_persist_display(const unsigned char *bgra,uint32_t width,uint32_t height,uint32_t pitch);
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf);
 /* FVF placement/constants are prepared first by the common draw owner. */

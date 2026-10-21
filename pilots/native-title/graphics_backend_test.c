@@ -11,6 +11,7 @@
 #include "graphics_fvf_beta_backend_test.inc"
 #include "graphics_fvf_unblended_backend_test.inc"
 #include "graphics_lighting_backend_test.inc"
+#include "graphics_pretransformed_fog_backend_test.inc"
 #include "graphics_flat_backend_test.inc"
 #include "graphics_pixel_backend_test.inc"
 #include "graphics_movie_backend_test.inc"
@@ -180,6 +181,9 @@ int main(int argc,char **argv)
         }
         if(argc==2 && !strcmp(argv[1],"--lighting")) {
             CHECK(!test_fixed_lighting());pilot_gfx_close();continue;
+        }
+        if(argc==2 && !strcmp(argv[1],"--pretransformed-fog")) {
+            CHECK(!test_pretransformed_fog());pilot_gfx_close();continue;
         }
         if(argc==2 && !strcmp(argv[1],"--texture-color-ops")) {
             CHECK(!test_texture_color_ops());pilot_gfx_close();continue;
