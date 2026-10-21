@@ -74,6 +74,7 @@ int main(void)
     CHECK(!pilot_initializer_consumer(0,5,0x42) && !pilot_initializer_consumer(0,5,0x54));
     CHECK(pilot_initializer_consumer(2,5,0)); /* typed fixed declaration; owner checks lighting */
     CHECK(!pilot_initializer_consumer(1,1,0) && !pilot_initializer_consumer(3,5,0));
+    CHECK(pilot_initializer_consumer(0,1,0x1c4) && !pilot_initializer_consumer(0,1,0x24));
     CHECK(pilot_initializer_format(6) && pilot_initializer_format(7) && pilot_initializer_format(0x12) && pilot_initializer_format(0x1e));
     CHECK(!pilot_initializer_format(5) && !pilot_initializer_format(0x2e));
     uint32_t small[4]={1,2,3,4},original[4];memcpy(original,small,sizeof(small));

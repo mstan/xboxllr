@@ -164,6 +164,7 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
 #endif
     int fixed_fvf=!(shader&1) && ((shader&15)==2 || beta_fvf);
     int fixed=(declaration && declaration->fixed) || fixed_fvf;
+    int screen_fvf=!(shader&1) && (shader&15)==4;
     if(beta_fvf) {
         uint32_t blend=graphics_render_read(137);
         if(blend)stop("unqualified active beta-FVF vertex blending",blend);
@@ -176,11 +177,15 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
          * sprites, attenuation and programmable size outputs need their own
          * consumer; retaining their cached parameters is not output support. */
         uint32_t minimum=graphics_render_read(117),maximum=graphics_render_read(123);
-        if(!fixed || (fixed_fvf && (shader&0x20)) ||
+        if((!fixed && !screen_fvf) || ((fixed_fvf || screen_fvf) && (shader&0x20)) ||
            graphics_render_read(116)!=0x3f800000u || minimum>0x3f800000u ||
            maximum<0x3f800000u || maximum>=0x7f800000u ||
-           graphics_render_read(118) || graphics_render_read(119) || graphics_render_read(151))
+           graphics_render_read(118) || graphics_render_read(119) || graphics_render_read(151)) {
+            fprintf(stderr,"[POINT STATE] fvf=%08x fixed=%d host_vertices=%d size=%08x min=%08x max=%08x sprite=%u scale=%u smooth=%u\n",
+                shader,fixed,host_vertices!=NULL,graphics_render_read(116),minimum,maximum,
+                graphics_render_read(118),graphics_render_read(119),graphics_render_read(151));
             stop("unqualified active point raster state",shader);
+        }
     }
     if(fixed_fvf) {
         if((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture))
