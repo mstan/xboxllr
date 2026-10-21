@@ -148,6 +148,7 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_fan_backend.inc"
 #include "graphics_index_backend.inc"
 #include "graphics_flat_backend.inc"
+#include "graphics_point_backend.inc"
 #include "graphics_edge_backend.inc"
 #include "graphics_depth_texture_backend.inc"
 
@@ -232,6 +233,7 @@ void pilot_gfx_close(void)
     pilot_fan_close();
     pilot_index_close();
     pilot_flat_close();
+    pilot_point_close();
     pilot_edge_close();
     pilot_depth_texture_close();
     pilot_visual_close();
@@ -1269,7 +1271,8 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
 #endif
     pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
-    HRESULT flat_result=pilot_flat_prepare(primitive);if(FAILED(flat_result)) {
+    struct PilotPointDraw point_draw={0};
+    HRESULT flat_result=primitive==1?pilot_point_prepare(&point_draw):pilot_flat_prepare(primitive);if(FAILED(flat_result)) {
 #ifdef PILOT_D3D_PHOBOS
         pilot_donor_blend_candidate(0);
 #endif
@@ -1302,6 +1305,7 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
 #endif
     struct PilotEdgeDraw edge_draw;
     HRESULT edge_result=pilot_edge_begin(&edge_draw);if(FAILED(edge_result)) {
+        pilot_point_end(&point_draw);
 #ifdef PILOT_D3D_PHOBOS
         pilot_donor_blend_candidate(0);
 #endif
@@ -1318,6 +1322,7 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
     else if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);
     else ID3D11DeviceContext_Draw(context,count,first);
     pilot_edge_end(&edge_draw);
+    pilot_point_end(&point_draw);
 #ifdef PILOT_D3D_PHOBOS
     if(explicit_blend) {
         ID3D11ShaderResourceView *none=NULL;

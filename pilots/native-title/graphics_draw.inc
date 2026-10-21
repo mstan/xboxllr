@@ -127,9 +127,9 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     unsigned primitive=args[0],first=args[1],count=args[2];
     unsigned submitted=indices?index_count:count;
     int memory_vertices=up_data || host_vertices;
-    int unit_points=primitive==1 && !indices && !memory_vertices;
+    int buffered_points=primitive==1 && !indices && !memory_vertices;
     if(!count || (uint64_t)first+count>UINT32_MAX)stop("invalid draw range",count);
-    if((!unit_points && primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || (!unit_points && submitted<3) ||
+    if((!buffered_points && primitive!=5 && primitive!=6 && primitive!=7 && primitive!=8) || (!buffered_points && submitted<3) ||
         (primitive==5 && submitted%3) || (primitive==8 && submitted%4)) {
         fprintf(stderr,"[D3D PRIMITIVE] type=%u first=%u count=%u submitted=%u indexed=%u shader=%08x\n",
             primitive,first,count,submitted,indices!=NULL,MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER));
@@ -172,20 +172,20 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
          * not change from the initializer baseline. No guest cache is written. */
         graphics_render_state(137,0,0);
     }
-    if(unit_points) {
-        /* Native POINTLIST is a one-pixel raster primitive. Other point sizes,
-         * sprites, attenuation and programmable size outputs need their own
-         * consumer; retaining their cached parameters is not output support. */
+    if(buffered_points) {
+        /* Fixed/screen vertices use the native GPU square/attenuation owner.
+         * Programmable/per-vertex size and edge AA still need their consumers. */
         uint32_t minimum=graphics_render_read(117),maximum=graphics_render_read(123);
         if((!fixed && !screen_fvf) || ((fixed_fvf || screen_fvf) && (shader&0x20)) ||
-           graphics_render_read(116)!=0x3f800000u || minimum>0x3f800000u ||
-           maximum<0x3f800000u || maximum>=0x7f800000u ||
-           graphics_render_read(118) || graphics_render_read(119) || graphics_render_read(151)) {
-            fprintf(stderr,"[POINT STATE] fvf=%08x fixed=%d host_vertices=%d size=%08x min=%08x max=%08x sprite=%u scale=%u smooth=%u\n",
+            graphics_render_read(151)) {
+            fprintf(stderr,"[POINT STATE] fvf=%08x fixed=%d host_vertices=%d size=%08x min=%08x max=%08x sprite=%u scale=%u smooth=%u attenuation=%08x,%08x,%08x\n",
                 shader,fixed,host_vertices!=NULL,graphics_render_read(116),minimum,maximum,
-                graphics_render_read(118),graphics_render_read(119),graphics_render_read(151));
+                graphics_render_read(118),graphics_render_read(119),graphics_render_read(151),
+                graphics_render_read(120),graphics_render_read(121),graphics_render_read(122));
             stop("unqualified active point raster state",shader);
         }
+        uint32_t points[8];for(unsigned i=0;i<8;++i)points[i]=graphics_render_read(116+i);
+        if(pilot_gfx_points(points,screen_fvf)<0)stop("invalid native point parameters",shader);
     }
     if(fixed_fvf) {
         if((draw_capture && *draw_capture) || (fvf_capture && *fvf_capture))

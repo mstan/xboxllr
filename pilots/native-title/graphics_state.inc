@@ -11,7 +11,7 @@ static int graphics_lighting_parameter(uint32_t state)
 {return (state>=104 && state<=111) || state==113 || state==114;}
 static int graphics_lighting_parameter_valid(uint32_t state,uint32_t value)
 {return graphics_lighting_parameter(state) && (state==114 || value<=(state<=105?1u:2u));}
-/* Keep the original point cache. Triangle draws do not consume it; the unit
+/* Keep the original point cache. Triangle draws do not consume it; the native
  * point owner validates active size/sprite/scale parameters before submission.
  * POINTSIZE_MIN (117) has its separately qualified initializer owner. */
 static int graphics_point_parameter(uint32_t state)

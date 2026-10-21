@@ -144,6 +144,7 @@ int main(int argc,char **argv)
 #ifdef PILOT_D3D_PHOBOS
     if(argc==2 && !strcmp(argv[1],"--gamma"))return test_gamma_presentation();
     if(argc==2 && !strcmp(argv[1],"--fixed-declarations"))return test_fixed_declarations();
+    if(argc==2 && !strcmp(argv[1],"--points"))return test_scaled_point_pixels();
     if(argc==2 && !strcmp(argv[1],"--null-texture-alpha"))return test_null_texture_alpha();
     if(argc==2 && !strcmp(argv[1],"--indexed"))return test_indexed_pipeline();
     if(argc==2 && !strcmp(argv[1],"--edge-antialias"))return test_edge_antialias();
