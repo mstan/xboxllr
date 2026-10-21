@@ -579,11 +579,37 @@ int main(int argc,char **argv)
     CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
     diagnostic.ExceptionCode=0x4001000au;
     CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
+    diagnostic.ExceptionCode=0x20474343u;
+    CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
+    diagnostic.ExceptionCode=0xe06d7363u;
+    CHECK(fault_handler(&pointers)==EXCEPTION_CONTINUE_SEARCH);
+    if(argc==2 && !strcmp(argv[1],"host-unhandled-language")) {
+        install_fault_handler();
+        RaiseException(0xe06d7363u,0,0,NULL);
+        return 3;
+    }
     if(argc==2 && !strcmp(argv[1],"host-diagnostics")) {
         install_fault_handler();
         OutputDebugStringA("xboxlle host diagnostic ANSI regression\n");
         OutputDebugStringW(L"xboxlle host diagnostic Unicode regression\n");
-        fprintf(stderr,"PASS: host debug output returns through the production exception handler\n");
+        unsigned caught=0;
+        const DWORD codes[]={0x20474343u,0xe06d7363u};
+        for(unsigned i=0;i<2;++i) {
+            __try {RaiseException(codes[i],0,0,NULL);}
+            __except(EXCEPTION_EXECUTE_HANDLER) {++caught;}
+        }
+        CHECK(caught==2);
+        char path[MAX_PATH],command[MAX_PATH+64];
+        CHECK(GetModuleFileNameA(NULL,path,sizeof(path)));
+        snprintf(command,sizeof(command),"\"%s\" host-unhandled-language",path);
+        STARTUPINFOA startup={0};PROCESS_INFORMATION process={0};startup.cb=sizeof(startup);
+        CHECK(CreateProcessA(path,command,NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,NULL,&startup,&process));
+        DWORD status=WaitForSingleObject(process.hProcess,10000),exit_code=0;
+        if(status!=WAIT_OBJECT_0)TerminateProcess(process.hProcess,79);
+        CHECK(GetExitCodeProcess(process.hProcess,&exit_code));
+        CloseHandle(process.hThread);CloseHandle(process.hProcess);
+        CHECK(status==WAIT_OBJECT_0 && exit_code==2);
+        fprintf(stderr,"PASS: production exception handlers preserve caught host language exceptions and stop unhandled throws\n");
         return 0;
     }
 #ifdef PILOT_GPU_AV_TEST_CALLBACKS

@@ -1069,11 +1069,11 @@ recomp_func_t recomp_lookup_kernel(uint32_t va)
 static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
 {
     DWORD code = exception->ExceptionRecord->ExceptionCode;
-    /* Windows libraries raise these diagnostic exceptions for thread names
-     * and OutputDebugStringA/W, inside their own SEH handlers. Let those
-     * handlers receive them;
+    /* Windows libraries raise diagnostic and C++ language exceptions inside
+     * their own SEH handlers. Let those handlers receive first-chance throws;
      * this does not resume or hide an unhandled guest/native fault. */
-    if(code==0x406d1388u || code==0x40010006u || code==0x4001000au)
+    if(code==0x406d1388u || code==0x40010006u || code==0x4001000au ||
+       code==0x20474343u || code==0xe06d7363u)
         return EXCEPTION_CONTINUE_SEARCH;
     if (code == EXCEPTION_ACCESS_VIOLATION) {
 #ifdef PILOT_AUDIO_DEVICE_LLE
@@ -1119,13 +1119,21 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
     stop("native exception", code);
 }
 
+static LONG WINAPI unhandled_fault_handler(EXCEPTION_POINTERS *exception)
+{
+    DWORD code=exception->ExceptionRecord->ExceptionCode;
+    if(code==0x20474343u || code==0xe06d7363u)
+        stop("unhandled host language exception",code);
+    return fault_handler(exception);
+}
+
 static void install_fault_handler(void)
 {
+    SetUnhandledExceptionFilter(unhandled_fault_handler);
 #if defined(PILOT_CALENDAR_LLE) || defined(PILOT_IO_DEVICE_LLE)
     /* Unicorn commits its reserved translation buffer through its own VEH.
      * Let that handler run before treating an exception as an unhandled
      * failure. Genuine faults still reach our terminating diagnostic. */
-    SetUnhandledExceptionFilter(fault_handler);
 #else
     AddVectoredExceptionHandler(1,fault_handler);
 #endif
