@@ -26,24 +26,46 @@ static void native_cpu_restore(const struct NativeCpuContext *c)
     memcpy(g_fp_stack,c->fp,sizeof(c->fp));g_fp_top=c->fp_top;g_fp_cmp=c->fp_cmp;g_df=c->df;g_fp_control_word=c->cw;g_fp_cc=c->cc;
     if(fesetenv(&c->environment))stop("native CPU environment restore failed",0);
 }
-static void native_cpu_pure_thiscall(uint32_t entry,uint32_t object)
+static uint32_t native_cpu_pure_call(uint32_t entry,uint32_t object,
+                                     unsigned count,const uint32_t *arguments)
 {
     /* Only source-closed, bounded, nonblocking arithmetic helpers may use
      * this service. Keep the CPU permit across its short host-owner critical
      * section; replay every pending suspension/preemption after returning. */
 #ifdef PILOT_SCHEDULING_LLE
-    (void)object;stop("native arithmetic service requires native CPU scheduling",entry);
+    (void)object;(void)count;(void)arguments;
+    stop("native arithmetic service requires native CPU scheduling",entry);
+    return 0;
 #else
     recomp_func_t body=recomp_lookup(entry);uint32_t top=g_esp;
+    /* Source-bound callers supply reviewed RET(4*count) helpers. Arguments
+     * are guest DWORDs, including guest addresses, never host pointers. Copy
+     * before touching the guest stack: a caller may have staged its arguments
+     * there. Four arguments cover the original spatial table lookup ABI. */
+    uint32_t copied[4];
+    if(count>4 || (count && !arguments))
+        stop("unqualified native arithmetic service arguments",entry);
+    if(count)memcpy(copied,arguments,count*sizeof(*copied));
     if(!body || dispatch_in_dpc || top<512 || !wait_range(top-512,512,1))
         stop("unqualified native arithmetic service frame",entry);
     struct NativeCpuContext saved;native_cpu_save(&saved);
     volatile uint32_t *requests=g_pilot_suspend_count;g_pilot_suspend_count=NULL;
     g_ecx=object;g_fp_top=0;memset(g_fp_stack,0,sizeof(saved.fp));
+    for(unsigned i=count;i;--i)PUSH32(g_esp,copied[i-1]);
     PUSH32(g_esp,0);body();
     if(g_esp!=top || g_ebx!=saved.regs[4] || g_esi!=saved.regs[5] || g_edi!=saved.regs[6] ||
        g_fs_base!=saved.regs[8] || next_kernel_ordinal!=saved.regs[12])
         stop("native arithmetic service changed its bounded ABI",entry);
+    uint32_t result=g_eax;
+    /* g_ebp/g_seh_ebp publish the latest generated frame, including a nested
+     * callee's frame. The architectural EBP itself is local to that function.
+     * Restore these publication caches; requiring them unchanged would reject
+     * ordinary helpers that called a correctly balanced framed function. */
     native_cpu_restore(&saved);g_pilot_suspend_count=requests;
+    return result;
 #endif
+}
+static void native_cpu_pure_thiscall(uint32_t entry,uint32_t object)
+{
+    (void)native_cpu_pure_call(entry,object,0,NULL);
 }

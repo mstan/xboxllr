@@ -1,0 +1,6 @@
+foreach(case esp ebx esi edi fs ordinal entry dpc underflow range count null)
+  execute_process(COMMAND "${PROGRAM}" "${case}" RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
+  if(NOT result EQUAL 2 OR NOT "${out}${err}" MATCHES "STOP .*native arithmetic service")
+    message(FATAL_ERROR "Native CPU service ${case} did not reject its invalid contract: ${result}\n${out}${err}")
+  endif()
+endforeach()

@@ -10,6 +10,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from native_binding import Binding, validate_body
 from native_audio_i3dl2 import bind_i3dl2
 from native_audio_spatial import bind_spatial
+from native_audio_spatial_math import bind_spatial_math, spatial_math_header
 
 # Semantic enum names used by the shared runtime. Absent title APIs get unique
 # out-of-range values; they do not acquire a wrapper or a callable table row.
@@ -123,10 +124,12 @@ def bind(xbe,output,symbols,profile=None):
     listener=listener_binding(context,proof,calls,functions,data)
     i3dl2=bind_i3dl2(context,proof,functions,data)
     spatial=bind_spatial(context,proof,calls,functions,data)
+    spatial_math=bind_spatial_math(context,proof,functions,data)
     binding=dict(xbe_sha256=context.image['sha256'],calls=calls,tables=tables,**layout,dsp_helpers=dsp)
     if listener:binding['listener']=listener
     if i3dl2:binding['i3dl2']=i3dl2
     if spatial:binding['spatial']=spatial
+    if spatial_math:binding['spatial_math']=spatial_math
     header=['#pragma once','#include <stdint.h>','enum PilotAudioEntry {']+[f'    PILOT_AUDIO_{c["name"]},' for c in calls]
     header+=['    PILOT_AUDIO_COUNT','};','static const struct { const char *name; uint32_t address, stack_bytes, bytes; const char *sha256; } pilot_audio_calls[] = {']
     header+=[f'    {{"{c["name"]}", {c["address"]}u, {c["stack_bytes"]}u, {functions[c["address"]]["size"]}u, "{c["sha256"]}"}},' for c in calls]+['};']
@@ -152,6 +155,7 @@ def bind(xbe,output,symbols,profile=None):
     header+=[f'#define PILOT_AUDIO_HAS_PAUSE {int("IDirectSoundBuffer_Pause" in proof["calls"])}']
     if listener:header+=['#define PILOT_AUDIO_LISTENER_VERSION 1u']
     if spatial:header+=['#define PILOT_AUDIO_SPATIAL_CACHE_VERSION 1u']
+    if spatial_math:header+=spatial_math_header(spatial_math,data)
     if i3dl2:header+=['#define PILOT_AUDIO_I3DL2_VERSION 1u',
         f'#define PILOT_AUDIO_I3DL2_INITIALIZE 0x{i3dl2["initialize"]:x}u',
         f'#define PILOT_AUDIO_I3DL2_CALCULATE 0x{i3dl2["calculate"]:x}u']
@@ -167,7 +171,13 @@ def bind(xbe,output,symbols,profile=None):
     record=output/'audio-binding.aot-private.json'
     if (context.generated/'pilot_audio_binding.c').exists():
         old=json.loads(record.read_text())
-        if any(k not in binding or (binding[k]!=v if k!='dsp_helpers' else any(binding[k].get(n)!=d for n,d in v.items())) for k,v in old.items()) or (context.generated/'pilot_audio_binding.c').read_text()!=texts['pilot_audio_binding.c']:
+        from native_audio_spatial_math import retains_spatial_math
+        def retained(k,v):
+            if k not in binding:return False
+            if k=='dsp_helpers':return all(binding[k].get(n)==d for n,d in v.items())
+            if k=='spatial_math':return retains_spatial_math(v,binding[k])
+            return binding[k]==v
+        if not all(retained(k,v) for k,v in old.items()) or (context.generated/'pilot_audio_binding.c').read_text()!=texts['pilot_audio_binding.c']:
             raise ValueError('existing audio binding differs')
         if old!=binding or (context.generated/'pilot_audio_bindings.h').read_text()!=texts['pilot_audio_bindings.h']:
             (context.generated/'pilot_audio_bindings.h').write_text(texts['pilot_audio_bindings.h'],newline='\n')

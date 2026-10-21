@@ -1,7 +1,7 @@
-/* Device-owned original listener parameters. Only 2D voices are currently
- * admitted: these parameters do not transform their samples or mix-bin routes.
- * Keep pending/applied values for a future qualified spatial consumer, with
- * known masks so unobserved original defaults cannot masquerade as zeroes. */
+/* Device-owned original listener parameters. 2D voices ignore this state;
+ * the bound spatial output owner consumes applied values. Known masks keep
+ * unobserved defaults distinct until an original defaults profile supplies
+ * them, while pending updates retain their original deferred semantics. */
 #ifdef PILOT_AUDIO_LISTENER_VERSION
 #if PILOT_AUDIO_LISTENER_VERSION != 1
 #error Unsupported native listener contract

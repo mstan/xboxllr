@@ -34,6 +34,7 @@ static bool float_format(const WAVEFORMATEX *f,unsigned channels)
     const auto *e=reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(f);
     return e->Samples.wValidBitsPerSample==32 && e->SubFormat==KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 }
+#include "audio_spatial_xapo.hpp"
 struct CaptureStamp {uint64_t frame,time;};
 static uint64_t capture_clock(void)
 {
@@ -160,6 +161,8 @@ struct Guard {Guard(){AcquireSRWLockExclusive(&lock);}~Guard(){ReleaseSRWLockExc
 struct Chunk {std::atomic<bool> busy{false};BYTE data[2048];};
 struct Buffer final:public IXAudio2VoiceCallback {
     IXAudio2SourceVoice *voice=nullptr;
+    IXAudio2SubmixVoice *spatial_voice=nullptr;
+    SpatialEffect *spatial_effect=nullptr;
     BYTE *data=nullptr;
     UINT32 bytes=0,align=0,channels=0,rate=0,frequency=0,origin=0,next=0;
     UINT32 loop_start=0,loop_end=0;
@@ -323,7 +326,7 @@ int32_t pilot_audio_open(void)
         effects=new(std::nothrow) Effects();if(!effects)hr=E_OUTOFMEMORY;
         else {
             XAUDIO2_EFFECT_DESCRIPTOR effect{effects,TRUE,6};XAUDIO2_EFFECT_CHAIN chain{1,&effect};
-            hr=engine->CreateSubmixVoice(&mixer,32,48000,0,0,nullptr,&chain);
+            hr=engine->CreateSubmixVoice(&mixer,32,48000,0,1,nullptr,&chain);
             if(FAILED(hr))fprintf(stderr,"[AUDIO INIT] mix/effects=%08x\n",(unsigned)hr);
         }
     }
@@ -574,7 +577,7 @@ int32_t pilot_audio_mixbin_headroom(unsigned bin,uint32_t amount)
 int32_t pilot_audio_buffer_mixbins(void *opaque,unsigned count,const uint32_t *bins,const int32_t *volumes)
 {
     auto *b=static_cast<Buffer*>(opaque);
-    if(!b || count>8 || (count && (!bins || !volumes)))return E_INVALIDARG;
+    if(!b || b->spatial_voice || count>8 || (count && (!bins || !volumes)))return E_INVALIDARG;
     float matrix[64]{};
     for(unsigned slot=0;slot<count;++slot) {
         if(bins[slot]>=32 || volumes[slot]>0 || volumes[slot]<-10000)return E_INVALIDARG;
@@ -584,7 +587,7 @@ int32_t pilot_audio_buffer_mixbins(void *opaque,unsigned count,const uint32_t *b
     }
     Guard guard;return b->voice->SetOutputMatrix(mixer,b->channels,32,matrix);
 }
-int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate,unsigned bits,void **out)
+static int32_t buffer_create(uint32_t bytes,unsigned channels,unsigned rate,unsigned bits,void **out,bool spatial)
 {
     if(!engine || !out || !bytes || (channels!=1 && channels!=2) || (bits!=8 && bits!=16) ||
        rate<100 || rate>200000 || bytes%(channels*(bits/8)))return E_INVALIDARG;
@@ -597,13 +600,31 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
     // Hz; SamplesPlayed still counts the original PCM frames, not output frames.
     WAVEFORMATEX fmt{WAVE_FORMAT_PCM,(WORD)channels,48000,48000*b->align,(WORD)b->align,(WORD)bits,0};
     XAUDIO2_SEND_DESCRIPTOR dest{0,mixer};XAUDIO2_VOICE_SENDS sends{1,&dest};
-    HRESULT hr=engine->CreateSourceVoice(&b->voice,&fmt,0,200000.0f/48000,b,&sends);
+    HRESULT hr=S_OK;
+    if(spatial) {
+        if(channels!=1)hr=E_INVALIDARG;
+        else {
+            b->spatial_effect=new(std::nothrow) SpatialEffect();
+            if(!b->spatial_effect)hr=E_OUTOFMEMORY;
+            else {
+                XAUDIO2_EFFECT_DESCRIPTOR effect{static_cast<IXAPO*>(b->spatial_effect),TRUE,PILOT_AUDIO_SPATIAL_CHANNELS};XAUDIO2_EFFECT_CHAIN chain{1,&effect};
+                hr=engine->CreateSubmixVoice(&b->spatial_voice,1,48000,0,0,&sends,&chain);
+                if(SUCCEEDED(hr))dest.pOutputVoice=b->spatial_voice;
+            }
+        }
+    }
+    if(SUCCEEDED(hr))hr=engine->CreateSourceVoice(&b->voice,&fmt,0,200000.0f/48000,b,&sends);
     if(SUCCEEDED(hr))hr=b->voice->SetFrequencyRatio(rate/48000.0f);
     if(SUCCEEDED(hr)) {
-        float matrix[64]{};
-        if(channels==2){matrix[0]=1;matrix[3]=1;}
-        else {matrix[0]=matrix[1]=1;}
-        hr=b->voice->SetOutputMatrix(mixer,channels,32,matrix);
+        if(spatial) {
+            float matrix[32*PILOT_AUDIO_SPATIAL_CHANNELS]{};
+            hr=b->spatial_voice->SetOutputMatrix(mixer,PILOT_AUDIO_SPATIAL_CHANNELS,32,matrix);
+        } else {
+            float matrix[64]{};
+            if(channels==2){matrix[0]=1;matrix[3]=1;}
+            else {matrix[0]=matrix[1]=1;}
+            hr=b->voice->SetOutputMatrix(mixer,channels,32,matrix);
+        }
     }
     if(SUCCEEDED(hr)) {
         Guard guard;unsigned slot=0;while(slot<256 && buffers[slot])++slot;
@@ -613,15 +634,43 @@ int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate
             audio_ingress_record(b,3,0,b->data,b->bytes);buffers[slot]=b;
         }
     }
-    if(FAILED(hr)){if(b->voice)b->voice->DestroyVoice();delete[] b->data;delete b;return hr;}
+    if(FAILED(hr)){
+        if(b->voice)b->voice->DestroyVoice();
+        if(b->spatial_voice)b->spatial_voice->DestroyVoice();
+        if(b->spatial_effect)b->spatial_effect->Release();
+        delete[] b->data;delete b;return hr;
+    }
     *out=b;return S_OK;
+}
+int32_t pilot_audio_buffer_create(uint32_t bytes,unsigned channels,unsigned rate,unsigned bits,void **out)
+{return buffer_create(bytes,channels,rate,bits,out,false);}
+int32_t pilot_audio_buffer_spatial_create(uint32_t bytes,unsigned rate,unsigned bits,void **out)
+{return buffer_create(bytes,1,rate,bits,out,true);}
+int32_t pilot_audio_buffer_spatial(void *opaque,const PilotAudioSpatialState *state)
+{
+    auto *b=static_cast<Buffer*>(opaque);
+    if(!b || !b->spatial_voice || !state || !pilot_spatial_state_valid(*state))return E_INVALIDARG;
+    Guard guard;
+    static UINT32 next_operation=1;
+    UINT32 operation=next_operation++;if(!next_operation)next_operation=1;
+    // One XAudio2 operation set changes the pitch, sends and filter snapshot
+    // together, without stopping the engine or flushing source-frame history.
+    HRESULT hr=b->voice->SetFrequencyRatio(state->frequency_ratio,operation);
+    if(SUCCEEDED(hr))hr=b->spatial_voice->SetOutputMatrix(mixer,PILOT_AUDIO_SPATIAL_CHANNELS,32,state->matrix,operation);
+    if(SUCCEEDED(hr))hr=b->spatial_voice->SetEffectParameters(0,state,sizeof(*state),operation);
+    if(SUCCEEDED(hr))hr=engine->CommitChanges(operation);
+    if(SUCCEEDED(hr))b->frequency=(UINT32)std::lround(state->frequency_ratio*48000);
+    return hr;
 }
 void pilot_audio_buffer_destroy(void *opaque)
 {
     auto *b=static_cast<Buffer*>(opaque);if(!b)return;
     {Guard guard;audio_stream_record(b,"destroy");audio_ingress_record(b,5,0,nullptr,0);for(auto &p:buffers)if(p==b)p=nullptr;
      notifications_progress(b);notifications_close(b);}
-    b->voice->DestroyVoice();delete[] b->data;delete b;
+    b->voice->DestroyVoice();
+    if(b->spatial_voice)b->spatial_voice->DestroyVoice();
+    if(b->spatial_effect)b->spatial_effect->Release();
+    delete[] b->data;delete b;
 }
 int32_t pilot_audio_buffer_copy(void *opaque,uint32_t offset,void *data,uint32_t bytes,int readback)
 {

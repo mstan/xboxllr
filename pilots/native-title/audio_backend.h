@@ -12,6 +12,16 @@ int32_t pilot_audio_buffer_copy(void *buffer,uint32_t offset,void *data,uint32_t
 int32_t pilot_audio_buffer_play(void *buffer,int looping);
 struct PilotAudioNotification {uint32_t offset;void *event;};
 #ifdef PILOT_AUDIO_DSP
+/* Source remains mono PCM. The spatial submix runs after source resampling at
+ * 48 kHz: front L/R, rear L/R, room and a separate direct mono send. */
+#define PILOT_AUDIO_SPATIAL_CHANNELS 6
+struct PilotAudioSpatialState {
+    float taps[2][31],delay;
+    float direct_pole,room_pole,frequency_ratio;
+    float matrix[32*PILOT_AUDIO_SPATIAL_CHANNELS];
+};
+int32_t pilot_audio_buffer_spatial_create(uint32_t bytes,unsigned rate,unsigned bits,void **out);
+int32_t pilot_audio_buffer_spatial(void *buffer,const struct PilotAudioSpatialState *state);
 int32_t pilot_audio_mixbin_headroom(unsigned bin,uint32_t amount);
 /* Borrows input references during the call; successful configuration owns
  * independent references until replaced or the voice is destroyed. */

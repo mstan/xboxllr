@@ -1,19 +1,25 @@
-/* Exact original parameter layout and deferred/apply low-bit contract.
- * Unknown defaults remain unknown. This phase admits inactive voice storage
- * and setters, never active spatial playback without its rendering owner. */
+/* Original parameter layout and deferred/apply low-bit contract. Active
+ * publication is available only with the image-bound native output owner;
+ * cache-only profiles retain their inactive-output boundary. */
 #ifdef PILOT_AUDIO_SPATIAL_CACHE_VERSION
 #if PILOT_AUDIO_SPATIAL_CACHE_VERSION != 1 || !defined(PILOT_AUDIO_LISTENER_VERSION)
 #error Unsupported native spatial cache contract
 #endif
 static void audio_spatial_commit(struct PilotAudioBuffer *b)
 {
+#ifndef PILOT_AUDIO_SPATIAL_OUTPUT
     if(b->host) {
         uint32_t playing=0;
         if(pilot_audio_buffer_status(b->host,&playing)<0 || (playing&1))
             stop("spatial cache commit requires inactive output",b->base);
     }
+#endif
     memcpy(b->spatial_cache.applied,b->spatial_cache.pending,sizeof(b->spatial_cache.pending));
     b->spatial_cache.applied_known=b->spatial_cache.known;b->spatial_cache.dirty=0;
+#ifdef PILOT_AUDIO_SPATIAL_OUTPUT
+    int32_t hr=audio_spatial_publish(b,b->host);
+    if(hr<0)stop("spatial parameter publication failed",(uint32_t)hr);
+#endif
 }
 static void audio_spatial_commit_all(void)
 {
