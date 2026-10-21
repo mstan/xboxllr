@@ -17,6 +17,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 std::atomic<bool> active{false};
 std::atomic<uint64_t> frames{0},wanted{0};
+std::atomic<uint64_t> requested_size{0};
 std::mutex state_mutex;
 std::condition_variable captured;
 std::array<uint8_t,18> input{};
@@ -60,6 +61,15 @@ std::string clear_input(const std::string& args) {
     std::lock_guard<std::mutex> lock(state_mutex);input.fill(0);input_until={};
     return "{\"ok\":true}\n";
 }
+std::string resize(const std::string& args) {
+    std::istringstream stream(args);std::string x,y,extra;stream>>x>>y;
+    unsigned width=0,height=0;
+    if(stream>>extra || !number(x,width) || !number(y,height) || width<64 || height<64 ||
+       width>8192 || height>8192 || uint64_t(width)*height>16*1024*1024)
+        return failure("resize needs client width/height in 64..8192, at most 16M pixels");
+    requested_size.store((uint64_t(width)<<32)|height);
+    return "{\"ok\":true,\"queued\":true}\n";
+}
 std::string base64(const std::vector<unsigned char>& bytes) {
     static const char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string result;result.reserve(((bytes.size()+2)/3)*4);
@@ -93,6 +103,7 @@ extern "C" int pilot_debug_start(const char *port_text) {
     server=std::make_unique<xlle::DebugServer>();
     server->register_command("status",status);server->register_command("set_input",set_input);
     server->register_command("clear_input",clear_input);server->register_command("screenshot",screenshot);
+    server->register_command("resize",resize);
     if(!server->start(static_cast<uint16_t>(port))) {
         std::fprintf(stderr,"[NATIVE TCP] %s\n",server->last_error().c_str());server.reset();return 1;
     }
@@ -100,6 +111,12 @@ extern "C" int pilot_debug_start(const char *port_text) {
     return 0;
 }
 extern "C" int pilot_debug_active(void) {return active.load();}
+extern "C" int pilot_debug_take_client_size(uint32_t size[2]) {
+    if(!size || !active.load())return 0;
+    const auto requested=requested_size.exchange(0);
+    if(!requested)return 0;
+    size[0]=uint32_t(requested>>32);size[1]=uint32_t(requested);return 1;
+}
 extern "C" int pilot_debug_input(uint8_t pad[18]) {
     if(!active.load() || !pad)return 0;
     std::lock_guard<std::mutex> lock(state_mutex);

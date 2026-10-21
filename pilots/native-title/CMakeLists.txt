@@ -103,7 +103,11 @@ if(PILOT_TITLE_MOD_SOURCE)
     message(FATAL_ERROR "Missing static title plugin registry")
   endif()
   target_sources(xlle_native_title PRIVATE "${PILOT_TITLE_MOD_SOURCE}")
-  target_include_directories(xlle_native_title PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  # The trusted registry needs this interface directory; generated CPU units
+  # do not. A target-wide include changes every MSVC compile command when a
+  # title first enables mods, forcing an unrelated complete CPU rebuild.
+  set_property(SOURCE "${PILOT_TITLE_MOD_SOURCE}" APPEND PROPERTY
+    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
   set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS PILOT_TITLE_MODS)
 endif()
 option(PILOT_GRAPHICS_FRAME_AUDIT "Private one-frame graphics operation accounting" OFF)

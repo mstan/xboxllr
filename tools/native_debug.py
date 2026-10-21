@@ -61,6 +61,9 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     commands.add_parser("clear_input")
+    resize = commands.add_parser('resize')
+    resize.add_argument('width', type=int)
+    resize.add_argument('height', type=int)
     press = commands.add_parser("press")
     press.add_argument("buttons", help="Comma-separated Xbox names, e.g. a,down")
     press.add_argument("--ms", type=int, default=150)
@@ -74,6 +77,8 @@ def main():
             parser.error("--ms must be in 1..5000")
         pad = gamepad(args.buttons, args.lx, args.ly, args.rx, args.ry)
         result = request(args.port, f"set_input {pad.hex()} {args.ms}")
+    elif args.command == 'resize':
+        result = request(args.port, f'resize {args.width} {args.height}')
     else:
         result = request(args.port, args.command)
         if args.command == "screenshot":

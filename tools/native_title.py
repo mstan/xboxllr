@@ -42,6 +42,27 @@ def digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
+def framework_identity():
+    """Prevent a new framework pin/source tree from blessing an old binary.
+
+    Clean source binds to its commit. Explicit development trees also bind to
+    tracked edits and new source inputs; ignored outputs are never inventoried.
+    """
+    git = 'C:/Program Files/Git/cmd/git.exe' if os.name == 'nt' else 'git'
+    command = [git, '-C', str(ROOT)]
+    revision = subprocess.check_output(command + ['rev-parse', 'HEAD'], text=True).strip()
+    changes = subprocess.check_output(command + ['diff', '--no-ext-diff', '--binary', 'HEAD', '--'])
+    new = subprocess.check_output(command + ['ls-files', '--others', '--exclude-standard', '-z', '--',
+        '*.c', '*.cpp', '*.h', '*.inc', '*.py', '*.cmake', 'CMakeLists.txt'])
+    inputs = {}
+    for name in filter(None, new.decode('utf-8').split('\0')):
+        path = (ROOT / name).resolve()
+        if not path.is_relative_to(ROOT):
+            raise ValueError('framework source input leaves its checkout')
+        inputs[name] = digest(path)
+    return dict(revision=revision, tracked_diff_sha256=hashlib.sha256(changes).hexdigest(), new_sources=inputs)
+
+
 def definition(path):
     path = Path(path).resolve()
     data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -59,8 +80,8 @@ def definition(path):
     for key, value in data.get("build", {}).items():
         if not re.fullmatch(r"PILOT_[A-Z0-9_]+", key) or not isinstance(value, (str, int, bool)):
             raise ValueError("invalid native build setting")
-        if key == "PILOT_SECTION_MOD_SOURCE":
-            raise ValueError("select section_mod_source through private paths")
+        if key in ("PILOT_SECTION_MOD_SOURCE", "PILOT_TITLE_MOD_SOURCE"):
+            raise ValueError("select a reviewed mod registry through its declared input")
     content = data.get("content", {})
     filename = content.get("image", "default.xbe")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+\.xbe", filename, re.I) or filename.startswith("."):
@@ -85,7 +106,30 @@ def definition(path):
         value = data.get("generation", {}).get(key, 0)
         if type(value) is not int or value < 0:
             raise ValueError("invalid generated C unit budget")
+    modes = data.get('launcher', {}).get('frame_modes', [])
+    if not isinstance(modes, list) or any(m not in ('interpolated', 'actual') for m in modes) or len(set(modes)) != len(modes):
+        raise ValueError('declare unique qualified frame modes')
+    title_mod_inputs(path, data)
     return path, data
+
+
+def title_mod_inputs(source, data):
+    """Bind the trusted registry and its declared local headers to the build."""
+    mods = data.get('mods', {})
+    registry = mods.get('registry')
+    if not registry:
+        return {}
+    root = Path(source).parent.resolve()
+    inputs = [registry, *mods.get('inputs', [])]
+    if any(not isinstance(p, str) or not p for p in inputs):
+        raise ValueError('invalid title registry input')
+    result = {}
+    for item in inputs:
+        path = (root / item).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise ValueError('title registry inputs must be files within the title root')
+        result[item] = dict(path=str(path), sha256=digest(path))
+    return result
 
 
 def private_paths(path):
@@ -165,12 +209,17 @@ def prepare_command(source, data, paths, output):
     return command
 
 
-def configure_command(data, paths, output, build, cmake, generator, jobs):
+def configure_command(data, paths, output, build, cmake, generator, jobs, source=None):
     options = dict(data["build"])
     options.setdefault("PILOT_NATIVE_LINK_PROFILE", "FINAL")
     options.update(XBOXLLR_BUILD_MODE="NATIVE_TITLE", PILOT_GENERATED=str(Path(output) / "gen"),
                    PILOT_EXECUTABLE_NAME=data["title"]["executable"], PILOT_COMPILE_JOBS=str(jobs),
-                   PILOT_SECTION_MOD_SOURCE="")
+                   PILOT_SECTION_MOD_SOURCE="", PILOT_TITLE_MOD_SOURCE="")
+    if data.get('mods', {}).get('registry'):
+        if source is None:
+            raise ValueError('title registry configuration requires its title definition')
+        inputs = title_mod_inputs(source, data)
+        options['PILOT_TITLE_MOD_SOURCE'] = inputs[data['mods']['registry']]['path']
     for option, key in DEPENDENCIES.items():
         if key in paths:
             if not paths[key].exists():
@@ -199,6 +248,7 @@ def identity(source, data, output, paths=None):
     profile = data.get("generation", {}).get("profile")
     require_receipt(Path(output) / "native-title-preparation.json", preparation_identity(source, data, output))
     result = {"title": data["title"]["id"], "definition_sha256": digest(source),
+            "framework": framework_identity(),
             "profile_sha256": profile_identity(source, profile),
             "generation_sha256": digest(Path(output) / "generation.aot-private.json"),
             "generated": str(Path(output).resolve())}
@@ -209,6 +259,9 @@ def identity(source, data, output, paths=None):
     if paths and paths.get("section_mod_source"):
         selected = paths["section_mod_source"].resolve()
         result["section_mod"] = {"source": str(selected), "sha256": digest(selected)}
+    inputs = title_mod_inputs(source, data)
+    if inputs:
+        result['title_mod'] = inputs
     return result
 
 
@@ -473,7 +526,8 @@ def require_receipt(path, expected):
         raise ValueError("native build identity changed; configure and build the selected title again")
 
 
-def launch(data, paths, output, build, automated=False, seconds=None, detach=False, source=None, input_replay=None, capture=False, debug_port=None):
+def launch(data, paths, output, build, automated=False, seconds=None, detach=False, source=None, input_replay=None, capture=False, debug_port=None,
+           visual_options=None, launcher=None):
     check_image(data["title"], paths)
     check_generated(output, data["title"])
     if debug_port is not None and (type(debug_port) is not int or not 1 <= debug_port <= 65535):
@@ -486,6 +540,8 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         raise ValueError("run duration must be finite and positive")
     if detach and automated:
         raise ValueError("unattended runs retain their bounded process owner")
+    if launcher and (automated or input_replay is not None):
+        raise ValueError('Interactive launcher requires an owner-facing run')
     replay_bytes = None
     if input_replay is not None:
         replay_path = Path(input_replay).resolve()
@@ -508,6 +564,24 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
     runs = Path(build) / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-"), dir=runs))
+    selected_environment = {}
+    from native_title_launcher import binary as launcher_binary, select as select_launcher
+    use_launcher = launcher is True or (launcher is None and not automated and input_replay is None and
+                                       bool(data.get('launcher')) and launcher_binary(build).is_file())
+    if use_launcher:
+        selection = select_launcher(source, data, paths, build, run, force=launcher is True)
+        if selection is None:
+            print('Launcher closed; game was not started.', flush=True)
+            return
+        paths = dict(paths, xbe=selection['image'])
+        check_image(data['title'], paths)
+        visual_options, selected_environment = selection['options'], selection['environment']
+    mod_plan = None
+    if visual_options and (visual_options.get('aspect') is not None or visual_options.get('height', 0) or
+        visual_options.get('supersample', 1) != 1 or visual_options.get('antialiasing', 'original') != 'original' or
+        visual_options.get('anisotropy', 1) != 1 or visual_options.get('frame_mode', 'original') != 'original'):
+        from native_visual_mods import resolve
+        mod_plan = resolve(source, data, run / 'mods.plan', **visual_options)
     # Freeze the actual executable and its adjacent transports. Future builds
     # cannot replace a running owner's binary or force their window closed.
     stage = run / "app"
@@ -523,6 +597,9 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         raise ValueError("native executable changed during staging; retry after build completes")
     environment = {k: v for k, v in os.environ.items() if not k.startswith("XLLE_PILOT_")}
     environment.update({key: str(value) for key, value in data.get("runtime", {}).items()})
+    environment.update(selected_environment)
+    if mod_plan is not None:
+        environment['XLLE_PILOT_MOD_PLAN'] = str((run / 'mods.plan').resolve())
     if debug_port is not None:
         environment["XLLE_PILOT_DEBUG_PORT"] = str(debug_port)
         if automated and replay_bytes is None:
@@ -544,13 +621,15 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         for key in ("SDL_AUDIODRIVER", "SDL_AUDIO_DRIVER"):
             if environment.get(key, "").lower() == "dummy":
                 environment.pop(key)
-        environment["RECOMP_VOLUME"] = "100"
+        environment["RECOMP_VOLUME"] = selected_environment.get('RECOMP_VOLUME', '100')
     command = [str(stage / binary.name), *(str(paths[key]) for key in ("xbe", "eeprom", "media_root", "state_dir"))]
     with (run / "title.log").open("w", encoding="utf-8") as log:
         child = subprocess.Popen(command, env=environment, stdout=log, stderr=subprocess.STDOUT)
         receipt = dict(title=data["title"]["id"], route="native-title", pid=child.pid,
                        executable_sha256=digest(stage / binary.name), command=command,
                        automated=automated, output=str(run))
+        if mod_plan is not None:
+            receipt['mod_plan'] = mod_plan
         if replay_bytes is not None:
             receipt.update(input_replay=str(replay_path), input_replay_sha256=stage_identity["input_replay_sha256"])
         if debug_port is not None:
@@ -575,7 +654,7 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("check", "prepare", "bind", "recover", "partition", "configure", "build", "run"))
+    parser.add_argument("action", choices=("check", "prepare", "bind", "recover", "partition", "configure", "build", "build-launcher", "run"))
     parser.add_argument("--title", type=Path, required=True)
     parser.add_argument("--paths", type=Path, required=True)
     parser.add_argument("--generated", type=Path, required=True)
@@ -596,6 +675,16 @@ def main():
     parser.add_argument("--reuse-discovery", action="store_true",
                         help="Prepare using the existing image-bound function discovery; original bodies are regenerated")
     parser.add_argument("--debug-port", type=int, help="Opt-in localhost native input/presented-screenshot server")
+    ui = parser.add_mutually_exclusive_group()
+    ui.add_argument('--launcher', action='store_const', const=True, default=None, dest='launcher')
+    ui.add_argument('--no-launcher', action='store_const', const=False, dest='launcher')
+    parser.add_argument('--widescreen', help='Trusted title camera mod: adaptive or 4:3 through 32:9')
+    parser.add_argument('--internal-resolution', type=int, choices=(0, 1080, 1440, 1800, 2160), default=0)
+    parser.add_argument('--supersampling', type=int, choices=(1, 2, 3), default=1)
+    parser.add_argument('--antialiasing', choices=('original', 'fxaa'), default='original')
+    parser.add_argument('--anisotropy', type=int, choices=(1, 2, 4, 8, 16), default=1)
+    parser.add_argument('--frame-mode', choices=('original', 'interpolated', 'actual'), default='original')
+    parser.add_argument('--frame-rate', type=int, choices=(60, 120), default=60)
     args = parser.parse_args()
     if not 1 <= args.jobs <= 32 or (args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds <= 0)):
         parser.error("invalid job count or run duration")
@@ -612,6 +701,10 @@ def main():
         data["build"]["PILOT_NATIVE_LINK_PROFILE"] = args.link_profile
     paths = private_paths(args.paths)
     check_image(data["title"], paths)
+    if args.action == 'build-launcher':
+        from native_title_launcher import build_launcher
+        print(build_launcher(source, data, paths, args.build_dir, args.cmake, args.generator, args.jobs))
+        return
     if args.action in ("prepare", "bind", "recover", "partition", "configure", "build"):
         reject_staging_mutation(args.generated, args.build_dir)
     if args.action == "prepare":
@@ -631,7 +724,7 @@ def main():
     elif args.action == "configure":
         require_receipt(args.generated / "native-title-preparation.json", preparation_identity(source, data, args.generated))
         write_runtime_profile(args.generated, data)
-        subprocess.run(configure_command(data, paths, args.generated, args.build_dir, args.cmake, args.generator, args.jobs), check=True)
+        subprocess.run(configure_command(data, paths, args.generated, args.build_dir, args.cmake, args.generator, args.jobs, source), check=True)
         (args.build_dir / "native-title-configure.json").write_text(json.dumps(identity(source, data, args.generated, paths), indent=2) + "\n")
     elif args.action == "build":
         selected = identity(source, data, args.generated, paths)
@@ -642,7 +735,11 @@ def main():
         selected["executable_sha256"] = digest(executable(args.build_dir, data["title"]["executable"]))
         (args.build_dir / "native-title-build.json").write_text(json.dumps(selected, indent=2) + "\n")
     elif args.action == "run":
-        result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source, args.input_replay, args.capture, args.debug_port)
+        options = dict(aspect=args.widescreen, height=args.internal_resolution, supersample=args.supersampling,
+                       antialiasing=args.antialiasing, anisotropy=args.anisotropy,
+                       frame_mode=args.frame_mode, frame_rate=args.frame_rate)
+        result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source, args.input_replay, args.capture, args.debug_port,
+                        options, args.launcher)
         if result is not None and not result["stopped_at_deadline"]:
             return result["exit_code"]
     else:

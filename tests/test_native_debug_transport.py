@@ -43,13 +43,15 @@ def main():
                 assert response.readline() == b"pong\n"
                 assert json.loads(response.readline())["ok"]
         for command in ("set_input 00 100", "set_input " + "00"*18 + " 5001",
-                        "set_input " + "0001" + "00"*16 + " 100", "screenshot extra"):
+                        "set_input " + "0001" + "00"*16 + " 100", "screenshot extra",
+                        'resize 0 720', 'resize 8192 8192', 'resize 1680 -1', 'resize 1680 720 extra'):
             try:
                 request(port, command)
                 raise AssertionError("invalid command accepted")
             except ValueError:
                 pass
         pad = gamepad("up,a", -12345, 12345)
+        assert request(port, 'resize 1680 720')['queued']
         assert pad == struct.pack("<H8Bhhhh", 1, 255, 0, 0, 0, 0, 0, 0, 0, -12345, 12345, 0, 0)
         assert request(port, f"set_input {pad.hex()} 250")["sequence"] == 1
         deadline = time.monotonic() + 1

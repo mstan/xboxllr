@@ -510,6 +510,15 @@ int32_t pilot_gfx_transform(unsigned state,const float matrix[16])
 int32_t pilot_gfx_present(void)
 {
     if (!pilot_device) return E_FAIL;
+    uint32_t requested_size[2];
+    if(pilot_debug_take_client_size(requested_size)) {
+        RECT rectangle={0,0,(LONG)requested_size[0],(LONG)requested_size[1]};
+        DWORD style=(DWORD)GetWindowLongPtrW(pilot_window,GWL_STYLE);
+        DWORD extended=(DWORD)GetWindowLongPtrW(pilot_window,GWL_EXSTYLE);
+        if(!AdjustWindowRectEx(&rectangle,style,GetMenu(pilot_window)!=NULL,extended) ||
+           !SetWindowPos(pilot_window,NULL,0,0,rectangle.right-rectangle.left,rectangle.bottom-rectangle.top,
+                SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))return HRESULT_FROM_WIN32(GetLastError());
+    }
     if(pilot_presentation.copy_buffers==2) {
         /* Keep each physical image and its completion owner together, just
          * as the original COPY path exchanges Data/Lock in its two scanouts.

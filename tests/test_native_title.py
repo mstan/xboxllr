@@ -13,6 +13,64 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_framework_change_cannot_launch_a_stale_binary(self):
+        self.framework.return_value=dict(revision='changed authored framework')
+        with patch.object(n.subprocess,'Popen') as spawn,self.assertRaisesRegex(ValueError,'identity changed'):
+            n.launch(self.data,self.paths,self.output,self.build,source=self.source)
+        spawn.assert_not_called()
+
+    def test_launcher_cancel_or_different_image_never_starts_a_title(self):
+        import native_title_launcher as launcher
+        with patch.object(launcher,'select',return_value=None),patch.object(n.subprocess,'Popen') as spawn:
+            self.assertIsNone(n.launch(self.data,self.paths,self.output,self.build,source=self.source,launcher=True))
+        spawn.assert_not_called()
+        wrong=self.root/'wrong.xbe';wrong.write_bytes(b'wrong image')
+        with patch.object(launcher,'select',return_value=dict(image=wrong,options={},environment={})),patch.object(n.subprocess,'Popen') as spawn:
+            with self.assertRaisesRegex(ValueError,'differs from the selected title'):
+                n.launch(self.data,self.paths,self.output,self.build,source=self.source,launcher=True)
+        spawn.assert_not_called()
+
+    def test_title_registry_and_header_identity_cannot_bless_stale_binary(self):
+        registry=self.source.parent/'visuals.c';registry.write_text('/* authored registry */')
+        header=self.source.parent/'facts.h';header.write_text('/* authored facts */')
+        self.data['mods']=dict(registry='visuals.c',inputs=['facts.h'])
+        selected=n.identity(self.source,self.data,self.output)
+        command=n.configure_command(self.data,self.paths,self.output,self.build,'cmake','Ninja',4,self.source)
+        self.assertIn('-DPILOT_TITLE_MOD_SOURCE='+str(registry),command)
+        header.write_text('/* changed facts */')
+        self.assertNotEqual(selected,n.identity(self.source,self.data,self.output))
+        with patch.object(n.subprocess,'Popen') as spawn,self.assertRaises(ValueError):
+            n.launch(self.data,self.paths,self.output,self.build,source=self.source)
+        spawn.assert_not_called()
+        self.data['mods']['registry']='../authored.xbe'
+        with self.assertRaisesRegex(ValueError,'within the title root'):
+            n.title_mod_inputs(self.source,self.data)
+
+    def test_unqualified_mod_and_interactive_automation_fail_before_spawn(self):
+        with patch.object(n.subprocess,'Popen') as spawn:
+            with self.assertRaisesRegex(ValueError,'owner-facing'):
+                n.launch(self.data,self.paths,self.output,self.build,automated=True,seconds=1,source=self.source,launcher=True)
+            with self.assertRaisesRegex(ValueError,'qualified'):
+                n.launch(self.data,self.paths,self.output,self.build,detach=True,source=self.source,
+                         visual_options=dict(frame_mode='actual'))
+        spawn.assert_not_called()
+
+    def test_automated_visual_plan_overrides_inherited_plan_and_retains_mute(self):
+        registry=self.source.parent/'visuals.c';registry.write_text('/* authored registry */')
+        self.data['mods']=dict(registry='visuals.c')
+        self.receipt()
+        child=Mock(pid=123,returncode=0)
+        with patch.dict(os.environ,{'XLLE_PILOT_MOD_PLAN':'untrusted inherited plan'}),patch.object(n.subprocess,'Popen',return_value=child) as spawn:
+            result=n.launch(self.data,self.paths,self.output,self.build,automated=True,seconds=1,source=self.source,
+                            visual_options=dict(height=1080,antialiasing='fxaa'))
+        env=spawn.call_args.kwargs['env']
+        plan=Path(env['XLLE_PILOT_MOD_PLAN'])
+        self.assertIn('operation resolution 1 1080',plan.read_text())
+        self.assertIn('operation antialiasing 1 1',plan.read_text())
+        self.assertIn(n.digest(self.xbe),plan.read_text())
+        self.assertEqual(env['RECOMP_VOLUME'],'0')
+        self.assertEqual(result['mod_plan']['internal_canvas'],[1440,1080])
+
     def test_unavailable_runtime_media_does_not_block_local_build_paths(self):
         pathsfile=self.root/'paths.json'
         pathsfile.write_text(json.dumps(dict(xbe='authored.xbe',media_root='offline-media',
@@ -81,6 +139,8 @@ class NativeTitleTests(unittest.TestCase):
         self.assertIn('-DPILOT_SECTION_MOD_SOURCE=',cmd)
 
     def setUp(self):
+        framework=patch.object(n,'framework_identity',return_value=dict(revision='authored framework'))
+        self.framework=framework.start();self.addCleanup(framework.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

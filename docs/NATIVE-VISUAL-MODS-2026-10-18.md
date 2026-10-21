@@ -73,6 +73,24 @@ XYZRHW draw. This repair applies with all enhancements disabled.
 
 ## Launcher and visibility
 
+Declared native titles can now use this same provider through
+`tools/native_title.py build-launcher` and `run --launcher`. The title's
+`[launcher]` names the reviewed UI revision and available frame modes; `[mods]`
+selects a trusted static registry and any title-specific widescreen manifest.
+Registry source and declared local fact/header inputs join the build identity.
+The framework commit, tracked edits and new source files also join that identity;
+changing a framework pin cannot silently reuse a binary from an older source tree.
+`native_visual_mods.py` resolves the shared catalogs to image-bound v2 plans;
+`XLLE_PILOT_MOD_PLAN` selects that plan. Legacy Blinx's resolver remains intact.
+Cancelled launchers and changed image selections cannot start an unchecked title.
+Owner runs use normal audio/windowing; explicit automated runs stay muted/bounded.
+
+The opt-in localhost debug server also queues `resize WIDTH HEIGHT` requests.
+The graphics owner applies them without moving, activating or showing the window.
+Dimensions are bounded to64..8192 and16M pixels. The transport never calls native
+window or graphics APIs. This supports actual adaptive aspect checks in one
+running process alongside existing input leases and presented screenshots.
+
 `pilots/native-launcher` is a separate generic recomp-ui host. The game resolver
 still validates its exact identity, trusted catalogs and complete plan. A
 bounded data-only handoff carries staged choices; malformed results cannot
