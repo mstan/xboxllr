@@ -43,10 +43,12 @@ static int test_initializer_states(void)
     ID3D11DeviceContext_RSGetState(context,&actual);CHECK(actual);ID3D11RasterizerState_GetDesc(actual,&desc);ID3D11RasterizerState_Release(actual);
     CHECK(!desc.DepthBias && desc.DepthBiasClamp==0 && desc.SlopeScaledDepthBias==0 && desc.CullMode==D3D11_CULL_NONE);
     CHECK(pilot_gfx_xbox_render_state(142,0) && pilot_gfx_xbox_render_state(137,0));
+    CHECK(pilot_gfx_xbox_render_state(142,1));
     CHECK(pilot_gfx_xbox_render_state(112,2) && pilot_gfx_xbox_render_state(117,0x3f800000));
     struct PilotInitializerState observed;CHECK(pilot_gfx_initializer_snapshot(&observed));
     CHECK(observed.precision_policy==PILOT_COLOR_NATIVE_RGBA8 && observed.dither && observed.zero_bias && observed.controls==15);
-    const uint32_t rejected[][2]={{65,2},{149,1},{142,1},{137,1},{112,1},{117,0x40000000}};
+    CHECK(observed.normalize==1);
+    const uint32_t rejected[][2]={{65,2},{149,1},{142,2},{137,1},{112,1},{117,0x40000000}};
     for(unsigned i=0;i<sizeof(rejected)/sizeof(*rejected);++i) {
         CHECK(!pilot_gfx_xbox_render_state(rejected[i][0],rejected[i][1]));
         struct PilotInitializerState after;CHECK(pilot_gfx_initializer_snapshot(&after) && !memcmp(&after,&observed,sizeof(after)));

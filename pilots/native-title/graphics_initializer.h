@@ -19,7 +19,10 @@ static inline int pilot_initializer_value(uint32_t state,uint32_t value)
     case 76:return value==4 || value==15;
     case 112:return value==0 || value==2;
     case 117:return value==0 || value==0x3f800000u;
-    case 137:case 142:case 149:return value==0;
+    /* The original cache feeds the native fixed-function lighting snapshot.
+     * Programs and unlit draws retain this boolean until a lit draw uses it. */
+    case 142:return value<=1;
+    case 137:case 149:return value==0;
     default:return 0;
     }
 }

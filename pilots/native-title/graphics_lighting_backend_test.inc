@@ -83,7 +83,9 @@ static int test_fixed_lighting(void)
     s.material.diffuse[0]=.5f;s.material.diffuse[1]=.25f;s.ambient=0;
     expected[0]=expected[1]=.25f;expected[2]=.125f;
     CHECK(!test_lighting_pixel(0x1118,vertex,vertices,sizeof(vertices[0]),&s,expected));
-    s.normalize=1;expected[0]=expected[1]=.125f;
+    CHECK(pilot_gfx_xbox_render_state(142,1));
+    struct PilotInitializerState normal_state;CHECK(pilot_gfx_initializer_snapshot(&normal_state) && normal_state.normalize==1);
+    s.normalize=normal_state.normalize;expected[0]=expected[1]=.125f;
     CHECK(!test_lighting_pixel(0x1118,vertex,vertices,sizeof(vertices[0]),&s,expected));
     struct PilotLightingSnapshot finite=s;
     s.material.power=s.material.specular[0]=s.material.ambient[3]=NAN;
@@ -145,7 +147,28 @@ static int test_fixed_lighting(void)
     CHECK(pilot_gfx_xbox_texture_state(0,14,4));expected[0]=0;
     CHECK(!test_lighting_pixel(0x1118,vertex,vertices,sizeof(vertices[0]),&s,expected));
     CHECK(pilot_gfx_xbox_texture_state(0,14,0));
-    CHECK(pilot_gfx_fvf_prepare_fixed(0x42)<0);
+    /* XYZ+UV omits the normal array: lighting must read retained v2 rather
+     * than disabling light or fabricating a normal. Test actual pixels across
+     * cached preparations and a packet setter, plus explicit-array priority. */
+    struct {float p[3],uv[2];} no_normal[3]={0};
+    for(unsigned i=0;i<3;++i)memcpy(no_normal[i].p,vertices[i].position,12);
+    float saved_normal[4],current_normal[4]={0,0,-.5f,1};
+    CHECK(pilot_gfx_vertex_current_get(2,saved_normal) && pilot_gfx_vertex_current_set(2,current_normal));
+    memset(&s,0,sizeof(s));memcpy(s.view,identity,64);
+    s.material.diffuse[0]=.5f;s.material.diffuse[1]=.25f;s.material.diffuse[2]=.125f;s.material.diffuse[3]=1;
+    s.count=1;s.lights[0].type=3;s.lights[0].direction[2]=1;
+    for(unsigned i=0;i<3;++i)s.lights[0].diffuse[i]=1;
+    expected[0]=.25f;expected[1]=.125f;expected[2]=.0625f;
+    CHECK(!test_lighting_pixel(0x102,vertex,no_normal,sizeof(no_normal[0]),&s,expected));
+    float opposite=1;uint32_t word;memcpy(&word,&opposite,4);
+    CHECK(pilot_gfx_command_method(0x1a28,word,1));
+    expected[0]=expected[1]=expected[2]=0;
+    CHECK(!test_lighting_pixel(0x102,vertex,no_normal,sizeof(no_normal[0]),&s,expected));
+    s.normalize=1;expected[0]=.5f;expected[1]=.25f;expected[2]=.125f;
+    CHECK(!test_lighting_pixel(0x1118,vertex,vertices,sizeof(vertices[0]),&s,expected));
+    current_normal[2]=-2;CHECK(pilot_gfx_vertex_current_set(2,current_normal));
+    CHECK(!test_lighting_pixel(0x102,vertex,no_normal,sizeof(no_normal[0]),&s,expected));
+    CHECK(pilot_gfx_vertex_current_set(2,saved_normal));
     struct PilotLightingSnapshot invalid=s;invalid.count=9;
     CHECK(pilot_gfx_lighting_publish(&invalid)<0 && pilot_gfx_lighting_ready());
     pilot_gfx_lighting_invalidate();CHECK(!pilot_gfx_lighting_ready());

@@ -12,6 +12,7 @@
 #define PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET 16
 #define PILOT_D3D_SNAPSHOT_TEXTURES 32
 #define PILOT_D3D_SNAPSHOT_PIXEL_SHADER 64
+#define PILOT_D3D_SNAPSHOT_VERTEX_SHADER 68
 #define PILOT_D3D_YUV_STATE 160
 #define PILOT_D3D_PRESENT_INTERVAL (PILOT_D3D_RENDER_STATES+127*4)
 static unsigned char storage[8192],*memory=storage;
@@ -56,10 +57,11 @@ int main(void)
     CHECK(MEM32(PILOT_D3D_RENDER_STATES+77*4)==0x80000000 && MEM32(PILOT_D3D_RENDER_STATES+78*4)==0x80000000);
     for(unsigned i=79;i<=81;++i)CHECK(!MEM32(PILOT_D3D_RENDER_STATES+i*4));
     graphics_render_state(142,0,1);graphics_render_state(137,0,1);
+    graphics_render_state(142,1,1);CHECK(owner.normalize==1 && MEM32(PILOT_D3D_RENDER_STATES+142*4)==1);
     graphics_render_state(112,2,1);graphics_render_state(117,0x3f800000,1);
     graphics_sync_deferred();CHECK(!interval);
     CHECK(owner.ambient_source==2 && owner.point_min==0x3f800000 && owner.controls==15 && owner.zero_bias);
-    const uint32_t rejected[][2]={{65,2},{149,1},{142,1},{137,1},{112,1},{117,0x40000000}};
+    const uint32_t rejected[][2]={{65,2},{149,1},{142,2},{137,1},{112,1},{117,0x40000000}};
     for(unsigned i=0;i<sizeof(rejected)/sizeof(*rejected);++i) {
         unsigned char saved[sizeof(storage)];memcpy(saved,storage,sizeof(saved));
         struct PilotInitializerState previous=owner;unsigned previous_calls=calls,previous_failures=failures;

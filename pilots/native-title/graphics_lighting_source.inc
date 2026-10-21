@@ -18,7 +18,7 @@ static const char native_lighting_source[]=
 "VS_OUT native_lighting(VS_IN v,VS_OUT o) {\n"
 " if(!(Flags&FLAG_LIGHTING))return o;\n"
 " float3 p=mul(float4(v.pos.xyz,1),WorldView).xyz;\n"
-" float3 n=(Flags&FLAG_HAS_NORMAL)?mul(v.normal,(float3x3)WorldViewInvTranspose):float3(0,0,0);\n"
+" float3 n=mul(v.normal,(float3x3)WorldViewInvTranspose);\n"
 " if(NativeLightParams.z!=0 && dot(n,n)>0)n=normalize(n);\n"
 " float3 eye=NativeLightParams.y!=0?normalize(-p):float3(0,0,-1);\n"
 " float4 md=native_material(NativeMaterialSources.x,NativeMatDiffuse,v);\n"

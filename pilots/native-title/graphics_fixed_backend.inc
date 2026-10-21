@@ -28,11 +28,12 @@ int32_t pilot_gfx_shader_create_fixed(const struct PilotVertexElement elements[1
     const char *core=pilot_d3d_fixed_vertex_source();if(!core)return E_FAIL;
     struct ShaderText text={0};text.capacity=strlen(core)+32768;text.data=malloc(text.capacity);
     if(!text.data)return E_OUTOFMEMORY;
-    shader_text(&text,"#define main xlle_fixed_main\n%s\n#undef main\n%s\nstruct RAW_IN {\n",core,native_lighting_source);
+    shader_text(&text,"#define main xlle_fixed_main\n%s\n#undef main\n%s\n"
+        "cbuffer CurrentInputs:register(b3){float4 CurrentInput[16];};\nstruct RAW_IN {\n",core,native_lighting_source);
     for(unsigned i=0;i<16;++i)if(used&(1u<<i))
         shader_text(&text,"%s v%u:ATTR%u;\n",shader_format(elements[i].type)->hlsl,i,i);
     shader_text(&text,"};\nVS_OUT raster_main(RAW_IN r) { VS_IN v=(VS_IN)0;\n"
-        "v.pos=float4(r.v0,1);v.normal=float3(0,0,1);"
+        "v.pos=float4(r.v0,1);v.normal=CurrentInput[2].xyz;"
         "v.tex0=v.tex1=v.tex2=v.tex3=float4(0,0,0,1);\n");
     if(elements[2].type==0x16)
         shader_text(&text,"v.normal=max(float3(float(int(r.v2<<21)>>21)/1023.0,"
@@ -57,8 +58,12 @@ int32_t pilot_gfx_shader_create_fixed(const struct PilotVertexElement elements[1
 int32_t pilot_gfx_shader_prepare_fixed(uint32_t handle)
 {
     struct NativeShader *shader=native_shader(handle);if(!shader->fixed_fvf)return E_INVALIDARG;
-    if((shader->fixed_fvf&15)==2 && d3d8_GetRenderStates()[D3DRS_LIGHTING] &&
-       !(shader->fixed_fvf&0x10))return E_NOTIMPL; /* Current normal needs its own owner. */
+    /* Disabled arrays consume the same retained NV2A attributes as native
+     * programs. Refresh on every preparation, including cached shaders, so a
+     * subsequent method/immediate setter takes effect without a new layout. */
+    if(!(shader->fixed_fvf&0x10)) {
+        HRESULT current=native_current_flush();if(FAILED(current))return current;
+    }
     void pilot_d3d_fvf_prepare(UINT,const float[4],const float[4]);
     const float scale[4]={1,1,1,0},offset[4]={0};
     pilot_gfx_shader_fixed_binding();pilot_d3d_program_fog_mode(0);
