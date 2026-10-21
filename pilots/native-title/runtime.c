@@ -49,6 +49,7 @@ static RECOMP_TLS uint32_t recent[32], recent_pos;
 static RECOMP_TLS uint64_t entries;
 static uint32_t trace_function;
 static volatile LONG trace_function_hits;
+static const char *trace_function_trigger;
 #ifdef PILOT_USB_LLE
 static int trace_original_usb;
 static unsigned trace_original_usb_count;
@@ -363,7 +364,10 @@ void recomp_trace_enter(const char *name, uint32_t va)
     recent[recent_pos++ & 31] = va;
     ++entries;
     if (entries <= 24) fprintf(stderr, "[ENTER] %08x\n", va);
-    if(trace_function && va==trace_function && InterlockedIncrement(&trace_function_hits)<=8) {
+    if(trace_function && va==trace_function &&
+       (!trace_function_trigger || !*trace_function_trigger ||
+        GetFileAttributesA(trace_function_trigger)!=INVALID_FILE_ATTRIBUTES) &&
+       InterlockedIncrement(&trace_function_hits)<=8) {
         fprintf(stderr,"[FUNCTION TRACE] va=%08x thread=%u eax=%08x ecx=%08x edx=%08x ebx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x stack=",
                 va,current_thread_slot,g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_ebp,g_esp);
         for(unsigned i=0;i<8;++i)fprintf(stderr," %08x",MEM32(g_esp+i*4));
@@ -1318,6 +1322,7 @@ int main(int argc,char **argv)
 #endif
     const char *trace=getenv("XLLE_PILOT_TRACE_FUNCTION");
     if(trace && *trace) {char *end;trace_function=strtoul(trace,&end,0);if(*end || !trace_function)stop("invalid trace function address",0);}
+    trace_function_trigger=getenv("XLLE_PILOT_TRACE_FUNCTION_TRIGGER");
     install_fault_handler();
     if (argc<2 || argc>5) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory] [local-storage-directory]\n"); return 1; }
     if(pilot_debug_start(getenv("XLLE_PILOT_DEBUG_PORT")))stop("native TCP listener configuration/bind failed",0);

@@ -140,6 +140,37 @@ static void input_refresh(void)
     uint64_t now=dispatch_monotonic();
     for (unsigned i=0;i<4;++i) input_sample(i,now,0);
 }
+/* Bounded private observations of the actual XAPI consumer. Receiving a host
+ * report does not prove a title called GetState or accepted its capabilities.
+ * Disabled observations perform no I/O; input_lock serializes this observer. */
+static void input_observe(unsigned entry,const uint32_t args[4],uint32_t result,uint32_t error)
+{
+    static int configured,enabled;
+    static unsigned emitted,calls[PILOT_INPUT_COUNT];
+    static uint8_t previous_pad[18];
+    if(!configured) {
+        const char *value=getenv("XLLE_PILOT_INPUT_OBSERVE");
+        enabled=value && !strcmp(value,"1");configured=1;
+    }
+    if(!enabled || emitted>=128)return;
+    const uint8_t *data=NULL;unsigned bytes=0;int changed=0;
+    if(!result && entry==PILOT_INPUT_XInputGetState) {
+        data=memory+args[1];bytes=PILOT_INPUT_STATE_BYTES;
+        changed=memcmp(previous_pad,data+4,18)!=0;
+        memcpy(previous_pad,data+4,18);
+    }
+#if PILOT_INPUT_HAS_CAPABILITIES
+    if(!result && entry==PILOT_INPUT_XInputGetCapabilities) {
+        data=memory+args[1];bytes=PILOT_INPUT_CAPABILITIES_BYTES;
+    }
+#endif
+    if(calls[entry]++>=8 && !changed)return;
+    ++emitted;
+    fprintf(stderr,"[INPUT OBSERVE] call=%u caller=%08x arg0=%08x arg1=%08x result=%08x error=%u data=",
+        entry,MEM32(g_esp),args[0],args[1],result,error);
+    for(unsigned i=0;i<bytes;++i)fprintf(stderr,"%02x",data[i]);
+    fputc('\n',stderr);
+}
 static uint32_t input_open(const uint32_t args[4],uint32_t *error)
 {
     uint32_t type=args[0],port=args[1],slot=args[2],poll=args[3];
@@ -317,6 +348,7 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
 #endif
     default: stop("unqualified input operation",entry);
     }
+    input_observe(entry,args,result,error);
     ReleaseSRWLockExclusive(&input_lock);
     if (error) {
         uint32_t original_stack=g_esp;
