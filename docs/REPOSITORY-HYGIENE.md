@@ -33,6 +33,15 @@ patterns, printing only a path, line and category. Historical names are checked
 even when a renamed file shares a blob with a harmless source path. New binary
 assets require an explicit policy change and review; do not bypass a finding.
 
+The owner requested README screenshots on October 21, 2026. Three visually
+reviewed documentation images are now allowed only at the exact paths and
+SHA256 values in `DOCUMENTATION_IMAGES` in the publication guard, with source
+and rights information in [their notice](screenshots/NOTICE.md). This exception
+only admits their binary/image format; secret-pattern checks still run. Changed
+bytes, another image in the same directory, or the same binary at an unreviewed
+path remain rejected, including in historical trees. It does not authorize
+publishing diagnostic capture directories or original media.
+
 Hooks are local and CI executes after a push, so neither is a guarantee against
 all disclosures. Also run a dedicated secret scanner before publication, with
 redacted output stored **outside** the repository. For example, with a verified

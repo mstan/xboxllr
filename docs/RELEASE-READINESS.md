@@ -1,4 +1,4 @@
-# XboxLLR release readiness
+# xboxllr release readiness
 
 Audit: 2026-10-21. Tracking: `beads-xbox.1.187`; distribution provenance and
 licensing: `beads-xbox.1.21`. The owner prioritizes this work ahead of further
@@ -8,30 +8,41 @@ JSRF recovery/extra-mode qualification. Existing accepted builds remain intact.
 
 | Repository | Current presentation | Release gap |
 | --- | --- | --- |
-| XboxLLR, currently hosted/named xboxlle | Legacy full-system/Unicorn setup guide; does not describe the current fast native Dashboard/Blinx/JSRF route accurately | Refresh product name and architecture, supported-title gallery, developer setup, shared release tooling and Dashboard-as-title packaging |
-| BlinxRecomp | Private developer-first README with workstation layout, build modes and qualification history | Player-first features, curated widescreen screenshots, simple owned-game setup, controls/mods, known limits, releases and concise credits |
-| JSRFRecomp | Native development preview and coverage/CLI summary | Same player-facing presentation, explicit top-level licensing/attribution, repository publishing setup and release packaging; local checkout has no origin remote |
+| xboxllr | Current native/LLE/HLE overview, three-title gallery and linked developer references | Shared release tooling and Dashboard-as-title packaging |
+| BlinxRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; old build notes preserved separately | Clean first-run package and download instructions after shipping gates are resolved |
+| JSRFRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; developer notes preserved separately | Release packaging and clean first-run setup; source license/scope and private remote are now present |
 
 The inspected Blinx source is `5ec1620`, pinned to framework `8cdc4d9`.
 JSRF source is `c52007e`, pinned to framework `b657fc6`. Latest private
 compatibility builds of Blinx and Dashboard with `b657fc6` render successfully;
 that does not itself change Blinx's checked-in pin or create a release.
-Remote repository visibility and existing GitHub release assets are not verified
-by this audit; GitHub CLI authentication was not available in the agent's
-redirected configuration. Do not infer that a remote repository does not exist.
+Authenticated GitHub API checks on October 21 confirm these repositories:
+
+| Repository | URL | Current visibility |
+| --- | --- | --- |
+| xboxllr | https://github.com/mstan/xboxllr | Private pending release preparation |
+| BlinxRecomp | https://github.com/mstan/BlinxRecomp | Private |
+| JSRFRecomp | https://github.com/mstan/JSRFRecomp | Private |
+
+The requested framework rename is applied; its former `mstan/xboxlle` API URL
+resolves to `mstan/xboxllr`. JSRF now has a private remote and matching origin.
+No visibility was changed. Neither existing framework nor Blinx remote had
+GitHub releases at this check. The intended final arrangement is a public
+framework and private game repos; the framework remains private until its
+public-source release review is complete.
 
 ## Priorities
 
 1. **Resolve shared distribution and platform gates.** Inventory the exact
    shipping profile, incorporated code, notices and user-supplied inputs. Keep
    the owner's current non-GPL shipping policy unless explicitly changed.
-2. **Build one reusable release path in XboxLLR.** Games provide metadata and
+2. **Build one reusable release path in xboxllr.** Games provide metadata and
    adapters; framework code owns build, staging, dependency checks and packaging.
 3. **Use Blinx as the first end-user release.** It has the most mature assisted
    campaign/time-control/save coverage and visual implementation. Refresh its
    README and prove setup on a clean profile without development paths.
 4. **Apply the same release path to Dashboard and JSRF.** Dashboard is a title
-   artifact of XboxLLR; JSRF remains its own game repository. Carry forward the
+   artifact of xboxllr; JSRF remains its own game repository. Carry forward the
    accepted rapid-coverage scope and explicit deferrals rather than claiming
    exhaustive gameplay qualification.
 
@@ -48,8 +59,9 @@ HLE-only profile links Unicorn merely because the legacy full-system build does.
 
 Resolve incorporated-source permissions or replace excluded implementations
 under the retained interfaces before publishing the relevant executable.
-Do not silently relicense the owner's work. JSRF also needs an explicit license
-and scope file consistent with that decision; the audit found no top-level LICENSE.
+Do not silently relicense the owner's work. JSRF now includes the same unmodified owner-original license, notice and a
+local scope/component inventory. These files do not resolve the combined-build
+restriction.
 
 ### Native Linux support
 
@@ -77,7 +89,7 @@ AppImage layout and preservation of writable state. Its existing scripts contain
 title-specific and duplicated logic; copying them into every Xbox game would
 miss the owner's requested shared architecture.
 
-- XboxLLR owns normalized release metadata, build profiles, staging/verification,
+- xboxllr owns normalized release metadata, build profiles, staging/verification,
   runtime dependency closure, notices and provenance, version/build identity,
   archive generation and reusable CI workflows.
 - Game repositories own title identity/revisions, mod catalogs, artwork,
@@ -85,7 +97,7 @@ miss the owner's requested shared architecture.
   Blinx's `game.toml` and the generic `native-title.toml` driver interfaces.
 - Produce a self-contained Windows x64 ZIP and a native Linux x64 AppImage or
   equivalent self-contained package after that host is qualified. Dashboard
-  uses the same title path; XboxLLR also has a separate recompiler-tool artifact.
+  uses the same title path; xboxllr also has a separate recompiler-tool artifact.
 - Stage tracked release inputs only. Resolve the actual transitive DLL/ELF
   dependency graph; include launcher assets, shipped mod catalogs, licenses and
   applicable source/relink materials. Separate optional developer symbols.
@@ -103,7 +115,7 @@ available features, supported game revision, setup, controls/mods and known limi
 Move detailed build/qualification history into linked developer documents.
 Only show curated documentation images; don't publish diagnostic capture trees.
 
-XboxLLR's README explains native CPU translation and the LLE correctness floor,
+xboxllr's README explains native CPU translation and the LLE correctness floor,
 with fast native HLE implementations under retained caller contracts. It must
 not claim to be HLE-free or imply that all other recompilers lack accuracy.
 Show Dashboard, Blinx and JSRF, with current support scopes and a developer path.
@@ -114,5 +126,8 @@ recorded contributors. Use verified project names and links. Keep this readable
 recognition separate from the exact component/revision/file-level notices in
 [THIRD_PARTY_ATTRIBUTION.md](../THIRD_PARTY_ATTRIBUTION.md); preserve both.
 
-No executable releases, visibility changes or license changes were made by
-this initial readiness audit.
+This pass refreshed the three front pages and credits, preserved developer
+setup notes, added five curated screenshot copies and applied the requested
+repository rename/private JSRF remote. JSRF source licensing now records the
+existing ecosystem policy. No executable releases or visibility changes were
+made, and no tested runtime pins were advanced.

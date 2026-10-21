@@ -104,4 +104,6 @@ refs/
 *.quiescence.json
 *.ppm
 *.png
+!/docs/screenshots/dashboard.png
+!/docs/screenshots/jsrf-widescreen.png
 *.log

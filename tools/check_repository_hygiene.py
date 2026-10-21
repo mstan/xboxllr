@@ -6,6 +6,7 @@ Default: scan the Git index (exact bytes the next commit would contain).
 This is a publication guard, not a replacement for a full secret scanner/review.
 """
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -18,6 +19,13 @@ PRIVATE_SUFFIXES = frozenset((
     '.pem .key .p12 .pfx .keystore .gpr .blockpack .jsonl .ppm .png .log'
 ).split())
 PRIVATE_ROOTS = {'machine', 'private', 'secrets', 'dumps', 'captures', 'play'}
+# Owner-requested README images, visually reviewed with source/rights notices.
+# Exact paths AND SHA256 bytes are required; this is not an image-directory exemption.
+DOCUMENTATION_IMAGES = {
+    'docs/screenshots/blinx-widescreen.jpg': '52c135a49255fc1271bc0142384fe602b3e1b946056e6fbc328cfb93920980e2',
+    'docs/screenshots/dashboard.png': '9ad68fba44cf1deca41a95222c010f58eee339ac9ba416b53c598fcfd3587378',
+    'docs/screenshots/jsrf-widescreen.png': 'f87db9810f706b99d88544368d56f8c4a68dd1b7c8f039d41d0ec018167397eb',
+}
 SECRET_PATTERNS = {
     'private key': re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----'),
     'provider token': re.compile(rb'(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-(?:proj-)?[A-Za-z0-9_-]{30,})'),
@@ -43,7 +51,7 @@ def private_path(path):
     )
 
 
-def content_findings(data):
+def content_findings(data, allow_binary=False):
     if data.startswith(b'/* XLLE_' + b'PRIVATE_GUEST_ARTIFACT */'):
         yield 'generated private guest code', 1
     if data.startswith(b'# schema=xboxlle.block-census.v1 '):
@@ -55,8 +63,8 @@ def content_findings(data):
                 yield 'private guest input', 1
         except (ValueError, UnicodeError):
             pass
-    # The repository contains text source/metadata only. Renaming a dump is insufficient.
-    if b'\0' in data:
+    # Only hash-reviewed documentation images may contain binary bytes.
+    if b'\0' in data and not allow_binary:
         yield 'binary data', 1
     for category, pattern in SECRET_PATTERNS.items():
         for match in pattern.finditer(data):
@@ -76,12 +84,13 @@ def scan(root, history=False):
         meta, path_bytes = entry.split(b'\t', 1)
         mode, oid, stage = meta.decode().split()
         path = path_bytes.decode('utf-8', 'replace')
-        if private_path(path):
+        if private_path(path) and path not in DOCUMENTATION_IMAGES:
             failures.add((path, 'private asset path', 0))
         if stage != '0' or mode in {'160000', '120000'}:
             failures.add((path, 'unmerged entry, submodule or symlink requires review', 0))
             continue
-        objects.setdefault(oid, path)
+        # Do not let a reviewed image also admit the same blob at another path.
+        objects.setdefault((oid, path if path in DOCUMENTATION_IMAGES else None), (path, path))
     if history:
         # Check names in EVERY tree: rev-list --objects only names each blob once,
         # which otherwise misses an identical blob moved into a forbidden path.
@@ -94,16 +103,16 @@ def scan(root, history=False):
                 mode, kind, oid = meta.decode().split()
                 path = path_bytes.decode('utf-8', 'replace')
                 label = f'{commit[:12]}:{path}'
-                if private_path(path):
+                if private_path(path) and path not in DOCUMENTATION_IMAGES:
                     failures.add((label, 'private asset path', 0))
                 if kind == 'blob':
-                    objects.setdefault(oid, label)
+                    objects.setdefault((oid, path if path in DOCUMENTATION_IMAGES else None), (path, label))
                 elif kind == 'commit':
                     failures.add((label, 'submodule requires separate audit', 0))
     reader = subprocess.Popen(['git', '-C', str(root), 'cat-file', '--batch'],
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     try:
-        for oid, path in objects.items():
+        for (oid, _), (path, label) in objects.items():
             reader.stdin.write((oid + '\n').encode('ascii'))
             reader.stdin.flush()
             header = reader.stdout.readline().split()
@@ -112,8 +121,12 @@ def scan(root, history=False):
             data = reader.stdout.read(int(header[2]))
             if reader.stdout.read(1) != b'\n':
                 raise RuntimeError('Truncated Git object stream')
-            for category, line in content_findings(data):
-                failures.add((path, category, line))
+            expected_image = DOCUMENTATION_IMAGES.get(path)
+            approved_image = expected_image is not None and hashlib.sha256(data).hexdigest() == expected_image
+            if expected_image is not None and not approved_image:
+                failures.add((label, 'documentation image differs from reviewed SHA256', 1))
+            for category, line in content_findings(data, allow_binary=approved_image):
+                failures.add((label, category, line))
     finally:
         reader.stdin.close()
         reader.stdout.close()

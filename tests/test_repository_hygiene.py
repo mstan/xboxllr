@@ -1,9 +1,11 @@
 """Exercise actual index/history publication boundaries using disposable Git repos."""
 import importlib.util
+import hashlib
 import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / 'tools/check_repository_hygiene.py'
 spec = importlib.util.spec_from_file_location('hygiene', SCRIPT)
@@ -50,6 +52,50 @@ class HygieneTests(unittest.TestCase):
             hygiene.git(root, 'commit', '-qm', 'private path shares existing blob')
             hygiene.git(root, 'rm', '-q', 'disk.img')
             hygiene.git(root, 'commit', '-qm', 'delete')
+            self.assertEqual(hygiene.scan(root), 0)
+            self.assertEqual(hygiene.scan(root, history=True), 1)
+
+    def test_reviewed_image_requires_exact_index_bytes_and_path(self):
+        image = b'\x89PNG\r\n\0reviewed documentation fixture'
+        name = 'docs/screenshots/reviewed.png'
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+                hygiene.DOCUMENTATION_IMAGES, {name: hashlib.sha256(image).hexdigest()}, clear=True):
+            root = pathlib.Path(temp)
+            hygiene.git(root, 'init', '-q')
+            path = root / name
+            path.parent.mkdir(parents=True)
+            path.write_bytes(image)
+            hygiene.git(root, 'add', '.')
+            self.assertEqual(hygiene.scan(root), 0)
+            path.write_bytes(image + b'changed')
+            hygiene.git(root, 'add', '.')
+            path.write_bytes(image)  # Unstaged approved bytes cannot hide changed index bytes.
+            self.assertEqual(hygiene.scan(root), 1)
+            hygiene.git(root, 'add', '.')
+            (root / 'renamed.txt').write_bytes(image)
+            hygiene.git(root, 'add', '.')
+            self.assertEqual(hygiene.scan(root), 1)
+
+    def test_reviewed_image_history_and_unreviewed_historical_alias(self):
+        image = b'\x89PNG\r\n\0reviewed historical fixture'
+        name = 'docs/screenshots/reviewed.png'
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+                hygiene.DOCUMENTATION_IMAGES, {name: hashlib.sha256(image).hexdigest()}, clear=True):
+            root = pathlib.Path(temp)
+            hygiene.git(root, 'init', '-q')
+            hygiene.git(root, 'config', 'user.email', 'fixture@example.invalid')
+            hygiene.git(root, 'config', 'user.name', 'Fixture')
+            path = root / name
+            path.parent.mkdir(parents=True)
+            path.write_bytes(image)
+            hygiene.git(root, 'add', '.')
+            hygiene.git(root, 'commit', '-qm', 'approved image')
+            self.assertEqual(hygiene.scan(root, history=True), 0)
+            (root / 'alias.txt').write_bytes(image)
+            hygiene.git(root, 'add', '.')
+            hygiene.git(root, 'commit', '-qm', 'unreviewed binary alias')
+            hygiene.git(root, 'rm', '-q', 'alias.txt')
+            hygiene.git(root, 'commit', '-qm', 'delete alias')
             self.assertEqual(hygiene.scan(root), 0)
             self.assertEqual(hygiene.scan(root, history=True), 1)
 
