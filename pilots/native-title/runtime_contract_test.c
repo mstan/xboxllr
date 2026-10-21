@@ -817,6 +817,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"graphics-deferred-invalid-point")) { test_graphics(8); return 1; }
         if (!strcmp(argv[1],"graphics-1555-storage")) { test_graphics(9); return 0; }
         if (!strcmp(argv[1],"graphics-geometry-capacity")) { test_graphics(10); return 0; }
+        if (!strcmp(argv[1],"graphics-vertex-header-storage")) { test_graphics(15); return 0; }
         if (!strcmp(argv[1],"graphics-immediate")) { test_graphics(11); return 0; }
         if (!strcmp(argv[1],"graphics-immediate-cpu")) { test_graphics(12); return 1; }
         if (!strcmp(argv[1],"graphics-fvf-beta")) { test_graphics(13); return 0; }

@@ -1,3 +1,30 @@
+static void test_graphics_vertex_header_storage(void)
+{
+    uint64_t resident=vm_committed(0,0x100000000ull);
+    /* Raw user VM reuse must not acquire ownership of a live driver header. */
+    uint32_t raw=0,raw_bytes=4096;
+    CHECK(!vm_allocate(&raw,0,&raw_bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    uint32_t stale=raw;raw_bytes=0;CHECK(!vm_free(&raw,&raw_bytes,MEM_RELEASE));
+    uint32_t live=graphics_vertex_allocate(128);
+    CHECK(live && live!=stale && test_pool_owned(live) && !vm_find(live,12));
+    struct GraphicsVertexObject *vertex=graphics_vertex(live);
+    uint32_t data=vertex->data,native=vertex->native,expected[32],readback[32];
+    for(unsigned i=0;i<32;++i)expected[i]=0x13579bdfu^(i*79);
+    memcpy(memory+data,expected,sizeof(expected));
+    pilot_gfx_vertex_upload(native,memory+data,sizeof(expected));
+    raw=0;raw_bytes=4096;
+    CHECK(!vm_allocate(&raw,0,&raw_bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    CHECK(raw==stale);raw_bytes=0;CHECK(!vm_free(&raw,&raw_bytes,MEM_RELEASE));
+    CHECK(MEM32(live)==0x01000001u && vertex->refs==1);
+    CHECK(!pilot_gfx_vertex_readback(native,readback,sizeof(readback)));
+    CHECK(!memcmp(expected,readback,sizeof(expected)));
+    graphics_vertex_bind(0,live,16);
+    CHECK(!graphics_vertex_ref(live,0) && test_pool_owned(live) && physical_find(data,128));
+    graphics_vertex_bind(0,0,0);
+    CHECK(!test_pool_owned(live) && !physical_find(data,128) && graphics_vertex_find(live)<0);
+    CHECK(vm_committed(0,0x100000000ull)==resident);
+    puts("PASS vertex header storage: raw VM reuse/free, live CPU/GPU bytes, bound retention and final allocator cleanup");
+}
 static void test_graphics_vertices(void)
 {
     uint64_t resident=vm_committed(0,0x100000000ull);
@@ -9,6 +36,7 @@ static void test_graphics_vertices(void)
         length=sizes[pass];
         uint32_t header=call_graphics(PILOT_D3D_D3DDevice_CreateVertexBuffer2,&length);
         CHECK(header && MEM32(header)==0x01000001u && !MEM32(header+8));
+        CHECK(test_pool_owned(header) && !vm_find(header,12));
         uint32_t lock[]={header,0},data=call_graphics(PILOT_D3D_D3DVertexBuffer_Lock2,lock);
         CHECK(data==(MEM32(header+4)|0x80000000u) && physical_find(data,length));
         unsigned char *expected=malloc(length),*readback=malloc(length);
@@ -27,9 +55,11 @@ static void test_graphics_vertices(void)
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==1);
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0);
         CHECK(!physical_find(data,length) && !vm_find(header,12));
+        CHECK(!test_pool_owned(header));
         CHECK(vm_committed(0,0x100000000ull)==resident);
         free(expected);free(readback);
     }
+    test_graphics_vertex_header_storage();
     /* Externally initialized headers alias one caller-owned allocation. A
      * nonzero Data offset is part of registration, not a second allocation. */
     uint32_t allocation=physical_allocate(8192,0,0xffffffffu,0,0x404);

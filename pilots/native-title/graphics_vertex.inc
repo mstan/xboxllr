@@ -61,20 +61,23 @@ static uint32_t graphics_vertex_allocate(uint32_t length)
         return 0;
     }
     struct GraphicsVertexObject vertex={0};
-    vertex.bytes=length; vertex.refs=1; uint32_t bytes=4096;
-    if(vm_allocate(&vertex.header,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE))return 0;
+    vertex.bytes=length; vertex.refs=1;
+    /* The SDK header is a small fixed object, not a standalone user VM
+     * reservation. Use the same maintained allocator as texture/index headers;
+     * a recycled raw VirtualAlloc address must never become a driver header. */
+    vertex.header=pool_allocate(12,0x48584256u);if(!vertex.header)return 0;
     /* Original CreateVertexBuffer2 stores a physical offset; Lock2 and inline
      * CPU consumers set bit31 to read the cached alias. Ordinary virtual data
      * cannot satisfy that contract even when native Lock happens to work. */
     vertex.data=physical_allocate(length,0,0x03ffffffu,4096,PAGE_READWRITE|PAGE_WRITECOMBINE);
     if(!vertex.data) {
-        bytes=0; if(vm_free(&vertex.header,&bytes,MEM_RELEASE))stop("vertex header cleanup failed",vertex.header);
+        pool_free(vertex.header);
         return 0;
     }
     int32_t result=pilot_gfx_vertex_create(length,&vertex.native);
     if(result<0) {
         physical_free(vertex.data);
-        bytes=0; if(vm_free(&vertex.header,&bytes,MEM_RELEASE))stop("vertex header cleanup failed",vertex.header);
+        pool_free(vertex.header);
         if((uint32_t)result!=0x8007000eu)stop("native vertex allocation failed",(uint32_t)result);
         return 0;
     }
@@ -102,8 +105,7 @@ static void graphics_vertex_collect(struct GraphicsVertexObject *vertex)
         memset(vertex,0,sizeof(*vertex));return;
     }
     physical_free(vertex->data);
-    uint32_t bytes=0;
-    if(vm_free(&vertex->header,&bytes,MEM_RELEASE))stop("vertex header release failed",vertex->header);
+    pool_free(vertex->header);
     memset(vertex,0,sizeof(*vertex));
 }
 static uint32_t graphics_vertex_ref(uint32_t header,int acquire)

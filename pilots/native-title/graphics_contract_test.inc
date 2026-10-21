@@ -132,6 +132,7 @@ static void test_graphics(int focused_fixture)
             else if(focused_fixture==10)test_graphics_geometry_capacity();
             else if(focused_fixture==11 || focused_fixture==12)test_graphics_immediate_vertices(focused_fixture==12);
             else if(focused_fixture==13 || focused_fixture==14)test_graphics_fvf_beta_declaration(focused_fixture==14);
+            else if(focused_fixture==15)test_graphics_vertex_header_storage();
             else test_graphics_deferred_relevance((unsigned)focused_fixture-4);
             CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
