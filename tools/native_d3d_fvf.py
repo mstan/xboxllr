@@ -20,6 +20,12 @@ def prepare_fvf(code: str, *, phobos: bool = False) -> str:
                 '                         ff_op_reads_texture(pc->stage_color[stage][3],\n'
                 '                                             tss[D3DTSS_ALPHAARG1],\n'
                 '                                             tss[D3DTSS_ALPHAARG2])))',
+                '            /* A later RGB-only stage must retain the preceding alpha\n'
+                '             * when its alpha argument names an unbound sampler. Stage\n'
+                '             * zero still has neutral sampled alpha for factor/diffuse. */\n'
+                '            if (stage && !tex && ff_op_reads_texture(pc->stage_color[stage][3],\n'
+                '                     tss[D3DTSS_ALPHAARG1], tss[D3DTSS_ALPHAARG2]))\n'
+                '                pc->stage_color[stage][3] = D3DTOP_DISABLE;\n'
                 '            /* Empty alpha sampling is neutral; preserve independent RGB. */\n'
                 '            if (!tex && ff_op_reads_texture(colorop, tss[D3DTSS_COLORARG1],\n'
                 '                                            tss[D3DTSS_COLORARG2]))')

@@ -48,6 +48,41 @@ static int test_null_texture_alpha(void)
     CHECK(!pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,vertices,sizeof(vertices[0]),0x44));
     CHECK(!pilot_gfx_readback(pixels,sizeof(pixels)));
     CHECK(pixels[center]==255 && pixels[center+1]==0 && pixels[center+2]==0);
+    /* A real texture mask must survive a later unbound stage whose RGB adds
+     * an independent factor. This is the Blinx whisker/fur material shape;
+     * both zero and full alpha are checked with authored BC2 bytes. */
+    uint32_t texture=0;
+    CHECK(!pilot_gfx_texture_create(4,4,1,0x0e,&texture));
+    const unsigned char mask[16]={0xff,0,0xff,0,0xff,0,0xff,0,
+                                 0xff,0xff,0,0,0,0,0,0};
+    pilot_gfx_texture_upload(texture,0,mask,sizeof(mask));
+    pilot_gfx_texture_bind(0,texture);
+    pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,1);
+    pilot_gfx_set_state(D3DRS_TEXTUREFACTOR,0xff040810);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_MODULATE);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+    pilot_gfx_set_texture_state(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+    pilot_gfx_set_texture_state(1,D3DTSS_COLOROP,D3DTOP_ADD);
+    pilot_gfx_set_texture_state(1,D3DTSS_COLORARG1,D3DTA_CURRENT);
+    pilot_gfx_set_texture_state(1,D3DTSS_COLORARG2,D3DTA_TFACTOR);
+    pilot_gfx_set_texture_state(1,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+    pilot_gfx_set_texture_state(1,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+    struct {float x,y,z,w;uint32_t color;float u,v;} masked[]={
+        {8,8,.5f,1,0xff804020,0,0.125f},
+        {56,8,.5f,1,0xff804020,0,0.125f},
+        {32,56,.5f,1,0xff804020,0,0.125f}};
+    const unsigned mask_expected[2][3]={{0,0,64},{132,72,48}};
+    for(unsigned opaque=0;opaque<2;++opaque) {
+        for(unsigned vertex=0;vertex<3;++vertex)masked[vertex].u=opaque?0.125f:0.625f;
+        CHECK(!pilot_gfx_clear(1,0xff000040,1,0));
+        CHECK(!pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,masked,sizeof(masked[0]),0x144));
+        CHECK(!pilot_gfx_readback(pixels,sizeof(pixels)));
+        fprintf(stderr,"LATER NULL ALPHA opaque=%u RGB=%u,%u,%u\n",opaque,pixels[center],pixels[center+1],pixels[center+2]);
+        for(unsigned lane=0;lane<3;++lane)CHECK(abs((int)pixels[center+lane]-(int)mask_expected[opaque][lane])<=1);
+    }
+    pilot_gfx_texture_bind(0,0);pilot_gfx_texture_destroy(texture);
     pilot_gfx_close();
     fprintf(stderr,"PASS: unbound alpha preserves factor/diffuse RGB and factor alpha; later empty RGB compatibility retained\n");
     return 0;

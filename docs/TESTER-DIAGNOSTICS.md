@@ -81,3 +81,15 @@ Developers can enable the same session mode through `XBOXLLR_DIAGNOSTICS=1`.
 Small authored tests exercise the real C input recorder/replayer, queue overflow,
 changed call order, malformed input, snapshot ownership and separate save storage
 without starting a game. This code is shared by Blinx, JSRF and Dashboard.
+
+## Focused renderer captures
+
+Developer runs using the existing `XLLE_PILOT_DRAW_CAPTURE` directory can set
+`XLLE_PILOT_DRAW_CAPTURE_AFTER_SWAP=1` to start their draw budget at the next
+swap after the trigger. `XLLE_PILOT_DRAW_CAPTURE_FORMAT=0x0e` restricts capture
+to the stage-zero allocation format, and
+`XLLE_PILOT_DRAW_CAPTURE_UNIQUE_TEXTURES=1` retains one representative draw
+per stage-zero header. These filters help inspect transparent materials without
+capturing hundreds of repeated particle or fur draws. The existing 256-draw
+maximum and source-serialization guards still apply. A representative texture
+capture does not establish all uses of that texture or complete-scene coverage.

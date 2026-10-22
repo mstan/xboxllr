@@ -11,10 +11,41 @@ static FILE *graphics_draw_capture(const uint32_t args[3])
     static unsigned sequence;
     const char *trigger=getenv("XLLE_PILOT_DRAW_CAPTURE_TRIGGER");
     if(trigger && *trigger && GetFileAttributesA(trigger)==INVALID_FILE_ATTRIBUTES)return NULL;
+    /* A late trigger can land in a UI pass near the end of a frame. Allow a
+     * diagnostic to wait for the next swap so its bounded draw budget starts
+     * with the scene instead. Ordinary rendering never enters this path. */
+    static unsigned armed,armed_swap;
+    const char *after_swap=getenv("XLLE_PILOT_DRAW_CAPTURE_AFTER_SWAP");
+    if(after_swap && !strcmp(after_swap,"1")) {
+        if(!armed) {armed=1;armed_swap=graphics_swap_submitted;return NULL;}
+        if(armed_swap==graphics_swap_submitted)return NULL;
+    }
+    const char *format_setting=getenv("XLLE_PILOT_DRAW_CAPTURE_FORMAT");
+    if(format_setting && *format_setting) {
+        char *end;unsigned long selected=strtoul(format_setting,&end,0);
+        if(*end || selected>255)stop("draw capture texture format outside range",0);
+        uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES);
+        unsigned found=0;
+        for(unsigned i=0;header && i<graphics_texture_capacity;++i)
+            if(graphics_textures[i].header==header) {
+                found=graphics_textures[i].format==selected;break;
+            }
+        if(!found)return NULL;
+    }
     const char *requested=getenv("XLLE_PILOT_DRAW_CAPTURE_LIMIT");
     unsigned limit=requested?(unsigned)strtoul(requested,NULL,10):32;
     if(!limit || limit>256)stop("draw capture limit outside range",limit);
     if(sequence>=limit)return NULL;
+    /* Texture inspection may need one representative draw per binding rather
+     * than spending the entire budget on repeated particle/fur layers. */
+    static uint32_t seen_textures[256];static unsigned seen_count;
+    const char *unique=getenv("XLLE_PILOT_DRAW_CAPTURE_UNIQUE_TEXTURES");
+    if(unique && !strcmp(unique,"1")) {
+        uint32_t header=MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_TEXTURES);
+        for(unsigned i=0;i<seen_count;++i)if(seen_textures[i]==header)return NULL;
+        if(seen_count>=256)return NULL;
+        seen_textures[seen_count++]=header;
+    }
     if(!args[2] || args[2]>65536)stop("draw capture count outside range",args[2]);
     struct GraphicsShader *shader=graphics_shader(MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SNAPSHOT_VERTEX_SHADER));
     struct PilotVertexElement elements[16];struct PilotVertexProbeStream streams[16]={0};
