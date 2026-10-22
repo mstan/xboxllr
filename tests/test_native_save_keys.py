@@ -103,6 +103,19 @@ class NativeSigningTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertEqual(receipt.read_text(), 'Preserve existing receipt')
 
+    def test_virtual_keys_keep_cross_title_and_alternate_certificate_relationships(self):
+        first = bytearray(self.xbe)
+        first[0x2d0:0x2e0] = first[0x2c0:0x2d0]
+        second = bytearray(first)
+        struct.pack_into('<I', second, 0x208, 0xf00d0002)
+        s.prepare_virtual(bytes(first), self.eeprom, self.output, root=bytes(range(32)))
+        other = self.root / 'second.aot-private.bin'
+        s.prepare_virtual(bytes(second), self.eeprom, other, root=bytes(range(32)))
+        a, b = self.output.read_bytes(), other.read_bytes()
+        self.assertNotEqual(a[8:40], b[8:40])
+        self.assertEqual(a[88:], b[88:])
+        self.assertEqual(a[88:104], a[104:120])
+
 
 if __name__ == '__main__':
     unittest.main()
