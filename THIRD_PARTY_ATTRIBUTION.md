@@ -1893,3 +1893,19 @@ and8KB mapped-bootstrap behavior as a separate behavioral reference. The authore
 MMIO callback connects the already credited sole DSP owner; no GPL implementation
 body, owned program bytes, hardware payload or console-specific data is included.
 Precise boot timing, active resets and held-bank aperture semantics are not inferred.
+## Native startup animation reconstruction (2026-10-22)
+
+The standalone native startup prototype imports the authored portable C core
+from [bennyborn/xbox-boot-re](https://github.com/bennyborn/xbox-boot-re), commit
+`12a3396aa77f72c8d2fd94c0988c7e11539b47e7`, under its MIT license, retained at
+`src/third_party/xbox-boot-re/LICENSE`. The original-look D3D11 host adapts that
+project's MIT WebGPU renderer, shaders and texture-upload rules. Thanks to
+bennyborn and the project's credited xemu/Ghidra contributors; the original
+animation was created by Pipeworks Software for Microsoft.
+
+No Microsoft-owned `data/` files, BIOS, models, samples or packed boot assets
+are included. Local extraction requires an admitted user-owned complete kernel.
+This is a native animation reconstruction, with approximate voice synthesis;
+it does not execute firmware or hand its machine state into a native title.
+See `docs/NATIVE-BOOT-INTRO.md` for provenance and the remaining integration
+and qualification work.

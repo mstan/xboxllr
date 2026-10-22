@@ -54,3 +54,13 @@ Artwork/screenshots identify the supported titles and retain separate rights
 notices. The standalone EEPROM tool retains its LGPL terms. No legacy
 Unicorn/full-system executable is included in these native-title downloads.
 Read the [setup guide](docs/SETUP.md) before importing or sharing saves.
+## Native startup animation prototype
+
+The imported authored `src/third_party/xbox-boot-re/core/` code and the adapted
+shader work retain the adjacent upstream MIT license. Owner-original host,
+admission and integration work follows this repository's GPL-3.0-or-later
+default. Microsoft startup models, samples, tables, firmware and trademarks
+remain separately owned and are not supplied or relicensed by this project.
+The extractor contains bounds, relocation rules and fingerprints only;
+generated private asset packs are excluded from source and release artifacts.
+See `docs/NATIVE-BOOT-INTRO.md`.

@@ -38,6 +38,8 @@ bios/
 hdd*.img
 hdd*.raw
 kernel*.img
+xboot.pak
+/boot-assets/
 *.xbe
 *.xiso
 *.iso
