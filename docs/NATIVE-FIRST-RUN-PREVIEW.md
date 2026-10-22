@@ -2,8 +2,8 @@
 
 Tracking: `beads-xbox.1.187.7`, October 21, 2026. Shared owner-use packaging for
 Blinx, JSRF and Dashboard lives in xboxllr. It is separate from publication and
-is not the [GPL source/tooling release](RELEASE-READINESS.md). Combined
-original-title code remains local; the former no-GPL policy is superseded.
+also used for the [Windows prerelease](RELEASE-READINESS.md). Project source and
+prepared dependency source accompany the downloads; original media stays separate.
 
 `tools/native_release_package.py` accepts title metadata, an optimized native
 runtime, its CMake cache, the common recomp-ui launcher, a reviewed official
@@ -31,10 +31,23 @@ Archive only a pristine staged directory:
 python tools/native_release_archive.py --source <new-preview-directory> --output <new-windows-x64.zip>
 ```
 
+Prepare the dependency-source supplement from the exact inputs used by the
+native executables and launcher:
+
+```powershell
+python tools/native_release_sources.py --renderer <prepared-d3d-source> --ui <prepared-launcher-ui> --dsp <prepared-dsp-source> --output <new-dependency-source.zip>
+```
+
+This verifies prepared-source receipts, including guarded DSP modifications,
+and includes retained licenses and per-file hashes. Unrelated launcher sample
+ROMs/tests are excluded. Publish it beside the exact project source kit and
+Windows ZIP. Release provenance distinguishes unchanged gameplay binaries from
+later packaging/notices commits; a documentation update is not a new playtest.
+
 This verifies every manifest hash and the resulting ZIP, rejects additional
 files/links and owned-image extensions, and refuses to overwrite an archive.
 Do not archive an owner review folder after running it. Archive creation does
-not resolve the original-title content boundary in `LICENSE-SCOPE.md`.
+not grant third-party rights; retain the source and notices in `LICENSE-SCOPE.md`.
 
 `Start Game.cmd` runs the bundled Python host. `release.json` records package
 hashes, native runtime settings and title identity. This detects accidental
@@ -112,7 +125,7 @@ build evidence also records the prepared dependency and CPU-output inputs.
 
 Deferred: ISO extraction/import, general firmware import, virtual-profile
 gameplay/save qualification, complete per-title image-backed save/load QA, optional-file import into an
-existing profile, remaining source/license review, Linux and release publication.
+existing profile, Linux and the remaining legacy full-system source/license review.
 Older preview packages use native host folders; the new image route is being
 reviewed in the refreshed Blinx, JSRF and Dashboard packages. Dashboard uses the
 shared quality/presentation registry without a game-specific camera mod; its

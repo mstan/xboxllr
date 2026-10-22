@@ -1,4 +1,4 @@
-"""Assemble a local owner-use Windows preview; never bundle owned setup inputs.
+"""Assemble a pristine Windows preview; never bundle owned setup inputs.
 
 This stager is not a license clearance or GitHub publication operation.
 """
@@ -101,7 +101,7 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
         shutil.copy2(ROOT / 'tools' / (module + '.py'), tools)
     notices = output / 'notices'
     notices.mkdir()
-    for name in ('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md', 'CREDITS.md', 'THIRD_PARTY_ATTRIBUTION.md'):
+    for name in ('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md', 'RIGHTS-NOTICE.md', 'CREDITS.md', 'THIRD_PARTY_ATTRIBUTION.md'):
         shutil.copy2(ROOT / name, notices / name)
     if (ROOT / 'LICENSES').is_dir():
         copy_tree(ROOT / 'LICENSES', notices / 'LICENSES')
@@ -158,8 +158,10 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
         'Launcher keyboard bindings are stored beside Launcher.exe.\n'
         'Keep that data folder, selected save storage and any <image>.xboxllr profile across upgrades.\n'
         'Do not copy either into a release archive.\n\n'
-        'Owner-use candidate only. The source/tooling release is GPL; this executable\n'
-        'also contains translated original title code and is not included in that release.\n', encoding='utf-8')
+        'Project software is GPL-3.0-or-later; third-party terms remain applicable.\n'
+        'Original software, artwork and trademarks remain the property of their\n'
+        'respective rights holders. See notices/RIGHTS-NOTICE.md and notices/LICENSE.\n'
+        'Source and build information accompany the download on its release page.\n', encoding='utf-8')
     files = {p.relative_to(output).as_posix(): sha(p) for p in output.rglob('*') if p.is_file()}
     record = dict(schema='xboxllr.native-preview.v1', title=title,
         executable='native/' + runtime.name, launcher_executable='native/Launcher.exe',
@@ -171,7 +173,7 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
             'rev-parse', 'HEAD'], text=True).strip(),
         framework_dirty=bool(subprocess.check_output(['C:/Program Files/Git/cmd/git.exe', '-C', str(ROOT),
             'status', '--porcelain'], text=True).strip()),
-        distribution='private-owner-preview; not publication-cleared')
+        distribution='windows-prerelease; original content supplied by user')
     (output / 'release.json').write_text(json.dumps(record, indent=2)+'\n', encoding='utf-8')
     return record
 

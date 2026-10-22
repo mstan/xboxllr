@@ -24,31 +24,33 @@ scripts. A root license change alone is not a complete source-package audit.
 Native title gameplay does not link Unicorn; the separate legacy full-system
 route does. Any future legacy binary needs its own component/version review.
 
-## Current release boundary
+## Windows releases and original-title inputs
 
-The October 22 release is a **source/tooling preview**, not a downloadable
-precompiled game. Title-native executables currently statically include code
-translated from the owner's original XBE. That input's rights are not changed
-by our GPL grant, and the repository policy keeps original/generated title code
-private. Such executables are not included in these releases. Supplying only
-our wrappers would not provide all the source for those combined executables.
+The October 22 preview includes precompiled Windows native-title applications
+and separate source/tooling downloads. GPL permits binary distribution subject
+to its license and corresponding-source requirements; it does not require
+players to compile the application. The owner's decision removes the former
+policy restriction on distributing the selected GPL renderer.
 
-Release source archives contain the framework, title metadata/mods, build tools
-and notices. They exclude original games/firmware/Dashboard files, generated
-title bodies, kernel/EEPROM/signing material, disk images, native saves and
-profiles. A recursive title source archive includes its exact framework pin.
-Build locally using your own admitted title input and the documented toolchain.
-The source-generation/build process is documented in [Development](docs/DEVELOPMENT.md).
+The project grant does not license the original Microsoft or Sega software.
+Native title executables include mechanically translated original instructions;
+we claim no copyright in those instructions. Players must supply their own
+supported game or Dashboard files for data/assets. Original XBEs, disc images,
+firmware dumps, HDD images, EEPROM, keys and saves are not bundled.
 
-Standalone ROM-free binaries may be released separately after their exact
-corresponding-source and dependency package is verified. No original-game rights
-or blanket clearance for an arbitrary combined binary are implied here.
+Source downloads include project source, modifications, build/generation tools
+and the exact framework pins. A dependency-source supplement preserves prepared
+renderer/runtime/launcher source and notices used by the Windows builds.
+Original-title function bodies are generated from the user's supplied input;
+they are not included as original-derived source downloads. See
+[Development](docs/DEVELOPMENT.md) for preparation and build instructions.
 
-Artwork/screenshots identify the supported titles and have separate rights
-notices. They are not covered by a blanket GPL software grant. The standalone
-EEPROM source tool keeps its LGPL notice; generated console identities and keys
-remain private data. Read the [setup guide](docs/SETUP.md) before sharing saves.
+This describes the distribution model, not a claim that a disclaimer grants
+third-party permission or settles all questions about translated-code copyright.
+The [original rights notice](RIGHTS-NOTICE.md) reserves the original owners'
+rights without attempting to remove obligations for incorporated GPL code.
 
-References: [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html),
-[GNU on generated output](https://www.gnu.org/licenses/gpl-faq.en.html#GPLOutput),
-[GNU on corresponding source](https://www.gnu.org/licenses/gpl-faq.en.html#SourceAndBinaryOnDifferentSites).
+Artwork/screenshots identify the supported titles and retain separate rights
+notices. The standalone EEPROM tool retains its LGPL terms. No legacy
+Unicorn/full-system executable is included in these native-title downloads.
+Read the [setup guide](docs/SETUP.md) before importing or sharing saves.

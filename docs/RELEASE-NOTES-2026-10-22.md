@@ -1,13 +1,10 @@
-# Windows preview candidate — October 22, 2026
+# Windows preview - October 22, 2026
 
-Applies to xboxllr's Dashboard title, BlinxRecomp and JSRFRecomp. The release
-contains **GPL source/tooling**, including exact pinned framework source in the
-game archives. All three repos remain private. Windows is the tested native
-host; Linux is deferred. No precompiled original-title executable is attached.
-
-The owner selected GPL-3.0-or-later for owner-original contributions on October
-22. Third-party terms are retained. This supersedes the former no-GPL shipping
-restriction and removes the policy requirement to replace the Phobos renderer.
+Precompiled Windows x64 applications are available for Xbox Dashboard, Blinx
+and JSRF, alongside GPL project source and a prepared dependency-source
+supplement. The xboxllr toolkit is distributed as source/Python tools. All three
+repositories remain private; Linux is deferred. You supply your own supported
+original game or Dashboard files. No original media or console dumps are bundled.
 
 ## What changed
 
@@ -45,16 +42,22 @@ Xbox Live cache records and Dashboard Gaussian upscaling remain deferred.
 Xbox Live is unavailable. No firmware boot runs in these launchers. Its
 follow-up target is default off for games and on for Dashboard if qualified.
 
-## Release contents and local binaries
+## Release contents and rights
 
-Source kits contain framework/title source, mods, build tools, documentation and
-notices, with commit/hash manifests. Build the native title locally with your
-own supported game and the documented toolchain.
+Download the Windows ZIP for the title, extract it to a writable folder and open
+`Start Game.cmd`. Use **Skip** for the optional console setup, then select your
+supported extracted XBE on the main screen and keep its complete asset folder.
+No compiler is needed to run a prebuilt Windows title download.
 
-Existing combined title executables contain code translated from the original
-XBE. Our GPL grant does not license those original bodies, and repository input
-rules keep them local. They are not included in this source/tooling release.
-See [license scope](../LICENSE-SCOPE.md) and [release readiness](RELEASE-READINESS.md).
+Project contributions are GPL-3.0-or-later; incorporated components retain their
+terms. Original software, artwork and trademarks remain the property of their
+respective rights holders, with all original rights reserved. The notice is not
+permission from those owners or an exception to the GPL. Native executables
+include translated execution code; original-title source bodies are regenerated
+from the user's input. See [rights notice](../RIGHTS-NOTICE.md),
+[license scope](../LICENSE-SCOPE.md) and [release readiness](RELEASE-READINESS.md).
 
-No original game/firmware/Dashboard files, HDDs, EEPROM, signing inputs, saved
-profiles, native saves or generated original source are in the release archives.
+Source kits and the dependency supplement preserve source/build information and
+notices. No original XBE/disc/firmware/HDD/EEPROM, signing keys, saves or used
+profiles are included. Preserve your existing data and selected save storage
+when updating; do not overwrite or discard native progress.

@@ -1,7 +1,7 @@
-"""Archive a pristine staged owner candidate, never a used playtest directory.
+"""Archive a pristine Windows package, never a used playtest directory.
 
-An archive is not distribution clearance. These statically translated title
-candidates remain local; see the original-content boundary in LICENSE-SCOPE.md.
+An archive is not a legal clearance. Preserve the source, dependency notices
+and original-rightsholder scope described in LICENSE-SCOPE.md.
 """
 from __future__ import annotations
 
