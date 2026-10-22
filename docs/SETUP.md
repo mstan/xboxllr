@@ -130,6 +130,8 @@ must not quietly re-sign, discard or replace native saves.
 These commands prepare inputs, **not a complete end-user installation**. The
 current build also requires the matching title metadata, CPU preparation,
 renderer/audio dependencies and build tools in the linked developer guides.
+The framework's [developer setup](DEVELOPMENT.md) covers a clean checkout,
+toolchain/dependency preparation and native versus full-system builds.
 
 Use Python 3 and run from a current xboxllr checkout. Example private locations
 below are on G:; choose a writable data drive with sufficient space. Direct

@@ -64,6 +64,8 @@ the [visual-mod design](docs/NATIVE-VISUAL-MODS-2026-10-18.md).
 
 ## Development
 
+Start with the [developer setup guide](docs/DEVELOPMENT.md) for a clean checkout,
+toolchains, ROM-free checks, pinned dependencies and native title builds.
 Use the [native-title driver guide](docs/NATIVE-TITLE-DRIVER.md) and
 [native reference pilot documentation](pilots/native-title/README.md) for current
 build profiles, private input preparation and bounded validation. Title projects
