@@ -4,43 +4,48 @@ Audit: 2026-10-21. Tracking: `beads-xbox.1.187`; distribution provenance and
 licensing: `beads-xbox.1.21`. The owner prioritizes this work ahead of further
 JSRF recovery/extra-mode qualification. Existing accepted builds remain intact.
 
+The owner narrowed the current release target to **Windows** on October 21.
+Native Linux host/backend work is deferred and does not block these releases.
+All three repositories remain private.
+
 ## Current repositories
 
 | Repository | Current presentation | Release gap |
 | --- | --- | --- |
-| xboxllr | Current native/LLE/HLE overview, three-title gallery and linked developer references | Shared release tooling and Dashboard-as-title packaging |
+| xboxllr | Current native/LLE/HLE overview, three-title gallery and linked developer references | Shared Windows release tooling and Dashboard-as-title packaging |
 | BlinxRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; old build notes preserved separately | Clean first-run package and download instructions after shipping gates are resolved |
 | JSRFRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; developer notes preserved separately | Release packaging and clean first-run setup; source license/scope and private remote are now present |
 
-The inspected Blinx source is `5ec1620`, pinned to framework `8cdc4d9`.
-JSRF source is `c52007e`, pinned to framework `b657fc6`. Latest private
+The published Blinx presentation is `411a42c`, pinned to framework `8cdc4d9`.
+JSRF presentation is `860f89f`, pinned to framework `b657fc6`. Latest private
 compatibility builds of Blinx and Dashboard with `b657fc6` render successfully;
 that does not itself change Blinx's checked-in pin or create a release.
 Authenticated GitHub API checks on October 21 confirm these repositories:
 
 | Repository | URL | Current visibility |
 | --- | --- | --- |
-| xboxllr | https://github.com/mstan/xboxllr | Private pending release preparation |
+| xboxllr | https://github.com/mstan/xboxllr | Private; retain private visibility |
 | BlinxRecomp | https://github.com/mstan/BlinxRecomp | Private |
 | JSRFRecomp | https://github.com/mstan/JSRFRecomp | Private |
 
 The requested framework rename is applied; its former `mstan/xboxlle` API URL
 resolves to `mstan/xboxllr`. JSRF now has a private remote and matching origin.
-No visibility was changed. Neither existing framework nor Blinx remote had
-GitHub releases at this check. The intended final arrangement is a public
-framework and private game repos; the framework remains private until its
-public-source release review is complete.
+No visibility was changed. The owner confirmed on October 21 that `xboxllr`
+should remain private, superseding the earlier public-framework plan. All three
+repositories stay private. Neither existing framework nor Blinx remote had
+GitHub releases at this check.
 
 ## Priorities
 
 | Release work | Status |
 | --- | --- |
 | Player-facing game pages, framework overview, screenshots and credits | Complete and pushed |
-| Requested repository rename and private game remotes | Complete; framework public visibility awaits source review |
+| Requested repository rename and private game remotes | Complete; all three repos remain private |
 | Replace the runtime's GPL ADPCM codec with the maintained permissive adapter | Implemented; reference, actual mixer and native JSRF smoke checks pass |
 | Generated CPU helper provenance and selected renderer implementation | File-level review/replacement remains open |
 | Shared release packaging and minimal first-run setup | Open |
-| Native Linux host/backends and title execution | Open |
+| Imported Windows DLL preflight | Shared verifier implemented; current title outputs need reviewed VC++ runtime files |
+| Native Linux host/backends and title execution | Deferred by owner; not a Windows release gate |
 | Final clean-profile packages and release publication | Open |
 
 1. **Resolve shared distribution and platform gates.** Inventory the exact
@@ -57,6 +62,12 @@ public-source release review is complete.
    exhaustive gameplay qualification.
 
 ## Actual shipping gates
+
+The shared [Windows dependency preflight](WINDOWS-RELEASE-DEPENDENCIES.md)
+checks ordinary and delay-import module closure without running a title. Its
+real-binary audit found three app-local VC++ runtime DLLs missing in each of
+the existing Blinx, Dashboard and JSRF output folders. Module presence does not
+clear licensing, toolset version compatibility or clean-profile package QA.
 
 ### License and provenance
 
@@ -76,7 +87,11 @@ Do not silently relicense the owner's work. JSRF now includes the same unmodifie
 local scope/component inventory. These files do not resolve the combined-build
 restriction.
 
-### Native Linux support
+### Deferred native Linux support
+
+Owner decision (October 21): defer this substantial port until after the Windows
+release. Retain the requirements below for future work; Linux does not gate
+current artifact acceptance.
 
 The current native host directly uses Win32/NT memory, threading and service
 APIs, D3D11 presentation and XAudio2. Portable generated C and portable component
@@ -108,8 +123,9 @@ miss the owner's requested shared architecture.
 - Game repositories own title identity/revisions, mod catalogs, artwork,
   documentation and thin adapters to the pinned framework tooling. Reconcile
   Blinx's `game.toml` and the generic `native-title.toml` driver interfaces.
-- Produce a self-contained Windows x64 ZIP and a native Linux x64 AppImage or
-  equivalent self-contained package after that host is qualified. Dashboard
+- Produce a self-contained Windows x64 ZIP for the current release. A native
+  Linux x64 AppImage or equivalent package is deferred until that host is
+  qualified. Dashboard
   uses the same title path; xboxllr also has a separate recompiler-tool artifact.
 - Stage tracked release inputs only. Resolve the actual transitive DLL/ELF
   dependency graph; include launcher assets, shipped mod catalogs, licenses and
