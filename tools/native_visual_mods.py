@@ -34,7 +34,8 @@ def manifests(source, data):
 
 
 def resolve(source, data, output, *, aspect=None, height=0, supersample=1,
-            antialiasing='original', anisotropy=1, frame_mode='original', frame_rate=60):
+            antialiasing='original', anisotropy=1, frame_mode='original', frame_rate=60,
+            registry_available=None):
     if (any(type(v) is not int for v in (height, supersample, anisotropy, frame_rate))
         or height not in (0, 1080, 1440, 1800, 2160) or supersample not in (1, 2, 3)
         or antialiasing not in ('original', 'fxaa') or anisotropy not in (1, 2, 4, 8, 16)
@@ -42,7 +43,9 @@ def resolve(source, data, output, *, aspect=None, height=0, supersample=1,
         raise ValueError('Invalid visual mod option')
     if frame_mode != 'original' and frame_mode not in data.get('launcher', {}).get('frame_modes', []):
         raise ValueError('Frame mode is not qualified for this title')
-    if not data.get('mods', {}).get('registry'):
+    if registry_available is not None and type(registry_available) is not bool:
+        raise ValueError('Invalid compiled visual registry capability')
+    if not (data.get('mods', {}).get('registry') if registry_available is None else registry_available):
         raise ValueError('This title does not declare a trusted visual mod registry')
     sha = data['title']['xbe_sha256']
     ratio, adaptive = aspect_value(aspect) if aspect is not None else (Fraction(4, 3), False)

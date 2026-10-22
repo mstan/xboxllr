@@ -1,0 +1,174 @@
+"""Fresh-profile ownership tests with authored inputs, without a game/window."""
+import hashlib
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+import native_release_runtime as runtime
+import native_save_keys
+from native_mod_launcher import Catalog, encoded
+from create_eeprom import generate_eeprom
+from test_native_save_keys import authored_xbe
+
+
+class FirstRunTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict('os.environ')
+        environment.start(); self.addCleanup(environment.stop)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.image = self.root / 'owned.xbe'
+        self.image.write_bytes(authored_xbe())
+        self.kernel = self.root / 'kernel.bin'
+        self.kernel.write_bytes(bytes(native_save_keys.CERTIFICATE_KEY_OFFSET) + bytes(range(1, 17)))
+        pin = patch.object(native_save_keys, 'KERNEL_SHA', runtime.sha(self.kernel))
+        pin.start(); self.addCleanup(pin.stop)
+        self.data = dict(title=dict(xbe_sha256=runtime.sha(self.image)))
+
+    def test_fresh_setup_publishes_complete_identity_without_source_changes(self):
+        before = runtime.sha(self.kernel), runtime.sha(self.image)
+        profile = runtime.prepare_profile(self.root, self.data, self.image, self.kernel)
+        self.assertEqual(runtime.verify_profile(self.root, self.data), profile)
+        self.assertEqual(before, (runtime.sha(self.kernel), runtime.sha(self.image)))
+        self.assertEqual(json.loads((profile / 'profile.json').read_text())['eeprom_source'], 'generated-r2')
+        self.assertFalse((self.root / 'data/state').exists())
+
+    def test_default_virtual_profile_needs_no_kernel_and_keeps_real_signatures(self):
+        profile = runtime.prepare_profile(self.root, self.data, self.image)
+        record = json.loads((profile / 'profile.json').read_text())
+        self.assertEqual(record['signing'], 'virtual-local-v1')
+        self.assertEqual(runtime.verify_profile(self.root, self.data), profile)
+        keys = (profile / 'save-keys.bin').read_bytes()
+        self.assertEqual(len(keys), 360)
+        self.assertTrue(all(any(keys[start:start+16]) for start in range(72,360,16)))
+        other = self.root / 'other-console'
+        second = runtime.prepare_profile(other, self.data, self.image)
+        self.assertNotEqual(keys[88:], (second / 'save-keys.bin').read_bytes()[88:])
+        self.assertEqual((profile / 'save-keys.bin').read_bytes(), keys)
+
+    def test_shared_console_keeps_identity_and_refuses_unowned_existing_storage(self):
+        media = self.root / 'media'; media.mkdir()
+        self.image = self.image.rename(media / self.image.name)
+        storage = self.root / 'shared'; storage.mkdir()
+        kernel, eeprom, seed = runtime.shared_identity(storage, self.image)
+        first = runtime.prepare_profile(self.root / 'first', self.data, self.image, kernel, eeprom, virtual_root=seed)
+        kernel2, eeprom2, seed2 = runtime.shared_identity(storage, self.image)
+        second = runtime.prepare_profile(self.root / 'second', self.data, self.image, kernel2, eeprom2, virtual_root=seed2)
+        self.assertEqual((first / 'save-keys.bin').read_bytes(), (second / 'save-keys.bin').read_bytes())
+        occupied = self.root / 'old-storage'; occupied.mkdir()
+        save = occupied / 'progress.sav'; save.write_bytes(b'owner progress')
+        with self.assertRaisesRegex(ValueError, 'already contains files'):
+            runtime.shared_identity(occupied, self.image)
+        self.assertEqual(list(occupied.iterdir()), [save])
+        self.assertEqual(save.read_bytes(), b'owner progress')
+
+    def test_first_use_acknowledgement_is_distinct_from_game_selection(self):
+        choice = self.root / 'console-choice.txt'
+        self.assertFalse(runtime.read_console_choice(choice)['acknowledged'])
+        choice.write_text('xboxllr-console-choice 1\nacknowledged 1\nkernel -\neeprom -\nstorage -\nend\n')
+        self.assertEqual(runtime.read_console_choice(choice), dict(acknowledged=True,kernel='',eeprom='',storage=''))
+
+    def test_optional_eeprom_import_retains_exact_identity_and_source(self):
+        original = self.root / 'original-eeprom.bin'
+        eeprom = generate_eeprom(random_bytes=bytes(range(58)))
+        original.write_bytes(eeprom)
+        profile = runtime.prepare_profile(self.root, self.data, self.image, self.kernel, original)
+        self.assertEqual((profile / 'eeprom.bin').read_bytes(), eeprom)
+        self.assertEqual(original.read_bytes(), eeprom)
+        runtime.verify_profile(self.root, self.data)
+
+    def test_existing_identity_and_native_progress_are_never_replaced(self):
+        destination = self.root / 'data/console'
+        destination.mkdir(parents=True)
+        save = destination / 'progress.sav'
+        save.write_bytes(b'Owner progress')
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            runtime.prepare_profile(self.root, self.data, self.image, self.kernel)
+        self.assertEqual(save.read_bytes(), b'Owner progress')
+        self.assertEqual(list(destination.iterdir()), [save])
+
+    def test_bad_kernel_and_wrong_game_do_not_create_profile_output(self):
+        self.kernel.write_bytes(b'not an admitted kernel')
+        with self.assertRaisesRegex(ValueError, 'Unreviewed'):
+            runtime.prepare_profile(self.root, self.data, self.image, self.kernel)
+        self.assertFalse((self.root / 'data').exists())
+        self.image.write_bytes(b'wrong title')
+        with self.assertRaisesRegex(ValueError, 'supported original revision'):
+            runtime.prepare_profile(self.root, self.data, self.image, self.kernel)
+        self.assertFalse((self.root / 'data').exists())
+
+    def test_invalid_optional_eeprom_is_not_replaced(self):
+        original = self.root / 'bad-eeprom.bin'
+        original.write_bytes(bytes(256))
+        with self.assertRaisesRegex(ValueError, 'EEPROM is invalid'):
+            runtime.prepare_profile(self.root, self.data, self.image, self.kernel, original)
+        self.assertEqual(original.read_bytes(), bytes(256))
+        self.assertFalse((self.root / 'data').exists())
+
+    def test_changed_signing_or_settings_inputs_are_rejected(self):
+        profile = runtime.prepare_profile(self.root, self.data, self.image, self.kernel)
+        settings = profile / 'console-settings.bin'
+        original = settings.read_bytes()
+        settings.write_bytes(original[:-1])
+        with self.assertRaisesRegex(ValueError, 'settings do not match'):
+            runtime.verify_profile(self.root, self.data)
+        settings.write_bytes(original)
+        (profile / 'save-keys.bin').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'identity changed'):
+            runtime.verify_profile(self.root, self.data)
+
+    def test_package_paths_cannot_escape_the_application(self):
+        for path in ['../old-saves', '/outside', 'C:/outside']:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                runtime.inside(self.root, path)
+
+    def test_second_setup_session_is_refused(self):
+        data = runtime.writable_environment(self.root)
+        with runtime.session_lock(data):
+            with self.assertRaisesRegex(ValueError, 'already open'):
+                with runtime.session_lock(data):
+                    self.fail('Second writer admitted')
+
+    def test_owner_launch_isolates_developer_overrides_and_has_no_deadline(self):
+        runtime.writable_environment(self.root)
+        data = dict(self.data, executable='game.exe', runtime=dict(XLLE_PILOT_GUEST_SCHEDULER='1'),
+                    capabilities=dict(visual_mods=False))
+        catalog = Catalog([], self.root / 'selection.json')
+        catalog.player = dict(source='keyboard', guid='')
+        profile = self.root / 'data/console'
+        with patch.dict('os.environ', dict(XLLE_PILOT_INPUT_REPLAY='old-replay',
+                XLLE_PILOT_MOD_PLAN='old-plan', XLLE_PILOT_SAVE_KEYS_FILE='old-keys',
+                SDL_AUDIODRIVER='dummy')), patch.object(runtime.subprocess, 'Popen') as process:
+            process.return_value.wait.return_value = 0
+            runtime.launch_game(self.root, data, self.image, profile, catalog)
+            env = process.call_args.kwargs['env']
+            self.assertNotIn('XLLE_PILOT_INPUT_REPLAY', env)
+            self.assertNotIn('XLLE_PILOT_MOD_PLAN', env)
+            self.assertNotIn('SDL_AUDIODRIVER', env)
+            self.assertEqual(env['XLLE_PILOT_SAVE_KEYS_FILE'], str(profile / 'save-keys.bin'))
+            self.assertEqual(env['XLLE_PILOT_GUEST_SCHEDULER'], '1')
+            self.assertEqual(env['XLLE_PILOT_VISIBLE'], '1')
+            self.assertEqual(env['XLLE_PILOT_AUDIO_OUTPUT_MUTE'], '0')
+            process.return_value.wait.assert_called_once_with()
+            process.return_value.terminate.assert_not_called()
+
+    def test_setup_result_roundtrips_unicode_and_is_transactional(self):
+        catalog = Catalog([], self.root / 'mods.json', setup=dict(required=True, kernel=''))
+        result = self.root / 'result'
+        text = 'xlle-launcher-result 1\nresult 1\nimage -\nvolume 100\nskip 0\nplayer keyboard -\nkernel '+encoded('G:/Owned files/原本.bin')+'\nend\n'
+        result.write_text(text, encoding='ascii')
+        catalog.ingest(result)
+        self.assertEqual(catalog.setup['kernel'], 'G:/Owned files/原本.bin')
+        result.write_text(text.replace('end\n', 'kernel -\nend\n'), encoding='ascii')
+        with self.assertRaises(ValueError):
+            catalog.ingest(result)
+        self.assertEqual(catalog.setup['kernel'], 'G:/Owned files/原本.bin')
+
+
+if __name__ == '__main__':
+    unittest.main()

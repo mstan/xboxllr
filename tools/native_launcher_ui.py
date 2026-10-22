@@ -37,7 +37,8 @@ def prepare(source, output, git='git'):
             if item.is_dir():
                 path.mkdir(parents=True, exist_ok=True)
             else:
-                if item.filename in ('src/consoles/xbox/xbox_profile.h', 'src/common/backends/imgui/launcher_imgui.cpp'):
+                if item.filename in ('src/consoles/xbox/xbox_profile.h', 'src/common/backends/imgui/launcher_imgui.cpp',
+                                     'src/common/launcher_platform_sdl2.c'):
                     continue
                 path.parent.mkdir(parents=True, exist_ok=True)
                 data = files.read(item)
@@ -53,7 +54,7 @@ def prepare(source, output, git='git'):
     code = code.replace('static const SystemProfile kSystemProfileXbox = {',
         '/* xboxlle host adapter: only consumed controls are shown. */\n'
         'static const char* const kPanelsXboxNativeDashboard[]={"game","controller",NULL};\n'
-        'static const char* const kPanelsXboxNativeSettings[]={"audio",NULL};\n'
+        'static const char* const kPanelsXboxNativeSettings[]={"audio","system",NULL};\n'
         'static const char* const kPanelsXboxNativeController[]={"controller_config",NULL};\n'
         'static const SystemProfile kSystemProfileXbox = {').replace(old, new)
     if code.count('    NULL, 0, NULL, NULL,') != 1:
@@ -68,6 +69,38 @@ def prepare(source, output, git='git'):
     view = output / 'src/common/backends/imgui/launcher_imgui.cpp'
     with zipfile.ZipFile(io.BytesIO(archive)) as files:
         code = files.read('src/common/backends/imgui/launcher_imgui.cpp').decode('utf-8')
+    adapter = Path(__file__).resolve().parents[1] / 'pilots/native-launcher'
+    for source, name in [('console_setup.h','xboxllr_console_setup.h'), ('console_setup_ui.inc','xboxllr_console_setup_ui.inc')]:
+        data = (adapter / source).read_bytes()
+        target = output / 'src/common' / name
+        if not target.exists() or target.read_bytes() != data:
+            target.write_bytes(data)
+    boundary = 'int avail_system(const LauncherModel* m) { return launcher_model_bios_applies(m); }'
+    if code.count(boundary) != 1:
+        raise ValueError('Unreviewed native console-settings boundary')
+    code = code.replace('#include "launcher_debug.h"', '#include "launcher_debug.h"\n#include "xboxllr_console_setup.h"')
+    code = code.replace(boundary, '#include "xboxllr_console_setup_ui.inc"\n'
+        'int avail_system(const LauncherModel* m) { return xboxllr_console_setup || launcher_model_bios_applies(m); }')
+    boundary = 'void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {'
+    if code.count(boundary) != 1 or code.count('    draw_setup_wizard_modal(m, th);') != 1:
+        raise ValueError('Unreviewed native first-launch boundary')
+    code = code.replace(boundary, boundary + '\n    if(xboxllr_console_setup){draw_xboxllr_console_controls(m,th);return;}')
+    code = code.replace('    draw_setup_wizard_modal(m, th);', '    draw_xboxllr_console_welcome(m, th);\n    draw_setup_wizard_modal(m, th);')
+    boundary = 'void draw_settings(LauncherModel* m, const LauncherTheme& th) {'
+    if code.count(boundary) != 1:
+        raise ValueError('Unreviewed native settings layout boundary')
+    code = code.replace(boundary, boundary + '''
+    if(xboxllr_console_setup) {
+        g_settings_two_col=false;
+        const auto *profile=(const SystemProfile*)m->profile;
+        for(const char *id : {"audio","system"}) {
+            const LauncherPanel *panel=find_composed(profile->panels_settings,id,m);
+            if(!panel)continue;
+            begin_container(id,ImVec2(ImGui::GetContentRegionAvail().x,0),ImGuiChildFlags_AutoResizeY);
+            panel->draw(m,&th);end_container();ImGui::Dummy(ImVec2(0,px(th.spacing_md)));
+        }
+        return;
+    }''')
     old = '    if (ImGui::Button(install_label)) {'
     if code.count(old) != 2:
         raise ValueError('Unreviewed bundled-only provider toolbar')
@@ -88,6 +121,29 @@ def prepare(source, output, git='git'):
     if code.count(old) != 1:
         raise ValueError('Unreviewed shared player connection-status boundary')
     code = code.replace(old, new)
+    # The shared BIOS slot carries a one-time signing input for this host;
+    # never describe it as firmware that the native runtime executes.
+    setup_labels = {
+        '"%s needs a BIOS image and a playable %s before you can launch. "':
+            '"%s needs a kernel backup for save setup and an extracted %s. "',
+        '"Pick both below (you must legally own these dumps).",\n                game, noun);\n        } else {':
+            '"Choose your own files below; the kernel is read once, not booted.",\n                game, noun);\n        } else {',
+        ': "1. BIOS";': ': "1. Kernel backup (preview save setup)";',
+        ': "Browse for a BIOS image required by this console.";':
+            ': "Used once to prepare signed saves; no original kernel runs during play.";',
+        '                                      : "Select BIOS file";':
+            '                                      : "Select your Xbox kernel backup";',
+        'ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))':
+            'ImGui::Button("Browse kernel##setup", ImVec2(px(140), px(32)))',
+        ': "Select your game ROM file.";':
+            ': "Select the supported .xbe inside its complete extracted asset folder.";',
+        'ImGui::Button(browse_lbl, ImVec2(px(128), px(32)))':
+            'ImGui::Button(browse_lbl, ImVec2(px(200), px(32)))',
+    }
+    for old, new in setup_labels.items():
+        if code.count(old) != 1:
+            raise ValueError('Unreviewed native first-run label boundary: ' + old)
+        code = code.replace(old, new)
     old = '        row_label("Deadzone", th);\n        {'
     if code.count(old) != 1:
         raise ValueError('Unreviewed controller deadzone boundary')
@@ -99,9 +155,28 @@ def prepare(source, output, git='git'):
     code = code.replace(old, '''        if(aprof && aprof->id && !strcmp(aprof->id,"xbox"))
             image_fit_centered(art, 180, 124, inner);
         else image_fit_centered(art, 120, 78, inner);''')
+    old = '        launcher_platform_present(p);'
+    if code.count(old) != 1:
+        raise ValueError('Unreviewed low-power launcher boundary')
+    code = code.replace(old, old + '''
+        if(SDL_getenv("XLLE_LAUNCHER_LOW_POWER") &&
+           !(SDL_GetWindowFlags(p->window)&SDL_WINDOW_INPUT_FOCUS)) SDL_Delay(200);''')
     data = code.encode('utf-8')
     if not view.exists() or view.read_bytes() != data:
         view.write_bytes(data)
+    platform = output / 'src/common/launcher_platform_sdl2.c'
+    with zipfile.ZipFile(io.BytesIO(archive)) as files:
+        code = files.read('src/common/launcher_platform_sdl2.c').decode('utf-8')
+    old = '    if (test_hidden) window_flags |= SDL_WINDOW_HIDDEN;'
+    if code.count(old) != 1 or code.count('    if (!test_hidden)\n        SDL_RaiseWindow') != 1:
+        raise ValueError('Unreviewed minimized launcher boundary')
+    code = code.replace(old, old + '\n    const bool start_minimized = getenv("XLLE_LAUNCHER_START_MINIMIZED") != NULL;\n'
+                        '    if(start_minimized) window_flags |= SDL_WINDOW_MINIMIZED;')
+    code = code.replace('    if (!test_hidden)\n        SDL_RaiseWindow',
+                        '    if (!test_hidden && !start_minimized)\n        SDL_RaiseWindow')
+    data = code.encode('utf-8')
+    if not platform.exists() or platform.read_bytes() != data:
+        platform.write_bytes(data)
     photo = output / 'assets/consoles/xbox/img/pad_xbox.jpg'
     if not photo.is_file():
         request = urllib.request.Request(CONTROLLER_PHOTO_URL, headers={'User-Agent': 'xboxlle-launcher-artwork/1.0'})
@@ -115,7 +190,7 @@ def prepare(source, output, git='git'):
         raise ValueError('Changed controller photograph')
     inventory = {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'xboxlle-ui.json'}
-    manifest = dict(version=1, adapter_version=4, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
+    manifest = dict(version=1, adapter_version=6, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
                     adapter='Xbox native host: mod provider, audio volume and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
     (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
@@ -125,7 +200,7 @@ def prepare(source, output, git='git'):
 def verify(output):
     output = Path(output).resolve()
     manifest = json.loads((output / 'xboxlle-ui.json').read_text(encoding='utf-8'))
-    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 4:
+    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 6:
         raise ValueError('Unreviewed prepared UI profile')
     if manifest.get('controller_photo') != dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256):
         raise ValueError('Unreviewed controller photograph provenance')

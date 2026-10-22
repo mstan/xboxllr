@@ -21,6 +21,43 @@ KERNEL_BASE = 0x80010000
 CERTIFICATE_KEY_OFFSET = 0x8004fa40 - KERNEL_BASE
 
 
+def prepare_virtual(xbe, eeprom, output, *, root):
+    """Real local-save HMAC keys for a new virtual identity, not retail keys.
+
+    The caller owns/persists the root. Never use this to replace an imported
+    identity or claim stock-save, stock-kernel or network compatibility.
+    """
+    if len(root) != 32 or not any(root):
+        raise ValueError('Invalid virtual-console signing identity')
+    image = parse_xbe(xbe)
+    checked = validate_eeprom(eeprom)
+    if not checked.ok:
+        raise ValueError('Virtual EEPROM rejected: ' + checked.reason)
+    cert = struct.unpack_from('<I', xbe, 0x118)[0] - image['base']
+    headers = struct.unpack_from('<I', xbe, 0x108)[0]
+    if cert < 0 or cert + 0x1d0 > headers:
+        raise ValueError('Signing certificate is outside XBE headers')
+    certificate_bytes = struct.unpack_from('<I', xbe, cert)[0]
+    if certificate_bytes < 0x1d0 or cert + certificate_bytes > headers:
+        raise ValueError('Signing certificate is incomplete or outside XBE headers')
+    # Domain-separated keys still exercise the existing SHA/HMAC exports and
+    # native game save verification. No accept-all or zero-key path exists.
+    keys = b''.join(hmac.digest(root, b'xboxllr.local-save.v1\0' +
+        struct.pack('<I', image['title_id']) + bytes([i]) +
+        xbe[cert + 0xc0 + i*16:cert + 0xd0 + i*16], 'sha256')[:16] for i in range(17))
+    disk_key = _decrypt_security(eeprom, checked.revision)[8:24]
+    blob = b'XLLEKEY1' + hashlib.sha256(xbe).digest() + hashlib.sha256(eeprom).digest() + disk_key + keys
+    output = Path(output)
+    if output.exists() or output.with_suffix(output.suffix + '.json').exists():
+        raise ValueError('Signing inputs already exist; preserve this identity')
+    with output.open('xb') as file:
+        file.write(blob)
+    output.with_suffix(output.suffix + '.json').write_text(json.dumps(dict(
+        format='XLLEKEY1', signing='virtual-local-v1', xbe_sha256=image['sha256'],
+        eeprom_sha256=hashlib.sha256(eeprom).hexdigest(), bytes=len(blob),
+        stock_key_equivalent=False, key_values_logged=False), indent=2)+'\n', encoding='utf-8')
+
+
 def kernel_key(kernel):
     if hashlib.sha256(kernel).hexdigest() != KERNEL_SHA:
         raise ValueError('Unreviewed original kernel')

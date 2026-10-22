@@ -44,8 +44,8 @@ GitHub releases at this check.
 | Replace the runtime's GPL ADPCM codec with the maintained permissive adapter | Implemented; reference, actual mixer and native JSRF smoke checks pass |
 | Generated CPU helper provenance | MIT upstream replacement and authored bridge pass component checks plus representative native JSRF save/load/gameplay; title release migration remains |
 | Selected renderer implementation and remaining emitted glue provenance | File-level review/replacement remains open |
-| Shared release packaging and minimal first-run setup | Open |
-| Imported Windows DLL preflight | Shared verifier implemented; current title outputs need reviewed VC++ runtime files |
+| Shared release packaging and minimal first-run setup | Private preview stager, once-only optional console setup, kernel-free virtual profiles and shared native storage folders implemented; ISO import, real virtual-save gameplay checks and image-backed FATX remain open |
+| Imported Windows DLL preflight | Preview stager resolves selected app-local imports, including reviewed VC++ runtime files; public distribution review remains |
 | Native signing-input preparation | Stdlib default matches original-derived files for all three titles; no normal Unicorn dependency; owned kernel/profile input remains |
 | Native Linux host/backends and title execution | Deferred by owner; not a Windows release gate |
 | Final clean-profile packages and release publication | Open |
@@ -71,6 +71,12 @@ and title pins remain unchanged. Component Linux checks do not qualify native
 Linux title execution.
 
 ## Actual shipping gates
+
+The [shared first-run preview path](NATIVE-FIRST-RUN-PREVIEW.md) now stages
+local owner-use candidates for all three titles, with a bundled frontend,
+Python and selected native DLLs. It preserves existing profiles and admits
+owned setup inputs separately. These candidates are not GitHub releases and
+do not clear the distribution gates below.
 
 The shared [Windows dependency preflight](WINDOWS-RELEASE-DEPENDENCIES.md)
 checks ordinary and delay-import module closure without running a title. Its

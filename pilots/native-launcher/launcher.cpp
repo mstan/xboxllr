@@ -4,6 +4,7 @@
 #include "recomp_launcher.h"
 #include "launcher_profile.h"
 #include "visual_mods.h"
+#include "console_setup.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cctype>
@@ -13,6 +14,11 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <filesystem>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+XboxllrConsoleSetup *xboxllr_console_setup=nullptr;
 struct Choice {std::string value,label;};
 struct Option {std::string id,label,value,initial;std::vector<Choice> choices;};
 struct Feature {std::string package,id,name,description;int enabled=0;std::vector<Option> options;};
@@ -21,6 +27,10 @@ struct Catalog {
     std::string title,region,sha,error;std::vector<Package> packages;std::vector<Feature> features;
     std::string player_source="auto",player_guid;
     RecompLauncherCSettings settings={};
+    bool setup=false,needs_setup=false;
+    bool console=false;
+    std::string choice_path;
+    XboxllrConsoleSetup console_ui;
 };
 static std::string unhex(const std::string &s) {
     if(s=="-")return {};
@@ -74,6 +84,13 @@ static Catalog read_catalog(const char *path) {
             if(c.player_source=="gamepad"?(c.player_guid.size()!=32||c.player_guid.find_first_not_of("0123456789abcdef")!=std::string::npos):!c.player_guid.empty())throw std::runtime_error("Invalid Player 1 controller identity");
             c.settings.player_src[0]=c.player_source=="keyboard"?1:c.player_source=="gamepad"?2:0;
             copy(c.settings.player_gamepad_guid[0],c.player_guid);
+        } else if(t[0]=="setup"&&t.size()==3&&(t[1]=="0"||t[1]=="1")&&!c.setup) {
+            c.setup=true;c.needs_setup=t[1]=="1";copy(c.settings.bios_path,x(2));
+        } else if(t[0]=="console"&&t.size()==6&&!c.console&&c.setup&&
+                  (t[1]=="0"||t[1]=="1")&&(t[2]=="0"||t[2]=="1")) {
+            c.console=true;c.console_ui.acknowledged=t[1]=="1";c.console_ui.locked=t[2]=="1";
+            copy(c.console_ui.kernel,c.settings.bios_path);copy(c.console_ui.eeprom,x(3));
+            copy(c.console_ui.storage,x(4));c.choice_path=x(5);
         } else if(t[0]=="package"&&t.size()==5&&c.packages.size()<32) {
             Package p={x(1),x(2),x(3),x(4)};
             if(std::any_of(c.packages.begin(),c.packages.end(),[&](const Package &old){return old.id==p.id;}))throw std::runtime_error("Duplicate package");
@@ -156,12 +173,40 @@ static int commit(void *p,const char *) {
     } catch(const std::exception &e){c.error=e.what();return 0;}
 }
 static const char *last_error(void *p){return ((Catalog*)p)->error.c_str();}
+static void persist_console(void *context) {
+    auto &c=*(Catalog*)context;auto &s=c.console_ui;
+    std::string temporary=c.choice_path+".tmp";
+    std::ofstream out(std::filesystem::u8path(temporary),std::ios::binary|std::ios::trunc);
+    out<<"xboxllr-console-choice 1\nacknowledged "<<s.acknowledged<<"\nkernel "<<hex(s.kernel)
+       <<"\neeprom "<<hex(s.eeprom)<<"\nstorage "<<hex(s.storage)<<"\nend\n";
+    out.close();
+    if(!out)throw std::runtime_error("Could not save console setup choices");
+#if defined(_WIN32)
+    if(!MoveFileExW(std::filesystem::u8path(temporary).c_str(),std::filesystem::u8path(c.choice_path).c_str(),
+                    MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
+        throw std::runtime_error("Could not store console setup choices");
+#else
+    std::filesystem::rename(std::filesystem::u8path(temporary),std::filesystem::u8path(c.choice_path));
+#endif
+}
+/* The producer checks the exact kernel fingerprint before publishing keys. */
+static int signing_source_verify(const char *path,RecompLauncherCBiosVerify *out) {
+    if(!out)return 0;*out={};
+    std::ifstream in(path?path:"",std::ios::binary|std::ios::ate);
+    if(in&&in.tellg()>0&&in.tellg()<=1048576) {
+        out->ok=1;out->warn=1;
+        copy(out->detail,"Selected; exact source identity is checked when setting up saves.");
+    } else copy(out->detail,"Choose your kernel backup for this preview's save-signing setup.");
+    return 1;
+}
 static void save(const Catalog &c,const char *path,int result,const char *image) {
     std::ofstream out(path,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("Cannot save launcher result");
     out<<"xlle-launcher-result 1\nresult "<<result<<"\nimage "<<hex(image)<<"\nvolume "<<(c.settings.enable_audio?c.settings.volume:0)<<"\nskip "<<(c.settings.skip_launcher?1:0)<<"\n";
     const int source=c.settings.player_src[0];
     const std::string kind=c.player_source=="auto"&&source==0?"auto":source==2?"gamepad":source==1?"keyboard":"none";
     out<<"player "<<kind<<" "<<hex(source==2?c.settings.player_gamepad_guid[0]:"")<<"\n";
+    if(c.setup)out<<"kernel "<<hex(c.console?c.console_ui.kernel:c.settings.bios_path)<<"\n";
+    if(c.console)out<<"console "<<c.console_ui.acknowledged<<" "<<hex(c.console_ui.eeprom)<<" "<<hex(c.console_ui.storage)<<"\n";
     for(auto &f:c.features) {
         out<<"feature "<<hex(f.package)<<" "<<hex(f.id)<<" "<<f.enabled<<"\n";
         for(auto &o:f.options)out<<"option "<<hex(f.package)<<" "<<hex(f.id)<<" "<<hex(o.id)<<" "<<hex(o.value)<<"\n";
@@ -172,6 +217,7 @@ int main(int argc,char **argv) {
     try {
         if(argc!=4&&argc!=5)throw std::runtime_error("Usage: xlle_launcher catalog result owned.xbe [--validate]");
         Catalog c=read_catalog(argv[1]);
+        if(c.console){c.console_ui.persist=persist_console;c.console_ui.context=&c;xboxllr_console_setup=&c.console_ui;}
         if(argc==5){if(std::string(argv[4])!="--validate"||!commit(&c,argv[3]))throw std::runtime_error(c.error);save(c,argv[2],0,argv[3]);return 0;}
         /* Only first use chooses a default. Saved/disconnected pads retain
          * their GUID and the shared UI's normal hot-plug/offline behavior. */
@@ -191,9 +237,18 @@ int main(int argc,char **argv) {
         mods.feature_enable=feature_enable;mods.feature_set_option=set_option;mods.commit=commit;mods.last_error=last_error;
         RecompLauncherCGameInfo game={};launcher_profile_apply("xbox",&game);game.name=c.title.c_str();game.region=c.region.c_str();game.mods=&mods;
         game.num_players=1;game.lock_device=0;game.hide_rebind=1;game.host_persists_paths=1;
-#ifdef XLLE_LAUNCHER_HAS_BOXART
-        game.boxart_path="assets/img/boxart.png";
-#endif
+        if(c.console)game.rom_noun="game files";
+        if(c.setup&&!c.console) {
+            game.setup_wizard_supported=1;game.needs_setup=c.needs_setup;
+            game.has_bios=c.needs_setup?1:0;game.bios_verify=signing_source_verify;
+            game.bios_name="Kernel backup (preview save setup)";
+            static const char *patterns[]={"*.bin"};
+            game.bios_patterns=patterns;game.num_bios_patterns=1;
+            game.bios_filter_desc="Your Xbox kernel backup";
+            game.rom_noun="Xbox executable";
+        }
+        if(std::ifstream("assets/img/boxart.png",std::ios::binary).good())
+            game.boxart_path="assets/img/boxart.png";
         uint8_t sha[1][32];for(unsigned i=0;i<32;++i)sha[0][i]=(uint8_t)std::stoul(c.sha.substr(i*2,2),nullptr,16);
         game.known_sha256=sha;game.num_known_sha256=1;
         char image[4096]={};int result=recomp_launcher_run_window(c.title.c_str(),&c.settings,&game,"assets",argv[3],image,sizeof(image));

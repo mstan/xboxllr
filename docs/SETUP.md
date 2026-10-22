@@ -1,16 +1,16 @@
 # Setup: games, console profiles and the original Dashboard
 
-Status: October 21, 2026. Current previews run on Windows x64. Standalone
-Windows packages and the first-run interface below are still being built;
-Linux releases are deferred. Tracking: `beads-xbox.1.187.6`, release
+Status: October 21, 2026. Current previews run on Windows x64. Private owner-use
+packages now have a shared first-run interface; ISO-only import and publication
+remain unfinished. Linux releases are deferred. Tracking: `beads-xbox.1.187.7`, release
 `beads-xbox.1.187`, console/storage provisioning `beads-xbox.1.22`.
 
 ## Choose what you want to run
 
 | Experience | What you supply today | Intended release setup |
 | --- | --- | --- |
-| Blinx or JSRF, direct native launch | Matching extracted game files and a prepared title/console profile, or the reviewed owned kernel plus an EEPROM to prepare signing inputs; developer build inputs are also needed | Select your own supported game ISO; setup extracts/verifies it and creates a virtual console and writable storage. Original console files are an optional import. This ISO-only path is not implemented/qualified yet. |
-| Original Microsoft Dashboard, native launch | Matching Dashboard 5960 executable **and its assets**, plus the same signing/profile preparation used by games | Import your own matching Dashboard files. Use the shared native console services; a full original firmware boot is optional. Reduced-input profile setup still needs qualification here too. |
+| Blinx or JSRF, direct native launch | Matching extracted game files; the private package can create a new local console without other dumps. Original console inputs are optional. Real virtual-profile save/restart/load qualification remains. | Select your own supported game ISO; setup extracts/verifies it and creates a virtual console and writable storage. Direct ISO import is not implemented yet. |
+| Original Microsoft Dashboard, native launch | Matching Dashboard 5960 executable **and its assets**; the package uses the same optional console setup as games | Import your own matching Dashboard files. Use the shared native console services; a full original firmware boot is optional. |
 | Original-software full-system/reference route | Compatible owned flash, decrypted 2BL, a readable raw FATX HDD image and an EEPROM; encrypted bootloader extraction additionally needs matching MCPX/key material | An explicit advanced option with its own compatible input set; it is separate from direct native launch. |
 | Open-source default dashboard | No implementation has been selected for xboxllr | Optional redistributable shell/dashboard with its own qualified services and asset licenses; never a prerequisite for launching a game. |
 
@@ -22,6 +22,36 @@ and program are separate from boot firmware. See the
 [kernel-service and profile design](KERNEL-SERVICES-SETUP.md).
 
 ## 1. Obtain your own content
+
+### Private Windows preview packages
+
+Open **Start Game.cmd** in the title's folder. First run shows an optional
+console-files popup. **Skip and continue** chooses new local saves and automatic
+storage; the choice is saved immediately and the popup does not reappear.
+Select the supported extracted `.xbe` on the **main screen**, keeping it
+inside its complete asset tree. This preview does not accept an ISO directly.
+
+**Settings** contains optional kernel/EEPROM import and shared save-storage
+selection. A new virtual console requires none of these files. Local saves use
+real signing/verification under a generated persistent identity; they are not
+stock-key-equivalent. Original Xbox saves may require their original signing
+source and matching EEPROM. A new identity starts with empty saves. Importing an
+EEPROM preserves the source file; it does not copy existing saves automatically.
+Current profile setup rejects an already created identity rather than replacing
+its native saves. Setup, identity and game state are stored in the package's
+`data` directory; launcher keyboard bindings are beside `Launcher.exe`.
+Keep both when updating an owner preview. The packages include Python and the
+selected native DLL dependencies; players do not need a development toolchain.
+An optional shared virtual HDD **folder** reuses one persistent console identity
+and holds an exclusive writer lock throughout play. Existing unrelated storage
+is rejected unchanged. Importing an original HDD **image** remains unfinished;
+the UI says so explicitly. New-save/restart/load checks with the new local
+identity remain an owner gameplay check before release qualification.
+
+These are private test candidates, not publication-cleared releases. The owner
+handoff includes a separate local **Setup Inputs** folder; its game directories
+are links to existing owned backups, not redistributable or portable content.
+See [preview packaging](NATIVE-FIRST-RUN-PREVIEW.md) for the shared build path.
 
 Use game and console backups you are entitled to make and use. This project
 does not supply Microsoft firmware, retail Dashboard assets, games or private
@@ -89,7 +119,8 @@ the disc label alone is insufficient.
 
 The intended first-run choice is **Use a virtual console** or **Import my Xbox
 files**. Both choices must keep identity and persistent storage together. The
-first-run UI is not available yet; the current developer steps follow below.
+reduced-input release flow remains unfinished. The private preview's more
+limited first-run interface is described above; developer steps follow below.
 
 For a new virtual console, generate settings/identity and format writable
 storage locally. The game ISO should be the only required user content for

@@ -30,9 +30,10 @@ a separate supported direction with its own additional inputs.
 | Storage | Persistent native host files; separate LLE raw-image path | One formatted FATX image used through both backends; do not substitute unrelated saves plus a dummy image |
 
 The kernel is not a normal native runtime input. It is currently needed once
-to prepare signing data, or not needed again when a matching prepared profile
-already exists. Removing interpreter execution from that preparer did not
-remove its private-data dependency.
+to prepare **original-compatible** signing data, or not needed again when a
+matching prepared profile exists. New local virtual profiles now have a
+separate generated identity and need no kernel. They do not claim retail-key
+or original LLE-kernel compatibility. See [preview setup](NATIVE-FIRST-RUN-PREVIEW.md).
 
 ## Save identities are the important qualification boundary
 
@@ -52,8 +53,10 @@ There are two explicit profile cases:
   a candidate way to remove the kernel dump requirement for new local play.
   It must be identified as virtual and qualified using actual new save,
   restart and load. It cannot be called stock-key-equivalent, and stock-save
-  import/System Link compatibility must not be promised. No implementation
-  or title qualification of this new profile has landed yet.
+  import/System Link compatibility must not be promised. The private preview
+  now implements this profile and the once-only optional setup UI; component
+  persistence and shared-folder identity checks pass. Actual new-game save,
+  restart and load remains title qualification before release.
 
 Do not weaken verification, use zero exports or accept every signature to
 simulate compatibility. Both profile types must perform real cryptography

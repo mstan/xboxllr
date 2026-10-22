@@ -18,6 +18,7 @@ jobs:
       - run: python3 tests/test_windows_dependencies.py
       - run: python3 tests/test_native_cpu_helpers.py
       - run: python3 tests/test_native_save_keys.py
+      - run: python3 tests/test_native_release_runtime.py
       - name: Compile and execute ROM-free native CPU helper contracts
         run: |
           python3 tools/native_cpu_helpers.py --emit-header --output build-cpu-helpers/recomp_types.h

@@ -14,9 +14,6 @@ import json
 from pathlib import Path
 import struct
 
-import aot_compile
-
-
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -90,6 +87,9 @@ def parse_xbe(data):
 
 
 def discover(data, image, seeds=(), limit=500000):
+    # Certificate/profile setup only needs parse_xbe; keep the compiler out
+    # of the portable player's import graph.
+    import aot_compile
     import capstone as cs
     from capstone.x86_const import X86_OP_IMM
     if limit < 1:
