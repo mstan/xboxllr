@@ -26,6 +26,7 @@ static HRESULT pilot_visibility_query(D3D11_QUERY type,ID3D11Query **out)
 {D3D11_QUERY_DESC d={type,0};return ID3D11Device_CreateQuery(d3d8_GetD3D11Device(),&d,out);}
 int32_t pilot_gfx_visibility_begin(void)
 {
+    pilot_gfx_batch_flush();
     if(!pilot_device)return E_FAIL;
     struct PilotVisibilityCounter *c=calloc(1,sizeof(*c));if(!c)return E_OUTOFMEMORY;
     HRESULT hr=pilot_visibility_query(D3D11_QUERY_OCCLUSION,&c->query);
@@ -40,6 +41,7 @@ int32_t pilot_gfx_visibility_begin(void)
 }
 int32_t pilot_gfx_visibility_end(uint32_t index)
 {
+    pilot_gfx_batch_flush();
     if(!pilot_device)return E_FAIL;
     if(!pilot_visibility_current){HRESULT hr=pilot_gfx_visibility_begin();if(FAILED(hr))return hr;}
     struct PilotVisibilityReport *r=calloc(1,sizeof(*r));if(!r)return E_OUTOFMEMORY;

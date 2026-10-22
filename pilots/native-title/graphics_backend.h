@@ -58,6 +58,15 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
 /* FVF placement/constants are prepared first by the common draw owner. */
 int32_t pilot_gfx_immediate_fvf(uint32_t fvf);
 int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity);
+/* Draw-service batching is internal HLE ownership, never an original handle.
+ * Flush before any non-draw service, observation, or native input mutation. */
+struct PilotDrawBatchStats {
+    uint64_t queued_draws,native_draws,vertex_updates,vertex_bytes;
+    unsigned largest_batch;
+};
+void pilot_gfx_batch_allow(int eligible);
+void pilot_gfx_batch_flush(void);
+void pilot_gfx_batch_stats(struct PilotDrawBatchStats *stats);
 void pilot_gfx_set_state(uint32_t state,uint32_t value);
 int pilot_gfx_logic_op(uint32_t value);
 void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value);

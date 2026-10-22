@@ -39,6 +39,7 @@
 #include "graphics_null_texture_backend_test.inc"
 #include "graphics_index_backend_test.inc"
 #include "graphics_edge_backend_test.inc"
+#include "graphics_strip_batch_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -177,6 +178,9 @@ int main(int argc,char **argv)
             CHECK(!test_fixed_resultarg());pilot_gfx_close();continue;
         }
 #ifdef PILOT_D3D_PHOBOS
+        if(argc==2 && !strcmp(argv[1],"--strip-batch")) {
+            CHECK(!test_strip_batch());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--fvf-unblended")) {
             CHECK(!test_fvf_unblended_pixels());pilot_gfx_close();continue;
         }

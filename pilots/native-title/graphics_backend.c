@@ -159,6 +159,7 @@ static unsigned pilot_sampling_views_dirty=15;
 void pilot_d3d_raster_texture_mode(UINT native,const float scale[4][4]);
 void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_completion_backend.inc"
+#include "graphics_strip_batch_backend.inc"
 #include "graphics_visibility_backend.inc"
 #include "graphics_quad_backend.inc"
 #include "graphics_fan_backend.inc"
@@ -170,6 +171,7 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 
 void pilot_gfx_pixel_fixed(void)
 {
+    pilot_gfx_batch_flush();
     if(!pilot_device)pilot_d3d_backend_stop("pixel binding before device creation");
     d3d8_combiners_set_pixel_shader(0);
     d3d8_shaders_prepare_pixel();
@@ -201,7 +203,9 @@ int32_t pilot_gfx_pixel_program(const uint32_t states[57],uint32_t texture_modes
     uint32_t modes=D3D8_PSTEXTUREMODES_XBOX|texture_modes;
     if(host[D3DRS_PSTEXTUREMODES]!=modes)pilot_gfx_set_state(D3DRS_PSTEXTUREMODES,modes);
     /* Nonzero selector; all structure and constants come from the state array. */
-    d3d8_combiners_set_pixel_shader(0x80u|(states[53]&15));
+    DWORD selector=0x80u|(states[53]&15);
+    if(d3d8_combiners_get_pixel_shader()!=selector)pilot_gfx_batch_flush();
+    d3d8_combiners_set_pixel_shader(selector);
     return S_OK;
 #else
     (void)states;(void)texture_modes;return E_NOTIMPL;
@@ -238,6 +242,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    pilot_strip_batch_close();
     pilot_deferred_invalidate();
     pilot_visual_gamma_reset();
     pilot_blend_default_shape=pilot_blend_transient=pilot_blend_transient_proof=pilot_blend_draws=0;
@@ -378,6 +383,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
 }
 int32_t pilot_gfx_reset(const uint32_t p[17])
 {
+    pilot_gfx_batch_flush();
     pilot_deferred_invalidate();
 #ifdef PILOT_D3D_PHOBOS
     if(!pilot_device)return E_FAIL;
@@ -467,6 +473,7 @@ stage_failed:
 }
 int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stencil)
 {
+    pilot_gfx_batch_flush();
     if (!pilot_device) return E_FAIL;
     ID3D11RenderTargetView *rtv=NULL;ID3D11DepthStencilView *dsv=NULL;
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();ID3D11DeviceContext_OMGetRenderTargets(ctx,1,&rtv,&dsv);
@@ -483,6 +490,7 @@ int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stenc
 }
 int32_t pilot_gfx_viewport(const void *viewport)
 {
+    pilot_gfx_batch_flush();
     if (!pilot_device) return E_FAIL;
     HRESULT result=pilot_device->lpVtbl->SetViewport(pilot_device,(const D3DVIEWPORT8*)viewport);
     if(SUCCEEDED(result)) {
@@ -519,6 +527,7 @@ int32_t pilot_gfx_get_viewport(uint32_t viewport[6])
 }
 int32_t pilot_gfx_transform(unsigned state,const float matrix[16])
 {
+    pilot_gfx_batch_flush();
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,
         D3DTS_TEXTURE0,D3DTS_TEXTURE1,D3DTS_TEXTURE2,D3DTS_TEXTURE3,
         D3DTS_WORLD,D3DTS_WORLD1,D3DTS_WORLD2,D3DTS_WORLD3};
@@ -527,6 +536,8 @@ int32_t pilot_gfx_transform(unsigned state,const float matrix[16])
 }
 int32_t pilot_gfx_present(void)
 {
+    pilot_gfx_batch_flush();
+    pilot_strip_batch_profile();
     if (!pilot_device) return E_FAIL;
     uint32_t requested_size[2];
     if(pilot_debug_take_client_size(requested_size)) {
@@ -624,6 +635,7 @@ int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle)
 }
 void pilot_gfx_vertex_destroy(uint32_t handle)
 {
+    pilot_gfx_batch_flush();
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
     for(unsigned i=0;i<16;++i)if(pilot_bound_vertices[i]==handle)pilot_d3d_backend_stop("destroying a bound vertex buffer");
     if(vertex->iface.lpVtbl->Release(&vertex->iface)!=0)
@@ -632,6 +644,7 @@ void pilot_gfx_vertex_destroy(uint32_t handle)
 }
 void pilot_gfx_vertex_bind(unsigned stream,uint32_t handle,uint32_t stride)
 {
+    pilot_gfx_batch_flush();
     if(!pilot_device || stream>=16 || stride>2048)pilot_d3d_backend_stop("invalid native vertex binding");
     ID3D11Buffer *buffer=handle?pilot_donor_vertex(pilot_vertex(handle)):NULL;UINT offset=0;
     ID3D11DeviceContext_IASetVertexBuffers(d3d8_GetD3D11Context(),stream,1,&buffer,&stride,&offset);
@@ -643,6 +656,7 @@ void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
     if(!data || bytes!=vertex->size) pilot_d3d_backend_stop("invalid vertex upload range");
     if(pilot_vertices[handle-1].uploaded && !pilot_vertices[handle-1].refetch && !memcmp(vertex->sys_mem,data,bytes)) return;
+    pilot_gfx_batch_flush();
     BYTE *destination=NULL;
     pilot_d3d_require(vertex->iface.lpVtbl->Lock(&vertex->iface,0,bytes,&destination,0),__FILE__,__LINE__);
     memcpy(destination,data,bytes);
@@ -664,8 +678,19 @@ void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t off
     }
     const BYTE *source=(const BYTE*)data+offset;
     if(!memcmp(vertex->sys_mem+offset,source,bytes))return;
-    /* DEFAULT storage and the immediate context: UpdateSubresource snapshots
-     * source bytes and preserves earlier draws before this ordered update. */
+    pilot_gfx_batch_flush();
+    /* Snapshot a bounded page when batching short buffered draws. Subsequent
+     * draws still compare their actual consumed bytes; later inline writes
+     * flush older reads before updating the same native storage. */
+    if(pilot_strip_batch.allowed && bytes<4096) {
+        uint32_t end=offset+bytes;
+        offset&=~4095u;
+        uint64_t rounded=((uint64_t)end+4095)&~4095ull;
+        end=rounded>vertex->size?vertex->size:(uint32_t)rounded;
+        bytes=end-offset;source=(const BYTE*)data+offset;
+    }
+    /* DEFAULT storage snapshots source bytes and preserves earlier draws. */
+    ++pilot_strip_batch.stats.vertex_updates;pilot_strip_batch.stats.vertex_bytes+=bytes;
     D3D11_BOX box={offset,0,0,offset+bytes,1,1};
     ID3D11DeviceContext_UpdateSubresource(d3d8_GetD3D11Context(),
         (ID3D11Resource*)pilot_donor_vertex(vertex),0,&box,source,0,0);
@@ -674,6 +699,7 @@ void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t off
 }
 int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity)
 {
+    pilot_gfx_batch_flush();
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
     if(!data || capacity<vertex->size || !pilot_vertices[handle-1].uploaded) return E_INVALIDARG;
     D3D11_BUFFER_DESC desc;
@@ -761,6 +787,7 @@ static uint32_t pilot_feedback_validate(void)
 }
 void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
 {
+    pilot_gfx_batch_flush();
     if(!pilot_device || stage>=4)pilot_d3d_backend_stop("invalid native texture binding");
     D3D8Texture *texture=handle?pilot_texture(handle):NULL;
     if(handle && (pilot_donor_texture(texture)==(pilot_color_target?pilot_donor_texture(pilot_texture(pilot_color_target)):pilot_surfaces[0]) ||
@@ -784,6 +811,7 @@ void pilot_gfx_texture_sampling_format(unsigned stage,uint32_t format)
     if(format!=pilot_textures[pilot_bound_textures[stage]-1].guest_format && !(format==0x12 && texture->d3d8_format==0x2e))
         pilot_d3d_backend_stop("unqualified texture sampling reinterpretation");
     if(pilot_sampling_formats[stage]!=format) {
+        pilot_gfx_batch_flush();
         pilot_sampling_formats[stage]=format;pilot_sampling_views_dirty|=1u<<stage;
     }
 }
@@ -835,6 +863,7 @@ void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void 
 }
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
+    pilot_gfx_batch_flush();
     if(pilot_initializer.dither && color && !pilot_initializer_format(pilot_texture(color)->d3d8_format))return E_NOTIMPL;
     pilot_sampling_views_dirty=15;
 #ifndef PILOT_D3D_PHOBOS
@@ -985,6 +1014,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         int changed=!pilot_textures[handle-1].uploaded || pilot_textures[handle-1].gpu_written;
         for(UINT row=0;row<rows && !changed;++row)changed=memcmp(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
         if(!changed)return;
+        pilot_gfx_batch_flush();
         /* Xbox Z24S8 stores stencil in the low byte; native D24S8 stores it
          * in the high byte. CPU writes use real staging copies, since D3D11
          * forbids UpdateSubresource on a depth-stencil destination. */
@@ -1025,6 +1055,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     if(!changed) {
         texture->locked=FALSE; return; /* No changed CPU work to upload. */
     }
+    pilot_gfx_batch_flush();
     if(pair) {
         /* Both streams retain the same Morton texel order. The existing
          * donor upload unswizzles the expanded four-byte texels once. */
@@ -1081,6 +1112,7 @@ int32_t pilot_gfx_movie_luma(uint32_t handle,unsigned step,unsigned char *sample
 }
 int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
 {
+    pilot_gfx_batch_flush();
     pilot_texture(handle);ID3D11RenderTargetView *rtv=pilot_textures[handle-1].rtv;
     if(!rtv)return E_INVALIDARG;
     float rgba[]={((color>>16)&255)/255.0f,((color>>8)&255)/255.0f,(color&255)/255.0f,(color>>24)/255.0f};
@@ -1092,6 +1124,7 @@ int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
 }
 void pilot_gfx_texture_download(uint32_t handle,void *data,uint32_t bytes)
 {
+    pilot_gfx_batch_flush();
     D3D8Texture *texture=pilot_texture(handle);
     if(texture->levels!=1 || !(texture->d3d8_format==0x12 || texture->d3d8_format==0x1e || texture->d3d8_format==0x2e))
         pilot_d3d_backend_stop("unqualified GPU texture download format");
@@ -1172,6 +1205,7 @@ void pilot_gfx_set_state(uint32_t state,uint32_t value)
         if(pilot_logic_copy)value=0;
     }
 #ifdef PILOT_D3D_PHOBOS
+    if(state>=256 || d3d8_GetRenderStates()[state]!=value)pilot_gfx_batch_flush();
     switch(state) {
     case D3DRS_FOGENABLE:case D3DRS_FOGTABLEMODE:case D3DRS_FOGSTART:
     case D3DRS_FOGEND:case D3DRS_FOGDENSITY:case D3DRS_RANGEFOGENABLE:
@@ -1197,13 +1231,15 @@ void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 {
     if (!pilot_device) pilot_d3d_backend_stop("texture state before device creation");
 #ifdef PILOT_D3D_PHOBOS
-    if(stage<4 && state<32 && d3d8_GetTSS(stage)[state]!=value)
-        ++pilot_deferred_revision[stage+1];
+    if(stage<4 && state<32 && d3d8_GetTSS(stage)[state]!=value) {
+        pilot_gfx_batch_flush();++pilot_deferred_revision[stage+1];
+    }
 #endif
     pilot_d3d_require(pilot_device->lpVtbl->SetTextureStageState(pilot_device,stage,(D3DTEXTURESTAGESTATETYPE)state,value),__FILE__,__LINE__);
 }
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf)
 {
+    pilot_gfx_batch_flush();
     if (!pilot_device) return E_FAIL;
     if(pilot_edge_requested)return E_NOTIMPL; /* The internal donor UP path owns its raster setup. */
     if((pilot_initializer.controls || pilot_initializer.dither) &&
@@ -1292,6 +1328,22 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
     if(pilot_initializer.dither && !pilot_initializer_target_format())return E_NOTIMPL;
     uint32_t feedback=pilot_feedback_validate();
     if(pilot_edge_requested && feedback)return E_NOTIMPL;
+    const DWORD *batch_states=d3d8_GetRenderStates();
+    int blend_candidate=0;
+#ifdef PILOT_D3D_PHOBOS
+    blend_candidate=!indices && pilot_gfx_blend_candidate_geometry(primitive,first,count);
+#endif
+    int batchable=pilot_strip_batch.allowed && !indices && primitive==6 &&
+        !feedback && !pilot_edge_requested && !pilot_logic_copy && !blend_candidate &&
+        batch_states[D3DRS_SHADEMODE]==2 && pilot_strip_batch_room(first,count);
+    if(!batchable)pilot_gfx_batch_flush();
+    if(batchable && pilot_strip_batch.count) {
+        pilot_strip_batch_queue(first,count);
+        pilot_mark_draw();
+        if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
+        if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
+        return S_OK;
+    }
     D3D11_PRIMITIVE_TOPOLOGY topology;
     if(primitive==1 && !indices && !pilot_edge_requested)topology=D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
     else if(primitive==5 && count>=3 && count%3==0)topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -1313,7 +1365,7 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
         }
     }
 #ifdef PILOT_D3D_PHOBOS
-    pilot_donor_blend_candidate(!indices && pilot_gfx_blend_candidate_geometry(primitive,first,count));
+    pilot_donor_blend_candidate(blend_candidate);
 #endif
     pilot_d3d_raster_texture_mode(1,scale);d3d8_shaders_prepare_pixel();d3d8_states_apply();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
@@ -1364,7 +1416,8 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
         ID3D11DeviceContext_DrawIndexed(context,index_words,0,base);
         ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);
         if(previous)ID3D11Buffer_Release(previous);
-    } else if(primitive==7)pilot_fan_draw(first,count);
+    } else if(batchable)pilot_strip_batch_queue(first,count);
+    else if(primitive==7)pilot_fan_draw(first,count);
     else if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);
     else ID3D11DeviceContext_Draw(context,count,first);
     pilot_edge_end(&edge_draw);
@@ -1416,10 +1469,12 @@ int32_t pilot_gfx_draw_memory(unsigned primitive,unsigned count,const void *vert
 uint32_t pilot_gfx_height(void) { return pilot_guest_height?pilot_guest_height:d3d8_GetBackbufferHeight(); }
 int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity)
 {
+    pilot_gfx_batch_flush();
     return pilot_gfx_surface_readback(pilot_presentation.sample_type==0x2222?1:0,rgba,capacity);
 }
 int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t capacity)
 {
+    pilot_gfx_batch_flush();
     if (!pilot_device || !rgba || (surface>=4 || surface==2) || !pilot_surfaces[surface]) return E_INVALIDARG;
     ID3D11Texture2D *back=pilot_surfaces[surface],*staging=NULL;
     ID3D11Texture2D_AddRef(back);
@@ -1485,6 +1540,7 @@ int32_t pilot_gfx_reference_raster(struct PilotRasterObservation *out)
 }
 int32_t pilot_gfx_reference_target_readback(unsigned depth,void *data,uint32_t capacity,uint32_t metadata[3])
 {
+    pilot_gfx_batch_flush();
     if(!pilot_device || depth>1 || !metadata)return E_INVALIDARG;
     memset(metadata,0,3*sizeof(*metadata));
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();

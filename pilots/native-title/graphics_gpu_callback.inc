@@ -48,7 +48,8 @@ static int graphics_gpu_deliver(void)
     ReleaseSRWLockExclusive(&graphics_lock);return pending;
 }
 /* Renderer commands after the software trap cannot overtake its callback.
- * The independent display-event wait submits no command and does not enter
+ * The independent display-event wait flushes buffered draws without waiting
+ * for GPU completion and does not enter
  * this renderer barrier.
  * CPU execution after Insert remains free to run; callbacks also run when the
  * caller only polls memory. Reentrant DPC calls use their own execution context. */

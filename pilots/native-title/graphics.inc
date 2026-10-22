@@ -269,12 +269,14 @@ static void graphics_dispatch_impl(unsigned entry)
     }
 #endif
     if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank) {
+        AcquireSRWLockExclusive(&graphics_lock);pilot_gfx_batch_flush();ReleaseSRWLockExclusive(&graphics_lock);
         graphics_wait_vblank();
         g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
     }
     uint64_t entered=graphics_service_profile_enabled()?dispatch_monotonic():0;
     AcquireSRWLockExclusive(&graphics_lock);
     uint64_t acquired=entered?dispatch_monotonic():0;
+    if(entry!=PILOT_D3D_D3DDevice_DrawVertices)pilot_gfx_batch_flush();
     if(entry==graphics_resource_wait_entry() && !graphics_active) {
         ReleaseSRWLockExclusive(&graphics_lock);g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
     }

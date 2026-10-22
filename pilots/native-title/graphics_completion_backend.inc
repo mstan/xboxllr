@@ -110,6 +110,7 @@ static void pilot_completion_poll(void)
 }
 static int pilot_serial_busy(uint64_t serial)
 {
+    pilot_gfx_batch_flush();
     if(serial<=pilot_completed)return 0;
     pilot_completion_poll();if(serial<=pilot_completed)return 0;
     if(!pilot_completion_tail || pilot_completion_tail->serial<serial) {

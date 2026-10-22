@@ -54,6 +54,7 @@ static HRESULT native_current_flush(void)
         if(FAILED(hr))return hr;
         memcpy(native_current_uploaded,values,sizeof(values));native_current_uploaded_valid=1;
     } else if(!native_current_uploaded_valid || memcmp(values,native_current_uploaded,sizeof(values))) {
+        pilot_gfx_batch_flush();
         ID3D11DeviceContext_UpdateSubresource(ctx,(ID3D11Resource*)native_current_buffer,0,NULL,values,0,0);
         memcpy(native_current_uploaded,values,sizeof(values));native_current_uploaded_valid=1;
     }

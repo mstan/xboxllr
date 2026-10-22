@@ -171,6 +171,7 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
         }
         stop("unqualified primitive/count",primitive);
     }
+    if(primitive!=6 || memory_vertices || indices)pilot_gfx_batch_flush();
     const char *draw_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_DRAW),*fvf_capture=graphics_diagnostic(GRAPHICS_DIAGNOSTIC_FVF);
     if(host_vertices && (indices || up_data || first ||
         (draw_capture && *draw_capture) || (fvf_capture && *fvf_capture) ||
@@ -196,6 +197,7 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     int fixed_fvf=!(shader&1) && ((shader&15)==2 || beta_fvf);
     int fixed=(declaration && declaration->fixed) || fixed_fvf;
     int screen_fvf=!(shader&1) && (shader&15)==4;
+    pilot_gfx_batch_allow(!memory_vertices && !indices && primitive==6 && declaration && !fixed);
     if(beta_fvf) {
         uint32_t blend=graphics_render_read(137);
         if(blend)stop("unqualified active beta-FVF vertex blending",blend);

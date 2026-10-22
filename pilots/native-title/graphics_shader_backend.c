@@ -39,6 +39,7 @@ static struct NativeShader *native_shader(uint32_t handle)
 #include "graphics_blend_admission_backend.inc"
 int32_t pilot_gfx_shader_bind(uint32_t handle)
 {
+    pilot_gfx_batch_flush();
     native_shader_active=0;
     struct NativeShader *shader=native_shader(handle);
     if(shader->fixed_fvf) {
@@ -70,6 +71,7 @@ int32_t pilot_gfx_shader_flush(void)
 {
     if(!native_constants_buffer || !native_shader_bound)return E_INVALIDARG;
     if(native_constants_dirty) {
+        pilot_gfx_batch_flush();
         ID3D11DeviceContext *context=d3d8_GetD3D11Context();D3D11_MAPPED_SUBRESOURCE mapped;
         HRESULT result=ID3D11DeviceContext_Map(context,(ID3D11Resource*)native_constants_buffer,0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
         if(FAILED(result))return result;
@@ -179,6 +181,7 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
 #include "graphics_pretransformed_fog_backend.inc"
 void pilot_gfx_shader_destroy(uint32_t handle)
 {
+    pilot_gfx_batch_flush();
     struct NativeShader *shader=native_shader(handle);
     if(native_shader_bound==handle) {
         ID3D11DeviceContext_VSSetShader(d3d8_GetD3D11Context(),NULL,NULL,0);
@@ -195,6 +198,7 @@ void pilot_gfx_shader_destroy(uint32_t handle)
 }
 void pilot_gfx_shaders_close(void)
 {
+    pilot_gfx_batch_flush();
     native_pretransformed_fog_close();native_lighting_close();
     native_current_close();
     for(unsigned i=0;i<256;++i)if(native_shaders[i].object)pilot_gfx_shader_destroy(i+1);
@@ -226,6 +230,7 @@ int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4])
         D3D11_SUBRESOURCE_DATA initial={values,0,0};HRESULT hr=ID3D11Device_CreateBuffer(device,&desc,&initial,&native_raster_buffer);
         if(FAILED(hr))return hr;memcpy(native_raster_values,values,sizeof(values));
     } else if(memcmp(native_raster_values,values,sizeof(values))) {
+        pilot_gfx_batch_flush();
         ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource*)native_raster_buffer,0,NULL,values,0,0);
         memcpy(native_raster_values,values,sizeof(values));
     }
