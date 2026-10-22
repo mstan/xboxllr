@@ -34,6 +34,22 @@ accepted JSRF preview. Microsoft's `dumpbin /dependents` independently confirms
 the candidate's direct module list. None of these read-only checks changes
 accepted executables, controller settings or native saves.
 
+A follow-up data-only extraction selected Microsoft's signed runtime bundle
+`14.51.36247.0`, downloaded from the [official current x64 link](https://aka.ms/vc14/vc_redist.x64.exe).
+The installer SHA256 is
+`843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c`.
+Its installer was not executed. The required x64 DLLs are available in the
+private dependency cache; each title's runner import graph resolves when that
+directory is supplied. This is source selection for packaging, not a delivered
+archive or first-launch result. The bundle's license link is
+[Microsoft's runtime terms](https://aka.ms/VCRedistLicense).
+
+The shared launcher also imports the platform's DirectWrite and Direct2D
+libraries. These are OS components under the selected policy, as documented
+by Microsoft's [DirectWrite](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-dwritecreatefactory)
+and [Direct2D](https://learn.microsoft.com/en-us/windows/win32/direct2d/createfactory-lt-factory-gt--d2d1-factory-type---factory-)
+references. They are not copied from the builder's System32 directory.
+
 This establishes **imported module presence**, not complete release readiness.
 It does not check imported export versions, export forwarders, arbitrary
 LoadLibrary calls, assets, licenses or the correctness of title code. Explicit

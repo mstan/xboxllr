@@ -79,6 +79,7 @@ class WindowsDependencyTests(unittest.TestCase):
 
     def test_os_api_sets_do_not_exempt_redist_libraries(self):
         app = self.put('app.exe', ['api-ms-win-core-file-l1-1-0.dll', 'xinput1_4.dll', 'bcryptprimitives.dll',
+                                   'dwrite.dll', 'd2d1.dll',
                                    'xaudio2_9redist.dll', 'vcruntime140.dll'])
         result = w.inventory([app])
         self.assertEqual({x['name'] for x in result['missing']}, {'xaudio2_9redist.dll', 'vcruntime140.dll'})

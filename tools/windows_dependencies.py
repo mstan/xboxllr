@@ -16,8 +16,8 @@ import struct
 # Windows 10+ platform components. VC++/MinGW/SDL/XAudio redist DLLs are not
 # platform exemptions: the package must supply those when actually imported.
 SYSTEM_DLLS = frozenset("""
-advapi32 avrt bcrypt bcryptprimitives cfgmgr32 combase comctl32 comdlg32 crypt32 d3d11
-d3dcompiler_47 dbghelp dwmapi dxgi gdi32 hid imm32 iphlpapi kernel32
+advapi32 avrt bcrypt bcryptprimitives cfgmgr32 combase comctl32 comdlg32 crypt32 d2d1 d3d11
+d3dcompiler_47 dbghelp dwmapi dwrite dxgi gdi32 hid imm32 iphlpapi kernel32
 kernelbase mpr msacm32 msvcrt ntdll ole32 oleaut32 opengl32 powrprof
 propsys psapi rpcrt4 secur32 setupapi shell32 shlwapi user32 userenv
 uxtheme version winhttp wininet winmm wintrust ws2_32 wtsapi32 xaudio2_9
