@@ -2,6 +2,21 @@
  * Simple packet setters change GPU state only; their callers maintain the
  * guest cache. Deferred arrays are sampled together at the draw boundary. */
 static uint32_t graphics_state_baseline[166],graphics_texture_baseline[4][32];
+static struct {
+    uint64_t revision[5];
+    uint32_t render[44],texture[4][22];
+    unsigned valid;
+} graphics_deferred_cache;
+/* Diagnostic baseline selection; ordinary launches keep the optimized path. */
+static int graphics_deferred_cache_enabled=-1;
+static int graphics_deferred_tracking(uint64_t revision[5])
+{
+    if(graphics_deferred_cache_enabled<0) {
+        const char *value=getenv("XLLE_PILOT_DEFERRED_STATE_CACHE");
+        graphics_deferred_cache_enabled=!(value && !strcmp(value,"0"));
+    }
+    return graphics_deferred_cache_enabled && pilot_gfx_deferred_revisions(revision);
+}
 
 /* These fields only feed fixed-function vertex lighting/material selection.
  * Preserve their actual guest cache even when a program or unlit draw makes
@@ -60,6 +75,7 @@ static void graphics_texture_state(uint32_t stage,uint32_t state,uint32_t value,
 }
 static void graphics_state_init(void)
 {
+    graphics_deferred_cache.valid=0;
     graphics_render_map_check();
     MEM32(PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET)=0;
     MEM32(PILOT_D3D_DEVICE_OBJECT+8)=0;
@@ -111,9 +127,30 @@ static void graphics_sync_deferred(void)
         if(header){uint32_t format=(MEM32(header+12)>>8)&255;
             if(format==0x24 || format==0x25)stop("packed YUV sampling requires qualified conversion state",header);}
     }
+    /* Inline setters can bypass every named entry point: compare the actual
+     * guest words on every draw. A native packet/setter/reset may also change
+     * the renderer while those words stay unchanged, so require its audited
+     * revision too. Neither path consumes guest dirty bits or skips draws. */
+    uint32_t render[44],texture[4][22];
+    for(unsigned i=0;i<44;++i)render[i]=graphics_render_read(92+i);
+    for(unsigned stage=0;stage<4;++stage)
+        memcpy(texture[stage],memory+PILOT_D3D_TEXTURE_STATES+128*stage,sizeof(texture[stage]));
+    uint64_t revision[5];
+    int tracked=graphics_deferred_tracking(revision);
+    unsigned changed=0;
+    if(!tracked || !(graphics_deferred_cache.valid&1) ||
+       graphics_deferred_cache.revision[0]!=revision[0] ||
+       memcmp(render,graphics_deferred_cache.render,sizeof(render)))changed|=1;
+    for(unsigned stage=0;stage<4;++stage)
+        if(!tracked || !(graphics_deferred_cache.valid&(2u<<stage)) ||
+           graphics_deferred_cache.revision[stage+1]!=revision[stage+1] ||
+           memcmp(texture[stage],graphics_deferred_cache.texture[stage],sizeof(texture[stage])))
+            changed|=2u<<stage;
+    if(!changed)return;
+    if(changed&1)
     for(unsigned state=92;state<136;++state) {
         int index=graphics_render_guest_index(state);if(index<0)continue;
-        uint32_t value=graphics_render_read(state);
+        uint32_t value=render[state-92];
         if(graphics_lighting_parameter(state)) {
             if(!graphics_lighting_parameter_valid(state,value))stop("unqualified deferred lighting parameter",state);
             continue;
@@ -132,8 +169,8 @@ static void graphics_sync_deferred(void)
             stop("changed unqualified deferred render state",state);
         }
     }
-    for(unsigned stage=0;stage<4;++stage) for(unsigned state=0;state<22;++state) {
-        uint32_t value=MEM32(PILOT_D3D_TEXTURE_STATES+128*stage+4*state);
+    for(unsigned stage=0;stage<4;++stage) if(changed&(2u<<stage)) for(unsigned state=0;state<22;++state) {
+        uint32_t value=texture[stage][state];
         if(!pilot_gfx_xbox_texture_state(stage,state,value) && value!=graphics_texture_baseline[stage][state]) {
             fprintf(stderr,"[D3D DEFERRED TEXTURE STATE] stage=%u state=%u value=%08x baseline=%08x pixel_shader=%08x\n",
                 stage,state,value,graphics_texture_baseline[stage][state],
@@ -141,4 +178,7 @@ static void graphics_sync_deferred(void)
             stop("changed unqualified deferred texture state",state);
         }
     }
+    memcpy(graphics_deferred_cache.render,render,sizeof(render));
+    memcpy(graphics_deferred_cache.texture,texture,sizeof(texture));
+    graphics_deferred_cache.valid=graphics_deferred_tracking(graphics_deferred_cache.revision)?31u:0u;
 }

@@ -208,8 +208,14 @@ stop. The separate original-kernel LLE reference uses Unicorn where selected.
 Eight thousand dispatch entries are not a percentage of all possible CPU
 semantics or campaign behavior.
 
-Next optimization scope is the measured graphics-state/resource synchronization
-cost. Cache only after locating all host-state mutations/invalidation at Reset,
+The [deferred state cache](NATIVE-DEFERRED-STATE-CACHE-2026-10-22.md) now removes
+repeated conversion of unchanged state, with actual guest-byte comparisons,
+native mutation revisions and reset invalidation. A same-process Blinx 2-1
+comparison measured 21% lower process CPU cost per update. A steady 30 Hz
+entrance remains unproven under concurrent machine load; this is not a claim
+that all graphics costs are resolved.
+
+Further graphics-state/resource optimization must locate all host-state mutations/invalidation at Reset,
 state blocks, movie passes and resource aliases; retain guest state writes and
 validate real GPU output. A dirty-state shortcut without those invalidations
 would paint the architecture into exactly the corner this work is avoiding.

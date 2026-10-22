@@ -38,6 +38,7 @@ static void test_graphics_deferred_relevance(unsigned failure)
     struct Vertex {float x,y,z,w;uint32_t color;} source[]={
         {8,8,.25f,1,0xffff0000},{56,8,.25f,1,0xffff0000},{32,56,.25f,1,0xffff0000}};
     memcpy(memory+0x19600,source,sizeof(source));
+    graphics_sync_deferred(); /* Invalid raw writes must invalidate a warm cache. */
     if(failure==3)graphics_render_write(104,2);
     if(failure==4)graphics_render_write(120,0x7f800000);
     uint32_t draw[]={failure==2?1u:5u,0,3};
@@ -88,6 +89,48 @@ static void test_graphics_states(void)
     graphics_test_triangle(0.25f,0xffff0000);
     graphics_test_triangle(0.75f,0xff00ff00);
     graphics_test_pixel(255,0,0,0); /* Second, farther triangle rejected. */
+    /* Warm the exact same guest words, then change native state through a
+     * packet-style boundary which does not update that guest cache. A cache
+     * keyed only by guest bytes would leave green TFACTOR selected here. */
+    CHECK(pilot_gfx_xbox_render_state(148,0xff00ff00));
+    CHECK(pilot_gfx_xbox_texture_state(0,14,3));
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0xffff0000);graphics_test_pixel(255,0,0,0);
+    /* Conversely, raw inline writes have no native revision event. */
+    MEM32(PILOT_D3D_TEXTURE_STATES+14*4)=3;
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0xffff0000);graphics_test_pixel(0,255,0,0);
+    MEM32(PILOT_D3D_TEXTURE_STATES+14*4)=0;
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0xffff0000);graphics_test_pixel(255,0,0,0);
+    /* Keep the intervening combiners active so stage 3 affects real pixels. */
+    for(unsigned stage=1;stage<3;++stage) {
+        MEM32(PILOT_D3D_TEXTURE_STATES+stage*128+12*4)=2;
+        MEM32(PILOT_D3D_TEXTURE_STATES+stage*128+14*4)=1;
+        MEM32(PILOT_D3D_TEXTURE_STATES+stage*128+16*4)=2;
+        MEM32(PILOT_D3D_TEXTURE_STATES+stage*128+18*4)=1;
+    }
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0xffff0000);graphics_test_pixel(255,0,0,0);
+    /* The last stage has its own revision and inline-byte snapshot too. */
+    CHECK(pilot_gfx_xbox_texture_state(3,12,2));
+    CHECK(pilot_gfx_xbox_texture_state(3,14,3));
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0xffff0000);graphics_test_pixel(255,0,0,0);
+    MEM32(PILOT_D3D_TEXTURE_STATES+3*128+12*4)=2;
+    MEM32(PILOT_D3D_TEXTURE_STATES+3*128+14*4)=3;
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0xffff0000);graphics_test_pixel(0,255,0,0);
+    MEM32(PILOT_D3D_TEXTURE_STATES+3*128+12*4)=graphics_texture_baseline[3][12];
+    MEM32(PILOT_D3D_TEXTURE_STATES+3*128+14*4)=graphics_texture_baseline[3][14];
+    CHECK(pilot_gfx_clear(3,0xff0000ff,1,0)>=0);
+    graphics_test_triangle(.25f,0xffff0000);graphics_test_pixel(255,0,0,0);
+    for(unsigned stage=1;stage<3;++stage) {
+        const unsigned fields[]={12,14,16,18};
+        for(unsigned i=0;i<4;++i)
+            MEM32(PILOT_D3D_TEXTURE_STATES+stage*128+fields[i]*4)=graphics_texture_baseline[stage][fields[i]];
+    }
+    CHECK(pilot_gfx_xbox_render_state(148,graphics_render_read(148)));
     arg=0;call_graphics(PILOT_D3D_D3DDevice_SetRenderState_ZEnable,&arg);
     graphics_test_triangle(0.75f,0xff00ff00);
     graphics_test_pixel(0,255,0,0);

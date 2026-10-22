@@ -1,5 +1,6 @@
 /* Real guest ABI, backing allocations and native GPU resources across two
  * registry growth boundaries, including live bindings and retained waiters. */
+#if defined(PILOT_D3D_INDEX_DATA_GLOBAL) && !defined(PILOT_D3D_PROFILE_CLASSIC)
 static void test_graphics_geometry_capacity(void)
 {
     enum { count=513, bytes=64 };
@@ -74,3 +75,10 @@ static void test_graphics_geometry_capacity(void)
     CHECK(vm_committed(0,0x100000000ull)==resident);
     puts("PASS geometry capacity: 513 simultaneous CPU vertex/index and native GPU owners, old/new bytes, stable handles/bindings/wait leases, release/reuse and real allocation-failure cleanup");
 }
+#else
+static void test_graphics_geometry_capacity(void)
+{
+    fputs("SKIP: geometry capacity requires an admitted index-buffer ABI\n",stderr);
+    exit(77);
+}
+#endif

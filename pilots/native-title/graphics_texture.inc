@@ -374,9 +374,15 @@ static void graphics_texture_sample_prepare(unsigned slot)
      * consumption. Their exposure is unconditional; a child scan adds nothing. */
     if(scan)for(unsigned i=0;i<graphics_texture_capacity;++i)
         if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
-    for(unsigned level=0;level<texture->levels;++level)
-        pilot_gfx_texture_prepare_sample(texture->native,level,memory+texture->data+graphics_level_offset(texture,level),
-            graphics_level_bytes(texture,level),exposed);
+    /* Walk the same packed mip chain once. Re-summing every preceding level
+     * at each consumption was quadratic in the level count. Actual CPU bytes
+     * still reach the backend on every exposed sample, including inline writes. */
+    uint32_t offset=0;
+    for(unsigned level=0;level<texture->levels;++level) {
+        uint32_t bytes=graphics_level_bytes(texture,level);
+        pilot_gfx_texture_prepare_sample(texture->native,level,memory+texture->data+offset,bytes,exposed);
+        offset+=bytes;
+    }
     if(texture->usage && scan) {
         for(unsigned i=0;i<graphics_texture_capacity;++i)
             if(i==slot || graphics_textures[i].parent==slot+1)graphics_textures[i].cpu_exposed=0;

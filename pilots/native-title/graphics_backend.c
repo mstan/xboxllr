@@ -14,6 +14,22 @@
 #include "event_trace.h"
 static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
+/* Only mutations of the fields republished at a deferred draw boundary can
+ * invalidate that category. Inline guest writes are independently compared
+ * by the runtime; these revisions cover native-only packet/API writes. */
+static uint64_t pilot_deferred_revision[5]={1,1,1,1,1};
+static void pilot_deferred_invalidate(void)
+{for(unsigned i=0;i<5;++i)++pilot_deferred_revision[i];}
+int pilot_gfx_deferred_revisions(uint64_t revisions[5])
+{
+#ifdef PILOT_D3D_PHOBOS
+    memcpy(revisions,pilot_deferred_revision,sizeof(pilot_deferred_revision));
+    return 1;
+#else
+    (void)revisions;
+    return 0; /* Retain full synchronization without an audited donor cache. */
+#endif
+}
 static HWND pilot_window;
 static WCHAR pilot_window_title[256]=L"Xbox native reference";
 int32_t pilot_gfx_title(const char *utf8)
@@ -222,6 +238,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+    pilot_deferred_invalidate();
     pilot_visual_gamma_reset();
     pilot_blend_default_shape=pilot_blend_transient=pilot_blend_transient_proof=pilot_blend_draws=0;
     pilot_blend_noise=0;
@@ -361,6 +378,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
 }
 int32_t pilot_gfx_reset(const uint32_t p[17])
 {
+    pilot_deferred_invalidate();
 #ifdef PILOT_D3D_PHOBOS
     if(!pilot_device)return E_FAIL;
     if(pilot_presentation.copy_buffers==2 || (p && p[3]==2))return E_NOTIMPL;
@@ -998,6 +1016,11 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         const BYTE *src=data;const BYTE *dst=lock.pBits;
         for(UINT i=0;i<width*height && !changed;++i)
             changed=dst[i*2]!=src[i*2] || dst[i*2+1]!=(src[i*2+1]|0x80);
+    } else if(!changed && pitch==guest_pitch) {
+        /* Compressed/swizzled and equally pitched linear levels are contiguous.
+         * Compare the identical byte range once rather than calling memcmp for
+         * every logical row. Padded guest rows retain their existing row walk. */
+        changed=memcmp(lock.pBits,data,bytes)!=0;
     } else for(UINT row=0;row<rows && !changed;++row)changed=memcmp((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
     if(!changed) {
         texture->locked=FALSE; return; /* No changed CPU work to upload. */
@@ -1011,7 +1034,8 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
             dst[i*4+1]=dst[i*4+3]=src[i*2+1];
         }
     } else {
-        for(UINT row=0;row<rows;++row)memcpy((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
+        if(pitch==guest_pitch)memcpy(lock.pBits,data,bytes);
+        else for(UINT row=0;row<rows;++row)memcpy((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
         /* X1R5G5B5 samples opaque even when the CPU's ignored X bit is zero.
          * Native B5G5R5A1 uses that bit as alpha. Only the native upload copy
          * changes; preserve caller bytes and compare with this bit masked in
@@ -1147,6 +1171,15 @@ void pilot_gfx_set_state(uint32_t state,uint32_t value)
         pilot_requested_blend=value;
         if(pilot_logic_copy)value=0;
     }
+#ifdef PILOT_D3D_PHOBOS
+    switch(state) {
+    case D3DRS_FOGENABLE:case D3DRS_FOGTABLEMODE:case D3DRS_FOGSTART:
+    case D3DRS_FOGEND:case D3DRS_FOGDENSITY:case D3DRS_RANGEFOGENABLE:
+    case D3DRS_LIGHTING:case D3DRS_SPECULARENABLE:case D3DRS_AMBIENT:
+        if(d3d8_GetRenderStates()[state]!=value)++pilot_deferred_revision[0];
+        break;
+    }
+#endif
     pilot_d3d_require(pilot_device->lpVtbl->SetRenderState(pilot_device,(D3DRENDERSTATETYPE)state,value),__FILE__,__LINE__);
 }
 int pilot_gfx_logic_op(uint32_t value)
@@ -1163,6 +1196,10 @@ int pilot_gfx_logic_op(uint32_t value)
 void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value)
 {
     if (!pilot_device) pilot_d3d_backend_stop("texture state before device creation");
+#ifdef PILOT_D3D_PHOBOS
+    if(stage<4 && state<32 && d3d8_GetTSS(stage)[state]!=value)
+        ++pilot_deferred_revision[stage+1];
+#endif
     pilot_d3d_require(pilot_device->lpVtbl->SetTextureStageState(pilot_device,stage,(D3DTEXTURESTAGESTATETYPE)state,value),__FILE__,__LINE__);
 }
 int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uint32_t stride,uint32_t fvf)

@@ -61,6 +61,11 @@ int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity);
 void pilot_gfx_set_state(uint32_t state,uint32_t value);
 int pilot_gfx_logic_op(uint32_t value);
 void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value);
+/* Revisions for deferred render fields, then texture stages 0..3. Changes
+ * include native-only mutations and device reset/close; raw guest writes are
+ * sampled separately. Returns zero to request uncached synchronization.
+ * Serialized by the graphics owner; no donor object is exposed to the guest. */
+int pilot_gfx_deferred_revisions(uint64_t revisions[5]);
 int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value);
 int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value);
 uint32_t pilot_gfx_width(void);
