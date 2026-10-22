@@ -46,6 +46,7 @@ GitHub releases at this check.
 | Selected renderer implementation and remaining emitted glue provenance | File-level review/replacement remains open |
 | Shared release packaging and minimal first-run setup | Open |
 | Imported Windows DLL preflight | Shared verifier implemented; current title outputs need reviewed VC++ runtime files |
+| Native signing-input preparation | Stdlib default matches original-derived files for all three titles; no normal Unicorn dependency; owned kernel/profile input remains |
 | Native Linux host/backends and title execution | Deferred by owner; not a Windows release gate |
 | Final clean-profile packages and release publication | Open |
 
@@ -114,11 +115,15 @@ Target: the owner's matching game dump; optional original Dashboard files.
 Generate writable storage, configuration, cache and a virtual-console profile
 locally where supported. Audit current EEPROM, signing/settings, media, generated
 CPU and preparation dependencies before promising game-only setup. The current
-`native_save_keys.py` preparer executes the original owned kernel through
-Unicorn; EEPROM and console-region generation alone do not remove that
-preparation dependency. Native title gameplay does not link Unicorn. Removing
-the original-kernel setup requirement remains open; do not substitute fabricated
-signatures or change existing native-save identities. Define a
+`native_save_keys.py` preparer now uses the original-checked stdlib HMAC
+derivation. Its normal path does not import Unicorn or execute the owned kernel;
+original execution is an explicit optional verification mode. The owned kernel
+still supplies private certificate material, so EEPROM and console-region
+generation alone do not establish game-only setup. See
+[signing preparation](NATIVE-SIGNING-SETUP.md). Native title gameplay does not
+link Unicorn. Removing the original-kernel/profile setup requirement remains
+open; do not substitute fabricated signatures or change native-save identities.
+Define a
 ROM-free setup host/first-run generation boundary; don't package development
 paths, original binaries/media, keys, user saves or private generated output.
 
