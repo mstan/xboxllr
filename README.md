@@ -19,7 +19,8 @@ game projects carry their own revision metadata, mods and tested framework pin.
 Coverage is scoped in the linked title records below.*
 
 [Architecture](#native-code-and-low-level-contracts) |
-[Development](#development) | [Release plan](docs/RELEASE-READINESS.md) |
+[Setup and required files](docs/SETUP.md) | [Development](#development) |
+[Release plan](docs/RELEASE-READINESS.md) |
 [Credits](CREDITS.md)
 
 ## Native code and low-level contracts
@@ -88,9 +89,13 @@ Linux packages are release targets; self-contained downloads are not ready yet.
 
 The setup target is the user's matching game dump, plus original Dashboard files
 only if they want that Dashboard. Writable console storage, settings and other
-supported generated inputs should be created locally. Current developer setup
-still needs additional preparation inputs. A redistributable default dashboard
-and game-only first-run setup remain planned capabilities.
+supported generated inputs should be created locally. Original Xbox files remain
+an optional profile import, with title-aware explanations of relevant save or
+network limits. Current developer setup still needs original-derived signing
+preparation; neither native games nor the native Dashboard boot a Microsoft
+kernel. [Setup and required files](docs/SETUP.md) separates that temporary
+dependency from optional original-system boot. A redistributable default
+dashboard and ISO-only first-run setup remain planned capabilities.
 
 The [release readiness plan](docs/RELEASE-READINESS.md) tracks shared packaging,
 clean-machine setup, native Linux support and incorporated-code licensing.

@@ -3,6 +3,13 @@
 Tracking: `beads-xbox.1.187.5`. Signing inputs retain the `XLLEKEY1` format and
 the native runtime's original title/console identity contract.
 
+For complete input choices, optional console imports and original Dashboard
+setup, start with [Setup](SETUP.md). The
+[kernel-service design](KERNEL-SERVICES-SETUP.md) separates the current
+original-compatible signing profile from the planned fresh virtual profile.
+Neither native games nor the native Dashboard boot this owned kernel; it is
+currently an offline material source, not a normal runtime dependency.
+
 Normal preparation uses the standard-library HMAC derivation already checked
 against the original kernel. It does not execute Xbox code or import Unicorn:
 

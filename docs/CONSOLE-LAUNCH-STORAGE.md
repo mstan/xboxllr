@@ -3,6 +3,14 @@
 Owner clarification, 2026-10-08; provisioning work is tracked in
 `beads-xbox.1.22`, with storage qualification in `.102`.
 
+October 21 setup clarification: [Setup](SETUP.md) and
+[kernel services/profile design](KERNEL-SERVICES-SETUP.md) distinguish current
+inputs from the ISO-only target. Original Xbox identity imports remain optional
+for the intended fresh local-play route. A title-aware first-use notice explains
+only relevant limitations; required genuine credentials are checked when a
+feature needs them. Existing native saves/identities must remain intact.
+Native Dashboard launch is distinct from original-firmware boot.
+
 **A supported real dashboard path is an architectural requirement. Supplying
 dashboard files is optional for accelerated/direct-title use. Real persistent
 console storage is required in both cases.** Dashboard performance and polish

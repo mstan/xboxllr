@@ -1,5 +1,11 @@
 # INPUTS - private machine material
 
+This page describes the original-software full-system/reference route. For
+native games, native Dashboard and reduced-input setup, use
+[the setup guide](SETUP.md). Flash, 2BL and a raw HDD dump are not normal native
+game runtime requirements. Its remaining owned-kernel dependency is offline
+signing preparation; a fresh ISO-only virtual profile is still being built.
+
 A clean checkout builds and runs the unit/spike tests without private Xbox material.
 Stock-dashboard replay and interactive dashboard work require a private sibling
 `machine` directory. Keep it outside the repo tree:

@@ -111,6 +111,19 @@ qualified native Linux build. Keep Windows behavior working during the port.
 
 ### Minimal first-run inputs
 
+Owner follow-up (October 21): make original console-file import optional for
+the intended fresh local-play setup. Use a title-aware first-use explanation
+and acknowledgement: missing optional files generally do not matter for
+single-player play such as Blinx, while imported saves or supported Xbox network
+features can need original identity material. Require actual credentials at
+features that need them, never fake success. Preserve existing profiles/saves
+when importing later. [Complete setup](SETUP.md) and
+[shared kernel/profile design](KERNEL-SERVICES-SETUP.md) record the concrete
+input matrix, current limitations, upstream references and implementation order.
+The native Dashboard does not inherently need original-firmware boot either.
+ISO-only setup and shared FATX storage are still implementation gates, not
+completed by these documentation changes (`beads-xbox.1.187.6`, `.1.22`).
+
 Target: the owner's matching game dump; optional original Dashboard files.
 Generate writable storage, configuration, cache and a virtual-console profile
 locally where supported. Audit current EEPROM, signing/settings, media, generated

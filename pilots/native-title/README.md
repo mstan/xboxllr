@@ -38,9 +38,14 @@ For authenticated saves, prepare the private signing input once before launch:
 python tools/native_save_keys.py --xbe <owned-default.xbe> --kernel <owned-kernel-live.bin> --eeprom <owned-eeprom.bin> --output <PILOT_GENERATED>/save-keys.aot-private.bin
 ```
 
-The tool executes the reviewed original per-title producer and independently
-checks all 17 title/alternate keys, then authenticates/decrypts the supplied
-EEPROM. The default CMake input is `PILOT_GENERATED/save-keys.aot-private.bin`;
+The tool normally derives all 17 title/alternate keys with the original-checked
+standard-library HMAC producer, then authenticates/decrypts the supplied EEPROM.
+It reads private material from the reviewed owned kernel but does not execute
+it. `--verify-original` explicitly adds bounded original execution and needs
+the optional Unicorn reference dependency. See
+[signing setup](../../docs/NATIVE-SIGNING-SETUP.md) and the
+[complete setup/input guide](../../docs/SETUP.md). The default CMake input is
+`PILOT_GENERATED/save-keys.aot-private.bin`;
 `PILOT_SAVE_KEYS_FILE` or the runtime path `XLLE_PILOT_SAVE_KEYS_FILE` relocates
 that private input. Missing/mismatched inputs stop before data publication.
 No key values or original binary bodies are printed or checked into source.
