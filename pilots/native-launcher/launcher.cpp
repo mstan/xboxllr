@@ -30,6 +30,8 @@ struct Catalog {
     bool setup=false,needs_setup=false;
     bool console=false;
     std::string choice_path;
+    bool boot=false;
+    std::string boot_choice_path;
     XboxllrConsoleSetup console_ui;
 };
 static std::string unhex(const std::string &s) {
@@ -92,6 +94,9 @@ static Catalog read_catalog(const char *path) {
             copy(c.console_ui.kernel,c.settings.bios_path);copy(c.console_ui.eeprom,x(3));
             copy(c.console_ui.storage,x(4));c.choice_path=x(5);
             if(t.size()==7)copy(c.console_ui.hdd,x(6));
+        } else if(t[0]=="boot"&&t.size()==5&&c.console&&!c.boot&&(t[1]=="0"||t[1]=="1")) {
+            c.boot=true;c.console_ui.boot_available=true;c.console_ui.boot_enabled=t[1]=="1";
+            copy(c.console_ui.boot_kernel,x(2));copy(c.console_ui.boot_status,x(3));c.boot_choice_path=x(4);
         } else if(t[0]=="package"&&t.size()==5&&c.packages.size()<32) {
             Package p={x(1),x(2),x(3),x(4)};
             if(std::any_of(c.packages.begin(),c.packages.end(),[&](const Package &old){return old.id==p.id;}))throw std::runtime_error("Duplicate package");
@@ -191,6 +196,32 @@ static void persist_console(void *context) {
 #endif
 }
 /* The producer checks the exact kernel fingerprint before publishing keys. */
+static void persist_boot(void *context) {
+    auto &c=*(Catalog*)context;auto &s=c.console_ui;
+    try {
+        if(c.boot_choice_path.empty())throw std::runtime_error("Startup settings path unavailable");
+        const auto path=std::filesystem::u8path(c.boot_choice_path);
+        const auto temporary=std::filesystem::u8path(c.boot_choice_path+".tmp");
+        for(auto p=path.parent_path();!p.empty();p=p.parent_path()) {
+            if(std::filesystem::is_symlink(std::filesystem::symlink_status(p)))throw std::runtime_error("Linked startup path");
+#if defined(_WIN32)
+            const DWORD attributes=GetFileAttributesW(p.c_str());
+            if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("Linked startup path");
+#endif
+            if(p==p.parent_path())break;
+        }
+        if(std::filesystem::exists(temporary)||std::filesystem::is_symlink(std::filesystem::symlink_status(temporary)))throw std::runtime_error("Startup settings temporary path occupied");
+        std::ofstream out(temporary,std::ios::binary|std::ios::trunc);
+        out<<"xboxllr-boot-choice 1\nenabled "<<(s.boot_enabled?1:0)<<"\nkernel "<<hex(s.boot_kernel)<<"\nend\n";
+        out.close();if(!out)throw std::runtime_error("Cannot save startup settings");
+#if defined(_WIN32)
+        if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Cannot store startup settings");
+#else
+        std::filesystem::rename(temporary,path);
+#endif
+        copy(s.boot_status,"Saved. Startup data is checked when you launch.");
+    } catch(const std::exception &) {copy(s.boot_status,"Startup settings could not be saved. Your console identity and saves are unchanged.");}
+}
 static int signing_source_verify(const char *path,RecompLauncherCBiosVerify *out) {
     if(!out)return 0;*out={};
     std::ifstream in(path?path:"",std::ios::binary|std::ios::ate);
@@ -208,6 +239,7 @@ static void save(const Catalog &c,const char *path,int result,const char *image)
     out<<"player "<<kind<<" "<<hex(source==2?c.settings.player_gamepad_guid[0]:"")<<"\n";
     if(c.setup)out<<"kernel "<<hex(c.console?c.console_ui.kernel:c.settings.bios_path)<<"\n";
     if(c.console)out<<"console "<<c.console_ui.acknowledged<<" "<<hex(c.console_ui.eeprom)<<" "<<hex(c.console_ui.storage)<<" "<<hex(c.console_ui.hdd)<<"\n";
+    if(c.boot)out<<"boot "<<(c.console_ui.boot_enabled?1:0)<<" "<<hex(c.console_ui.boot_kernel)<<"\n";
     for(auto &f:c.features) {
         out<<"feature "<<hex(f.package)<<" "<<hex(f.id)<<" "<<f.enabled<<"\n";
         for(auto &o:f.options)out<<"option "<<hex(f.package)<<" "<<hex(f.id)<<" "<<hex(o.id)<<" "<<hex(o.value)<<"\n";
@@ -218,7 +250,7 @@ int main(int argc,char **argv) {
     try {
         if(argc!=4&&argc!=5)throw std::runtime_error("Usage: xlle_launcher catalog result owned.xbe [--validate]");
         Catalog c=read_catalog(argv[1]);
-        if(c.console){c.console_ui.persist=persist_console;c.console_ui.context=&c;xboxllr_console_setup=&c.console_ui;}
+        if(c.console){c.console_ui.persist=persist_console;c.console_ui.persist_boot=persist_boot;c.console_ui.context=&c;xboxllr_console_setup=&c.console_ui;}
         if(argc==5){if(std::string(argv[4])!="--validate"||!commit(&c,argv[3]))throw std::runtime_error(c.error);save(c,argv[2],0,argv[3]);return 0;}
         /* Only first use chooses a default. Saved/disconnected pads retain
          * their GUID and the shared UI's normal hot-plug/offline behavior. */

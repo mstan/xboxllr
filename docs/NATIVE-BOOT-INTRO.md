@@ -7,12 +7,19 @@ It does not execute MCPX, 2BL or an original kernel, initialize a console,
 or transfer firmware-created machine state into a native game. It has no
 access to an HDD, EEPROM, native game saves or title memory.
 
-The current launcher and published title packages do not invoke this
-prototype. Launcher integration and its missing-input experience remain
-separate review items. The intended product defaults remain Dashboard on,
-games off, once integration is qualified. A missing/unsupported input must
-not block a game, create a fake black startup delay or download original
-assets. No proprietary boot assets are distributed.
+The shared Windows launcher can run this separate presentation stage before
+creating the native title process. Dashboard defaults on; games default off.
+Settings has an independent startup toggle and optional complete-kernel
+choice, which stay editable after the save-console profile is locked. The
+first-launch game setup does not gain another requirement. Published packages
+need rebuilding to include this fast follow; no installed owner copy is
+modified by the integration work.
+
+Missing or unsupported startup data gives a concise Settings status and the
+title launches directly. Completion or an explicit skip proceeds normally;
+an intro failure or 25-second helper timeout is logged and falls through to
+the title after helper cleanup. There is no fake black delay or downloaded
+original asset. No proprietary boot assets are distributed.
 
 ## Source and asset admission
 
@@ -95,9 +102,41 @@ artifacts contain original-derived content and stay private.
 graphics device. `--realtime` paces a headless run to its eight-second
 timeline. `--skip-at-ms 1000` tests an explicit skipped result. The foreground
 window accepts Escape, Enter, Space or controller A/B/Start/Back to skip.
+Held launch buttons and keyboard auto-repeat do not immediately skip it;
+a fresh press is required after this stage begins.
 No input is injected into any other application. A completed result requires
 the core's real end boundary; skip is reported separately. Run budget and
 allocation sizes are bounded. Every process owns and releases its resources.
+`--volume 0..100` scales only the generated stream; it does not change system
+audio settings. The launcher passes the owner's selected volume. Automated
+handoffs use hidden/muted uncapped rendering to keep test loops short.
+
+## Shared launcher and package handoff
+
+`tools/native_boot_launcher.py` owns only these private application paths:
+
+- `data/boot-choice.txt`: intro enable/kernel choice, separate from console setup.
+- `data/boot/assets/<pack-hash>/`: verified extracted pack and source fingerprints.
+- `data/boot/helper.log` and `last-run.json`: bounded helper output and status.
+- `data/boot/{temp,appdata,localappdata}/`: process-local writable paths.
+
+An explicitly selected complete kernel is validated before its startup data
+is used. With that field empty, a prepared private pack may be reused, or a
+compatible console kernel selected above may prepare it. A short or unknown
+signing dump never blocks gameplay. No save profile, EEPROM, HDD identity or
+Partition1 content is written by the startup module. The helper is ended
+before the title's process and input recorder begin; diagnostic input replay
+continues to reproduce the title directly.
+
+`native_title_launcher.build_launcher` also builds the shared helper on
+Windows, under `<build>/boot/`. The release stager now requires
+`--boot-intro <helper.exe>` (or the `boot_intro=` API argument). It packages
+`native/XboxStartup.exe`, its MIT notice, and a complete buildable copy of
+the startup host/core/extractor source under `source/native-startup/`.
+It never copies a pack or kernel. Archive admission rejects `.pak` files
+and an `XBPK` payload even when renamed. The Dashboard title declares
+`launcher.startup_intro = true`; other titles default off without game-name
+checks in the shared runtime. Saved settings override the initial default.
 
 The core is C11 and independent of Win32, graphics and audio devices. The
 first live presentation host is Windows D3D11 only and is excluded entirely
@@ -119,7 +158,9 @@ host assembly or optional instruction-set requirement.
 | Portability | Compile checked | All 13 core translation units cross-compile to AArch64 ELF with warnings as errors; Windows-only host imports stay guarded |
 | Full sequence accuracy | Open | Donor choreography and consumed-data equivalence support this port; middle-frame presentation and approximate voice output still need independent comparison or a quick owner review |
 | Foreground audio device/skip feel | Open | Background runs are muted; generated duration and content are measured, no speaker test claimed |
-| Launcher settings and title handoff | Open | Shared settings, optional complete-kernel/pack choice, defaults and native startup after end/skip/error; test all three titles without changing save identity |
+| Shared settings and startup lifecycle | Passed fixtures | Built launcher protocol roundtrip with locked console unchanged; end/skip/error/timeout route, private extraction and native-title spawn order checked |
+| Source-complete packaging | Passed fixtures | All three title default cases; helper/MIT source included; ordinary and renamed original packs rejected |
+| Actual three-title handoff | Open | Rebuild owner packages after review; launch Dashboard/Blinx/JSRF after completion/skip with their existing identity/storage unchanged |
 | Additional kernels/direct flash inputs | Deferred | Add explicit supported profiles and integrity tests when needed; never scan arbitrary firmware and guess |
 | Actual firmware execution/full state handoff | Separate deferred route | This presentation component does not implement or imply it |
 
@@ -133,3 +174,11 @@ completed normally. Nine focused tests also passed with the private input,
 including rejection before audio/device setup when headless mute is omitted.
 
 Tracking: central Beads `beads-xbox.1.190`.
+
+The integration regression batch passes 60 focused tests, including compiled
+launcher protocol roundtrip, actual isolated helper execution with a newly
+extracted private pack, preservation of persistent progress/signing identity,
+timeout termination/kill cleanup, and all three package-default fixture cases.
+The helper's actual Windows import closure is complete (four files including
+the executable). These are framework/fixture results; owner-facing handoffs
+of the three rebuilt games are still pending review.

@@ -357,6 +357,10 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
         enabled=os.environ.get('XBOXLLR_DIAGNOSTICS') == '1', hdd=hdd)
     log = session.log_path.open('w', encoding='utf-8')
     with log:
+        # A presentation stage owns no console identity or game input recorder.
+        # It ends (or is cleaned up) before the native title process is created.
+        from native_boot_launcher import run as run_startup
+        run_startup(root, data, catalog, env, log, automated=automated_seconds is not None)
         try:
             child = subprocess.Popen(command, cwd=state, env=env, stdout=log, stderr=log)
         except OSError:
@@ -416,10 +420,12 @@ def interactive(root, data, writable, minimized):
             verify_profile(root, data)
         choice_path = writable / 'console-choice.txt'
         choice = read_console_choice(choice_path)
+        from native_boot_launcher import ui_state as startup_ui
         catalog = Catalog(manifests(root / 'release.json', data) if data['capabilities']['visual_mods'] else [],
             writable / 'mod-selection.json', visibility=[root / 'mods/ui-visibility.json'],
             frame_modes=data.get('launcher', {}).get('frame_modes', []),
             defaults=data.get('launcher', {}).get('defaults', {}),
+            boot=startup_ui(root, data, fallback_kernel=choice['kernel']),
             setup=dict(required=False, kernel=choice['kernel'], acknowledged=choice['acknowledged'],
                        eeprom=choice['eeprom'], storage=choice['storage'], hdd=choice.get('hdd',''), locked=ready, choice_path=str(choice_path)))
         run = writable / 'launcher' / uuid.uuid4().hex
@@ -428,6 +434,12 @@ def interactive(root, data, writable, minimized):
             sha=data['title']['xbe_sha256'], image=config.get('image', ''))
         config = dict(image=image)
         atomic_json(config_path, config)
+        if catalog.boot is not None and result in (0, 1):
+            from native_boot_launcher import write_choice as write_startup_choice
+            try:
+                write_startup_choice(root, {k: catalog.boot[k] for k in ('enabled', 'kernel')})
+            except (ValueError, OSError):
+                pass  # An optional intro setting cannot block the native title.
         os.environ.pop('XLLE_LAUNCHER_START_MINIMIZED', None)
         if result != 0:
             return 0

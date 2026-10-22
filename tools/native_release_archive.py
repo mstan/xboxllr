@@ -28,9 +28,12 @@ def archive(source: Path, output: Path):
                 any(p in ('..', '.', '') for p in path.parts) or
                 any(p.casefold() in ('private-do-not-share', 'diagnostics') for p in path.parts) or
                 path.parts[0].lower() in ('data', 'local', 'setup inputs') or
-                path.suffix.lower() in ('.xbe', '.iso', '.xiso', '.img', '.qcow2', '.bin')):
+                path.suffix.lower() in ('.xbe', '.iso', '.xiso', '.img', '.qcow2', '.bin', '.pak', '.raw', '.rom')):
             raise ValueError('Private or unsafe package entry: ' + name)
-        inside(source, name)
+        entry = inside(source, name)
+        with entry.open('rb') as stream:
+            if stream.read(4) == b'XBPK':
+                raise ValueError('Private startup data in package: ' + name)
     actual = set()
     for path in source.rglob('*'):
         if path.is_symlink() or getattr(path, 'is_junction', lambda: False)():

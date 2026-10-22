@@ -18,6 +18,28 @@ def binary(build):
     return next((p for p in paths if p.is_file()), paths[0])
 
 
+def boot_binary(build):
+    return Path(build) / 'boot/Release/xboxllr_boot_intro.exe'
+
+
+def build_boot(build, cmake, generator, jobs):
+    """Shared Windows presentation helper; no proprietary input is needed."""
+    if os.name != 'nt':
+        return None
+    directory = Path(build) / 'boot'
+    command = [str(cmake), '-S', str(ROOT / 'pilots/native-boot'), '-B', str(directory), '-G', generator]
+    if generator.startswith('Visual Studio'):
+        command.extend(['-A', 'x64'])
+    else:
+        command.append('-DCMAKE_BUILD_TYPE=Release')
+    subprocess.run(command, check=True)
+    subprocess.run([str(cmake), '--build', str(directory), '--config', 'Release', '--parallel', str(jobs)], check=True)
+    path = boot_binary(build) if generator.startswith('Visual Studio') else directory / 'xboxllr_boot_intro.exe'
+    if not path.is_file():
+        raise ValueError('Startup helper build produced no executable')
+    return path
+
+
 def build_launcher(source, data, paths, build, cmake, generator, jobs):
     config = data.get('launcher', {})
     if config.get('ui_revision') != native_launcher_ui.REVISION:
@@ -42,6 +64,7 @@ def build_launcher(source, data, paths, build, cmake, generator, jobs):
             command.append('-D' + option + '=' + str((Path(source).parent / config[key]).resolve()))
     subprocess.run(command, check=True)
     subprocess.run([str(cmake), '--build', str(directory), '--config', 'Release', '--parallel', str(jobs)], check=True)
+    build_boot(build, cmake, generator, jobs)
     return binary(build)
 
 

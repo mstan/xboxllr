@@ -8,6 +8,7 @@ xbe_sha256 = "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d"
 
 [launcher]
 frame_modes = ["interpolated"]
+startup_intro = true
 
 [launcher.defaults."xboxlle.enhancement.visuals/antialiasing"]
 enabled = true

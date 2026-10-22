@@ -56,6 +56,19 @@ class ArchiveTests(unittest.TestCase):
             archive(self.source, self.output)
         self.assertFalse(self.output.exists())
 
+    def test_startup_packs_are_rejected_including_renamed_payloads(self):
+        for name in ('xboot.pak', 'renamed-startup.dat'):
+            payload = b'XBPK' + bytes(32)
+            path = self.source / name
+            path.write_bytes(payload)
+            self.metadata['files'][name] = hashlib.sha256(payload).hexdigest()
+            self.save()
+            with self.assertRaisesRegex(ValueError, 'Private'):
+                archive(self.source, self.output)
+            self.assertFalse(self.output.exists())
+            path.unlink()
+            del self.metadata['files'][name]
+
     def test_existing_output_is_preserved(self):
         self.output.write_bytes(b'keep')
         with self.assertRaises(ValueError):

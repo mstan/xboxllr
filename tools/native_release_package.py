@@ -16,7 +16,7 @@ import zipfile
 from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('native_release_runtime', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods',
+MODULES = ('native_release_runtime', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage')
 
 
@@ -36,7 +36,7 @@ def copy_tree(source, destination):
             shutil.copy2(path, target)
 
 
-def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
+def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, boot_intro):
     definition, runtime, launcher, cache, embed, output = map(Path,
         (definition, runtime, launcher, cache, embed, output))
     if output.exists() or output.is_symlink():
@@ -50,6 +50,7 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
                      game_id=game['title_id'], xbe_sha256=game['xbe_sha256'])
     else:
         raise ValueError('Unsupported title metadata')
+    intro_default = source.get('launcher', {}).get('startup_intro') is True
     options = {}
     for line in cache.read_text(encoding='utf-8').splitlines():
         if line.startswith('PILOT_') and ':INTERNAL=' not in line:
@@ -60,7 +61,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
         raise ValueError('Only the optimized native gameplay build belongs in this preview')
     if not runtime.resolve().is_relative_to(cache.parent.resolve()):
         raise ValueError('Runtime is outside its declared build')
-    closure = inventory([runtime, launcher], runtime_dirs)
+    boot_intro = Path(boot_intro)
+    closure = inventory([runtime, launcher, boot_intro], runtime_dirs)
     if not closure['complete']:
         raise ValueError('Missing Windows dependencies: ' + str(closure['missing']))
     # No output is created until metadata and all PE inputs have been checked.
@@ -68,7 +70,9 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
     native = output / 'native'
     native.mkdir()
     for record in closure['files']:
-        name = 'Launcher.exe' if Path(record['source']).resolve() == launcher.resolve() else record['name']
+        origin = Path(record['source']).resolve()
+        name = ('Launcher.exe' if origin == launcher.resolve() else
+                'XboxStartup.exe' if origin == boot_intro.resolve() else record['name'])
         shutil.copy2(record['source'], native / name)
     for folder in ('assets', 'third_party'):
         if (launcher.parent / folder).is_dir():
@@ -105,6 +109,21 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
         shutil.copy2(ROOT / name, notices / name)
     if (ROOT / 'LICENSES').is_dir():
         copy_tree(ROOT / 'LICENSES', notices / 'LICENSES')
+    # Self-contained authored startup source and retained MIT notice accompany
+    # the helper. Original pack/kernel/sample/model bytes are never copied.
+    boot_source = output / 'source/native-startup'
+    files = [ROOT / name for name in ('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md',
+             'tools/native_boot_assets.py', 'docs/NATIVE-BOOT-INTRO.md')]
+    for folder in ('pilots/native-boot', 'src/third_party/xbox-boot-re',
+                   'src/third_party/xbox-boot-re/core/include', 'src/third_party/xbox-boot-re/core/src'):
+        files.extend(p for p in (ROOT / folder).iterdir() if p.is_file() and
+                     (p.suffix.lower() in ('.c', '.cpp', '.h', '.md', '.txt') or p.name == 'LICENSE'))
+    for path in files:
+        target = boot_source / path.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+    (notices / 'xbox-boot-re').mkdir()
+    shutil.copy2(ROOT / 'src/third_party/xbox-boot-re/LICENSE', notices / 'xbox-boot-re/LICENSE')
     mods = {}
     available = bool(options.get('PILOT_TITLE_MOD_SOURCE'))
     if available:
@@ -164,10 +183,17 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
         'Original software, artwork and trademarks remain the property of their\n'
         'respective rights holders. See notices/RIGHTS-NOTICE.md and notices/LICENSE.\n'
         'Source and build information accompany the download on its release page.\n', encoding='utf-8')
+    with (output / 'README-FIRST.txt').open('a', encoding='utf-8') as readme:
+        readme.write('\nStartup intro: optional under Settings. Default for this title: ' + ('on' if intro_default else 'off') + '.\n'
+            'It uses startup data from your compatible complete kernel dump, prepared privately.\n'
+            'A short save-signing dump is not enough. Missing/unsupported startup data launches\n'
+            'the title directly. No boot assets are included, and console identity/saves stay unchanged.\n'
+            'This is a native animation reconstruction, not full firmware execution.\n')
     files = {p.relative_to(output).as_posix(): sha(p) for p in output.rglob('*') if p.is_file()}
     record = dict(schema='xboxllr.native-preview.v1', title=title,
         executable='native/' + runtime.name, launcher_executable='native/Launcher.exe',
-        capabilities=dict(visual_mods=available), mods=mods,
+        startup=dict(executable='native/XboxStartup.exe', default_enabled=intro_default),
+        capabilities=dict(visual_mods=available, startup_intro=True), mods=mods,
         launcher=dict(frame_modes=source.get('launcher', {}).get('frame_modes', []),
                       defaults=source.get('launcher', {}).get('defaults', {})),
         runtime=source.get('runtime', {}), files=files,
@@ -182,10 +208,10 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('definition', 'runtime', 'launcher', 'cache', 'embed', 'output'):
+    for name in ('definition', 'runtime', 'launcher', 'cache', 'embed', 'output', 'boot-intro'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--runtime-dir', type=Path, action='append', default=[])
     args = parser.parse_args()
     result = stage(args.definition, args.runtime, args.launcher, args.cache, args.embed,
-                   args.runtime_dir, args.output)
+                   args.runtime_dir, args.output, boot_intro=args.boot_intro)
     print(json.dumps(dict(title=result['title']['name'], files=len(result['files']))))

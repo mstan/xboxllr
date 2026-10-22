@@ -31,7 +31,7 @@ def decoded(value):
 
 
 class Catalog:
-    def __init__(self, manifests, state, *, visibility=(), frame_modes=(), setup=None, defaults=None):
+    def __init__(self, manifests, state, *, visibility=(), frame_modes=(), setup=None, defaults=None, boot=None):
         self.state_path = Path(state)
         defaults = {} if defaults is None else defaults
         if not isinstance(defaults, dict) or any(not isinstance(key, str) or not isinstance(value, dict) or
@@ -48,6 +48,13 @@ class Catalog:
                 ('hdd' in setup and not isinstance(setup['hdd'], str))):
             raise ValueError('Invalid native setup state')
         self.setup = dict(setup) if setup is not None else None
+        if boot is not None and (self.setup is None or 'acknowledged' not in self.setup or
+                set(boot) != {'enabled', 'kernel', 'status', 'choice_path'} or
+                type(boot['enabled']) is not bool or any(not isinstance(boot[k], str) or '\0' in boot[k]
+                    for k in ('kernel', 'status', 'choice_path')) or
+                len(boot['kernel'].encode('utf-8')) > 4095 or len(boot['status'].encode('utf-8')) > 511):
+            raise ValueError('Invalid native startup state')
+        self.boot = dict(boot) if boot is not None else None
         self.packages, self.features, self.hashes = [], [], {}
         hidden, hidden_choices = set(), {}
         for path in visibility:
@@ -129,6 +136,9 @@ class Catalog:
                 s = self.setup
                 lines.append(f'console {int(s["acknowledged"])} {int(s["locked"])} {encoded(s["eeprom"])} {encoded(s["storage"])} {encoded(s["choice_path"])}' +
                              (f' {encoded(s["hdd"])}' if 'hdd' in s else ''))
+        if self.boot is not None:
+            b = self.boot
+            lines.append(f'boot {int(b["enabled"])} {encoded(b["kernel"])} {encoded(b["status"])} {encoded(b["choice_path"])}')
         for p in self.packages:
             lines.append('package ' + ' '.join(encoded(p[k]) for k in ('id', 'name', 'version', 'description')))
         for f in self.features:
@@ -155,6 +165,7 @@ class Catalog:
         staged_player = dict(self.player)
         staged_kernel = self.setup['kernel'] if self.setup is not None else None
         staged_console = dict(self.setup) if self.setup is not None and 'acknowledged' in self.setup else None
+        staged_boot = dict(self.boot) if self.boot is not None else None
         by_key = {(f['package'], f['id']): f for f in staged}
         for line in lines[1:-1]:
             t = line.split()
@@ -186,6 +197,12 @@ class Catalog:
                 staged_console.update(acknowledged=t[1]=='1', eeprom=decoded(t[2]), storage=decoded(t[3]))
                 if len(t)==5: staged_console['hdd']=decoded(t[4])
                 seen.add('console')
+            elif t[0] == 'boot' and len(t) == 3 and staged_boot is not None and 'boot' not in seen and t[1] in ('0', '1'):
+                kernel = decoded(t[2])
+                if '\0' in kernel or len(kernel.encode('utf-8')) > 4095:
+                    raise ValueError('Invalid startup kernel path')
+                staged_boot.update(enabled=t[1] == '1', kernel=kernel)
+                seen.add('boot')
             elif t[0] == 'option' and len(t) == 5:
                 key = tuple(map(decoded, t[1:4]));f = by_key[key[:2]];value = decoded(t[4])
                 o = next(o for o in f['options'] if o['id'] == key[2])
@@ -199,11 +216,14 @@ class Catalog:
             expected.add('kernel')
         if staged_console is not None:
             expected.add('console')
+        if staged_boot is not None:
+            expected.add('boot')
         if seen != expected or result not in (0, 1, 2, 3):
             raise ValueError('Incomplete launcher result inventory')
         self.features, self.volume = staged, staged_volume
         self.skip_launcher = staged_skip
         self.player = staged_player
+        self.boot = staged_boot
         if self.setup is not None:
             if staged_console is not None:
                 self.setup = staged_console

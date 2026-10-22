@@ -135,7 +135,8 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         close_requested = true;
         return 0;
     }
-    if (message == WM_KEYDOWN && (wp == VK_ESCAPE || wp == VK_RETURN || wp == VK_SPACE)) {
+    if (message == WM_KEYDOWN && !(lp & (LPARAM(1) << 30)) &&
+        (wp == VK_ESCAPE || wp == VK_RETURN || wp == VK_SPACE)) {
         close_requested = true;
         return 0;
     }
@@ -173,6 +174,8 @@ class Controllers {
     HMODULE module_ = nullptr;
     using GetState = DWORD(WINAPI *)(DWORD, XINPUT_STATE *);
     GetState get_ = nullptr;
+    WORD previous_[4]{};
+    bool sampled_[4]{};
 
   public:
     Controllers(const Controllers &) = delete;
@@ -198,17 +201,26 @@ class Controllers {
         if (module_)
             FreeLibrary(module_);
     }
-    bool skip() const {
+    bool skip() {
         if (!get_)
             return false;
+        bool pressed = false;
         for (DWORD port = 0; port < 4; ++port) {
             XINPUT_STATE state{};
-            if (get_(port, &state) == ERROR_SUCCESS &&
-                (state.Gamepad.wButtons & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B |
-                                           XINPUT_GAMEPAD_START | XINPUT_GAMEPAD_BACK)))
-                return true;
+            if (get_(port, &state) != ERROR_SUCCESS) {
+                sampled_[port] = false;
+                previous_[port] = 0;
+                continue;
+            }
+            const WORD buttons = state.Gamepad.wButtons &
+                (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_START | XINPUT_GAMEPAD_BACK);
+            // The launcher's held Play button must not immediately skip the
+            // intro. Only a new press after this stage's first sample counts.
+            pressed |= sampled_[port] && (buttons & ~previous_[port]) != 0;
+            previous_[port] = buttons;
+            sampled_[port] = true;
         }
-        return false;
+        return pressed;
     }
 };
 void wav(const std::filesystem::path &path, const std::vector<int16_t> &samples) {
@@ -241,7 +253,7 @@ int wmain(int argc, wchar_t **argv) {
         std::filesystem::path pack_path, capture_dir, audio_path;
         bool headless = false, mute = false, warp = false, validate = false, realtime = false,
              core_only = false;
-        unsigned skip_at = 0;
+        unsigned skip_at = 0, volume = 100;
         for (int i = 1; i < argc; ++i) {
             std::wstring arg = argv[i];
             auto value = [&]() {
@@ -267,7 +279,14 @@ int wmain(int argc, wchar_t **argv) {
                 realtime = true;
             else if (arg == L"--core-only")
                 core_only = true;
-            else if (arg == L"--skip-at-ms") {
+            else if (arg == L"--volume") {
+                std::wstring number = value();
+                size_t end = 0;
+                unsigned long n = std::stoul(number, &end);
+                if (end != number.size() || n > 100)
+                    throw std::runtime_error("Volume must be between 0 and 100");
+                volume = (unsigned)n;
+            } else if (arg == L"--skip-at-ms") {
                 std::wstring number = value();
                 size_t end = 0;
                 unsigned long n = std::stoul(number, &end);
@@ -346,7 +365,10 @@ int wmain(int argc, wchar_t **argv) {
             ShowWindow(window.value, SW_SHOWNORMAL);
             UpdateWindow(window.value);
         }
-        if (!mute && !core_only)
+        if (volume < 100)
+            for (auto &sample : pcm)
+                sample = (int16_t)((int)sample * (int)volume / 100);
+        if (!mute && !core_only && volume)
             audio.start(pcm);
         Controllers controller;
         auto animation_start = std::chrono::steady_clock::now();
@@ -463,7 +485,7 @@ int wmain(int argc, wchar_t **argv) {
                   << ",\"setup_ms\":" << setup_ms << ",\"run_ms\":" << elapsed_ms
                   << ",\"audio_frames\":384000,\"audio_peak\":" << peak
                   << ",\"final_nonblack_pixels\":" << lit_pixels << ",\"pcm_sha256\":\"" << pcm_hash
-                  << "\",\"audio_output\":\"" << (!mute && !core_only ? "enabled" : "muted")
+                  << "\",\"audio_output\":\"" << (!mute && !core_only && volume ? "enabled" : "muted")
                   << "\",\"graphics_validation\":" << (validate ? "true" : "false")
                   << ",\"presentation\":\"" << (core_only ? "core-only" : "d3d11") << "\"}\n";
         return 0;

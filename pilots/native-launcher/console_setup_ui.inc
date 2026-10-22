@@ -9,6 +9,7 @@ static void xboxllr_pick_console_file(LauncherModel *m,const char *title,char *t
     req.title=title;req.start_path=target;
     req.mode=kind==1?PickMode::Folder:PickMode::OpenFile;
     if(kind==2){req.patterns={"*.qcow2","*.img","*.raw","*.bin"};req.description="Xbox HDD image";}
+    else if(kind==3){req.patterns={"*.bin","*.img"};req.description="Complete startup kernel";}
     else if(!kind){req.patterns={"*.bin"};req.description="Xbox dump (.bin)";}
     req.on_pick=[target,alternative](const char *path){if(path && *path){
         std::snprintf(target,4096,"%s",path);if(alternative)alternative[0]=0;
@@ -73,6 +74,17 @@ static void draw_xboxllr_console_controls(LauncherModel *m,const LauncherTheme &
         s->acknowledged=1;s->advanced_open=0;xboxllr_setup_persist();
     }
     if(s->locked)ImGui::EndDisabled();
+    if(s->boot_available) {
+        ImGui::Dummy(ImVec2(0,px(14)));ImGui::Separator();ImGui::Dummy(ImVec2(0,px(10)));
+        eyebrow("STARTUP INTRO");
+        ImGui::Checkbox("Play the Xbox startup intro",&s->boot_enabled);
+        ImGui::TextWrapped("Optional. Your title still launches when startup data is unavailable. This does not change your console identity or saves.");
+        ImGui::Dummy(ImVec2(0,px(6)));
+        xboxllr_console_path(m,"Startup kernel dump","Choose a compatible complete startup kernel",s->boot_kernel,3);
+        ImGui::TextWrapped("Leave blank to reuse prepared startup data or try the console kernel above. A short save-signing dump does not contain the intro.");
+        ImGui::TextColored(col(th.text_muted),"%s",s->boot_status);
+        if(ImGui::Button("Save startup settings") && s->persist_boot)s->persist_boot(s->context);
+    }
 }
 static void draw_xboxllr_console_welcome(LauncherModel *m,const LauncherTheme &th) {
     auto *s=xboxllr_console_setup;

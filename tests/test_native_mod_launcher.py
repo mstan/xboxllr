@@ -14,6 +14,29 @@ PID = 'xboxlle.enhancement.visuals'
 
 
 class LauncherPolicy(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get('XLLE_TEST_LAUNCHER'), 'Native launcher is an optional separate target')
+    def test_compiled_startup_settings_roundtrip_without_changing_locked_console(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            setup = dict(required=False, kernel='signing-only.bin', acknowledged=True,
+                         eeprom='original-eeprom.bin', storage='saves', hdd='', locked=True,
+                         choice_path=str(root / 'console-choice.txt'))
+            boot = dict(enabled=True, kernel='G:/Owned firmware/complete.img', status='Ready',
+                        choice_path=str(root / 'boot-choice.txt'))
+            c = ui.Catalog([], root / 'selection.json', setup=setup, boot=boot)
+            result, image = c.run(Path(os.environ['XLLE_TEST_LAUNCHER']), root / 'run',
+                title='Startup fixture', region='Test', sha='a' * 64, image='owned.xbe', validate=True)
+            self.assertEqual(result, 0)
+            self.assertEqual(c.boot, boot)
+            self.assertEqual(c.setup, setup)
+            target = root / 'run/launcher.result'
+            before = dict(c.boot)
+            target.write_text(target.read_text().replace('boot 1 ', 'boot 7 '))
+            with self.assertRaises(ValueError):
+                c.ingest(target)
+            self.assertEqual(c.boot, before)
+            self.assertFalse((root / 'console-choice.txt').exists())
+
     def test_explicit_title_defaults_keep_saved_choices_and_capability_limits(self):
         with tempfile.TemporaryDirectory() as d:
             state = Path(d) / 'selection.json'

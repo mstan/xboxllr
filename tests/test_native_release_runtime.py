@@ -16,6 +16,31 @@ from test_native_save_keys import authored_xbe
 
 
 class FirstRunTests(unittest.TestCase):
+    def test_intro_failure_returns_before_native_title_and_preserves_save_identity(self):
+        runtime.writable_environment(self.root)
+        profile = runtime.prepare_profile(self.root, self.data, self.image)
+        identity = (profile / 'eeprom.bin').read_bytes(), (profile / 'save-keys.bin').read_bytes()
+        save = self.root / 'data/state/Partition1/progress.sav'
+        save.parent.mkdir(parents=True)
+        save.write_bytes(b'owner progress')
+        (self.root / 'game.exe').write_bytes(b'authored game fixture')
+        data = dict(self.data, executable='game.exe', runtime={}, capabilities=dict(visual_mods=False))
+        catalog = Catalog([], self.root / 'selection.json')
+        events = []
+        def intro(*args, **kwargs):
+            events.append('intro-cleaned-up')
+            return dict(status='failed')
+        child = unittest.mock.Mock(pid=1, returncode=0)
+        child.wait.return_value = 0
+        def title(*args, **kwargs):
+            events.append('title-spawned')
+            return child
+        with patch('native_boot_launcher.run', side_effect=intro), patch.object(runtime.subprocess, 'Popen', side_effect=title):
+            self.assertEqual(runtime.launch_game(self.root, data, self.image, profile, catalog), 0)
+        self.assertEqual(events, ['intro-cleaned-up', 'title-spawned'])
+        self.assertEqual(identity, ((profile / 'eeprom.bin').read_bytes(), (profile / 'save-keys.bin').read_bytes()))
+        self.assertEqual(save.read_bytes(), b'owner progress')
+
     def setUp(self):
         environment = patch.dict('os.environ')
         environment.start(); self.addCleanup(environment.stop)
