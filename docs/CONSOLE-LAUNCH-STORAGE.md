@@ -56,12 +56,27 @@ kernel, firmware or game bytes to reduce setup requirements.
 
 ## Storage exists independently of a dashboard
 
-When a user supplies no disk, provision a real persistent virtual HDD with valid
-Xbox partition/FATX structures and required empty storage directories. A sparse
-raw image is acceptable. Importing an existing compatible image/profile remains
-supported; provisioning must never overwrite an existing original or silently
-rotate its console identity. Reuse the existing persistent EEPROM generator
-rather than requiring a physical-console EEPROM dump for every native setup.
+October 21 owner revision: when no disk is supplied, use lightweight private
+save folders for that game. They are created automatically and grow only as
+used. **Do not generate a per-game HDD image**, including an 8 GB sparse image.
+This default does not claim image compatibility with xemu or original firmware.
+Reuse the persistent EEPROM/signing profile without requiring console dumps
+for fresh local saves.
+
+Settings has two separate storage fields. An existing HDD image takes priority
+when selected. Otherwise the selected save folder is used; an empty folder
+field selects automatic private per-game storage. A selected image that is
+invalid, busy or paired with incompatible signing inputs blocks launch with
+an actionable error. It must never silently fall back to folder saves.
+
+Advanced Settings may select an **existing** xemu-compatible raw or QCOW2 HDD
+image instead. That selection must use the actual FATX bytes for native saves,
+not a dummy disk beside unrelated folders. Verify the disk layout and selected
+signing/console identity before allowing writes. Do not silently format,
+convert, overwrite or change the identity of an imported disk or its saves.
+Original protected saves require matching original signing material and, where
+applicable, the original EEPROM. A generated local signer is not retail-key
+equivalent.
 
 The console profile owns the HDD and identity. Game repositories bind their
 titles to that profile rather than each inventing an incompatible save store.
@@ -102,19 +117,20 @@ allowed; the real locked-drive path must also remain available.
 | Original dashboard route | Full-system LLE boots the owned dashboard | Maintain this route and expose an explicit supported launch choice alongside native title launch |
 | Retail boot experience | Existing original-software full-system boot route | Qualify the requested logo/boot sequence with the selected compatible user-supplied software, followed by dashboard/title entry |
 | Optional default dashboard | Architectural option only; no selected donor | Assess compatible permissive implementations when needed, preserve attribution and real service effects; direct game launch stays available |
-| Reduced-input identity | `tools/create_eeprom.py`; qualified generated-profile boot and retained LGPL attribution | Integrate provisioning/import into console setup, preserve identity and persist relevant changes |
-| Real HDD | Full-system IDE/image path with locked/unlocked policy and copy-on-write testing | Empty-image FATX formatter/importer, durable user mode and guided setup without dashboard assets |
-| Native save operations | Native pilot performs real persistent host-directory file operations | Connect accelerated filesystem services to the shared virtual-HDD contract; host folders alone do not close this requirement |
-| Configurable/shared save target | Private game launcher has local state configuration; shared console-profile contract is not implemented | Select/provision/import the actual profile and save drive; later qualify two recomp projects using one store, title isolation, identity continuity and exclusive image ownership |
+| Reduced-input identity | Shared first-use tooling provisions persistent virtual signing/EEPROM profiles or validates original input imports | Finish per-title new-save/restart/load qualification; preserve existing identity and native progress |
+| Default storage | Native pilot performs real persistent host-directory file operations | Preserve lightweight private per-game folders and stable identity; never automatically generate a disk image |
+| Optional imported HDD | Shared raw/QCOW2 block owner for LLE IDE and native FATX services; structure/signer admission, writer exclusion and component persistence checks | Finish Blinx image-backed save/load QA before refreshing the other two owner previews; retain original full-system cross-route acceptance |
+| Configurable/shared save target | Settings selects an existing HDD image first, otherwise a selected folder or automatic private per-game folder; shared identity and exclusive ownership are implemented | Qualify two recomp projects using one store, title isolation and identity continuity in actual gameplay |
 | Cross-route compatibility | Existing kernel/filesystem fixtures and original dashboard | Write a save, close/restart, read through the LLE route/dashboard, then reverse the direction; qualify shared identity, errors and flushing |
 
-Bundle formatter/layout, file lifetime and cross-route persistence checks using
+Bundle image admission/layout, file lifetime and cross-route persistence checks using
 one owned test console profile where possible. Reuse original kernel, existing
 LLE devices and behavioral references. Dashboard access and image-backed native
 storage remain explicit acceptance gates until exercised; neither the working
-attract milestone nor a repository split completes them.
+attract milestone nor a repository split completes them. Automatic image
+provisioning is no longer a requirement; the owner explicitly rejected it.
 The optional default dashboard and cross-title shared-drive rollout are future
 work. Preserve their interfaces now without starting another dashboard project
 or interrupting the serial Blinx LLE audit. This document records requirements,
-not completion of a launch selector, shared profile, formatter or retail-logo
+not completion of a launch selector, shared-profile gameplay qualification, formatter or retail-logo
 qualification.

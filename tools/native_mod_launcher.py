@@ -31,13 +31,21 @@ def decoded(value):
 
 
 class Catalog:
-    def __init__(self, manifests, state, *, visibility=(), frame_modes=(), setup=None):
+    def __init__(self, manifests, state, *, visibility=(), frame_modes=(), setup=None, defaults=None):
         self.state_path = Path(state)
+        defaults = {} if defaults is None else defaults
+        if not isinstance(defaults, dict) or any(not isinstance(key, str) or not isinstance(value, dict) or
+                set(value) - {'enabled', 'options'} or type(value.get('enabled', False)) is not bool or
+                not isinstance(value.get('options', {}), dict) or
+                any(not isinstance(k, str) or not isinstance(v, str) for k, v in value.get('options', {}).items())
+                for key, value in defaults.items()):
+            raise ValueError('Invalid title enhancement defaults')
         console_keys = {'acknowledged','eeprom','storage','locked','choice_path'}
-        if setup is not None and (set(setup) not in ({'required', 'kernel'}, {'required', 'kernel'} | console_keys) or
+        if setup is not None and (set(setup) not in ({'required', 'kernel'}, {'required', 'kernel'} | console_keys, {'required', 'kernel','hdd'} | console_keys) or
                 type(setup['required']) is not bool or not isinstance(setup['kernel'], str) or
                 ('acknowledged' in setup and (any(type(setup[k]) is not bool for k in ('acknowledged','locked')) or
-                 any(not isinstance(setup[k], str) for k in ('eeprom','storage','choice_path'))))):
+                 any(not isinstance(setup[k], str) for k in ('eeprom','storage','choice_path')))) or
+                ('hdd' in setup and not isinstance(setup['hdd'], str))):
             raise ValueError('Invalid native setup state')
         self.setup = dict(setup) if setup is not None else None
         self.packages, self.features, self.hashes = [], [], {}
@@ -72,7 +80,9 @@ class Catalog:
                     continue
                 if entry['default_enabled'] is not False:
                     raise ValueError('Elective native enhancements must default off')
-                saved = persisted.get('features', {}).get(key, {})
+                # Explicit title defaults are used only for new selections.
+                # Saved owner choices, including disabled features, win.
+                saved = persisted.get('features', {}).get(key, defaults.get(key, {}))
                 feature = dict(package=pid, id=fid, name=entry['name'], description=entry.get('description', manifest['description']),
                                enabled=saved.get('enabled') is True, options=[])
                 for item in manifest.get('option', []):
@@ -81,7 +91,7 @@ class Catalog:
                     oid = item['id']
                     if item['type'] == 'aspect':
                         values = ['adaptive', '4:3'] + item['presets']
-                        labels = ['Adaptive (window aspect)', 'Original 4:3'] + item['presets']
+                        labels = ['Adaptive (Fit to screen)', 'Original 4:3'] + item['presets']
                     elif item['type'] == 'choice':
                         values, labels = item['values'], item['labels']
                     else:
@@ -117,7 +127,8 @@ class Catalog:
             lines.append(f'setup {int(self.setup["required"])} {encoded(self.setup["kernel"])}')
             if 'acknowledged' in self.setup:
                 s = self.setup
-                lines.append(f'console {int(s["acknowledged"])} {int(s["locked"])} {encoded(s["eeprom"])} {encoded(s["storage"])} {encoded(s["choice_path"])}')
+                lines.append(f'console {int(s["acknowledged"])} {int(s["locked"])} {encoded(s["eeprom"])} {encoded(s["storage"])} {encoded(s["choice_path"])}' +
+                             (f' {encoded(s["hdd"])}' if 'hdd' in s else ''))
         for p in self.packages:
             lines.append('package ' + ' '.join(encoded(p[k]) for k in ('id', 'name', 'version', 'description')))
         for f in self.features:
@@ -171,8 +182,9 @@ class Catalog:
                 seen.add(key);f['enabled'] = t[3] == '1'
             elif t[0] == 'kernel' and len(t) == 2 and self.setup is not None and 'kernel' not in seen:
                 staged_kernel = decoded(t[1]);seen.add('kernel')
-            elif t[0] == 'console' and len(t) == 4 and staged_console is not None and 'console' not in seen and t[1] in ('0','1'):
+            elif t[0] == 'console' and len(t) in (4,5) and staged_console is not None and 'console' not in seen and t[1] in ('0','1'):
                 staged_console.update(acknowledged=t[1]=='1', eeprom=decoded(t[2]), storage=decoded(t[3]))
+                if len(t)==5: staged_console['hdd']=decoded(t[4])
                 seen.add('console')
             elif t[0] == 'option' and len(t) == 5:
                 key = tuple(map(decoded, t[1:4]));f = by_key[key[:2]];value = decoded(t[4])

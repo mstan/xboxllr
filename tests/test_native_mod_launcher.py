@@ -14,6 +14,24 @@ PID = 'xboxlle.enhancement.visuals'
 
 
 class LauncherPolicy(unittest.TestCase):
+    def test_explicit_title_defaults_keep_saved_choices_and_capability_limits(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / 'selection.json'
+            resolution = PID + '/resolution'
+            fps = 'xboxlle.enhancement.frame-rate/frame-rate'
+            defaults = {resolution: dict(enabled=True, options={'height': '1080'}),
+                        fps: dict(enabled=True, options={'mode': 'interpolated', 'rate': '60'})}
+            fresh = ui.Catalog(MANIFESTS, state, defaults=defaults, frame_modes=['interpolated'])
+            self.assertEqual(fresh.values()[(PID, 'resolution', 'height')], '1080')
+            self.assertEqual(fresh.values()[('xboxlle.enhancement.frame-rate', 'frame-rate', 'mode')], 'interpolated')
+            limited = ui.Catalog(MANIFESTS, state, defaults=defaults)
+            self.assertFalse(any(f['id'] == 'frame-rate' for f in limited.features))
+            ui.atomic_json(state, dict(version=1, features={resolution: dict(enabled=False, options={'height':'1440'})}))
+            saved = ui.Catalog(MANIFESTS, state, defaults=defaults)
+            feature = next(f for f in saved.features if f['id'] == 'resolution')
+            self.assertFalse(feature['enabled'])
+            self.assertEqual(feature['options'][0]['value'], '1440')
+
     def test_original_defaults_and_capability_filter(self):
         with tempfile.TemporaryDirectory() as d:
             c = ui.Catalog(MANIFESTS, Path(d) / 'selection.json')

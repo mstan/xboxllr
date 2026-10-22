@@ -106,4 +106,5 @@ refs/
 *.png
 !/docs/screenshots/dashboard.png
 !/docs/screenshots/jsrf-widescreen.png
+!/titles/dashboard/assets/launcher/boxart.png
 *.log

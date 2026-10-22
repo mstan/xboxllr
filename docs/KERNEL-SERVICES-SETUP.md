@@ -8,7 +8,7 @@ Owner direction: October 21, 2026. Tracking: `beads-xbox.1.187.6`,
 
 Keep the native kernel-service layer shared between games and Dashboard.
 The target for a fresh supported game installation is the owner's game ISO,
-with a locally created virtual console, settings and persistent HDD. Original
+with a locally created virtual console, settings and lightweight persistent save folders. Original
 Xbox files remain an optional profile import. Features that actually require
 genuine credentials must validate those inputs when selected. This specifies
 the intended setup, not a claim that ISO-only launch already works.
@@ -87,7 +87,11 @@ the selected identity. HLE may batch operations without repeating device-level
 steps. LLE accesses the actual FATX bytes through the existing disk device;
 HLE accesses those same on-disk structures through shared image services.
 
-Create a sparse, valid partitioned/formatted HDD only for a new profile.
+Owner revision: never create a per-game HDD image automatically. An existing
+raw/QCOW2 image is the optional first-priority storage choice; without one,
+use the selected save folder or automatic private per-game folders. Validate
+an imported disk and its selected original signing/EEPROM profile before use.
+Image admission failures must not silently fall back to folder saves.
 Import/select an existing disk without overwrite. Protect a shared image with
 exclusive writer ownership initially. Close/flush/reopen and two-direction
 HLE/LLE readback are the acceptance checks, using matching profile identities.
@@ -143,8 +147,8 @@ through documentation.
    save/restart/load smoke for Blinx and JSRF; reject wrong-identity saves and
    retain the accepted original-profile checks. Qualify native Dashboard use
    separately rather than assuming it follows from the games.
-3. Integrate a reviewed formatter and image-backed native filesystem through
-   the common storage owner. Prove durable bidirectional HLE/LLE access with
+3. Use the common image-backed storage owner for an existing imported disk;
+   do not generate or format a per-game image. Prove durable bidirectional HLE/LLE access with
    the same original-compatible profile, including writer exclusion and errors.
 4. Connect ISO extraction/revision checks, runtime files, profile setup and the
    launcher into one shared package flow. Preserve optional original Dashboard

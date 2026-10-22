@@ -1,6 +1,6 @@
 # Setup: games, console profiles and the original Dashboard
 
-Status: October 21, 2026. Current previews run on Windows x64. Private owner-use
+Status: October 22, 2026. Current previews run on Windows x64. Private owner-use
 packages now have a shared first-run interface; ISO-only import and publication
 remain unfinished. Linux releases are deferred. Tracking: `beads-xbox.1.187.7`, release
 `beads-xbox.1.187`, console/storage provisioning `beads-xbox.1.22`.
@@ -15,8 +15,8 @@ remain unfinished. Linux releases are deferred. Tracking: `beads-xbox.1.187.7`, 
 | Open-source default dashboard | No implementation has been selected for xboxllr | Optional redistributable shell/dashboard with its own qualified services and asset licenses; never a prerequisite for launching a game. |
 
 **Native games already use replacements for kernel services.** They do not boot
-the Microsoft kernel. Today's kernel-file requirement is an offline source of
-signing material, rather than execution of a complete operating system. The
+the Microsoft kernel. An optional kernel dump supplies original signing
+material offline; new virtual-console profiles do not require one. The
 native Dashboard is another title using those services; its original artwork
 and program are separate from boot firmware. See the
 [kernel-service and profile design](KERNEL-SERVICES-SETUP.md).
@@ -26,7 +26,7 @@ and program are separate from boot firmware. See the
 ### Private Windows preview packages
 
 Open **Start Game.cmd** in the title's folder. First run shows an optional
-console-files popup. **Skip and continue** chooses new local saves and automatic
+console-files popup. **Skip** chooses new local saves and automatic
 storage; the choice is saved immediately and the popup does not reappear.
 Select the supported extracted `.xbe` on the **main screen**, keeping it
 inside its complete asset tree. This preview does not accept an ISO directly.
@@ -42,11 +42,27 @@ its native saves. Setup, identity and game state are stored in the package's
 `data` directory; launcher keyboard bindings are beside `Launcher.exe`.
 Keep both when updating an owner preview. The packages include Python and the
 selected native DLL dependencies; players do not need a development toolchain.
-An optional shared virtual HDD **folder** reuses one persistent console identity
-and holds an exclusive writer lock throughout play. Existing unrelated storage
-is rejected unchanged. Importing an original HDD **image** remains unfinished;
-the UI says so explicitly. New-save/restart/load checks with the new local
-identity remain an owner gameplay check before release qualification.
+Storage is an either/or choice. Select an existing raw/QCOW2 FATX **HDD image**
+or a **Save folder**; selecting one disables the other until cleared. Legacy
+selections containing both use the image. Leave both empty for automatic,
+lightweight private save folders for this game only. No HDD image is created.
+
+An image needs admitted original signing inputs and matching EEPROM. Setup
+validates image features/layout and signer identity before use. Actual saves
+live inside its FATX partitions; the sibling `<image>.xboxllr` folder retains
+console identity and host settings. Preserve both. Invalid or busy images
+report an error; they never silently switch to folder saves. Close xemu or any
+other writer before using a shared disk. Only retail partitions 1–5 and the
+reviewed raw/QCOW2 feature set are supported; backing chains, snapshots,
+encryption and compressed clusters are rejected.
+
+A shared **folder** reuses one persistent console identity and uses the native
+host's partition directories. It is not a disk image that xemu can mount.
+Folder and image sessions both hold an exclusive writer lease. Existing
+unrelated storage is rejected unchanged. Original saves still need their
+matching identity and pass normal verification; disk validation cannot identify
+the signer of every existing save. New virtual-profile save/restart/load and
+the complete per-title image-backed save matrix remain qualification checks.
 
 These are private test candidates, not publication-cleared releases. The owner
 handoff includes a separate local **Setup Inputs** folder; its game directories
@@ -117,16 +133,16 @@ the disc label alone is insufficient.
 
 ## 2. Set up or import a console profile
 
-The intended first-run choice is **Use a virtual console** or **Import my Xbox
-files**. Both choices must keep identity and persistent storage together. The
-reduced-input release flow remains unfinished. The private preview's more
-limited first-run interface is described above; developer steps follow below.
+First run offers optional original-console setup or **Skip**. Skipping is
+remembered immediately and selects a new local identity; game selection stays
+on the main screen. Original imports remain available in Settings. Keep
+identity and persistent storage together. The working package flow is described
+above; advanced developer preparation follows below.
 
-For a new virtual console, generate settings/identity and format writable
-storage locally. The game ISO should be the only required user content for
-the default supported game route. An original Dashboard import is optional.
-Do not ask a player for a BIOS, boot ROM, existing HDD image or Dashboard simply
-to start a game once this route is qualified.
+For a new virtual console, the package generates settings, identity and save
+folders locally. Today the required content is the matching extracted game
+tree; ISO extraction inside the launcher is future work. A BIOS, boot ROM,
+existing HDD image or Dashboard is not a prerequisite for direct native games.
 
 Missing optional files warrant an informative, title-aware first-use notice,
 not an error or a warning before every launch. Intended Blinx wording, **after

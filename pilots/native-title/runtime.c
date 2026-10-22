@@ -1316,9 +1316,11 @@ static void load_image(const char *path)
 
 int main(int argc,char **argv)
 {
-    fprintf(stderr,"[TITLE] id=%s name=%s route=native-title\n",PILOT_TITLE_ID,PILOT_TITLE_NAME);
-#if defined(PILOT_D3D_NATIVE) && defined(PILOT_TITLE_RUNTIME_PROFILE)
-    if(pilot_gfx_title(PILOT_TITLE_NAME)<0)stop("invalid title window name",0);
+    const char *window_title=getenv("XLLE_PILOT_WINDOW_TITLE");
+    if(!window_title || !*window_title)window_title=PILOT_TITLE_NAME;
+    fprintf(stderr,"[TITLE] id=%s name=%s route=native-title\n",PILOT_TITLE_ID,window_title);
+#if defined(PILOT_D3D_NATIVE)
+    if(pilot_gfx_title(window_title)<0)stop("invalid title window name",0);
 #endif
 #ifdef PILOT_NATIVE_OPTIMIZATION
     fprintf(stderr,"[PILOT BUILD] native_optimization=%s\n",PILOT_NATIVE_OPTIMIZATION);

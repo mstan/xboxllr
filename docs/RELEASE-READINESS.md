@@ -1,6 +1,6 @@
 # xboxllr release readiness
 
-Audit: 2026-10-21. Tracking: `beads-xbox.1.187`; distribution provenance and
+Audit: 2026-10-22. Tracking: `beads-xbox.1.187`; distribution provenance and
 licensing: `beads-xbox.1.21`. The owner prioritizes this work ahead of further
 JSRF recovery/extra-mode qualification. Existing accepted builds remain intact.
 
@@ -12,15 +12,15 @@ All three repositories remain private.
 
 | Repository | Current presentation | Release gap |
 | --- | --- | --- |
-| xboxllr | Current native/LLE/HLE overview, three-title gallery and linked developer references | Shared Windows release tooling and Dashboard-as-title packaging |
-| BlinxRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; old build notes preserved separately | Clean first-run package and download instructions after shipping gates are resolved |
-| JSRFRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; developer notes preserved separately | Release packaging and clean first-run setup; source license/scope and private remote are now present |
+| xboxllr | Current native/LLE/HLE overview, three-title gallery and linked developer references | Shared Windows stager and Dashboard package implemented; combined-binary publication blocked by retained license policy |
+| BlinxRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; old build notes preserved separately | Clean candidate package implemented; publication awaits shared shipping gate |
+| JSRFRecomp | Player-first features, widescreen capture, controls/mods, scoped status and credits; developer notes preserved separately | Clean candidate package and real boxart implemented; publication awaits shared shipping gate |
 
-The published Blinx presentation is `411a42c`, pinned to framework `8cdc4d9`.
-JSRF presentation is `860f89f`, pinned to framework `b657fc6`. Latest private
-compatibility builds of Blinx and Dashboard with `b657fc6` render successfully;
-that does not itself change Blinx's checked-in pin or create a release.
-Authenticated GitHub API checks on October 21 confirm these repositories:
+The October 22 source checkpoint brings title pins together with the shared
+storage, launcher and mod fixes. Pin changes identify source, not a claim that
+all generated CPU preparations have identical provenance: JSRF uses the reviewed
+MIT CPU helper, while the current Blinx/Dashboard candidates still need their
+prepared CPU output migrated. Authenticated GitHub checks confirm these repos:
 
 | Repository | URL | Current visibility |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ GitHub releases at this check.
 | Replace the runtime's GPL ADPCM codec with the maintained permissive adapter | Implemented; reference, actual mixer and native JSRF smoke checks pass |
 | Generated CPU helper provenance | MIT upstream replacement and authored bridge pass component checks plus representative native JSRF save/load/gameplay; title release migration remains |
 | Selected renderer implementation and remaining emitted glue provenance | File-level review/replacement remains open |
-| Shared release packaging and minimal first-run setup | Private preview stager, once-only optional console setup, kernel-free virtual profiles and shared native storage folders implemented; ISO import, real virtual-save gameplay checks and image-backed FATX remain open |
+| Shared release packaging and minimal first-run setup | Private stager, strict manifest archive, once-only optional setup, kernel-free virtual profiles, shared folders and raw/QCOW2 FATX implemented; ISO import and remaining fresh-profile save matrix deferred/unqualified |
 | Imported Windows DLL preflight | Preview stager resolves selected app-local imports, including reviewed VC++ runtime files; public distribution review remains |
 | Native signing-input preparation | Stdlib default matches original-derived files for all three titles; no normal Unicorn dependency; owned kernel/profile input remains |
 | Native Linux host/backends and title execution | Deferred by owner; not a Windows release gate |
@@ -127,8 +127,9 @@ when importing later. [Complete setup](SETUP.md) and
 [shared kernel/profile design](KERNEL-SERVICES-SETUP.md) record the concrete
 input matrix, current limitations, upstream references and implementation order.
 The native Dashboard does not inherently need original-firmware boot either.
-ISO-only setup and shared FATX storage are still implementation gates, not
-completed by these documentation changes (`beads-xbox.1.187.6`, `.1.22`).
+ISO-only setup remains unfinished. Shared raw/QCOW2 FATX storage is implemented
+and component-qualified; the remaining per-title save matrix is explicit
+(`beads-xbox.1.22`). No per-game HDD image is generated.
 
 Target: the owner's matching game dump; optional original Dashboard files.
 Generate writable storage, configuration, cache and a virtual-console profile
@@ -136,12 +137,13 @@ locally where supported. Audit current EEPROM, signing/settings, media, generate
 CPU and preparation dependencies before promising game-only setup. The current
 `native_save_keys.py` preparer now uses the original-checked stdlib HMAC
 derivation. Its normal path does not import Unicorn or execute the owned kernel;
-original execution is an explicit optional verification mode. The owned kernel
-still supplies private certificate material, so EEPROM and console-region
-generation alone do not establish game-only setup. See
-[signing preparation](NATIVE-SIGNING-SETUP.md). Native title gameplay does not
-link Unicorn. Removing the original-kernel/profile setup requirement remains
-open; do not substitute fabricated signatures or change native-save identities.
+original execution is an explicit optional verification mode. Optional original import still uses admitted private certificate material.
+Fresh local profiles instead generate a persistent virtual signing root and
+use real HMAC verification; they do not claim original-key equivalence.
+See [signing preparation](NATIVE-SIGNING-SETUP.md) and
+[current package setup](NATIVE-FIRST-RUN-PREVIEW.md). Native title gameplay does
+not link Unicorn. Full fresh-profile save/restart/load qualification remains;
+no signatures are accepted blindly and existing save identities are preserved.
 Define a
 ROM-free setup host/first-run generation boundary; don't package development
 paths, original binaries/media, keys, user saves or private generated output.

@@ -55,8 +55,8 @@ feature="widescreen"
 id="authored.widescreen"
 ''')
         r=v.resolve(self.root/'title.toml',self.data,self.plan,aspect='adaptive',height=1080)
-        self.assertEqual(r['internal_canvas'],[2520,1080])
-        self.assertIn('operation aspect 1 authored.widescreen 7 3 1',self.plan.read_text())
+        self.assertEqual(r['internal_canvas'],[1920,1080])
+        self.assertIn('operation aspect 1 authored.widescreen 16 9 1',self.plan.read_text())
         retained=self.plan.read_bytes()
         with self.assertRaisesRegex(ValueError,'texture limit'):
             v.resolve(self.root/'title.toml',self.data,self.plan,aspect='32:9',height=2160,supersample=3)

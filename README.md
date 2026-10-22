@@ -86,18 +86,26 @@ used as instructions for the native previews.
 
 xboxllr is intended to publish the **recompiler toolkit** and a separate
 **Dashboard title** artifact. Blinx and JSRF retain their own game repos and
-reuse build/release tooling from a pinned xboxllr version. Windows ZIP and native
-Linux packages are release targets; self-contained downloads are not ready yet.
+reuse build/release tooling from a pinned xboxllr version. Windows x64 ZIPs are
+the current target; native Linux releases are deferred. Shared packaging now
+produces self-contained local candidates with a bundled launcher and Python.
+Executable publication remains blocked by the dependency review below.
 
 The setup target is the user's matching game dump, plus original Dashboard files
 only if they want that Dashboard. Writable console storage, settings and other
-supported generated inputs should be created locally. Original Xbox files remain
-an optional profile import, with title-aware explanations of relevant save or
-network limits. Current developer setup still needs original-derived signing
-preparation; neither native games nor the native Dashboard boot a Microsoft
-kernel. [Setup and required files](docs/SETUP.md) separates that temporary
-dependency from optional original-system boot. A redistributable default
-dashboard and ISO-only first-run setup remain planned capabilities.
+supported generated inputs are created locally. On first launch, choose **Skip**
+to use a persistent virtual-console identity and automatic private save folders.
+Original console files are optional for new local play. Settings also accepts
+an existing raw/QCOW2 FATX HDD image with validated original signing inputs and
+matching EEPROM. An image takes priority over folder storage; no 8 GB image is
+created per game. See [setup](docs/SETUP.md) for save compatibility and limits.
+Select the supported extracted XBE on the main screen and keep its complete
+asset folder. Direct ISO import remains unfinished.
+
+Neither native games nor the native Dashboard currently boot the firmware.
+Firmware startup is a separate follow-up: if qualified, its intended default
+is off for games and on for Dashboard. A redistributable default dashboard
+also remains a future capability; the current Dashboard needs your own files.
 
 The [release readiness plan](docs/RELEASE-READINESS.md) tracks shared packaging,
 clean-machine setup, native Linux support and incorporated-code licensing.

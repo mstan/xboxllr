@@ -6,6 +6,24 @@ name = "Xbox Dashboard"
 executable = "XboxDashboard"
 xbe_sha256 = "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d"
 
+[launcher]
+frame_modes = ["interpolated"]
+
+[launcher.defaults."xboxlle.enhancement.visuals/antialiasing"]
+enabled = true
+options = { method = "fxaa" }
+
+[launcher.defaults."xboxlle.enhancement.visuals/filtering"]
+enabled = true
+options = { anisotropy = "8" }
+
+[launcher.defaults."xboxlle.enhancement.frame-rate/frame-rate"]
+enabled = true
+options = { mode = "interpolated", rate = "60" }
+
+[mods]
+registry = "../../pilots/native-title/visual_registry.c"
+
 [content]
 image = "xboxdash.xbe"
 device = '\Device\Harddisk0\Partition2'

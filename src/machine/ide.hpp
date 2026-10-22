@@ -18,11 +18,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "machine/io_device.hpp"
+#include "storage/disk_image.hpp"
 
 namespace xlle {
 
@@ -80,8 +82,10 @@ struct IdeDrive {
 
     // Owned backing file: writable only under the explicit HDD writeback policy.
     std::FILE* blk = nullptr;
+    std::unique_ptr<xllr::storage::DiskImage> image;
 
-    bool present() const { return kind == Kind::kCd || blk != nullptr; }
+    bool backed() const { return blk != nullptr || image != nullptr; }
+    bool present() const { return kind == Kind::kCd || backed(); }
 };
 
 // The controller: primary-channel task file + control port + bus-master DMA ports.

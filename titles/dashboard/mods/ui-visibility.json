@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "hidden_features": [
+    "xboxlle.enhancement.visuals/resolution",
+    "xboxlle.enhancement.visuals/supersampling"
+  ],
+  "hidden_choices": {}
+}

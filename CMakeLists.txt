@@ -12,6 +12,7 @@ if(XBOXLLR_BUILD_MODE STREQUAL "NATIVE_TITLE")
 elseif(NOT XBOXLLR_BUILD_MODE STREQUAL "REFERENCE")
   message(FATAL_ERROR "XBOXLLR_BUILD_MODE must be REFERENCE or NATIVE_TITLE")
 endif()
+add_subdirectory(src/storage storage)
 
 # ---- xlle: LLE-first original-Xbox platform. A0 foundations. ----
 # Harvest strategy (DESIGN §3): CPU floor from Unicorn (QEMU x86 core), host layer from
@@ -169,6 +170,7 @@ target_include_directories(xlle_machine PUBLIC ${XLLE_INCLUDES})
 target_compile_definitions(xlle_machine PUBLIC XLLE_NATIVE_DRAW=$<BOOL:${XLLE_NATIVE_DRAW}>)
 target_link_libraries(xlle_machine PUBLIC xlle_cpu nv2a_vsh_emulator)
 target_link_libraries(xlle_machine PUBLIC xlle_apu_adpcm)
+target_link_libraries(xlle_machine PUBLIC xboxllr_storage_core)
 target_link_libraries(xlle_machine PUBLIC xlle_apu_rate)
 set(XLLE_DSP_SOURCE "" CACHE PATH "Prepared guarded MIT DSP source; empty keeps the device-only floor")
 set(XLLE_DSP_LIBRARY "" CACHE FILEPATH "Prepared DSP library for this host compiler ABI")
@@ -550,9 +552,11 @@ add_test(NAME aci_spdif COMMAND test_aci_spdif)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/AciOutput.cmake")
 
 add_executable(test_ide_security tests/test_ide_security.cpp src/machine/ide.cpp)
+target_link_libraries(test_ide_security PRIVATE xboxllr_storage_core)
 target_include_directories(test_ide_security PRIVATE ${XLLE_INCLUDES})
 add_test(NAME ide_security COMMAND test_ide_security)
 add_executable(test_ide_dvd tests/test_ide_dvd.cpp src/machine/ide.cpp src/machine/smbus.cpp)
+target_link_libraries(test_ide_dvd PRIVATE xboxllr_storage_core)
 target_include_directories(test_ide_dvd PRIVATE ${XLLE_INCLUDES})
 add_test(NAME ide_dvd COMMAND test_ide_dvd)
 
@@ -560,6 +564,7 @@ add_test(NAME ide_dvd COMMAND test_ide_dvd)
 # Kept out of installed/shipping targets; owned images are opened read-only.
 add_library(xlle_storage_reference SHARED EXCLUDE_FROM_ALL
   tools/storage_reference.cpp src/machine/ide.cpp src/machine/pic.cpp src/machine/pit.cpp)
+target_link_libraries(xlle_storage_reference PRIVATE xboxllr_storage_core)
 target_include_directories(xlle_storage_reference PRIVATE ${XLLE_INCLUDES})
 add_executable(test_pit tests/test_pit.cpp src/machine/pit.cpp src/machine/pic.cpp)
 target_include_directories(test_pit PRIVATE ${XLLE_INCLUDES})

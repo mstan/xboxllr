@@ -86,11 +86,12 @@ static Catalog read_catalog(const char *path) {
             copy(c.settings.player_gamepad_guid[0],c.player_guid);
         } else if(t[0]=="setup"&&t.size()==3&&(t[1]=="0"||t[1]=="1")&&!c.setup) {
             c.setup=true;c.needs_setup=t[1]=="1";copy(c.settings.bios_path,x(2));
-        } else if(t[0]=="console"&&t.size()==6&&!c.console&&c.setup&&
+        } else if(t[0]=="console"&&(t.size()==6||t.size()==7)&&!c.console&&c.setup&&
                   (t[1]=="0"||t[1]=="1")&&(t[2]=="0"||t[2]=="1")) {
             c.console=true;c.console_ui.acknowledged=t[1]=="1";c.console_ui.locked=t[2]=="1";
             copy(c.console_ui.kernel,c.settings.bios_path);copy(c.console_ui.eeprom,x(3));
             copy(c.console_ui.storage,x(4));c.choice_path=x(5);
+            if(t.size()==7)copy(c.console_ui.hdd,x(6));
         } else if(t[0]=="package"&&t.size()==5&&c.packages.size()<32) {
             Package p={x(1),x(2),x(3),x(4)};
             if(std::any_of(c.packages.begin(),c.packages.end(),[&](const Package &old){return old.id==p.id;}))throw std::runtime_error("Duplicate package");
@@ -162,7 +163,7 @@ static int commit(void *p,const char *) {
         /* The generic UI uses the common aspect feature ID for other titles.
          * No guest addresses or gameplay hooks belong in this adapter. */
         for(auto &f:c.features)if(f.enabled)for(auto &o:f.options)if(o.id=="aspect")aspect=o.value;
-        if(aspect=="adaptive")aspect="21:9";
+        if(aspect=="adaptive")aspect="16:9";
         unsigned n=0,d=0;char extra;if(std::sscanf(aspect.c_str(),"%u:%u%c",&n,&d,&extra)!=2)throw std::runtime_error("Invalid aspect");
         m.aspect_numerator=n;m.aspect_denominator=d;
         auto frames=value(c,"xboxlle.enhancement.frame-rate","frame-rate","mode","original");
@@ -177,8 +178,8 @@ static void persist_console(void *context) {
     auto &c=*(Catalog*)context;auto &s=c.console_ui;
     std::string temporary=c.choice_path+".tmp";
     std::ofstream out(std::filesystem::u8path(temporary),std::ios::binary|std::ios::trunc);
-    out<<"xboxllr-console-choice 1\nacknowledged "<<s.acknowledged<<"\nkernel "<<hex(s.kernel)
-       <<"\neeprom "<<hex(s.eeprom)<<"\nstorage "<<hex(s.storage)<<"\nend\n";
+    out<<"xboxllr-console-choice 2\nacknowledged "<<s.acknowledged<<"\nkernel "<<hex(s.kernel)
+       <<"\neeprom "<<hex(s.eeprom)<<"\nstorage "<<hex(s.storage)<<"\nhdd "<<hex(s.hdd)<<"\nend\n";
     out.close();
     if(!out)throw std::runtime_error("Could not save console setup choices");
 #if defined(_WIN32)
@@ -196,7 +197,7 @@ static int signing_source_verify(const char *path,RecompLauncherCBiosVerify *out
     if(in&&in.tellg()>0&&in.tellg()<=1048576) {
         out->ok=1;out->warn=1;
         copy(out->detail,"Selected; exact source identity is checked when setting up saves.");
-    } else copy(out->detail,"Choose your kernel backup for this preview's save-signing setup.");
+    } else copy(out->detail,"Choose your kernel dump for this preview's save-signing setup.");
     return 1;
 }
 static void save(const Catalog &c,const char *path,int result,const char *image) {
@@ -206,7 +207,7 @@ static void save(const Catalog &c,const char *path,int result,const char *image)
     const std::string kind=c.player_source=="auto"&&source==0?"auto":source==2?"gamepad":source==1?"keyboard":"none";
     out<<"player "<<kind<<" "<<hex(source==2?c.settings.player_gamepad_guid[0]:"")<<"\n";
     if(c.setup)out<<"kernel "<<hex(c.console?c.console_ui.kernel:c.settings.bios_path)<<"\n";
-    if(c.console)out<<"console "<<c.console_ui.acknowledged<<" "<<hex(c.console_ui.eeprom)<<" "<<hex(c.console_ui.storage)<<"\n";
+    if(c.console)out<<"console "<<c.console_ui.acknowledged<<" "<<hex(c.console_ui.eeprom)<<" "<<hex(c.console_ui.storage)<<" "<<hex(c.console_ui.hdd)<<"\n";
     for(auto &f:c.features) {
         out<<"feature "<<hex(f.package)<<" "<<hex(f.id)<<" "<<f.enabled<<"\n";
         for(auto &o:f.options)out<<"option "<<hex(f.package)<<" "<<hex(f.id)<<" "<<hex(o.id)<<" "<<hex(o.value)<<"\n";
@@ -241,10 +242,10 @@ int main(int argc,char **argv) {
         if(c.setup&&!c.console) {
             game.setup_wizard_supported=1;game.needs_setup=c.needs_setup;
             game.has_bios=c.needs_setup?1:0;game.bios_verify=signing_source_verify;
-            game.bios_name="Kernel backup (preview save setup)";
+            game.bios_name="Kernel dump (preview save setup)";
             static const char *patterns[]={"*.bin"};
             game.bios_patterns=patterns;game.num_bios_patterns=1;
-            game.bios_filter_desc="Your Xbox kernel backup";
+            game.bios_filter_desc="Your Xbox kernel dump";
             game.rom_noun="Xbox executable";
         }
         if(std::ifstream("assets/img/boxart.png",std::ios::binary).good())

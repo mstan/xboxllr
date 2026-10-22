@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def aspect_value(value):
     adaptive = value == 'adaptive'
-    ratio = '21:9' if adaptive else value
+    ratio = '16:9' if adaptive else value
     if not isinstance(ratio, str) or not re.fullmatch(r'[1-9][0-9]{0,4}:[1-9][0-9]{0,4}', ratio):
         raise ValueError('Aspect must be adaptive or numerator:denominator')
     n, d = map(int, ratio.split(':'))

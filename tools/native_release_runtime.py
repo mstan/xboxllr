@@ -1,7 +1,8 @@
 """Portable-layout native preview startup; all writable state stays beside it.
 
-This first owner-use package imports an admitted kernel once for save signing.
-It does not claim ISO-only setup or a shared image-backed FATX implementation.
+Fresh local saves need no original console dumps. Original signing imports and
+optional existing HDD images retain explicit admission and identity ownership.
+Direct ISO import and arbitrary original-save compatibility are separate work.
 """
 from __future__ import annotations
 
@@ -89,7 +90,7 @@ def prepare_profile(root, data, image, kernel=None, imported_eeprom=None, *, vir
         kernel_bytes = kernel.read_bytes()
         kernel_key(kernel_bytes)
     elif imported_eeprom and virtual_root is None:
-        raise ValueError('Using an original console for existing saves also needs its signing source. Select a kernel backup in Settings, or use the default new local console.')
+        raise ValueError('Using an original console for existing saves also needs its signing source. Select a kernel dump in Settings, or use the default new local console.')
     eeprom = read_eeprom_file(Path(imported_eeprom)) if imported_eeprom else generate_eeprom('r2')
     checked = validate_eeprom(eeprom)
     if not checked.ok:
@@ -174,12 +175,74 @@ def read_console_choice(path):
     if path.stat().st_size > 32768:
         raise ValueError('Console setup settings are invalid.')
     lines = path.read_text(encoding='ascii').splitlines()
-    if len(lines) != 6 or lines[0] != 'xboxllr-console-choice 1' or lines[-1] != 'end':
+    version = 1 if lines and lines[0] == 'xboxllr-console-choice 1' else 2 if lines and lines[0] == 'xboxllr-console-choice 2' else 0
+    if not version or len(lines) != (6 if version == 1 else 7) or lines[-1] != 'end':
         raise ValueError('Console setup settings are incomplete.')
     values = dict(line.split(' ', 1) for line in lines[1:-1])
-    if set(values) != {'acknowledged', 'kernel', 'eeprom', 'storage'} or values['acknowledged'] not in ('0', '1'):
+    keys = {'acknowledged', 'kernel', 'eeprom', 'storage'} | ({'hdd'} if version == 2 else set())
+    if set(values) != keys or values['acknowledged'] not in ('0', '1'):
         raise ValueError('Console setup settings are invalid.')
-    return dict(acknowledged=values['acknowledged'] == '1', **{k: decoded(values[k]) for k in ('kernel','eeprom','storage')})
+    return dict(acknowledged=values['acknowledged'] == '1', **{k: decoded(values[k]) for k in keys-{'acknowledged'}})
+
+
+def disk_identity(root, disk, kernel=None, eeprom=None, *, prepared=None):
+    """Admit actual image bytes and a retained original-compatible signer.
+
+    Original save formats still verify their own signatures in the title. The
+    disk does not reveal which EEPROM originally signed every proprietary save;
+    do not claim that metadata inspection proves that relationship.
+    """
+    from native_storage import Storage
+    from native_save_keys import kernel_key
+    disk = Path(disk)
+    if disk.is_symlink() or not disk.is_file() or str(disk.resolve()).startswith('\\\\'):
+        raise ValueError('Choose an existing local raw or QCOW2 HDD image file.')
+    disk = disk.resolve(strict=True)
+    with Storage(inside(root, 'native/xboxllr_storage.dll'), disk) as mounted:
+        report, identity = mounted.inspect(), mounted.identity()
+    # Only metadata/identity lives beside the selected image; game saves stay
+    # inside its actual FATX partitions. Never manufacture an image here.
+    owner = disk.with_name(disk.name + '.xboxllr')
+    if owner.exists() and (not owner.is_dir() or owner.is_symlink() or
+            getattr(owner, 'is_junction', lambda: False)()):
+        raise ValueError('The HDD console profile must be an ordinary directory.')
+    record_path = owner / 'identity.json'
+    record = json.loads(record_path.read_text()) if record_path.exists() else None
+    if record:
+        if (record.get('schema') != 'xboxllr.image-console.v1' or
+                record.get('disk_identity') != identity or record.get('signing') != 'original-source-hmac' or
+                sha(owner / 'eeprom.bin') != record.get('eeprom_sha256')):
+            raise ValueError('This disk or its console identity changed. Its existing saves were preserved.')
+        if eeprom and sha(Path(eeprom)) != record['eeprom_sha256']:
+            raise ValueError('The EEPROM does not match this disk profile. Existing saves were preserved.')
+        eeprom = owner / 'eeprom.bin'
+        kernel = kernel or record.get('kernel_source')
+    if prepared:
+        profile_record = json.loads((prepared / 'profile.json').read_text())
+        if (not record or profile_record['signing'] != 'original-source-hmac' or
+                sha(prepared / 'eeprom.bin') != record['eeprom_sha256']):
+            raise ValueError('This prepared save identity does not match the selected HDD image.')
+    else:
+        if not kernel or not eeprom:
+            raise ValueError('An existing HDD image needs your kernel dump and matching EEPROM. Select both in Settings, or leave the HDD image empty for new local saves.')
+        kernel_key(Path(kernel).read_bytes())
+        content = read_eeprom_file(Path(eeprom))
+        checked = validate_eeprom(content)
+        if not checked.ok:
+            raise ValueError('EEPROM rejected: ' + checked.reason)
+    if not record:
+        owner.mkdir(exist_ok=True)
+        if any(owner.iterdir()):
+            raise ValueError('The HDD profile folder already contains unrecognized data. Nothing was replaced.')
+        with (owner / 'eeprom.bin').open('xb') as output:
+            output.write(content)
+        record = dict(schema='xboxllr.image-console.v1', disk_identity=identity,
+            eeprom_sha256=hashlib.sha256(content).hexdigest(), signing='original-source-hmac',
+            kernel_source=str(Path(kernel).resolve()))
+        atomic_json(record_path, record)
+        eeprom = owner / 'eeprom.bin'
+    return dict(path=str(disk), owner=owner, identity=identity, report=report,
+                kernel=kernel, eeprom=eeprom)
 
 
 def verify_profile(root, data):
@@ -259,7 +322,7 @@ def choose_eeprom():
     return Path(selected.value) if ctypes.windll.comdlg32.GetOpenFileNameW(ctypes.byref(request)) else None
 
 
-def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, storage=None):
+def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, storage=None, hdd=None):
     image = checked_image(data, image)
     state = Path(storage) if storage is not None else root / 'data' / 'state'
     state.mkdir(parents=True, exist_ok=True)
@@ -269,6 +332,10 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
     env.update(XLLE_PILOT_SAVE_KEYS_FILE=str(profile / 'save-keys.bin'),
                XLLE_PILOT_CONSOLE_SETTINGS_FILE=str(profile / 'console-settings.bin'),
                XLLE_PILOT_VISIBLE='1', XLLE_PILOT_AUDIO_OUTPUT_MUTE='0', RECOMP_VOLUME=str(catalog.volume))
+    if data['title'].get('name'):
+        env['XLLE_PILOT_WINDOW_TITLE'] = data['title']['name']
+    if hdd:
+        env.update(XLLE_PILOT_HDD_IMAGE=hdd['path'], XLLE_PILOT_HDD_IDENTITY=hdd['identity'])
     for name in ('SDL_AUDIODRIVER', 'SDL_AUDIO_DRIVER'):
         env.pop(name, None)
     player = catalog.player
@@ -340,8 +407,9 @@ def interactive(root, data, writable, minimized):
         catalog = Catalog(manifests(root / 'release.json', data) if data['capabilities']['visual_mods'] else [],
             writable / 'mod-selection.json', visibility=[root / 'mods/ui-visibility.json'],
             frame_modes=data.get('launcher', {}).get('frame_modes', []),
+            defaults=data.get('launcher', {}).get('defaults', {}),
             setup=dict(required=False, kernel=choice['kernel'], acknowledged=choice['acknowledged'],
-                       eeprom=choice['eeprom'], storage=choice['storage'], locked=ready, choice_path=str(choice_path)))
+                       eeprom=choice['eeprom'], storage=choice['storage'], hdd=choice.get('hdd',''), locked=ready, choice_path=str(choice_path)))
         run = writable / 'launcher' / uuid.uuid4().hex
         result, image = catalog.run(inside(root, data['launcher_executable']), run,
             title=data['title']['name'], region=data['title'].get('region', ''),
@@ -355,22 +423,33 @@ def interactive(root, data, writable, minimized):
             checked_image(data, image)
             choice = read_console_choice(choice_path)
             binding = writable / 'console/storage.json'
-            storage = json.loads(binding.read_text())['path'] if ready and binding.exists() else choice['storage']
+            selected = json.loads(binding.read_text()) if ready and binding.exists() else dict(path=choice['storage'],hdd=choice.get('hdd',''))
+            storage, hdd_path = selected['path'], selected.get('hdd','')
             with ExitStack() as locks:
-                if storage:
+                hdd = None
+                if hdd_path:
+                    # Image priority is explicit. Never use the folder after
+                    # an image admission failure or a busy-image error.
+                    hdd = disk_identity(root,hdd_path,choice['kernel'] or None,choice['eeprom'] or None,
+                        prepared=writable/'console' if ready else None)
+                    locks.enter_context(session_lock(hdd['owner']))
+                    storage = str(hdd['owner']/'state')
+                elif storage:
                     # The shared writer lease covers setup and the whole game.
                     storage = str(Path(storage).resolve(strict=True))
                     locks.enter_context(session_lock(Path(storage)))
                 if not ready:
                     kernel, eeprom, seed = choice['kernel'] or None, choice['eeprom'] or None, None
-                    if storage:
+                    if hdd:
+                        kernel,eeprom = hdd['kernel'],hdd['eeprom']
+                    elif storage:
                         kernel, eeprom, seed = shared_identity(storage, image, kernel, eeprom)
                     profile = prepare_profile(root, data, image, kernel, eeprom, virtual_root=seed)
-                    atomic_json(profile / 'storage.json', dict(path=storage or ''))
+                    atomic_json(profile / 'storage.json', dict(path=storage or '',hdd=hdd['path'] if hdd else ''))
                 profile = verify_profile(root, data)
-                if storage and sha(Path(storage) / '.xboxllr-console/eeprom.bin') != sha(profile / 'eeprom.bin'):
+                if storage and not hdd and sha(Path(storage) / '.xboxllr-console/eeprom.bin') != sha(profile / 'eeprom.bin'):
                     raise ValueError('Shared storage belongs to another console. Its existing saves were preserved.')
-                return launch_game(root, data, image, profile, catalog, storage=storage or None)
+                return launch_game(root, data, image, profile, catalog, storage=storage or None,hdd=hdd)
         except (ValueError, OSError, KeyError) as error:
             message(data['title']['name'] + ' setup', str(error), 0x10)
 

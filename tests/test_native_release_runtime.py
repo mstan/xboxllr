@@ -73,6 +73,41 @@ class FirstRunTests(unittest.TestCase):
         choice.write_text('xboxllr-console-choice 1\nacknowledged 1\nkernel -\neeprom -\nstorage -\nend\n')
         self.assertEqual(runtime.read_console_choice(choice), dict(acknowledged=True,kernel='',eeprom='',storage=''))
 
+    def test_image_and_folder_choices_are_distinct_and_utf8_round_trip(self):
+        choice = self.root / 'console-choice.txt'
+        folder, disk = 'G:/Saves/private', 'G:/Xbox disks/shared.qcow2'
+        choice.write_text('xboxllr-console-choice 2\nacknowledged 1\nkernel -\neeprom -\nstorage '+
+            encoded(folder)+'\nhdd '+encoded(disk)+'\nend\n')
+        self.assertEqual(runtime.read_console_choice(choice),
+            dict(acknowledged=True,kernel='',eeprom='',storage=folder,hdd=disk))
+
+    def test_existing_disk_requires_verified_original_signing_inputs(self):
+        disk = self.root / 'shared.qcow2';disk.write_bytes(b'authored placeholder')
+        eeprom = self.root / 'owned-eeprom.bin';eeprom.write_bytes(generate_eeprom('r2'))
+        with patch('native_storage.Storage') as backend:
+            backend.return_value.__enter__.return_value.identity.return_value = 'ab'*32
+            backend.return_value.__enter__.return_value.inspect.return_value = dict(disk_structure_verified=True)
+            with self.assertRaisesRegex(ValueError,'kernel dump and matching EEPROM'):
+                runtime.disk_identity(self.root,disk)
+            self.assertFalse(disk.with_name(disk.name+'.xboxllr').exists())
+            selected = runtime.disk_identity(self.root,disk,self.kernel,eeprom)
+            profile = runtime.prepare_profile(self.root,self.data,self.image,selected['kernel'],selected['eeprom'])
+            runtime.disk_identity(self.root,disk,prepared=profile)
+            other = self.root / 'other-eeprom.bin';other.write_bytes(generate_eeprom('r2'))
+            with self.assertRaisesRegex(ValueError,'does not match'):
+                runtime.disk_identity(self.root,disk,self.kernel,other)
+            self.assertEqual((selected['owner']/'eeprom.bin').read_bytes(),eeprom.read_bytes())
+        self.assertEqual(disk.read_bytes(),b'authored placeholder')
+
+    def test_failed_disk_admission_does_not_make_profile_or_fallback_storage(self):
+        disk = self.root / 'invalid.img';disk.write_bytes(b'invalid disk')
+        with patch('native_storage.Storage',side_effect=ValueError('Damaged HDD image')):
+            with self.assertRaisesRegex(ValueError,'Damaged HDD'):
+                runtime.disk_identity(self.root,disk,self.kernel)
+        self.assertFalse((self.root/'data/console').exists())
+        self.assertFalse((self.root/'data/state').exists())
+        self.assertFalse(disk.with_name(disk.name+'.xboxllr').exists())
+
     def test_optional_eeprom_import_retains_exact_identity_and_source(self):
         original = self.root / 'original-eeprom.bin'
         eeprom = generate_eeprom(random_bytes=bytes(range(58)))
@@ -136,7 +171,8 @@ class FirstRunTests(unittest.TestCase):
 
     def test_owner_launch_isolates_developer_overrides_and_has_no_deadline(self):
         runtime.writable_environment(self.root)
-        data = dict(self.data, executable='game.exe', runtime=dict(XLLE_PILOT_GUEST_SCHEDULER='1'),
+        data = dict(self.data, title=dict(self.data['title'],name='Blinx: The Time Sweeper'),
+                    executable='game.exe', runtime=dict(XLLE_PILOT_GUEST_SCHEDULER='1'),
                     capabilities=dict(visual_mods=False))
         catalog = Catalog([], self.root / 'selection.json')
         catalog.player = dict(source='keyboard', guid='')
@@ -154,6 +190,7 @@ class FirstRunTests(unittest.TestCase):
             self.assertEqual(env['XLLE_PILOT_GUEST_SCHEDULER'], '1')
             self.assertEqual(env['XLLE_PILOT_VISIBLE'], '1')
             self.assertEqual(env['XLLE_PILOT_AUDIO_OUTPUT_MUTE'], '0')
+            self.assertEqual(env['XLLE_PILOT_WINDOW_TITLE'], 'Blinx: The Time Sweeper')
             process.return_value.wait.assert_called_once_with()
             process.return_value.terminate.assert_not_called()
 

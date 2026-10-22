@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prepare the pinned Xbox-themed shared launcher, with explicit host limits.
 
-This host consumes mod settings, audio volume and the shared controller source.
+This host consumes mod settings and the shared controller source.
 Its prepared Xbox profile offers those controls without advertising remaps,
 fullscreen, filtering or window-size settings that the host does not consume.
 The original clean UI revision plus every prepared file hash are recorded.
@@ -54,7 +54,7 @@ def prepare(source, output, git='git'):
     code = code.replace('static const SystemProfile kSystemProfileXbox = {',
         '/* xboxlle host adapter: only consumed controls are shown. */\n'
         'static const char* const kPanelsXboxNativeDashboard[]={"game","controller",NULL};\n'
-        'static const char* const kPanelsXboxNativeSettings[]={"audio","system",NULL};\n'
+        'static const char* const kPanelsXboxNativeSettings[]={"system",NULL};\n'
         'static const char* const kPanelsXboxNativeController[]={"controller_config",NULL};\n'
         'static const SystemProfile kSystemProfileXbox = {').replace(old, new)
     if code.count('    NULL, 0, NULL, NULL,') != 1:
@@ -93,7 +93,7 @@ def prepare(source, output, git='git'):
     if(xboxllr_console_setup) {
         g_settings_two_col=false;
         const auto *profile=(const SystemProfile*)m->profile;
-        for(const char *id : {"audio","system"}) {
+        for(const char *id : {"system"}) {
             const LauncherPanel *panel=find_composed(profile->panels_settings,id,m);
             if(!panel)continue;
             begin_container(id,ImVec2(ImGui::GetContentRegionAvail().x,0),ImGuiChildFlags_AutoResizeY);
@@ -125,14 +125,14 @@ def prepare(source, output, git='git'):
     # never describe it as firmware that the native runtime executes.
     setup_labels = {
         '"%s needs a BIOS image and a playable %s before you can launch. "':
-            '"%s needs a kernel backup for save setup and an extracted %s. "',
+            '"%s needs a kernel dump for save setup and an extracted %s. "',
         '"Pick both below (you must legally own these dumps).",\n                game, noun);\n        } else {':
             '"Choose your own files below; the kernel is read once, not booted.",\n                game, noun);\n        } else {',
-        ': "1. BIOS";': ': "1. Kernel backup (preview save setup)";',
+        ': "1. BIOS";': ': "1. Kernel dump (preview save setup)";',
         ': "Browse for a BIOS image required by this console.";':
             ': "Used once to prepare signed saves; no original kernel runs during play.";',
         '                                      : "Select BIOS file";':
-            '                                      : "Select your Xbox kernel backup";',
+            '                                      : "Select your Xbox kernel dump";',
         'ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))':
             'ImGui::Button("Browse kernel##setup", ImVec2(px(140), px(32)))',
         ': "Select your game ROM file.";':
@@ -190,8 +190,8 @@ def prepare(source, output, git='git'):
         raise ValueError('Changed controller photograph')
     inventory = {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'xboxlle-ui.json'}
-    manifest = dict(version=1, adapter_version=6, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
-                    adapter='Xbox native host: mod provider, audio volume and shared Player 1 source',
+    manifest = dict(version=1, adapter_version=8, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
+                    adapter='Xbox native host: mod provider, console storage and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
     (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     return manifest
@@ -200,7 +200,7 @@ def prepare(source, output, git='git'):
 def verify(output):
     output = Path(output).resolve()
     manifest = json.loads((output / 'xboxlle-ui.json').read_text(encoding='utf-8'))
-    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 6:
+    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 8:
         raise ValueError('Unreviewed prepared UI profile')
     if manifest.get('controller_photo') != dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256):
         raise ValueError('Unreviewed controller photograph provenance')

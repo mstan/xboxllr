@@ -17,7 +17,7 @@ from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('native_release_runtime', 'native_mod_launcher', 'native_visual_mods',
-           'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory')
+           'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage')
 
 
 def sha(path):
@@ -138,26 +138,33 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
     (output / 'Start Game.cmd').write_bytes(command.encode('ascii'))
     (output / 'README-FIRST.txt').write_text(
         title['name'] + '\n\nOpen Start Game.cmd. The first-launch popup asks about optional Xbox files.\n'
-        'Choose Skip and continue for a new local console and automatic save storage.\n'
+        'Choose Skip for a new local console and automatic private save storage.\n'
         'That choice is remembered. Original saves may need their original console files;\n'
         'new local saves are not guaranteed to work on a real Xbox. Xbox Live is unavailable.\n\n'
         'Choose your game files on the main screen: select the supported extracted .xbe.\n'
         'Keep the whole game asset folder. Direct ISO import is not implemented yet.\n'
-        'The separate Setup Inputs folder holds your owned game files.\n\n'
-        'Optional original kernel/EEPROM and shared save storage are under Settings.\n'
-        'Original HDD image import is not available; shared virtual HDD folders are supported.\n'
+        'Game files and original console files are supplied separately by you.\n\n'
+        'Optional Kernel dump, EEPROM (console identity), HDD image and Save folder are under Settings.\n'
+        'An existing raw/QCOW2 HDD image takes priority. Without an image, a chosen folder\n'
+        'is used; leave both blank for automatic private storage for this game only.\n'
+        'No HDD image is generated. A selected image needs a valid kernel dump and matching\n'
+        'EEPROM. Disk and selected signing inputs are checked before use. Original saves\n'
+        'still need their matching identity and must pass the game\'s own verification.\n'
+        'Close xemu or other games before sharing an image. Invalid/busy images report\n'
+        'an error instead of silently switching to folder saves.\n'
         'New identity starts with empty local saves. Previous previews/saves are untouched.\n'
         'Select your controller and optional Mods in the Xbox-themed launcher.\n'
         'Setup settings, console identity and saves live in this package\'s data folder.\n'
         'Launcher keyboard bindings are stored beside Launcher.exe.\n'
-        'Keep that data folder and any selected shared storage across upgrades.\n'
+        'Keep that data folder, selected save storage and any <image>.xboxllr profile across upgrades.\n'
         'Do not copy either into a release archive.\n\n'
         'Owner-use candidate only; unresolved distribution/license gates remain.\n', encoding='utf-8')
     files = {p.relative_to(output).as_posix(): sha(p) for p in output.rglob('*') if p.is_file()}
     record = dict(schema='xboxllr.native-preview.v1', title=title,
         executable='native/' + runtime.name, launcher_executable='native/Launcher.exe',
         capabilities=dict(visual_mods=available), mods=mods,
-        launcher=dict(frame_modes=source.get('launcher', {}).get('frame_modes', [])),
+        launcher=dict(frame_modes=source.get('launcher', {}).get('frame_modes', []),
+                      defaults=source.get('launcher', {}).get('defaults', {})),
         runtime=source.get('runtime', {}), files=files,
         framework_revision=subprocess.check_output(['C:/Program Files/Git/cmd/git.exe', '-C', str(ROOT),
             'rev-parse', 'HEAD'], text=True).strip(),

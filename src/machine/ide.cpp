@@ -53,6 +53,11 @@ enum {
 constexpr int kMaxMultSectors = 16;
 
 namespace {
+bool flush_backing(IdeDrive& drive) {
+    try {if(drive.image)drive.image->flush();else if(drive.blk && std::fflush(drive.blk))return false;}
+    catch(const std::exception&) {return false;}
+    return true;
+}
 void put_le16(uint8_t* p, int word, uint16_t v) {
     p[word * 2] = static_cast<uint8_t>(v);
     p[word * 2 + 1] = static_cast<uint8_t>(v >> 8);
@@ -75,7 +80,7 @@ IdeController::~IdeController() {
 }
 
 bool IdeController::configure_hdd_security(const HddSecurityConfig& config) {
-    if (drives_[0].blk) return false; // never change policy under a running guest
+    if (drives_[0].backed()) return false; // never change policy under a running guest
     hdd_security_ = config;
     return true;
 }
@@ -99,22 +104,15 @@ void IdeController::hardware_reset() {
 
 bool IdeController::attach_hdd(const std::string& path, bool writeback) {
     IdeDrive& d = drives_[0];
-    if (d.blk) return false;
+    if (d.backed()) return false;
     hdd_writeback_ = writeback;
     overlay_.clear();
     // Read-only unless writeback was explicitly asked for: see the write-policy note in
     // ide.hpp. Opening "rb" is itself part of the guarantee — nothing can modify the image
     // even by accident.
-    d.blk = std::fopen(path.c_str(), writeback ? "r+b" : "rb");
-    if (!d.blk) return false;
-#ifdef _WIN32
-    _fseeki64(d.blk, 0, SEEK_END);
-    int64_t size = _ftelli64(d.blk);
-#else
-    std::fseek(d.blk, 0, SEEK_END);
-    int64_t size = std::ftell(d.blk);
-#endif
-    if (size <= 0) { std::fclose(d.blk); d.blk = nullptr; return false; }
+    try {d.image=std::make_unique<xllr::storage::DiskImage>(path,writeback);}
+    catch(const std::exception&) {return false;}
+    int64_t size=static_cast<int64_t>(d.image->size());
     d.nb_sectors = static_cast<uint64_t>(size) / 512;
     // Geometry as qemu derives it: 16 heads x 63 sectors, cylinders capped at 16383.
     d.heads = d.drive_heads = 16;
@@ -455,8 +453,8 @@ void IdeController::data_write(uint32_t val, int size) {
 // --- Disk backing ------------------------------------------------------------------------------
 bool IdeController::disk_rw(IdeDrive& d, uint64_t sector, uint32_t count, bool write,
                             uint8_t* buf) {
-    if (!d.blk) return false;
-    if (sector + count > d.nb_sectors) return false;
+    if (!d.backed()) return false;
+    if (sector>d.nb_sectors || count>d.nb_sectors-sector) return false;
     const size_t n = static_cast<size_t>(count) * 512;
 
     // ---- copy-on-write path (default; beads-xbox.1.14.11) -------------------------------
@@ -480,13 +478,23 @@ bool IdeController::disk_rw(IdeDrive& d, uint64_t sector, uint32_t count, bool w
         }
     }
 
+    size_t done=0;
+    if(d.image) {
+        try {
+            if(write){d.image->write(sector*512,buf,n);d.image->flush();}
+            else d.image->read(sector*512,buf,n);
+            done=n;
+        } catch(const std::exception&) {return false;}
+    } else {
 #ifdef _WIN32
     if (_fseeki64(d.blk, static_cast<int64_t>(sector) * 512, SEEK_SET) != 0) return false;
 #else
     if (std::fseek(d.blk, static_cast<long>(sector * 512), SEEK_SET) != 0) return false;
 #endif
-    size_t done = write ? std::fwrite(buf, 1, n, d.blk) : std::fread(buf, 1, n, d.blk);
-    if (write) { sectors_written_ += count; std::fflush(d.blk); }
+    done = write ? std::fwrite(buf, 1, n, d.blk) : std::fread(buf, 1, n, d.blk);
+    if(write && std::fflush(d.blk))return false;
+    }
+    if (write) { sectors_written_ += count; }
     else sectors_read_ += count;
     if (done != n) return false;
     // Overlay wins over the file for any sector the guest has already written.
@@ -877,7 +885,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
 
     // ATA-5 table 9: locked media access and frozen security changes abort.
     // Unknown commands still reach the explicit unmodeled-command stop below.
-    if (!is_cd && d.blk) {
+    if (!is_cd && d.backed()) {
         bool denied = d.security_frozen && cmd >= 0xF1 && cmd <= 0xF6 && cmd != 0xF5;
         if (d.locked) {
             switch (cmd) {
@@ -901,7 +909,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
 
     switch (cmd) {
         case 0xEC:  // IDENTIFY DEVICE
-            if (!is_cd && d.blk) {
+            if (!is_cd && d.backed()) {
                 build_identify(d);
                 d.status = READY_STAT | SEEK_STAT;
                 transfer_start(d, 512, IdeDrive::End::TransferStop);
@@ -958,7 +966,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
             break;
         }
         case 0x91:  // INITIALIZE DEVICE PARAMETERS
-            if (!is_cd && d.blk) {
+            if (!is_cd && d.backed()) {
                 d.heads = (d.select & ATA_DEV_HS) + 1;
                 d.sectors = d.nsector & 0xff;
                 raise_irq();
@@ -974,26 +982,26 @@ void IdeController::exec_cmd(uint8_t cmd) {
             break;
         case 0x20: case 0x21: case 0x24:  // READ SECTORS (PIO; 0x24 = EXT)
             if (is_cd) { set_signature(d); abort_command(d); complete = true; break; }
-            if (!d.blk) { abort_command(d); complete = true; break; }
+            if (!d.backed()) { abort_command(d); complete = true; break; }
             cmd_lba48_transform(d, cmd == 0x24);
             d.req_nb_sectors = 1;
             sector_read(d);
             break;
         case 0x30: case 0x31: case 0x34:  // WRITE SECTORS (PIO; 0x34 = EXT)
-            if (!d.blk) { abort_command(d); complete = true; break; }
+            if (!d.backed()) { abort_command(d); complete = true; break; }
             cmd_lba48_transform(d, cmd == 0x34);
             d.req_nb_sectors = 1;
             d.status = SEEK_STAT | READY_STAT;
             transfer_start(d, 512, IdeDrive::End::SectorWrite);
             break;
         case 0xC4: case 0x29:  // READ MULTIPLE (0x29 = EXT)
-            if (!d.blk || !d.mult_sectors) { abort_command(d); complete = true; break; }
+            if (!d.backed() || !d.mult_sectors) { abort_command(d); complete = true; break; }
             cmd_lba48_transform(d, cmd == 0x29);
             d.req_nb_sectors = d.mult_sectors;
             sector_read(d);
             break;
         case 0xC5: case 0x39: {  // WRITE MULTIPLE (0x39 = EXT)
-            if (!d.blk || !d.mult_sectors) { abort_command(d); complete = true; break; }
+            if (!d.backed() || !d.mult_sectors) { abort_command(d); complete = true; break; }
             cmd_lba48_transform(d, cmd == 0x39);
             d.req_nb_sectors = d.mult_sectors;
             uint32_t n = d.nsector;
@@ -1014,14 +1022,14 @@ void IdeController::exec_cmd(uint8_t cmd) {
             set_dsc = true;
             break;
         case 0xC8: case 0xC9: case 0x25:  // READ DMA (0x25 = EXT)
-            if (!d.blk) { abort_command(d); complete = true; break; }
+            if (!d.backed()) { abort_command(d); complete = true; break; }
             cmd_lba48_transform(d, cmd == 0x25);
             d.status = READY_STAT | SEEK_STAT | DRQ_STAT;
             d.dma_cmd = IdeDrive::DmaCmd::Read;
             bm_maybe_run();
             break;
         case 0xCA: case 0xCB: case 0x35:  // WRITE DMA (0x35 = EXT)
-            if (!d.blk) { abort_command(d); complete = true; break; }
+            if (!d.backed()) { abort_command(d); complete = true; break; }
             cmd_lba48_transform(d, cmd == 0x35);
             d.status = READY_STAT | SEEK_STAT | DRQ_STAT;
             d.dma_cmd = IdeDrive::DmaCmd::Write;
@@ -1037,7 +1045,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
             set_dsc = true;
             break;
         case 0xE7: case 0xEA:  // FLUSH CACHE (EXT)
-            if (d.blk) std::fflush(d.blk);
+            if(!flush_backing(d)){abort_command(d);break;}
             d.status = READY_STAT | SEEK_STAT;
             raise_irq();
             break;
@@ -1052,7 +1060,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
             set_dsc = true;
             break;
         case 0xEF: {  // SET FEATURES (xemu cmd_set_features subset)
-            if (!d.blk) { abort_command(d); complete = true; break; }
+            if (!d.backed()) { abort_command(d); complete = true; break; }
             complete = true;
             set_dsc = true;
             switch (d.feature) {
@@ -1061,7 +1069,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
                     break;
                 case 0x82:  // write cache disable
                     put_le16(d.identify_data, 85, (1 << 14) | 1);
-                    std::fflush(d.blk);
+                    if(!flush_backing(d)){abort_command(d);return;}
                     break;
                 case 0xcc: case 0x66: case 0xaa: case 0x55: case 0x05: case 0x85:
                 case 0x69: case 0x67: case 0x96: case 0x9a: case 0x42: case 0xc2:
@@ -1103,7 +1111,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
             break;
         }
         case 0xF2:  // SECURITY UNLOCK: independently provisioned ATA credentials
-            if (is_cd || !d.blk) { abort_command(d); complete = true; break; }
+            if (is_cd || !d.backed()) { abort_command(d); complete = true; break; }
             if (hdd_security_.mode != HddSecurityConfig::Mode::Locked) {
                 abort_command(d);
                 if (fault_) fault_("IDE SECURITY UNLOCK unmodeled without provisioned credentials; configure the drive before boot");
@@ -1114,7 +1122,7 @@ void IdeController::exec_cmd(uint8_t cmd) {
             transfer_start(d, 512, IdeDrive::End::SecurityCmd);
             break;
         case 0xF5:  // SECURITY FREEZE LOCK
-            if (is_cd || !d.blk) { abort_command(d); complete = true; break; }
+            if (is_cd || !d.backed()) { abort_command(d); complete = true; break; }
             d.security_frozen = true;
             complete = true;
             break;

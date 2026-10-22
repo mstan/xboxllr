@@ -121,6 +121,7 @@ static uint32_t storage_create_host(HANDLE parent,const WCHAR *path,uint32_t acc
     InitOnceExecuteOnce(&media_once,media_start,NULL,NULL);
     return (uint32_t)media_nt_create(out,access,&attr,io,allocation,attributes,share,disposition,options,NULL,0);
 }
+#include "storage_image.inc"
 static void storage_mount(const char *directory)
 {
     WCHAR path[32768];
@@ -158,6 +159,8 @@ static void storage_mount(const char *directory)
     }
     storage_parent=root; wcscpy(storage_path,resolved);
     fprintf(stderr,"[STORAGE] five local native partitions; host-backed capacity in 16 KiB logical units\n");
+    const char *image=getenv("XLLE_PILOT_HDD_IMAGE");
+    if(image && *image)storage_image_mount(image);
 }
 static uint32_t media_hash(HANDLE file,char hex[65])
 {

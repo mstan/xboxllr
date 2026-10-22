@@ -102,6 +102,10 @@ static uint32_t cache_format(unsigned partition)
      * inside pinned, handle-relative ordinary directories. Root is retained. */
     WCHAR actual[32768],expected[32768];
     if (partition<3 || partition>5 || !storage_roots[partition]) return MEDIA_NO_MEDIA;
+    if(storage_image) {
+        for(unsigned i=0;i<256;++i)if(media_files[i].host && media_files[i].partition==partition)return 0xc0000043u;
+        return xllr_storage_clear_cache(storage_image,partition);
+    }
     if (swprintf(expected,32768,L"%ls\\Partition%u",storage_path,partition)<0) return MEDIA_INVALID;
     DWORD count=GetFinalPathNameByHandleW(storage_roots[partition],actual,32768,FILE_NAME_NORMALIZED);
     if (!count || count>=32768 || _wcsicmp(actual,expected)) return 0xc0000022u;

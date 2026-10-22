@@ -25,6 +25,7 @@ DOCUMENTATION_IMAGES = {
     'docs/screenshots/blinx-widescreen.jpg': '52c135a49255fc1271bc0142384fe602b3e1b946056e6fbc328cfb93920980e2',
     'docs/screenshots/dashboard.png': '9ad68fba44cf1deca41a95222c010f58eee339ac9ba416b53c598fcfd3587378',
     'docs/screenshots/jsrf-widescreen.png': 'f87db9810f706b99d88544368d56f8c4a68dd1b7c8f039d41d0ec018167397eb',
+    'titles/dashboard/assets/launcher/boxart.png': '9ad68fba44cf1deca41a95222c010f58eee339ac9ba416b53c598fcfd3587378',
 }
 SECRET_PATTERNS = {
     'private key': re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----'),

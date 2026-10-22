@@ -997,8 +997,20 @@ contributors, GPL-2.0-or-later) prepares a private installed-title HDD. A local
 directory-boundary repair and its source identity remain in private preparation
 artifacts. `native_hdd_install.py` is an authored orchestration/readback script.
 No libfatx implementation body, binary or patch is linked/copied into the
-intended non-GPL shipping product. FATX at runtime executes the owned original
-kernel over the previously maintained private reference hardware dependency.
+intended non-GPL shipping product. The original-kernel filesystem reference
+continues to use that private reference hardware dependency.
+
+The optional native image backend in `src/storage` is a first-party raw/QCOW2
+block and FATX implementation. The same block owner serves the maintained LLE
+IDE device. The external `mborgerson/fatx` revision
+`fe41b2c0a3f05c171af9770c68d8cc320367d1cf` was used as a separate two-way
+filesystem test oracle; its implementation and binary are not shipped or linked.
+The [QCOW2 format specification](https://www.qemu.org/docs/master/interop/qcow2.html)
+and the [xemu HDD image](https://github.com/xemu-project/xemu-hdd-image/releases/tag/1.0)
+provide format and compatibility references. Credit belongs to their authors
+and contributors. No QEMU, xemu or libfatx implementation bodies were copied
+into this backend; component validation is distinct from per-title save/load
+and full-system cross-route qualification.
 
 ## Original GPU completion qualification
 
