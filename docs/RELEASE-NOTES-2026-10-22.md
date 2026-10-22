@@ -1,8 +1,13 @@
 # Windows preview candidate — October 22, 2026
 
-Applies to xboxllr's Dashboard title, BlinxRecomp and JSRFRecomp. Windows x64
-only; all three repositories remain private. These notes accompany draft
-release preparation, not clearance to distribute the current combined binaries.
+Applies to xboxllr's Dashboard title, BlinxRecomp and JSRFRecomp. The release
+contains **GPL source/tooling**, including exact pinned framework source in the
+game archives. All three repos remain private. Windows is the tested native
+host; Linux is deferred. No precompiled original-title executable is attached.
+
+The owner selected GPL-3.0-or-later for owner-original contributions on October
+22. Third-party terms are retained. This supersedes the former no-GPL shipping
+restriction and removes the policy requirement to replace the Phobos renderer.
 
 ## What changed
 
@@ -40,15 +45,16 @@ Xbox Live cache records and Dashboard Gaussian upscaling remain deferred.
 Xbox Live is unavailable. No firmware boot runs in these launchers. Its
 follow-up target is default off for games and on for Dashboard if qualified.
 
-## Publication gate
+## Release contents and local binaries
 
-The current native renderer still incorporates excluded GPL implementation
-code. Blinx/Dashboard also retain older prepared CPU helpers; JSRF already uses
-the reviewed MIT helper. The retained non-GPL shipping policy and owner-source
-PolyForm terms have not changed. See [license scope](../LICENSE-SCOPE.md) and
-[release readiness](RELEASE-READINESS.md). Draft pages may carry these notes and
-candidate checksums, but playable binaries must not be attached until this gate
-is resolved. Private visibility is not license clearance.
+Source kits contain framework/title source, mods, build tools, documentation and
+notices, with commit/hash manifests. Build the native title locally with your
+own supported game and the documented toolchain.
+
+Existing combined title executables contain code translated from the original
+XBE. Our GPL grant does not license those original bodies, and repository input
+rules keep them local. They are not included in this source/tooling release.
+See [license scope](../LICENSE-SCOPE.md) and [release readiness](RELEASE-READINESS.md).
 
 No original game/firmware/Dashboard files, HDDs, EEPROM, signing inputs, saved
-profiles, native saves or generated original source belong in release archives.
+profiles, native saves or generated original source are in the release archives.

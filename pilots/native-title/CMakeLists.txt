@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(xlle_native_title_pilot C CXX)
-message(STATUS "Private GPL-dependent reference pilot; excluded from product build/install")
+message(STATUS "GPL native-title host; original translated title inputs remain local")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 add_executable(pilot_audio_spatial_filter_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_audio_spatial_filter.cpp")

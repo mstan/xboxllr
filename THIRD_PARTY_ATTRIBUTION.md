@@ -14,11 +14,13 @@ See the [integration and measured evidence](docs/NATIVE-ADPCM-RELEASE-2026-10-21
 Historical import records remain intact. This change does not clear the other
 private pilot dependencies for the intended shipping product.
 
-Third-party material keeps the terms of its authors. The owner's PolyForm grant
-does not override these licenses. This inventory records the directly fetched
-dependencies and the EEPROM port; transitive and incorporated-source provenance
-review remains open. [LICENSE-SCOPE.md](LICENSE-SCOPE.md) explains the unresolved
-GPL/PolyForm combined-executable conflict.
+Third-party material keeps the terms of its authors. The owner's GPL-3.0-or-later grant does not override component licenses.
+Owner decision October 22 supersedes the former non-GPL shipping restriction.
+Dated private-pilot records below retain their historical meaning; they are
+not the current distribution policy. The native GPL renderer can be retained
+under its terms; actual binary releases still need their corresponding source
+and original-content boundary checked. See [LICENSE-SCOPE.md](LICENSE-SCOPE.md).
+
 
 For each new import, record the upstream repository, exact revision, imported
 files and local changes here or in a linked component inventory. Preserve

@@ -89,7 +89,10 @@ xboxllr is intended to publish the **recompiler toolkit** and a separate
 reuse build/release tooling from a pinned xboxllr version. Windows x64 ZIPs are
 the current target; native Linux releases are deferred. Shared packaging now
 produces self-contained local candidates with a bundled launcher and Python.
-Executable publication remains blocked by the dependency review below.
+The current [release](https://github.com/mstan/xboxllr/releases/tag/preview-2026-10-22)
+provides GPL source/tooling. Precompiled title candidates remain local: they
+contain translated original Xbox code, which our software license does not
+relicense. See [license scope](LICENSE-SCOPE.md) for the release boundary.
 
 The setup target is the user's matching game dump, plus original Dashboard files
 only if they want that Dashboard. Writable console storage, settings and other
@@ -109,8 +112,9 @@ also remains a future capability; the current Dashboard needs your own files.
 
 The [release readiness plan](docs/RELEASE-READINESS.md) tracks shared packaging,
 clean-machine setup, native Linux support and incorporated-code licensing.
-Current private reference executables are not cleared for distribution under
-the intended shipping policy. Original Xbox firmware, game media, Dashboard
+The owner selected GPL distribution on October 22. Source/tooling releases
+are available; combined title binaries need a separate original-code and
+corresponding-source solution. Original Xbox firmware, game media, Dashboard
 assets, keys, saves and generated original code are not distributed here.
 
 ## Credits and license
@@ -124,7 +128,7 @@ Development and integration: **Matthew Stanley**. Special thanks to
 Readable recognition is in [Credits](CREDITS.md). Exact revisions, imported files,
 modifications and license notices are in
 [third-party attribution](THIRD_PARTY_ATTRIBUTION.md).
-Owner-original material uses [PolyForm Noncommercial 1.0.0](LICENSE), subject to
-[license scope](LICENSE-SCOPE.md). Third-party work retains its own terms;
-PolyForm is not an OSI open-source license. Neither this README nor a private
-repository changes incorporated-code or original-media rights.
+Owner-original material uses [GNU GPL version 3 or later](LICENSE), subject to
+[license scope](LICENSE-SCOPE.md). Third-party work retains its own terms.
+Neither this grant nor private repository visibility changes original-media
+rights. The source/tooling release excludes original and generated game code.

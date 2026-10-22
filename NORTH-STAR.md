@@ -54,14 +54,11 @@ existing native services (.102). Bound supported behavior and validation cost,
 not the requirement to retain LLE. Independent original-code/xemu/hardware
 evidence informs LLE; HLE may suggest cases but does not prove LLE correct.
 
-Owner distribution constraint, 2026-10-06: GPL projects may be external research
-and execution references, but GPL code must not enter the intended non-GPL
-shipping product. A source port, linked runtime or copied generated-code helper
-is still incorporated code. Prefer permissively licensed implementations with
-verified file provenance, or independently implement the observed contract.
-The current reference build already has GPL dependencies; this policy is a
-shipping target, not a claim that they have been removed. See
-[license scope](LICENSE-SCOPE.md), tracked by `beads-xbox.1.21`.
+Owner distribution update, 2026-10-22: release under GPL. Owner-original code
+is GPL-3.0-or-later; retained third-party terms and corresponding-source duties
+apply. This supersedes the October 6 no-GPL shipping restriction. Original game,
+firmware and generated title code remain private inputs; source/tooling releases
+must not imply that the GPL grant licenses those inputs. See LICENSE-SCOPE.md.
 
 ## Current goal
 

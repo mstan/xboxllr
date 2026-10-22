@@ -1,7 +1,7 @@
 """Archive a pristine staged owner candidate, never a used playtest directory.
 
-An archive is not distribution clearance. Current candidates remain local until
-the combined-executable gate in LICENSE-SCOPE.md is resolved.
+An archive is not distribution clearance. These statically translated title
+candidates remain local; see the original-content boundary in LICENSE-SCOPE.md.
 """
 from __future__ import annotations
 

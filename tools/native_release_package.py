@@ -158,7 +158,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
         'Launcher keyboard bindings are stored beside Launcher.exe.\n'
         'Keep that data folder, selected save storage and any <image>.xboxllr profile across upgrades.\n'
         'Do not copy either into a release archive.\n\n'
-        'Owner-use candidate only; unresolved distribution/license gates remain.\n', encoding='utf-8')
+        'Owner-use candidate only. The source/tooling release is GPL; this executable\n'
+        'also contains translated original title code and is not included in that release.\n', encoding='utf-8')
     files = {p.relative_to(output).as_posix(): sha(p) for p in output.rglob('*') if p.is_file()}
     record = dict(schema='xboxllr.native-preview.v1', title=title,
         executable='native/' + runtime.name, launcher_executable='native/Launcher.exe',

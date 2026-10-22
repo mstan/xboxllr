@@ -1,69 +1,54 @@
-# License scope and distribution status
+# License scope and distribution
 
-The owner has selected **PolyForm Noncommercial License 1.0.0** for his original
-work. [LICENSE](LICENSE) contains the unmodified official license text;
-[NOTICE](NOTICE) identifies the licensor. This follows the noncommercial policy
-used by psxrecomp. Its local license file contains edited wording, so xboxlle
-uses the official PolyForm text rather than presenting those edits as standard
-PolyForm. Nothing here changes psxrecomp's files or terms.
+Owner decision, October 22, 2026: license and release this project under the
+GNU GPL. Owner-original contributions are **GPL-3.0-or-later**, with the full
+GPLv3 text in [LICENSE](LICENSE) and the copyright/grant in [NOTICE](NOTICE).
+This supersedes the former PolyForm Noncommercial and no-GPL shipping policy
+for the current source. Earlier grants are not revoked. This change concerns
+xboxllr, BlinxRecomp and JSRFRecomp; it does not relicense unrelated projects.
 
-This grant applies only to original contributions for which Matthew Stan holds
-the necessary rights. It does not relicense third-party code, derivatives of
-third-party code, dependency source, or license documents. Their existing terms
-continue to govern. In particular, the EEPROM-generation port remains LGPL,
-including modifications to that port. See [the attribution inventory](THIRD_PARTY_ATTRIBUTION.md).
+## Third-party components
 
-## Unresolved combined-executable restriction
+Third-party material retains its own terms and notices. Our grant covers only
+rights held by the owner, not every file's authorship or original game content.
+The Phobos renderer remains under its GPLv3 terms, with the MIT upstream notice
+and component notices preserved. MIT, BSD, LGPL and other components retain
+their respective grants. See [the exact inventory](THIRD_PARTY_ATTRIBUTION.md).
+New native CPU preparations use the reviewed MIT helper and an authored bridge;
+older private preparations retain their original fork notices.
 
-Owner clarification, 2026-10-06: GPL projects are allowed as external research
-and reference runners. The intended shipping product must exclude GPL code.
-Reimplementing an observed ABI or behavior is different from copying or
-adapting its implementation; separate source folders or omitted source bundles
-do not make incorporated code disappear from an executable.
+The former policy-driven requirement to replace the GPL renderer is removed.
+GPL distribution still requires the applicable notices and corresponding source
+for the actual build, including incorporated modified dependencies and build
+scripts. A root license change alone is not a complete source-package audit.
+Native title gameplay does not link Unicorn; the separate legacy full-system
+route does. Any future legacy binary needs its own component/version review.
 
-In addition to Unicorn below, the current renderer imports GPL xemu shader
-translation and a GPL NoRain texture model (`src/third_party/`). These remain
-research dependencies with their notices; they have not been cleared for the
-intended shipping configuration. Earlier native-title preparations copied the
-fork runtime header into private generated output. New preparations use an
-attributed MIT upstream CPU helper template and a separate authored bridge;
-older preparations require a reviewed clone/rebuild. See the
-[CPU helper integration](docs/NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md).
-This does not clear all other compiler-emitted glue. The selectable PHOBOS
-renderer now compiles the fork's D3D11/RHI implementation from a pinned,
-notice-preserving prepared source tree (see THIRD_PARTY_ATTRIBUTION.md). It is an external
-reference experiment, excluded from the normal build, and is not a non-GPL
-product implementation. No executable release is authorized by that experiment.
+## Current release boundary
 
-The inspected sp00nznet donor revision retains an MIT root license and is a
-candidate for direct reuse where file-level provenance permits it. Phobos,
-NoRain, xemu and Cxbx remain useful behavior/contract references even where
-their implementations cannot be incorporated into the shipping product.
+The October 22 release is a **source/tooling preview**, not a downloadable
+precompiled game. Title-native executables currently statically include code
+translated from the owner's original XBE. That input's rights are not changed
+by our GPL grant, and the repository policy keeps original/generated title code
+private. Such executables are not included in these releases. Supplying only
+our wrappers would not provide all the source for those combined executables.
 
-The legacy full-system build statically links **Unicorn**, whose upstream license is GPL.
-PolyForm's noncommercial restriction is not GPL-compatible. Retaining a GPL
-notice or putting dependency files in a separate directory does not resolve
-that conflict for a combined executable. No GPL linking exception or alternate
-Unicorn license has been obtained, and this document grants neither.
+Release source archives contain the framework, title metadata/mods, build tools
+and notices. They exclude original games/firmware/Dashboard files, generated
+title bodies, kernel/EEPROM/signing material, disk images, native saves and
+profiles. A recursive title source archive includes its exact framework pin.
+Build locally using your own admitted title input and the documented toolchain.
+The source-generation/build process is documented in [Development](docs/DEVELOPMENT.md).
 
-**Do not distribute the current combined executable as a PolyForm-only product.**
-The owner's original-source licensing choice is recorded here; compatibility
-and incorporated-source provenance remain an open release task, tracked in
-`beads-xbox.1.21`. This is not a claim that every existing source file is entirely
-original or that the full dependency graph has been cleared.
+Standalone ROM-free binaries may be released separately after their exact
+corresponding-source and dependency package is verified. No original-game rights
+or blanket clearance for an arbitrary combined binary are implied here.
 
-Before distributing a combined build, resolve this through applicable
-permissions or a reviewed licensing/architecture change. Changing a static link
-to a DLL alone is not a presumed solution. Any alternative must also respect
-the measured CPU floor and the owner's scope decisions. Do not silently offer
-the owner's work under GPL, apply noncommercial restrictions to third-party
-GPL code, or label PolyForm as an OSI open-source license.
+Artwork/screenshots identify the supported titles and have separate rights
+notices. They are not covered by a blanket GPL software grant. The standalone
+EEPROM source tool keeps its LGPL notice; generated console identities and keys
+remain private data. Read the [setup guide](docs/SETUP.md) before sharing saves.
 
-The standalone LGPL EEPROM tool is distributed as editable Python source with
-its notices and license. Its generated machine files do not become copies of
-the generator's source merely because it produced them; keep them private for
-their identity/key content regardless.
-
-References: [official PolyForm terms](https://polyformproject.org/licenses/noncommercial/1.0.0),
-[Unicorn 2.1.1 COPYING](https://github.com/unicorn-engine/unicorn/blob/2.1.1/COPYING),
-and [GNU's compatibility guidance](https://www.gnu.org/licenses/gpl-faq.en.html#WhatDoesCompatMean).
+References: [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html),
+[GNU on generated output](https://www.gnu.org/licenses/gpl-faq.en.html#GPLOutput),
+[GNU on corresponding source](https://www.gnu.org/licenses/gpl-faq.en.html#SourceAndBinaryOnDifferentSites).

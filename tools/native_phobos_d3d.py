@@ -241,7 +241,7 @@ def prepare(donor, output, reference):
         'Source: https://github.com/phobos665/xboxrecomp/tree/'+PIN+'\n\n'
         'Based on sp00nznet/xboxrecomp; upstream MIT notice retained separately.\n'
         'The Phobos fork declares GPL-3.0; this is a private reference build,\n'
-        'outside the intended non-GPL product. Original per-file notices remain.\n\n'
+        'under retained GPL terms. Original per-file notices remain.\n\n'
         'Our changes: terminal guards replace unqualified COM bodies; host\n'
         'presentation defers pacing to the Xbox API adapter; renderer accessors\n'
         'and UP-ring upload expose real owned resources; independent vertex\n'

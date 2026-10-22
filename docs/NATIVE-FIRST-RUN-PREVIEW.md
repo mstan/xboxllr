@@ -2,7 +2,8 @@
 
 Tracking: `beads-xbox.1.187.7`, October 21, 2026. Shared owner-use packaging for
 Blinx, JSRF and Dashboard lives in xboxllr. It is separate from publication and
-does not resolve the [remaining release gates](RELEASE-READINESS.md).
+is not the [GPL source/tooling release](RELEASE-READINESS.md). Combined
+original-title code remains local; the former no-GPL policy is superseded.
 
 `tools/native_release_package.py` accepts title metadata, an optimized native
 runtime, its CMake cache, the common recomp-ui launcher, a reviewed official
@@ -33,7 +34,7 @@ python tools/native_release_archive.py --source <new-preview-directory> --output
 This verifies every manifest hash and the resulting ZIP, rejects additional
 files/links and owned-image extensions, and refuses to overwrite an archive.
 Do not archive an owner review folder after running it. Archive creation does
-not clear the combined-executable distribution gate in `LICENSE-SCOPE.md`.
+not resolve the original-title content boundary in `LICENSE-SCOPE.md`.
 
 `Start Game.cmd` runs the bundled Python host. `release.json` records package
 hashes, native runtime settings and title identity. This detects accidental
