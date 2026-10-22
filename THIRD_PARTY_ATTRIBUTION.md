@@ -1,5 +1,13 @@
 # Third-party attribution
 
+Native CPU helper template, October 21, 2026: new preparations use the unchanged
+sp00nznet MIT template at `1409a7d7801d3e931fb1074be6104209ddd9a33e` and a separate
+authored runtime bridge. Exact source/license hashes and imported files are in
+[the component inventory](src/third_party/xboxrecomp_cpu/README.md); adaptations
+and qualification are recorded in the
+[CPU helper integration](docs/NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md).
+Other generated glue and the private renderer still need their own review.
+
 Current native-title ADPCM, October 21, 2026: production audio uses the existing
 MIT-0 dr_wav adapter; the NoRain/Phobos codec below is now comparison-only.
 See the [integration and measured evidence](docs/NATIVE-ADPCM-RELEASE-2026-10-21.md).

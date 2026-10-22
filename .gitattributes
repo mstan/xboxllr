@@ -3,3 +3,6 @@ LICENSES/*.txt -whitespace
 # Pinned upstream donor bytes (hashes in the adjacent README).
 src/third_party/dr_wav/dr_wav.h -text -whitespace
 src/third_party/dr_wav/LICENSE -text -whitespace
+src/third_party/xboxrecomp_cpu/recomp_types.h -text -whitespace
+src/third_party/xboxrecomp_cpu/LICENSE -text -whitespace
+pilots/native-title/native_cpu_helpers.h text eol=lf

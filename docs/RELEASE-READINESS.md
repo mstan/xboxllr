@@ -42,7 +42,8 @@ GitHub releases at this check.
 | Player-facing game pages, framework overview, screenshots and credits | Complete and pushed |
 | Requested repository rename and private game remotes | Complete; all three repos remain private |
 | Replace the runtime's GPL ADPCM codec with the maintained permissive adapter | Implemented; reference, actual mixer and native JSRF smoke checks pass |
-| Generated CPU helper provenance and selected renderer implementation | File-level review/replacement remains open |
+| Generated CPU helper provenance | MIT upstream replacement and authored bridge pass component checks plus representative native JSRF save/load/gameplay; title release migration remains |
+| Selected renderer implementation and remaining emitted glue provenance | File-level review/replacement remains open |
 | Shared release packaging and minimal first-run setup | Open |
 | Imported Windows DLL preflight | Shared verifier implemented; current title outputs need reviewed VC++ runtime files |
 | Native Linux host/backends and title execution | Deferred by owner; not a Windows release gate |
@@ -60,6 +61,13 @@ GitHub releases at this check.
    artifact of xboxllr; JSRF remains its own game repository. Carry forward the
    accepted rapid-coverage scope and explicit deferrals rather than claiming
    exhaustive gameplay qualification.
+
+The CPU helper replacement is tracked in `beads-xbox.1.187.4` and
+[its provenance/qualification record](NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md).
+Representative native JSRF original-save loading, movement and active rendering/
+audio now pass with the attributed MIT template. Existing owner playtest builds
+and title pins remain unchanged. Component Linux checks do not qualify native
+Linux title execution.
 
 ## Actual shipping gates
 
@@ -105,7 +113,12 @@ qualified native Linux build. Keep Windows behavior working during the port.
 Target: the owner's matching game dump; optional original Dashboard files.
 Generate writable storage, configuration, cache and a virtual-console profile
 locally where supported. Audit current EEPROM, signing/settings, media, generated
-CPU and preparation dependencies before promising game-only setup. Define a
+CPU and preparation dependencies before promising game-only setup. The current
+`native_save_keys.py` preparer executes the original owned kernel through
+Unicorn; EEPROM and console-region generation alone do not remove that
+preparation dependency. Native title gameplay does not link Unicorn. Removing
+the original-kernel setup requirement remains open; do not substitute fabricated
+signatures or change existing native-save identities. Define a
 ROM-free setup host/first-run generation boundary; don't package development
 paths, original binaries/media, keys, user saves or private generated output.
 

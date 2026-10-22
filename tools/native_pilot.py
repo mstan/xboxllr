@@ -197,7 +197,10 @@ def prepare(args):
             max_functions=getattr(args, 'unit_max_functions', 0) or 250,
             max_bytes=getattr(args, 'unit_max_bytes', 0) or 524288)
     retire_recovered_entry_units(out/'gen',extent_records)
+    from native_cpu_helpers import install as install_cpu_helpers
+    runtime_helpers = install_cpu_helpers(out / 'gen')
     counts = harden_generated(out / "gen")
+    counts['runtime_helpers'] = runtime_helpers
     counts['x87_instruction_lowering']=json.loads(x87_report.read_text())
     if unit_budget is not None:
         counts['unit_budget'] = unit_budget

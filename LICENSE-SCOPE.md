@@ -24,8 +24,12 @@ do not make incorporated code disappear from an executable.
 In addition to Unicorn below, the current renderer imports GPL xemu shader
 translation and a GPL NoRain texture model (`src/third_party/`). These remain
 research dependencies with their notices; they have not been cleared for the
-intended shipping configuration. The Phobos native-title pilot also copies its
-GPL-fork runtime header into private generated output. Its selectable PHOBOS
+intended shipping configuration. Earlier native-title preparations copied the
+fork runtime header into private generated output. New preparations use an
+attributed MIT upstream CPU helper template and a separate authored bridge;
+older preparations require a reviewed clone/rebuild. See the
+[CPU helper integration](docs/NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md).
+This does not clear all other compiler-emitted glue. The selectable PHOBOS
 renderer now compiles the fork's D3D11/RHI implementation from a pinned,
 notice-preserving prepared source tree (see THIRD_PARTY_ATTRIBUTION.md). It is an external
 reference experiment, excluded from the normal build, and is not a non-GPL
@@ -36,7 +40,7 @@ candidate for direct reuse where file-level provenance permits it. Phobos,
 NoRain, xemu and Cxbx remain useful behavior/contract references even where
 their implementations cannot be incorporated into the shipping product.
 
-The current build statically links **Unicorn**, whose upstream license is GPL.
+The legacy full-system build statically links **Unicorn**, whose upstream license is GPL.
 PolyForm's noncommercial restriction is not GPL-compatible. Retaining a GPL
 notice or putting dependency files in a separate directory does not resolve
 that conflict for a combined executable. No GPL linking exception or alternate

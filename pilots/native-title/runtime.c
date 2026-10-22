@@ -216,6 +216,18 @@ uint32_t recomp_mxcsr_read(void)
     return value;
 }
 void recomp_icall_fail_log(uint32_t va) { stop("unresolved indirect target", va); }
+void recomp_abi_violation_log(uint32_t va, uint32_t ebx_before, uint32_t esi_before,
+                              uint32_t edi_before, uint32_t stack_before)
+{
+    (void)ebx_before; (void)esi_before; (void)edi_before; (void)stack_before;
+    stop("native call violated original register/stack ABI", va);
+}
+void recomp_abi_pop_violation_log(uint32_t va, uint32_t ebx_before, uint32_t esi_before,
+                                  uint32_t edi_before, uint32_t stack_before, uint32_t cleanup)
+{
+    (void)ebx_before; (void)esi_before; (void)edi_before; (void)stack_before; (void)cleanup;
+    stop("native call violated original exact cleanup ABI", va);
+}
 void recomp_icall_not_code_log(uint32_t va, uint32_t saved) { (void)saved; stop("non-code indirect target", va); }
 void recomp_int3_reached(uint32_t va) { stop("guest breakpoint", va); }
 void recomp_cxx_throw(uint32_t object, uint32_t info) { (void)info; stop("C++ exception unwinding unsupported", object); }

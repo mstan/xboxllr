@@ -16,6 +16,14 @@ jobs:
       - run: python3 tests/test_aot_private_input.py
       - run: python3 tests/test_cpu_block_census.py
       - run: python3 tests/test_windows_dependencies.py
+      - run: python3 tests/test_native_cpu_helpers.py
+      - name: Compile and execute ROM-free native CPU helper contracts
+        run: |
+          python3 tools/native_cpu_helpers.py --emit-header --output build-cpu-helpers/recomp_types.h
+          cc -std=c11 -O2 -Ibuild-cpu-helpers tests/test_native_cpu_helpers.c -lm -o build-cpu-helpers/normal
+          cc -std=c11 -O2 -DRECOMP_ABI_CHECK -Ibuild-cpu-helpers tests/test_native_cpu_helpers.c -lm -o build-cpu-helpers/checked
+          build-cpu-helpers/normal
+          build-cpu-helpers/checked
       - name: Compile portable generated C without Xbox inputs
         run: |
           python3 tools/aot_compile.py --input tests/aot_programs.json --output-c build-aot-ci/programs.c --output-h build-aot-ci/programs.h --manifest build-aot-ci/manifest.json

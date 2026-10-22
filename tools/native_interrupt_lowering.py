@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 import re
 from aot_inventory import parse_xbe
-from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 
 SITE = re.compile(r'RECOMP_UNIMPL\("(cli|sti|in al, dx|out dx, al|wbinvd)", (0x[0-9A-Fa-f]+)u\); /\* TODO: \1 \*/')
 REGS = {'eax', 'ecx', 'edx', 'ebx', 'esi', 'edi'}
@@ -36,6 +35,7 @@ def shadow_statement(insn):
 
 
 def lower(code, read):
+    from capstone import Cs, CS_ARCH_X86, CS_MODE_32
     disassembler = Cs(CS_ARCH_X86, CS_MODE_32)
     edits, rows = [], []
     for site in SITE.finditer(code):
