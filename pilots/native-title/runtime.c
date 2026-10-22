@@ -11,6 +11,9 @@
 #include <string.h>
 #include "event_trace.h"
 #include "native_debug.h"
+#ifdef PILOT_INPUT_NATIVE
+#include "input_host.h"
+#endif
 #define RECOMP_GENERATED_CODE
 #include "recomp_types.h"
 #include "pilot_image.h"
@@ -144,6 +147,9 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
     fprintf(stderr, "\n");
     stop_capture();
     fflush(stderr);
+#ifdef PILOT_INPUT_NATIVE
+    pilot_input_diagnostic_flush();
+#endif
     ExitProcess(2);
 }
 

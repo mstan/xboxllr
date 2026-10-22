@@ -371,6 +371,7 @@ endif()
 pilot_add_test(NAME pilot_graphics_abi_bridge COMMAND pilot_graphics_abi_test)
 set_tests_properties(pilot_graphics_abi_bridge PROPERTIES TIMEOUT 10)
 include(input_replay_tests.cmake)
+include(input_diagnostic_tests.cmake)
 add_executable(pilot_reference_clock_quantum_test reference_clock_quantum_test.c reference_clock.c)
 pilot_add_test(NAME pilot_reference_clock_quantum COMMAND pilot_reference_clock_quantum_test)
 set_tests_properties(pilot_reference_clock_quantum PROPERTIES TIMEOUT 10)
@@ -1191,6 +1192,11 @@ endif()
 add_executable(pilot_native_debug_test native_debug_test.cpp)
 target_link_libraries(pilot_native_debug_test PRIVATE pilot_native_debug)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+pilot_add_test(NAME pilot_input_diagnostic_capture_replay COMMAND "${CMAKE_COMMAND}" -E env
+  "XBOXLLR_INPUT_DIAGNOSTIC_TEST_EXE=$<TARGET_FILE:pilot_input_diagnostic_test>"
+  "XBOXLLR_DIAGNOSTIC_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/diagnostic-fixture"
+  "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_input_diagnostic.py")
+set_tests_properties(pilot_input_diagnostic_capture_replay PROPERTIES TIMEOUT 30)
 pilot_add_test(NAME pilot_native_debug_transport COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_debug_transport.py" "$<TARGET_FILE:pilot_native_debug_test>")
 set_tests_properties(pilot_native_debug_transport PROPERTIES TIMEOUT 25)

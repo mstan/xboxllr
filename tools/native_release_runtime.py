@@ -352,17 +352,29 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
         env.update(XLLE_PILOT_VISIBLE='0', XLLE_PILOT_AUDIO_OUTPUT_MUTE='1', RECOMP_VOLUME='0', SDL_AUDIODRIVER='dummy')
     command = [str(inside(root, data['executable'])), str(image),
                str(profile / 'eeprom.bin'), str(image.parent), str(state)]
-    log = (root / 'data' / 'game.log').open('w', encoding='utf-8')
+    from native_diagnostics import Session
+    session = Session(root, data, command[0], image, profile, state, catalog.selection(), env,
+        enabled=os.environ.get('XBOXLLR_DIAGNOSTICS') == '1', hdd=hdd)
+    log = session.log_path.open('w', encoding='utf-8')
     with log:
-        child = subprocess.Popen(command, cwd=state, env=env, stdout=log, stderr=log)
+        try:
+            child = subprocess.Popen(command, cwd=state, env=env, stdout=log, stderr=log)
+        except OSError:
+            session.finish(None, reason='launch-failed')
+            raise
+        session.started(child)
         if automated_seconds is not None:
             try:
-                return child.wait(timeout=automated_seconds)
+                code = child.wait(timeout=automated_seconds)
             except subprocess.TimeoutExpired:
                 child.terminate()
                 child.wait()
+                session.finish(child.returncode, reason='automated-time-limit')
                 return 0
-        return child.wait()
+        else:
+            code = child.wait()
+        session.finish(code)
+        return code
 
 
 def main():

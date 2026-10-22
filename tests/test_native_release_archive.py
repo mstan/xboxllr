@@ -61,3 +61,17 @@ class ArchiveTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             archive(self.source, self.output)
         self.assertEqual(self.output.read_bytes(), b'keep')
+
+    def test_private_diagnostic_metadata_rejected_even_when_manifested(self):
+        for folder in ('diagnostics', 'PRIVATE-DO-NOT-SHARE'):
+            path = self.source / folder / 'replay.json'
+            path.parent.mkdir()
+            path.write_text('{"fixture": "private tester metadata"}')
+            self.metadata['files'][path.relative_to(self.source).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.save()
+            with self.assertRaisesRegex(ValueError, 'Private or unsafe'):
+                archive(self.source, self.output)
+            self.assertFalse(self.output.exists())
+            del self.metadata['files'][path.relative_to(self.source).as_posix()]
+            path.unlink()
+            path.parent.rmdir()

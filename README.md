@@ -23,6 +23,10 @@ Coverage is scoped in the linked title records below.*
 [Release plan](docs/RELEASE-READINESS.md) |
 [Credits](CREDITS.md)
 
+For crash reports, see [tester diagnostics](docs/TESTER-DIAGNOSTICS.md): retained
+per-launch logs and optional private input reproduction sessions are shared by
+the native title packages.
+
 ## Native code and low-level contracts
 
 **Native** describes how CPU instructions execute. The title pipeline translates

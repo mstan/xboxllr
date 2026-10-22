@@ -106,7 +106,7 @@ static void input_host_convert(const XINPUT_GAMEPAD *source, uint8_t dest[18])
     memcpy(dest+14,&source->sThumbRX,2); memcpy(dest+16,&source->sThumbRY,2);
 }
 
-uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
+static uint32_t input_host_state_raw(unsigned port,uint8_t gamepad[18])
 {
     input_host_is_keyboard();
     if(!port && pilot_debug_input(gamepad))return ERROR_SUCCESS;
@@ -137,7 +137,7 @@ uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
     return status;
 }
 
-uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
+static uint32_t input_host_caps_raw(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
 {
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
@@ -145,7 +145,7 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
     if(input_host_is_keyboard() || input_replay_count || input_control_view || input_host_tcp) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         if(input_replay_count) {
-            uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
+            uint8_t state[18];uint32_t status=input_host_state_raw(port,state);
             if(status)return status;
         }
         uint8_t keys[256];memset(keys,1,sizeof(keys));XINPUT_GAMEPAD pad;
@@ -168,15 +168,17 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
     return ERROR_SUCCESS;
 }
 
-uint32_t pilot_input_host_rumble(unsigned port,uint16_t left,uint16_t right)
+static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right)
 {
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
     if(input_host_sdl)return pilot_input_sdl_rumble(port,left,right);
     if(input_host_is_keyboard() || input_replay_count || input_control_view || input_host_tcp) {
-        uint8_t state[18];uint32_t status=pilot_input_host_state(port,state);
+        uint8_t state[18];uint32_t status=input_host_state_raw(port,state);
         return status?status:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
     }
     XINPUT_VIBRATION vibration={left,right};
     return XInputSetState(port,&vibration);
 }
+
+#include "input_diagnostic.inc"

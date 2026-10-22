@@ -16,7 +16,7 @@ import zipfile
 from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('native_release_runtime', 'native_mod_launcher', 'native_visual_mods',
+MODULES = ('native_release_runtime', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage')
 
 
@@ -136,6 +136,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output):
             hidden_features=sorted(hidden), hidden_choices={key: sorted(v) for key, v in choices.items()}), indent=2)+'\n')
     command = '@echo off\r\nsetlocal\r\n"%~dp0python\\pythonw.exe" "%~dp0tools\\native_release_runtime.py" %*\r\n'
     (output / 'Start Game.cmd').write_bytes(command.encode('ascii'))
+    diagnostic_command = command.replace('setlocal\r\n', 'setlocal\r\nset "XBOXLLR_DIAGNOSTICS=1"\r\n')
+    (output / 'Start with Diagnostics.cmd').write_bytes(diagnostic_command.encode('ascii'))
     (output / 'README-FIRST.txt').write_text(
         title['name'] + '\n\nOpen Start Game.cmd. The first-launch popup asks about optional Xbox files.\n'
         'Choose Skip for a new local console and automatic private save storage.\n'

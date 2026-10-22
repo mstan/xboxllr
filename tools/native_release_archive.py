@@ -26,6 +26,7 @@ def archive(source: Path, output: Path):
         path = PurePosixPath(name)
         if (path.is_absolute() or '\\' in name or ':' in name or
                 any(p in ('..', '.', '') for p in path.parts) or
+                any(p.casefold() in ('private-do-not-share', 'diagnostics') for p in path.parts) or
                 path.parts[0].lower() in ('data', 'local', 'setup inputs') or
                 path.suffix.lower() in ('.xbe', '.iso', '.xiso', '.img', '.qcow2', '.bin')):
             raise ValueError('Private or unsafe package entry: ' + name)

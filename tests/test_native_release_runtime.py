@@ -177,10 +177,12 @@ class FirstRunTests(unittest.TestCase):
         catalog = Catalog([], self.root / 'selection.json')
         catalog.player = dict(source='keyboard', guid='')
         profile = self.root / 'data/console'
+        (self.root / 'game.exe').write_bytes(b'authored launcher fixture')
         with patch.dict('os.environ', dict(XLLE_PILOT_INPUT_REPLAY='old-replay',
                 XLLE_PILOT_MOD_PLAN='old-plan', XLLE_PILOT_SAVE_KEYS_FILE='old-keys',
                 SDL_AUDIODRIVER='dummy')), patch.object(runtime.subprocess, 'Popen') as process:
             process.return_value.wait.return_value = 0
+            process.return_value.pid = 123
             runtime.launch_game(self.root, data, self.image, profile, catalog)
             env = process.call_args.kwargs['env']
             self.assertNotIn('XLLE_PILOT_INPUT_REPLAY', env)
