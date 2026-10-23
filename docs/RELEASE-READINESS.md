@@ -1,12 +1,13 @@
 # xboxllr release readiness
 
-Updated October 22, 2026. Tracking: `beads-xbox.1.187`; licensing `.1.21`.
+Dashboard updated October 23, 2026. Tracking: `beads-xbox.1.196`;
+initial preparation `.1.187`; licensing `.1.21`.
 All three repositories remain private. The owner selected GPL distribution and
 authorized playable Windows prereleases. Native Linux releases remain deferred.
 
 | Repository | Windows preview and source downloads |
 | --- | --- |
-| [xboxllr](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-22) | Recompiler/framework source toolkit, native Xbox Dashboard Windows application, source kit and prepared dependency-source supplement |
+| [xboxllr](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-23.1) | Recompiler/framework source toolkit, updated native Xbox Dashboard Windows application, source kit and prepared dependency-source supplement |
 | [BlinxRecomp](https://github.com/mstan/BlinxRecomp/releases/tag/windows-preview-2026-10-22) | Blinx Windows application, recursively pinned source kit and prepared dependency-source supplement |
 | [JSRFRecomp](https://github.com/mstan/JSRFRecomp/releases/tag/windows-preview-2026-10-22) | JSRF Windows application, recursively pinned source kit and prepared dependency-source supplement |
 
@@ -24,6 +25,16 @@ authorized playable Windows prereleases. Native Linux releases remain deferred.
   explicit original-rightsholder notice. The notice creates no license exception.
 - Source kits include exact framework pins. Prepared dependency source and build
   provenance accompany the Windows downloads. Original title inputs stay separate.
+- Dashboard's full native startup now uses the title's rendering window, retaining
+  position and size through the handoff. Full startup defaults on for Dashboard;
+  the skip-animation mod defaults off. Startup assets come from a compatible
+  user-owned complete kernel dump. New packages open through `Start Game.exe`
+  without a developer console. Blinx camera mods are excluded from Dashboard.
+
+The Dashboard-only October 23 refresh has owner acceptance, a real native
+startup-to-menu/navigation/normal-close check, four native startup fixtures,
+and 61 passing Python regression tests (one additional private-input skip).
+Blinx and JSRF builds, pins and releases are unchanged by this refresh.
 
 ## Packaging and evidence
 
@@ -52,7 +63,8 @@ Our source license and notice do not grant Microsoft/Sega permission.
 
 Direct ISO import, native Linux host, general firmware admission, complete fresh
 virtual-profile and per-title image-backed save matrices, populated imported
-Xbox Live cache (`.1.188`), Dashboard Gaussian upscaling (`.1.189`) and firmware
-startup (`.1.190`). Xbox Live is unavailable. Cheat-assisted coverage is not
+Xbox Live cache (`.1.188`), Dashboard Gaussian upscaling (`.1.189`) and supporting
+startup hardware/audio precision (`.1.195`). Native startup presentation is
+available; full firmware boot is separate. Xbox Live is unavailable. Cheat-assisted coverage is not
 exhaustive natural-mechanics qualification. Legacy full-system binaries are not
 included. The toolkit is source/Python tooling, not a standalone compiler EXE.
