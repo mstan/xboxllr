@@ -6,8 +6,8 @@ description = "Reverse either camera axis independently for Player 1. Applies to
 save_compatibility = "shared"
 
 [[target]]
-system = "xbox"
-native_title_mod_abi = 2
+game_id = "4D530013"
+xbe_sha256 = "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"
 
 [[feature]]
 id = "invert-horizontal"

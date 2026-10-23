@@ -157,8 +157,13 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     relative = Path('mods/preloaded/packages') / MOD_PACKAGE / '1.0.0/manifest.toml'
     (output / relative).parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / relative, output / relative)
+    from native_input_mods import manifests as input_manifests
+    for path in input_manifests(source):
+        relative = path.relative_to(ROOT)
+        (output / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, output / relative)
     if available:
-        for package in ('xboxlle.enhancement.visuals', 'xboxlle.enhancement.frame-rate', 'xboxlle.enhancement.camera'):
+        for package in ('xboxlle.enhancement.visuals', 'xboxlle.enhancement.frame-rate'):
             relative = Path('mods/preloaded/packages') / package / '1.0.0/manifest.toml'
             (output / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, output / relative)

@@ -427,7 +427,10 @@ def interactive(root, data, writable, minimized):
         choice_path = writable / 'console-choice.txt'
         choice = read_console_choice(choice_path)
         from native_boot_launcher import ui_state as startup_ui, manifests as startup_manifests
+        from native_input_mods import manifests as input_manifests
         catalogs = (manifests(root / 'release.json', data) if data['capabilities']['visual_mods'] else [])
+        if not data['capabilities']['visual_mods']:
+            catalogs += input_manifests(data)
         catalogs += startup_manifests(data)
         catalog = Catalog(catalogs,
             writable / 'mod-selection.json', visibility=[root / 'mods/ui-visibility.json'],

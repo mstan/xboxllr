@@ -11,6 +11,7 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import native_release_package as package
 import native_boot_launcher as boot
+import native_input_mods as camera
 from native_mod_launcher import Catalog
 from native_release_archive import archive
 
@@ -67,17 +68,23 @@ class StartupPackageTests(unittest.TestCase):
                 z.writestr('pythonw.exe', b'MZ fixture')
             closure = dict(complete=True, missing=[], files=[dict(source=str(p), name=p.name)
                 for p in (runtime, launcher, helper)])
-            for name, requested in (('Blinx', False), ('JSRF', False),
-                                    ('Xbox Dashboard', True), ('Another native game', None)):
+            for name, requested, camera_enabled in (('Blinx', False, False), ('JSRF', False, False),
+                    ('Xbox Dashboard', True, False), ('Another native game', None, False),
+                    ('Blinx admitted revision', False, True)):
                 enabled = requested is True
                 definition = root/'title.toml'
                 definition.write_text('[title]\nid="fixture"\nname="'+name+'"\nxbe_sha256="'+'a'*64+'"\n'
                     + ('[launcher]\nstartup_intro='+str(requested).lower()+'\n' if requested is not None else ''))
+                if camera_enabled:
+                    definition.write_text('[game]\nname="Blinx admitted revision"\nregion="NTSC-U"\n'
+                        'title_id="4D530013"\nxbe_sha256="e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"\n')
                 output = root/(name.replace(' ', '-')+'-package')
                 with patch.object(package, 'inventory', return_value=closure):
                     record = package.stage(definition, runtime, launcher, cache, embed, [], output, boot_intro=helper)
                 self.assertEqual(record['startup']['default_enabled'], enabled)
                 self.assertFalse(record['capabilities']['visual_mods'])
+                self.assertEqual((output/'mods/preloaded/packages'/camera.PACKAGE/'1.0.0/manifest.toml').is_file(),
+                                 camera_enabled)
                 relative = Path('mods/preloaded/packages') / boot.MOD_PACKAGE / '1.0.0/manifest.toml'
                 self.assertEqual((output/relative).read_bytes(), (package.ROOT/relative).read_bytes())
                 catalog = Catalog([output/relative], output/'data/mod-selection.json')
