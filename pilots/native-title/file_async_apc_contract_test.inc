@@ -71,7 +71,12 @@ static void test_file_apcs(void)
         call_kernel(187,&file,1);CHECK(!g_eax);
         for(unsigned i=0;i<64;++i)CHECK(!native_apc_head[i] && !native_apc_tail[i]);
         CHECK(GetProcessHandleCount(GetCurrentProcess(),&after));
-        if(!cycle)baseline=after;else CHECK(after==baseline);
+        if(!cycle)baseline=after;
+        else {
+            if(after!=baseline)fprintf(stderr,"[FILE APC HANDLE BASELINE] cycle=%u expected=%lu actual=%lu\n",cycle,
+                (unsigned long)baseline,(unsigned long)after);
+            CHECK(after==baseline);
+        }
     }
     scheduler_retire();scheduler_enabled=0;
     fprintf(stderr,"PASS native file APC real reads/requesting-thread/alertable-only/CPU-permit, original232 and direct arguments, once-only, FP/SIMD restore, exit cancellation and retained handle baselines\n");

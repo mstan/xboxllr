@@ -75,6 +75,9 @@ void pilot_gfx_set_texture_state(uint32_t stage,uint32_t state,uint32_t value);
  * sampled separately. Returns zero to request uncached synchronization.
  * Serialized by the graphics owner; no donor object is exposed to the guest. */
 int pilot_gfx_deferred_revisions(uint64_t revisions[5]);
+/* False after native GPU writes or missing mip uploads: CPU bytes alone do
+ * not establish that a previously prepared native image is still usable. */
+uint64_t pilot_gfx_texture_cpu_snapshot_revision(uint32_t handle);
 int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value);
 int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value);
 uint32_t pilot_gfx_width(void);

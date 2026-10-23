@@ -41,6 +41,8 @@ if(PILOT_IO_DEVICE STREQUAL "LLE")
       "#define PILOT_IO_DEVICE_ROM \"${io_rom_path}\"\n#define PILOT_IO_DEVICE_ROM_SHA \"${io_rom_sha}\"\n")
   endif()
   add_library(pilot_io_device_lle STATIC io_device_lle.c)
+  target_link_libraries(pilot_io_device_lle PUBLIC pilot_memory_write_watch)
+  target_compile_definitions(pilot_io_device_lle PRIVATE PILOT_MEMORY_WRITE_WATCH)
   target_include_directories(pilot_io_device_lle PRIVATE "${PILOT_CALENDAR_UNICORN}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/io-device-private" "${CMAKE_CURRENT_BINARY_DIR}/calendar-private")
   target_compile_definitions(pilot_io_device_lle PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

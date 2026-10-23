@@ -1,5 +1,13 @@
 # Blinx: serial attract-sequence bring-up
 
+Latest performance follow-up (2026-10-22): the shared
+[resource-write tracking fix](NATIVE-RESOURCE-WRITE-WATCH-2026-10-22.md) reduces
+process CPU/update by16.3% in its balanced2-1 comparison. The owner confirms
+the severe entrance slowdown is vastly improved. Occasional remaining hitches
+and the earlier localized1-2 report stay explicit in beads-xbox.1.7.18; this does
+not change the bounded9/9 qualification accounting below.
+
+
 ## LLE contract hardening burndown - 2026-10-08
 
 The owner-approved [bounded closing checklist](BLINX-QUALIFICATION-CLOSURE.md)

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "memory_write_watch_runtime.h"
 #include "event_trace.h"
 #include "native_debug.h"
 #ifdef PILOT_INPUT_NATIVE
@@ -1202,6 +1203,11 @@ static void load_image(const char *path)
     image_mod_initialize(hex);
     memory = VirtualAlloc(NULL, (SIZE_T)0x100000000ull, MEM_RESERVE, PAGE_NOACCESS);
     if (!memory) stop("cannot reserve guest address space", 0);
+#if defined(PILOT_MEMORY_WRITE_WATCH) && !defined(PILOT_IO_DEVICE_LLE)
+    const char *write_watch=getenv("XLLE_PILOT_RESOURCE_WRITE_WATCH");
+    if(!write_watch || strcmp(write_watch,"0"))
+        fprintf(stderr,"[RESOURCE WRITE WATCH] available=%d\n",pilot_write_watch_initialize(memory,(SIZE_T)0x100000000ull));
+#endif
     g_xbox_mem_offset = (ptrdiff_t)memory;
     image_base=file32(0x104); header_bytes=file32(0x108);
     section_count=file32(0x11c); section_table=file32(0x120);

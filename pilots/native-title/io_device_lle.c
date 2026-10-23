@@ -18,6 +18,7 @@
 #include "io_device_config.h"
 #include "guest_layout.h"
 #include "guest_cpu_config.h"
+#include "memory_write_watch_runtime.h"
 #ifdef PILOT_USB_LLE
 #include "usb_lle.h"
 #include "calendar_kernel.h"

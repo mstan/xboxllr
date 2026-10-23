@@ -73,12 +73,20 @@ covered lowering boundaries, not full campaign or hardware equivalence.
 
 ## Optimization burndown
 
+Batching alone did not close the owner's severe Stage2-1 slowdown. The broader
+[performance reassessment](BLINX-STAGE21-PERFORMANCE-ASSESSMENT-2026-10-22.md)
+led to [shared resource-write tracking](NATIVE-RESOURCE-WRITE-WATCH-2026-10-22.md):
+a further16.3% process CPU saving in its own balanced comparison and an owner
+report of much smoother entrance gameplay. Occasional remaining hitches are
+tracked separately in beads-xbox.1.7.18. The separate optimization percentages
+are not additive whole-game speedup claims.
+
 | Candidate | State | Next evidence needed |
 | --- | --- | --- |
-| Deferred-state categories and linear/contiguous texture checks | Implemented and measured | Owner entrance playtest |
-| Ordered strips and small vertex upload grouping | Implemented; modest measured gain | Owner entrance/character/effect playtest |
+| Deferred-state categories and linear/contiguous texture checks | Implemented and measured | Combined owner entrance review accepted |
+| Ordered strips and small vertex upload grouping | Implemented; modest measured gain | Combined owner entrance review accepted; covered raster cases remain in focused tests |
 | Repeated native bindings and pipeline preparation | Optional follow-up | Attribute remaining CPU cost before changing ownership |
-| Texture checks for data not consumed by the current shader | Optional follow-up | Prove consumption and alias/lifetime tracking; retain byte checks for consumed data |
+| Resource ownership and repeated texture-byte checks | Implemented with correct write/alias tracking;16.3% less process CPU/update in balanced run050 and owner-accepted smoother entrance | Retain; minor hitch follow-up is beads-xbox.1.7.18. Invalid omission remains removed |
 | Shader prewarming | Optional follow-up | Distinguish first-use compilation from sustained entrance work |
 
 The remaining candidates do not gate the current owner playtest. No particle

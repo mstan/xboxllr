@@ -13,6 +13,10 @@ struct GraphicsTextureObject {
      * sets it. A handoff clears it only after clearing the whole family. */
     unsigned family_exposed;
     unsigned waiters,retire_original;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    PilotWriteSnapshot cpu_snapshot;
+    uint64_t cpu_snapshot_revision;
+#endif
 };
 static struct GraphicsTextureObject *graphics_textures;
 static unsigned graphics_texture_capacity;
@@ -364,25 +368,50 @@ static void graphics_texture_binding_ref(uint32_t header,int acquire)
     MEM32(header)=(MEM32(header)&~0x780000u)|(object->bindings<<19);
     graphics_texture_collect(slot);
 }
+#ifdef PILOT_MEMORY_WRITE_WATCH
+int graphics_texture_write_watch_enabled=-1;
+static int graphics_texture_write_watch(void)
+{
+    if(graphics_texture_write_watch_enabled<0) {
+        const char *value=getenv("XLLE_PILOT_RESOURCE_WRITE_WATCH");
+        graphics_texture_write_watch_enabled=!(value && !strcmp(value,"0"));
+    }
+    return graphics_texture_write_watch_enabled;
+}
+#endif
 static void graphics_texture_sample_prepare(unsigned slot)
 {
     struct GraphicsTextureObject *texture=&graphics_textures[slot];int exposed=!texture->usage || texture->cpu_exposed;
     if(texture->cpu_borrowed)graphics_texture_refresh_alias(slot);
     if(texture->guest_owned && !texture->cpu_borrowed)return; /* live GPU alias */
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    int watched=graphics_texture_write_watch() && !texture->usage && !texture->parent && texture->bytes>=4096;
+    uint64_t revision=watched?pilot_gfx_texture_cpu_snapshot_revision(texture->native):0;
+    if(revision && revision==texture->cpu_snapshot_revision &&
+       pilot_write_watch_reusable(&texture->cpu_snapshot))return;
+    int capturing=watched && pilot_write_watch_begin(memory+texture->data,texture->bytes,&texture->cpu_snapshot);
+#endif
     int scan=!graphics_texture_exposure_cache() || (texture->usage && texture->family_exposed);
-    /* Ordinary CPU-owned textures still compare their actual bytes at every
-     * consumption. Their exposure is unconditional; a child scan adds nothing. */
+    /* Ordinary CPU-owned textures retain actual-byte validation whenever a
+     * tracked snapshot cannot prove reuse. Their exposure is unconditional;
+     * a child scan adds nothing. */
     if(scan)for(unsigned i=0;i<graphics_texture_capacity;++i)
         if(graphics_textures[i].parent==slot+1)exposed|=graphics_textures[i].cpu_exposed;
     /* Walk the same packed mip chain once. Re-summing every preceding level
-     * at each consumption was quadratic in the level count. Actual CPU bytes
-     * still reach the backend on every exposed sample, including inline writes. */
+     * at each consumption was quadratic in the level count. Exposed samples
+     * that reach this path retain byte validation, including inline writes. */
     uint32_t offset=0;
     for(unsigned level=0;level<texture->levels;++level) {
         uint32_t bytes=graphics_level_bytes(texture,level);
         pilot_gfx_texture_prepare_sample(texture->native,level,memory+texture->data+offset,bytes,exposed);
         offset+=bytes;
     }
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    if(capturing) {
+        pilot_write_watch_end(&texture->cpu_snapshot);
+        texture->cpu_snapshot_revision=pilot_gfx_texture_cpu_snapshot_revision(texture->native);
+    }
+#endif
     if(texture->usage && scan) {
         for(unsigned i=0;i<graphics_texture_capacity;++i)
             if(i==slot || graphics_textures[i].parent==slot+1)graphics_textures[i].cpu_exposed=0;

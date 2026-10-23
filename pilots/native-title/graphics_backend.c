@@ -572,6 +572,7 @@ int32_t pilot_gfx_present(void)
     ID3D11DeviceContext_CopyResource(d3d8_GetD3D11Context(),(ID3D11Resource*)pilot_surfaces[1],(ID3D11Resource*)pilot_surfaces[0]);
     pilot_gpu_call_end("present CopyResource",started);
     pilot_surface_use[0]->serial=pilot_surface_use[1]->serial=pilot_mark_work();
+    pilot_surface_use[1]->write_serial=pilot_surface_use[1]->serial;
     started=pilot_gpu_call_begin();
 #ifdef PILOT_D3D_PHOBOS
     pilot_visual_real_present=1;
@@ -861,6 +862,14 @@ void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void 
     if(cpu_exposed || !(pilot_textures[handle-1].uploaded&(1u<<level)))pilot_gfx_texture_upload(handle,level,data,bytes);
     pilot_gpu_call_end("texture upload",started);
 }
+uint64_t pilot_gfx_texture_cpu_snapshot_revision(uint32_t handle)
+{
+    D3D8Texture *texture=pilot_texture(handle);
+    uint32_t levels=texture->levels;
+    if(!levels || levels>=32 || pilot_textures[handle-1].gpu_written ||
+       (pilot_textures[handle-1].uploaded&((1u<<levels)-1))!=((1u<<levels)-1))return 0;
+    return pilot_textures[handle-1].use->write_serial;
+}
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
     pilot_gfx_batch_flush();
@@ -1033,7 +1042,8 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource*)pilot_donor_texture(texture),(ID3D11Resource*)staging);
         for(UINT row=0;row<rows;++row)memcpy(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
         ID3D11Texture2D_Release(staging);pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=0;
-        pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=pilot_mark_work();return;
+        pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
+            pilot_textures[handle-1].use->write_serial=pilot_mark_work();return;
     }
     D3DLOCKED_RECT lock;
     pilot_d3d_require(texture->iface.lpVtbl->LockRect(&texture->iface,level,&lock,NULL,0),__FILE__,__LINE__);
@@ -1077,7 +1087,8 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
-    pilot_textures[handle-1].use->serial=pilot_mark_work();
+    pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
+        pilot_textures[handle-1].use->write_serial=pilot_mark_work();
     if(pilot_event_trace_enabled())fprintf(stderr,"[TEXTURE UPLOAD] native=%u level=%u %ux%u bytes=%u\n",handle,level,width,height,bytes);
     /* Diagnostic readback is opt-in and absent from production upload work. */
     const char *capture=getenv("XLLE_PILOT_TEXTURE_CAPTURE");
@@ -1119,7 +1130,7 @@ int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
     ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),rtv,rgba);
     pilot_textures[handle-1].uploaded=1;
     pilot_textures[handle-1].gpu_written=1;
-    pilot_textures[handle-1].use->serial=pilot_mark_work();
+    pilot_textures[handle-1].use->serial=pilot_textures[handle-1].use->write_serial=pilot_mark_work();
     return S_OK;
 }
 void pilot_gfx_texture_download(uint32_t handle,void *data,uint32_t bytes)
@@ -1146,7 +1157,8 @@ int32_t pilot_gfx_texture_clear_depth(uint32_t handle,uint32_t flags,float depth
     if(!dsv || !(flags&3) || (flags&~3u) || !(depth>=0 && depth<=1) || stencil>255)return E_INVALIDARG;
     ID3D11DeviceContext_ClearDepthStencilView(d3d8_GetD3D11Context(),dsv,flags,depth,(UINT8)stencil);
     pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=1;
-    pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=pilot_mark_work();return S_OK;
+    pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
+        pilot_textures[handle-1].use->write_serial=pilot_mark_work();return S_OK;
 }
 int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity)
 {

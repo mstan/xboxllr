@@ -7,7 +7,7 @@ struct MediaAsyncTransfer {
     HANDLE done,event;
     PTP_WAIT waiter;
     struct MediaFile *owner;
-    uint32_t iosb,length,write;
+    uint32_t iosb,length,write,data,writer_lease;
     struct NativeFileApc *apc;
 };
 static void media_async_publish(uint32_t iosb,uint32_t status,uint32_t bytes)
@@ -20,6 +20,9 @@ static void media_async_publish(uint32_t iosb,uint32_t status,uint32_t bytes)
 static void media_async_release(struct MediaAsyncTransfer *r)
 {
     struct MediaFile *owner=r->owner;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    if(r->writer_lease)pilot_write_watch_native_end(memory+r->data,r->length);
+#endif
     native_apc_discard(r->apc);
     if((r->event && !CloseHandle(r->event)) || !CloseHandle(r->done))stop("asynchronous IO handle cleanup failed",owner->id);
     CloseThreadpoolWait(r->waiter);free(r);
@@ -64,6 +67,13 @@ static uint32_t media_async_transfer(struct MediaFile *owner,const uint32_t *a,i
     }
     r->owner=owner;r->iosb=a[4];r->length=a[6];r->write=write;r->io.Status=(LONG)0x103;
     r->apc=apc;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    r->data=a[5];
+    if(!write) {
+        if(!pilot_write_watch_native_begin(memory+r->data,r->length))stop("cannot relinquish write watch for async read",a[5]);
+        r->writer_lease=1;
+    }
+#endif
     if((event && event_nt_reset(event,NULL)<0) || !ResetEvent(owner->async_idle) || !ResetEvent(owner->async_signal))stop("file IO event reset failed",owner->id);
     ++owner->pending;
     if(write)fprintf(stderr,"[ASYNC FILE WRITE] handle=%08x event=%08x bytes=%u offset=%lld\n",owner->id,a[1],a[6],offset.QuadPart);

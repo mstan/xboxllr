@@ -197,7 +197,13 @@ static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uin
         uint64_t additional=bytes-vm_committed(low,bytes);
         if (vm_committed(0,0x100000000ull)+vm_service_bytes+additional>64ull*1024*1024) { fprintf(stderr,"[VM FAILURE] guest memory budget: requested=%llu resident=%llu service=%llu\n",(unsigned long long)additional,(unsigned long long)vm_committed(0,0x100000000ull),(unsigned long long)vm_service_bytes); result=VM_NOMEM; goto done; }
         PVOID host=memory+low; SIZE_T span=bytes;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+        if(!pilot_write_watch_native_begin(host,bytes))stop("cannot relinquish write watch for commit",low);
+#endif
         result=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,protect);
+#ifdef PILOT_MEMORY_WRITE_WATCH
+        pilot_write_watch_native_end(memory+low,bytes);
+#endif
         if (result) goto done;
     }
     if (reserve) *region=(struct PilotRegion){low,bytes,protect,0};
@@ -240,7 +246,13 @@ static uint32_t vm_free(uint32_t *base,uint32_t *size,uint32_t type)
     if(!result && (outputs[0]!=low || outputs[1]!=bytes))stop("original release range differs",low);
 #else
     PVOID host=memory+low; SIZE_T span=bytes;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    if(!pilot_write_watch_native_begin(host,bytes))stop("cannot relinquish write watch for decommit",low);
+#endif
     result=(uint32_t)vm_native_free(GetCurrentProcess(),&host,&span,MEM_DECOMMIT);
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    pilot_write_watch_native_end(memory+low,bytes);
+#endif
 #endif
     if (!result) {
         if(type==MEM_RELEASE) {
@@ -272,7 +284,13 @@ static uint32_t vm_protect(uint32_t *base,uint32_t *size,uint32_t protect,uint32
         if(!result){*base=outputs[0];*size=outputs[1];*old=outputs[2];}
 #else
         PVOID host=memory+low; SIZE_T span=bytes; ULONG previous;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+        if(!pilot_write_watch_native_begin(host,bytes))stop("cannot relinquish write watch for protection",low);
+#endif
         result=(uint32_t)vm_native_protect(GetCurrentProcess(),&host,&span,protect,&previous);
+#ifdef PILOT_MEMORY_WRITE_WATCH
+        pilot_write_watch_native_end(memory+low,bytes);
+#endif
         if (!result) { *base=low; *size=bytes; *old=previous; }
 #endif
     }
@@ -297,6 +315,10 @@ static uint32_t vm_query(uint32_t base,uint32_t out[7])
         out[3]=end-low; out[4]=MEM_FREE; out[5]=PAGE_NOACCESS;
     } else {
         MEMORY_BASIC_INFORMATION host;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+        /* Original query extents must not expose internal RO page splits. */
+        if(!pilot_write_watch_invalidate(memory+r->base,r->size))stop("cannot relinquish write watch for query",low);
+#endif
         if (!VirtualQuery(memory+low,&host,sizeof(host))) stop("host VM query failed",low);
         uint64_t end=(unsigned char*)host.BaseAddress-memory+host.RegionSize;
         if (end>(uint64_t)r->base+r->size) end=(uint64_t)r->base+r->size;

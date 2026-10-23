@@ -11,7 +11,9 @@ static unsigned pilot_query_count,pilot_query_created;
 /* Completion belongs to image storage, not a reallocatable texture slot or
  * presentation handle. Aliases retain this small owner across retirement and
  * reset; recording/querying use needs no search or GPU readback. */
-struct PilotImageUse {uint64_t serial;unsigned refs;};
+/* Reads advance completion ownership, but only content writes invalidate a
+ * prepared CPU snapshot. Both revisions follow the shared image's lifetime. */
+struct PilotImageUse {uint64_t serial,write_serial;unsigned refs;};
 static struct PilotImageUse *pilot_surface_use[4];
 static struct PilotImageUse *pilot_image_use_create(void)
 {
@@ -185,14 +187,15 @@ void pilot_gfx_completion_stats(struct PilotGpuProgress *progress)
 static void pilot_mark_targets(unsigned flags,uint64_t serial)
 {
     if(flags&1) {
-        if(pilot_color_target)pilot_textures[pilot_color_target-1].use->serial=serial;
-        else pilot_surface_use[0]->serial=serial;
+        if(pilot_color_target)pilot_textures[pilot_color_target-1].use->serial=
+            pilot_textures[pilot_color_target-1].use->write_serial=serial;
+        else pilot_surface_use[0]->serial=pilot_surface_use[0]->write_serial=serial;
     }
     if(flags&6) {
-        if(pilot_depth_target==UINT32_MAX)pilot_surface_use[2]->serial=serial;
+        if(pilot_depth_target==UINT32_MAX)pilot_surface_use[2]->serial=pilot_surface_use[2]->write_serial=serial;
         else if(pilot_depth_target) {
             struct PilotNativeTexture *texture=&pilot_textures[pilot_depth_target-1];
-            texture->content_serial=texture->use->serial=serial;
+            texture->content_serial=texture->use->serial=texture->use->write_serial=serial;
         }
     }
 }

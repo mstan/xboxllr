@@ -121,7 +121,13 @@ static uint32_t fsc_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *buffer
         cpu_begin=media_profile_cpu(&cpu_available);
         profile->called=1;profile->begin=dispatch_monotonic();
     }
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    if(!pilot_write_watch_native_begin(buffer,length))stop("cannot relinquish write watch for file read",file->id);
+#endif
     uint32_t status=(uint32_t)media_nt_read(file->host,NULL,NULL,NULL,io,buffer,length,offset,NULL);
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    pilot_write_watch_native_end(buffer,length);
+#endif
     if(profile) {
         profile->end=dispatch_monotonic();
         unsigned available;uint64_t cpu=media_profile_cpu(&available);
