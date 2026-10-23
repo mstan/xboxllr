@@ -41,13 +41,15 @@ bool McpxApu::step_envelopes(uint16_t voice,ApuEnvelopeStep& result) {
             if(count)--count;else phase=2;
             break;
         case 2: {
-            const bool instant=signal_model_==ApuSignalModel::NominalDls2LinearV1 && !rate && !count;
+            const bool nominal=signal_model_==ApuSignalModel::NominalDls2LinearV1 ||
+                               signal_model_==ApuSignalModel::XemuStateVariableV1;
+            const bool instant=nominal && !rate && !count;
             if((!rate || count>rate) && !instant) {
                 char detail[240];
                 std::snprintf(detail,sizeof(detail),"envelope zero-rate/overflow attack remains unqualified voice=%u env=%u state=%08x count=%u rate=%u cfg=%08x/%08x",voice,i,state,count,rate,configuration[i*2],configuration[i*2+1]);
                 device_fault(detail);return false;
             }
-            if(instant)std::fprintf(stderr,"[audio] nominal-dls2-linear-v1 zero-rate/count attack voice=%u env=%u -> level255/hold; silicon transient deferred\n",voice,i);
+            if(instant)std::fprintf(stderr,"[audio] %s zero-rate/count attack voice=%u env=%u -> level255/hold; silicon transient deferred\n",apu_signal_model_name(signal_model_),voice,i);
             level=instant?255:count*255/rate;
             if(count==rate){phase=3;count=((configuration[i*2+1]>>12)&0xfff)*16;}
             else ++count;
@@ -151,14 +153,20 @@ bool McpxApu::process_2d_voice_impl(uint16_t voice,float* bins,uint32_t& count,b
         dls2_filter_frames_+=count;
         if(omitted_scale) {
             dls2_modulation_omitted_frames_+=count;
+            dls2_modulation_last_omitted_scale_=omitted_scale;
             if(!dls2_modulation_reported_) {
-                std::fprintf(stderr,"[audio] nominal-dls2-linear-v1 OMIT cutoff modulation signed-scale=%d; base coefficients and envelope stepping retained, silicon mapping deferred\n",omitted_scale);
+                std::fprintf(stderr,"[audio] model=%s OMIT cutoff modulation signed-scale=%d; base coefficients and envelope stepping retained, %s\n",
+                    apu_signal_model_name(signal_model_),omitted_scale,
+                    coefficients.xemu_state_variable?"pinned software reference leaves EF_FCSCALE unimplemented; silicon mapping deferred":
+                        "silicon mapping deferred");
                 dls2_modulation_reported_=true;
             }
         }
         if(!dls2_model_reported_) {
-            std::fprintf(stderr,"[audio] model=nominal-dls2-linear-v1 ordinary-mono base-f=%a damping=%a; silicon precision/nonlinearity/gain deferred\n",
-                coefficients.frequency,coefficients.damping);dls2_model_reported_=true;
+            std::fprintf(stderr,"[audio] model=%s ordinary-mono base-f=%a damping=%a; %s\n",
+                apu_signal_model_name(signal_model_),coefficients.frequency,coefficients.damping,
+                coefficients.xemu_state_variable?"software-reference normalization/cubic band; silicon precision deferred":
+                    "silicon precision/nonlinearity/gain deferred");dls2_model_reported_=true;
         }
     }
     for(unsigned i=0;i<count*2;++i)samples[i]*=envelope.amplitude;

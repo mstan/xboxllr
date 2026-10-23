@@ -241,6 +241,7 @@ struct xb_sound {
     uint32_t      magic;
     uint32_t      playing;          /* 0 in the short version */
     uint32_t      blocks;
+    uint32_t      owner_mode;      /* xboxllr: 0 fresh, 1 legacy VP, 2 external native VP */
     uint32_t      mute;
     /* sequencer */
     uint16_t      now;              /* 0x800A7958 */
@@ -1170,6 +1171,7 @@ void audio_start(const xb_state *s, xb_sound *a, int playing)
 
     a->playing = (uint32_t)playing;
     a->blocks = 0;
+    a->owner_mode = 0;
     a->mute = 0;
     /* 0x8006033C: ring and time, tables, records chained, event 1 posted */
     a->now = 1;
@@ -1219,6 +1221,71 @@ void audio_start(const xb_state *s, xb_sound *a, int playing)
 static int32_t asr8(int32_t v)
 {
     return v >= 0 ? v / 256 : -((-v + 255) / 256);
+}
+
+/* xboxllr authored seam. The source-qualified sequence and library calls are
+ * retained; no donor resampling, envelope stepping or guessed idle latency is
+ * run here. A native consumer must separately own actual VP processing/IRQs. */
+int audio_claim(xb_sound *a, uint32_t mode)
+{
+    if (a->owner_mode && a->owner_mode != mode)
+        return 0;
+    a->owner_mode = mode;
+    return 1;
+}
+
+int audio_native_block(const xb_state *s, xb_sound *a, uint32_t hardware_active,
+                        uint32_t library_idle_ack, xb_audio_native_out *out)
+{
+    xb_audio_native_out result = { 0 };
+    uint32_t c, i, table;
+
+    if ((hardware_active | library_idle_ack) >> NCH || (hardware_active & library_idle_ack))
+        return XB_ERR_ARG;
+    for (c = 0; c < NCH; ++c) {
+        if (((hardware_active | library_idle_ack) >> c & 1u) && !a->v[c].r.alloc)
+            return XB_ERR_ARG;
+    }
+    if (!audio_claim(a, 2))
+        return XB_ERR_ARG;
+    result.block = a->blocks;
+    for (c = 0; c < NCH; ++c) {
+        a->v[c].r.active = (uint8_t)(hardware_active >> c & 1u);
+        if (library_idle_ack >> c & 1u)
+            a->v[c].r.on = 0;
+    }
+    if (a->playing && a->blocks % XB_AUDIO_TICK_BLOCKS == 0) {
+        seq_tick(s, a);
+        result.tick = a->now;
+        result.n_cmds = a->n_cmds;
+        result.n_events = a->n_calls;
+        for (i = 0; i < a->n_cmds; ++i)
+            result.cmd[i] = a->cmd[i];
+        for (i = 0; i < a->n_calls; ++i) {
+            lib_voice *v = &a->v[a->call[i].channel];
+            xb_audio_native_event *event = &result.event[i];
+            voice_call(s, a, &a->call[i]);
+            /* NOTE describes a pending native command, not proof that the
+             * device accepted it or advanced. Preserve the supplied state. */
+            v->r.active = (uint8_t)(hardware_active >> a->call[i].channel & 1u);
+            event->call = a->call[i];
+            event->voice = v->r;
+            event->start = v->start;
+            event->frames = v->r.alloc ? v->r.ebo + 1 : 0;
+            event->table = UINT32_MAX;
+            for (table = 0; table < XB_TABLES; ++table)
+                if (v->data == table_addr[table])
+                    event->table = table;
+        }
+    }
+    for (c = 0; c < NCH; ++c) {
+        result.library_on |= (uint32_t)a->v[c].r.on << c;
+        result.hardware_active |= (uint32_t)a->v[c].r.active << c;
+    }
+    a->held_pos = BLOCK;
+    ++a->blocks;
+    *out = result;
+    return XB_OK;
 }
 
 void audio_block(const xb_state *s, xb_sound *a, xb_audio_out *out)

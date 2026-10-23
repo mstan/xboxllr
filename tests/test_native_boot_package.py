@@ -1,6 +1,7 @@
 """All title packages share a source-complete helper, never original startup data."""
 import hashlib
 from pathlib import Path
+import re
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,38 @@ from native_release_archive import archive
 
 
 class StartupPackageTests(unittest.TestCase):
+    def test_native_audio_source_build_closure(self):
+        sources = set(package.startup_source_files())
+        roots = (package.ROOT/'src', package.ROOT/'src/third_party/xbox-boot-re/core/include',
+                 package.ROOT/'src/third_party/xbox-boot-re/core/src')
+        for path in sources:
+            if path.suffix.lower() not in ('.h', '.hpp', '.c', '.cpp'):
+                continue
+            for name in re.findall(r'^\s*#\s*include\s*"([^"]+)"', path.read_text(encoding='utf-8'), re.M):
+                candidates = [(path.parent/name).resolve(), *((root/name).resolve() for root in roots)]
+                self.assertTrue(any(p in sources for p in candidates), f'{path}: missing include {name}')
+        for name in ('cmake/ApuRate.cmake', 'cmake/ApuAdpcm.cmake',
+                     'src/machine/apu_rate.cpp', 'src/machine/apu_envelope.cpp',
+                     'src/machine/apu_voice_quantum.cpp', 'src/machine/apu_filter.cpp',
+                     'src/machine/apu_adpcm.c', 'LICENSES/libsamplerate-BSD.txt',
+                     'src/third_party/libsamplerate/README.md', 'src/third_party/dr_wav/LICENSE'):
+            self.assertIn(package.ROOT/name, sources)
+        rate = (package.ROOT/'cmake/ApuRate.cmake').read_text()
+        self.assertIn('GIT_TAG c96f5e3de9c4488f4e6c97f59f5245f22fda22f7', rate)
+        # Source and notice inputs referenced by the shared CMake fragments
+        # must resolve inside the kit as well as the C/C++ include closure.
+        for fragment in ('cmake/ApuRate.cmake', 'cmake/ApuAdpcm.cmake',
+                         'pilots/native-boot/CMakeLists.txt'):
+            path = package.ROOT/fragment
+            variables = {'${CMAKE_CURRENT_LIST_DIR}': path.parent,
+                         '${BOOT_CORE}': package.ROOT/'src/third_party/xbox-boot-re/core'}
+            for name in re.findall(r'(\$\{(?:CMAKE_CURRENT_LIST_DIR|BOOT_CORE)\}/[^\s"\)]+)', path.read_text()):
+                variable, tail = name.split('}', 1)
+                target = (variables[variable+'}']/tail.lstrip('/')).resolve()
+                self.assertTrue(target in sources or any(target in p.parents for p in sources),
+                                f'{fragment}: missing CMake input {name}')
+        self.assertFalse(any(p.suffix.lower() in ('.pak', '.bin', '.img', '.rle', '.xbe') for p in sources))
+
     def test_three_title_defaults_helper_sources_and_private_asset_exclusion(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -20,6 +53,9 @@ class StartupPackageTests(unittest.TestCase):
             for path in (runtime, launcher, helper):
                 path.parent.mkdir()
                 path.write_bytes(b'MZ authored PE fixture')
+            helper_notice = helper.parent/'third_party/libsamplerate/README.md'
+            helper_notice.parent.mkdir(parents=True)
+            helper_notice.write_bytes(b'authored helper dependency notice fixture')
             cache = root/'build/CMakeCache.txt'
             cache.write_text('PILOT_NATIVE_OPTIMIZATION:STRING=OPTIMIZED\n'
                 'PILOT_IO_DEVICE:BOOL=OFF\nPILOT_SCHEDULING:STRING=NATIVE\n')
@@ -40,6 +76,8 @@ class StartupPackageTests(unittest.TestCase):
                     record = package.stage(definition, runtime, launcher, cache, embed, [], output, boot_intro=helper)
                 self.assertEqual(record['startup']['default_enabled'], enabled)
                 self.assertTrue((output/'native/XboxStartup.exe').is_file())
+                self.assertEqual((output/'native/third_party/libsamplerate/README.md').read_bytes(),
+                                 helper_notice.read_bytes())
                 self.assertTrue((output/'notices/xbox-boot-re/LICENSE').is_file())
                 self.assertTrue((output/'source/native-startup/pilots/native-boot/boot_main.cpp').is_file())
                 self.assertTrue((output/'source/native-startup/pilots/native-boot/boot_timeline.h').is_file())
@@ -47,6 +85,9 @@ class StartupPackageTests(unittest.TestCase):
                 for source in ('boot_after_image.h', 'boot_after_image_test.cpp', 'boot_handoff.h'):
                     self.assertTrue((output/'source/native-startup/pilots/native-boot'/source).is_file())
                 self.assertTrue((output/'source/native-startup/src/third_party/xbox-boot-re/core/src/Audio.c').is_file())
+                for source in package.BOOT_SHARED_SOURCES:
+                    self.assertEqual((output/'source/native-startup'/source).read_bytes(),
+                                     (package.ROOT/source).read_bytes())
                 self.assertTrue((output/'tools/native_boot_launcher.py').is_file())
                 self.assertFalse(any(p.suffix in ('.pak', '.bin', '.img') for p in output.rglob('*')))
                 archive(output, root/(name.replace(' ', '-')+'.zip'))

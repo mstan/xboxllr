@@ -333,9 +333,17 @@ def run(root, data, catalog, environment, log, *, automated=False, handoff=None,
                 command.append('--mute')
             if handoff is not None:
                 command.extend(handoff.arguments())
-            child = subprocess.Popen(command, cwd=safe_path(root, 'data/boot'), env=env,
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            # Only the helper's bounded JSON result belongs on stdout. Native
+            # APU diagnostics may exceed a pipe buffer before the ready event;
+            # a separate private file cannot block readiness or corrupt JSON.
+            # Popen gives the child its own redirect handle. Close our handle
+            # immediately, including while that child retains its final image.
+            diagnostics = safe_path(root, 'data/boot/helper-stderr.log')
+            with diagnostics.open('wb') as diagnostic_log:
+                child = subprocess.Popen(command, cwd=safe_path(root, 'data/boot'), env=env,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=diagnostic_log,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            report['diagnostic_log'] = 'data/boot/helper-stderr.log'
             try:
                 if handoff is not None and handoff.wait_ready(child):
                     report.update(status='awaiting-title', message='Startup final image is ready for the native title.')

@@ -2,7 +2,7 @@
 
 The standalone Windows prototype renders the original-look eight-second
 Xbox startup animation natively, including the blob, chamber, logo and
-synthesized sound. It is **an animation reconstruction, not firmware boot**.
+synthesized sound. It is **source-derived native presentation, not firmware boot**.
 It does not execute MCPX, 2BL or an original kernel, initialize a console,
 or transfer firmware-created machine state into a native game. It has no
 access to an HDD, EEPROM, native game saves or title memory.
@@ -28,7 +28,7 @@ original asset. No proprietary boot assets are distributed.
 
 The portable core is the MIT authored reconstruction from
 [`bennyborn/xbox-boot-re`](https://github.com/bennyborn/xbox-boot-re/tree/12a3396aa77f72c8d2fd94c0988c7e11539b47e7).
-Its license and unmodified core are retained under
+Its license and pinned core, with the documented xboxllr external-voice delta, are retained under
 `src/third_party/xbox-boot-re/`. The D3D11 host adapts the same project's
 original-look WebGPU shaders and ordered render contract. It preserves
 the two light-depth views, veil ping-pong, logo render-to-texture, 1280x480
@@ -95,9 +95,11 @@ and selected after-image source are recorded separately in the run receipt.
 No original logo bytes are shipped with the extractor or package.
 
 Audio needs all of the samples, sequence, envelopes, pointers and DSP data
-listed above. It is not silently substituted with silence. The core
-reconstructs sequencing and the GP stage, while **voice synthesis is an
-approximation**, as the donor documents. The full eight-second stereo
+listed above. It is not silently substituted with silence. The default native
+path retains original-derived sequencing and fixed-point GP arithmetic, with
+actual common-device VP source/voice ownership and idle feedback. Its named
+software signal model and remaining omissions are explicit below; it is not
+qualified as silicon-identical. The full eight-second stereo
 48 kHz stream is generated before playback; missing output devices report
 failure. Normal completion lets the audio finish; skip resets and closes
 the output immediately. Unattended runs require `--headless --mute`.
@@ -112,7 +114,7 @@ New-Item -ItemType Directory -Force "$bootTask\temp", "$bootTask\appdata", "$boo
 $env:TEMP = "$bootTask\temp"; $env:TMP = $env:TEMP
 $env:APPDATA = "$bootTask\appdata"; $env:LOCALAPPDATA = "$bootTask\localappdata"
 python -B tools/native_boot_assets.py --kernel G:\OwnedInputs\complete-kernel.img --output "$bootTask\assets"
-cmake -S pilots/native-boot -B "$bootTask\build" -A x64
+cmake -S pilots/native-boot -B "$bootTask\build" -A x64 -DFETCHCONTENT_BASE_DIR="$bootTask\deps"
 cmake --build "$bootTask\build" --config Release --parallel 2
 & "$bootTask\build\Release\xboxllr_boot_intro.exe" --pack "$bootTask\assets\xboot.pak" --headless --mute --validate --capture-dir "$bootTask\captures"
 ```
@@ -121,6 +123,17 @@ cmake --build "$bootTask\build" --config Release --parallel 2
 and final presentation at 16:9, 21:9 and 32:9. `--audio-file <new.wav>` saves
 the complete locally synthesized sound without playing it. All those
 artifacts contain original-derived content and stay private.
+
+The default build includes the shared native VP adapter. The source kit retains
+its explicit common APU/CMake/header closure, the dr_wav source and MIT-0 notice,
+and the libsamplerate BSD notice/provenance. CMake fetches libsamplerate at the
+immutable revision recorded in `cmake/ApuRate.cmake`; an existing prepared
+checkout can instead be supplied with
+`-DFETCHCONTENT_SOURCE_DIR_XLLE_SAMPLERATE=<path>` and
+`-DFETCHCONTENT_FULLY_DISCONNECTED=ON`. Downloads and build outputs must remain
+in the selected non-C: tree. `-DXBOXLLR_BOOT_APU_ADAPTER=OFF` is an explicit
+developer-only comparison of the retained legacy approximation, not a runtime
+fallback or the packaged default.
 
 `--core-only` runs all 480 frame descriptions and sound without creating a
 graphics device. `--realtime` paces a headless run to its eight-second
@@ -142,7 +155,8 @@ handoffs use hidden/muted uncapped rendering to keep test loops short.
 - `data/boot-choice.txt`: intro enable/kernel choice, separate from console setup.
 - `data/boot/assets/<pack-hash>/`: verified extracted pack and source fingerprints.
 - `data/boot/title-logo/<logo-hash>.rle`: private selected-original-XBE logo.
-- `data/boot/helper.log` and `last-run.json`: bounded helper output and status.
+- `data/boot/helper.log` and `last-run.json`: bounded helper JSON and status.
+- `data/boot/helper-stderr.log`: separate private native-device diagnostics.
 - `data/boot/{temp,appdata,localappdata}/`: process-local writable paths.
 
 An explicitly selected complete kernel is validated before its startup data
@@ -162,11 +176,19 @@ launcher's process handle and exits if that owner dies. Without startup IPC,
 the existing native window behavior is unchanged. Automated runs and diagnostic
 input replay continue to reproduce the title directly.
 
+Helper stdout contains only its bounded JSON result. Stderr writes directly to
+the separate private diagnostic file, with the parent's redirect handle closed
+immediately after process creation. Native APU diagnostics cannot fill an unread
+pipe before readiness or be mistaken for JSON. A real authored-child fixture
+writes 2 MiB of diagnostics before readiness, retains its inherited redirect
+after the parent closes it and completes the owned-title lifecycle normally.
+
 `native_title_launcher.build_launcher` also builds the shared helper on
 Windows, under `<build>/boot/`. The release stager now requires
 `--boot-intro <helper.exe>` (or the `boot_intro=` API argument). It packages
-`native/XboxStartup.exe`, its MIT notice, and a complete buildable copy of
-the startup host/core/extractor source under `source/native-startup/`.
+`native/XboxStartup.exe`, its actual dependency notices, and a complete buildable
+copy of the startup host/core/extractor and native APU source closure under
+`source/native-startup/`.
 It never copies a pack or kernel. Archive admission rejects `.pak` files
 and an `XBPK` payload even when renamed. Loose `.rle` files and either admitted
 original logo fingerprint are also rejected when renamed. The Dashboard title declares
@@ -222,9 +244,10 @@ renaming it would not satisfy the requirement.
 The retained donor is MIT authored source derived from its documented original
 animation routines. It is not a licensed copy of Microsoft source. Its
 sequencer and translated GP arithmetic have distinct original-code evidence;
-its VP voice-to-sample behavior uses an authored 16-tap resampler and an
-interpretation of envelopes/loop boundaries. The present port does not turn
-that interpretation into an independently qualified original sound model.
+its legacy VP voice-to-sample behavior uses an authored 16-tap resampler and an
+interpretation of envelopes/loop boundaries. The native default now replaces
+that legacy VP with the shared device and source-derived idle consumer described
+below. This still does not claim an independently qualified silicon sound model.
 See the pinned [core description](https://github.com/bennyborn/xbox-boot-re/blob/12a3396aa77f72c8d2fd94c0988c7e11539b47e7/docs/core.md)
 and [audio evidence and limits](https://github.com/bennyborn/xbox-boot-re/blob/12a3396aa77f72c8d2fd94c0988c7e11539b47e7/docs/decomp/Audio.md).
 
@@ -284,12 +307,12 @@ on title exit 7 or missing-present timeout without terminating the title. These
 tests qualify the IPC lifecycle. A subsequent coordinated Dashboard native/helper
 rebuild and actual first-present probe also passed: the retained helper received
 `title-presented` and exited0, followed by a bounded five-second muted Dashboard
-run with private state and unchanged original identity source. The final helper
+run with private state and unchanged original identity source. That presentation-checkpoint helper
 fingerprint is `0bb9844327c72294c4fc42d46d72e66ccbdc27d1acf82937ed65738cd4b205b4`.
 This used a hidden/muted helper; foreground transition and normal audio review
 remain open. Earlier deterministic capture/PCM results
-above predate the added after-image. Audio synthesis is unchanged and still
-explicitly approximate.
+above predate the added after-image and native VP correction. The audio at this
+presentation checkpoint was the explicitly approximate legacy path.
 
 There are reusable VP components already in `src/machine/apu_rate.cpp`,
 `apu_envelope.cpp`, `apu_filter.cpp` and `apu_voice_quantum.cpp`, with device
@@ -315,3 +338,125 @@ timeout termination/kill cleanup, and all three package-default fixture cases.
 The helper's actual Windows import closure is complete (four files including
 the executable). These are framework/fixture results; owner-facing handoffs
 of the three rebuilt games are still pending review.
+
+## Native voice correction in progress
+
+The donor's own `Audio.md` section 5.5 labels library voice-end latency as a
+guess: it clears the library's running flag at the next 6 ms beat. Its 81-note
+comparison observed 56 key-ons in a heavily breakpoint-disturbed run versus 34
+in the unpaused model. That paused run took 30.7 host seconds for 7.95 guest
+seconds while voices continued in real time; 56 is not a valid target to force.
+The audible concern is actual retrigger ownership, source phase and timing.
+
+The authored portable API v3 delta separates original sequencing/library calls
+from voice synthesis. `xb_audio_native_block` accepts actual hardware-active
+state and explicit library idle acknowledgements, emits ordered post-call
+register/source/start snapshots and produces no guessed voice samples. Hardware
+inactivity alone never clears the library owner. Invalid feedback rejects before
+clock/state changes. Native and legacy renderers cannot share one sound owner.
+The fixed-point GP arithmetic and original sequence are retained. See
+`src/third_party/xbox-boot-re/README.xboxllr.md` for the imported-code delta.
+
+The thin `BootApuVoiceAdapter` programs the common native `McpxApu` through its
+actual methods. Its caller owns RAM, source/SGE mappings, voice handles, signal
+policy and the native idle/notifier consumer. Actual source output becomes bins
+0, 1 and 11 for the existing GP routine. Missing mix publication returns an
+explicit idle-service requirement, with output untouched; it never invents
+silence or an acknowledgement.
+
+An authored native fixture reproduced a common-device defect: original NOTE
+re-publishes an unchanged LBO/EBO while a running voice changes pitch without
+VOICE_ON. Those writes discarded buffered source/envelope history, altering the
+waveform phase. The bounded common fix preserves unchanged LBO/EBO; changed
+ranges and explicit base rebinding/CBO seek retain their reset behavior. The
+fixture now continues byte-identically to its control. Four native fixtures
+pass, including ordered events, independent idle/retrigger ownership, actual
+source/routing/headroom and strict filter refusal. The legacy 384,000-frame PCM
+fingerprint remains unchanged as a developer comparison; the default helper
+now selects the separate shared native VP path without a legacy fallback.
+
+The native owner maps the actual eight generated/sample tables into private RAM,
+programs the real SGE/voice/notifier tables and consumes actual FE idle traps.
+The bounded owned-4983 source chain is `80066e99 -> 8006650d -> 80065e26 ->
+80064d7d -> 800630be`, with FE control at `80063e9a`. Library acknowledgement
+requires actual completion notification and trapped-idle consumption. It does
+not infer progress from elapsed beats. Mono unlink retains predecessor pitch.
+
+The actual eight-second private core-only run passes: 384,000 stereo 48 kHz
+frames, peak 9,759, 34 real starts and 33 consumed idle acknowledgements. No
+count is forced and there is no fallback. PCM SHA-256 is
+`281655c603ad33589c2d33e5d3efbcd496c2c88cc2ef35512f214f7f9879d37e`.
+Setup took 282.5 ms in that bounded run. These measured outputs establish
+end-to-end native synthesis, not audible acceptance. The run was muted and no
+independent unpaused original audio reference was established. A brief human
+ear review remains required before calling the sound accepted.
+
+A subsequent hidden/muted realtime D3D11-to-Dashboard run also passes with this
+native PCM fingerprint: 8,022.97 ms, 477 measured-timeline pictures, graphics
+validation enabled and the actual selected-title Microsoft after-image. The
+owned native title acknowledges its successful first presentation, the helper
+exits 0, original EEPROM bytes remain unchanged and both owned children retire.
+This exercises the complete native audio/presentation/handoff path; it still
+does not claim a speaker or independent original-reference comparison.
+
+The reusable `XemuStateVariableV1` signal policy adds a separately selected
+software-reference LPF under the common native VP interface. Existing game
+defaults and `NominalDls2LinearV1` retain their linear arithmetic. The new policy
+uses input normalization `sqrt(Q/2 + 0.01)` and cubic band stabilization before
+the state-variable step. Omitting that normalization changes the boot's two
+used resonance settings by about 3.9 dB and 13 dB, a material audible difference.
+The mathematical reference is the pinned
+[xemu state-variable description](https://github.com/xemu-project/xemu/blob/fc24584ce88f0915ad7f04775bb7712c2e3f49ee/hw/xbox/mcpx/apu/vp/svf.h)
+and the retained MIT donor's `Audio.c`/`Audio.md` explanation. No implementation
+body from xemu's GPLv2-labelled SVF file is imported. This is an independently
+authored portable recurrence in the existing filter owner, with explicit
+software-reference provenance. It does not claim physical MCPX precision or
+bit-identical full VP output. The existing nominal envelope curve remains
+identified as such. The pinned xemu
+[voice setup](https://github.com/xemu-project/xemu/blob/fc24584ce88f0915ad7f04775bb7712c2e3f49ee/hw/xbox/mcpx/apu/vp/vp.c)
+explicitly omits `ENV1_EF_FCSCALE` cutoff-envelope modulation, as does the donor.
+The new policy preserves that software-model limit: the actual signed scale
+remains in voice RAM and the filter envelope still steps, while base cutoff
+coefficients remain unchanged. It reports the selected model, signed omitted
+scale and affected rendered-frame counter; this is not hardware-equivalence
+qualification. Strict remains guarded and the existing nominal policy retains
+its prior omission/arithmetic. Fixtures check analytic DC gain at both resonance
+settings, state continuity across block partitions, unchanged old-policy DC
+gain and positive/negative omitted scales against a zero-scale control. Actual
+native sound and a brief human ear review remain acceptance work; no note count
+from the breakpoint-disturbed reference is forced.
+
+### Explicit audio model deferral
+
+The passing native run reports 252,576 voice-sample frames with cutoff-envelope
+modulation omitted and last signed scale -80. The field is preserved, reported
+and tested; the declared software reference also omits it. Establishing a
+physical MCPX scale-to-cutoff mapping is deferred. A future correction must
+retain signed register/envelope semantics and add independent frequency/time
+evidence before changing this named model or adding a separately qualified one.
+It must not infer units from a different sound chip or conceal the current limit.
+
+The existing nominal envelope curve and libsamplerate interpolation kernel also
+remain explicit software policies. Hardware-level envelope/transient and
+interpolation precision need independent evidence. These deferrals do not make
+full-machine firmware boot, security or key handling prerequisites for the
+owner's native presentation request. A material audible discrepancy found in
+the short owner review remains presentation work and must be addressed rather
+than dismissed as a model limit.
+
+The actual production launcher path also completed a hidden/muted native
+startup followed by the real Dashboard first-present acknowledgement. Its
+4,995-byte audio diagnostic stream stayed in the private stderr file; stdout
+remained a valid JSON result. The helper exited normally, the owned test title
+was retired after observation, and the source console identity was unchanged.
+This verifies the launch/logging integration separately from human sound review.
+
+Central follow-up `beads-xbox.1.195` tracks this supporting hardware/signal
+precision work. The native presentation and human acceptance issue remains
+`beads-xbox.1.190`; the supporting deferral does not close it.
+
+The isolated packaged startup source closure also configures and builds with
+native audio enabled by default, using only its 66 included source/notice files
+and the explicitly prepared pinned libsamplerate dependency. Its four native
+fixtures pass. Package fixtures check C/C++ includes, CMake inputs, pinned
+dependency provenance, copied helper notices and all title-default cases.

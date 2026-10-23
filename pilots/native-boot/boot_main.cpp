@@ -4,6 +4,9 @@
 #include "boot_renderer.h"
 #include "boot_timeline.h"
 #include "boot_handoff.h"
+#ifdef XBOXLLR_BOOT_NATIVE_AUDIO
+#include "boot_audio_owner.h"
+#endif
 #include <algorithm>
 #include <bcrypt.h>
 #include <chrono>
@@ -17,6 +20,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 #include <windows.h>
 #include <xinput.h>
 
@@ -349,8 +353,21 @@ int wmain(int argc, wchar_t **argv) {
         core_check(xb_init(state, pack.data, pack.size, &config), "Initialize native startup");
         core_check(xb_audio_init(state, audio_bytes.data, audio_bytes.size),
                    "Initialize startup synthesis");
+#ifdef XBOXLLR_BOOT_NATIVE_AUDIO
+        auto native_audio=boot_native_audio(state,384000);
+        auto pcm=std::move(native_audio.pcm);
+        const char *voice_model="shared-native-vp";
+        const unsigned voice_starts=native_audio.note_starts,idle_acks=native_audio.idle_acknowledgements;
+        const uint64_t omitted_cutoff_frames=native_audio.cutoff_modulation_omitted_frames;
+        const int omitted_cutoff_scale=native_audio.last_omitted_cutoff_scale;
+#else
         std::vector<int16_t> pcm(384000 * 2);
         core_check(xb_audio(state, pcm.data(), 384000), "Synthesize startup audio");
+        const char *voice_model="legacy-approximation";
+        const unsigned voice_starts=0,idle_acks=0;
+        const uint64_t omitted_cutoff_frames=0;
+        const int omitted_cutoff_scale=0;
+#endif
         const auto pcm_hash = sha256(pcm.data(), pcm.size() * 2);
         int peak = 0;
         for (int16_t sample : pcm)
@@ -554,6 +571,10 @@ int wmain(int argc, wchar_t **argv) {
                   << (title_logo.empty() ? "embedded-firmware-xecuter2" : "selected-title-xbe-microsoft") << "\""
                   << ",\"handoff\":\"" << handoff_result << "\",\"handoff_ms\":" << handoff_ms
                   << ",\"audio_frames\":384000,\"audio_peak\":" << peak
+                  << ",\"voice_model\":\"" << voice_model << "\",\"native_voice_starts\":" << voice_starts
+                  << ",\"native_idle_acknowledgements\":" << idle_acks
+                  << ",\"cutoff_modulation_omitted_frames\":" << omitted_cutoff_frames
+                  << ",\"last_omitted_cutoff_scale\":" << omitted_cutoff_scale
                   << ",\"final_nonblack_pixels\":" << lit_pixels << ",\"pcm_sha256\":\"" << pcm_hash
                   << "\",\"audio_output\":\"" << (!mute && !core_only && volume ? "enabled" : "muted")
                   << "\",\"graphics_validation\":" << (validate ? "true" : "false")

@@ -222,6 +222,7 @@ public:
     uint64_t voice_mix_quanta()const{return voice_mix_quanta_;}
     uint64_t dls2_filter_frames()const{return dls2_filter_frames_;}
     uint64_t dls2_modulation_omitted_frames()const{return dls2_modulation_omitted_frames_;}
+    int dls2_modulation_last_omitted_scale()const{return dls2_modulation_last_omitted_scale_;}
     ApuSignalModel signal_model()const{return signal_model_;}
 
     // Fresh opaque descriptor reads for the later stream owner. This stages
@@ -902,6 +903,7 @@ private:
     uint64_t dls2_filter_frames_=0;
     bool dls2_model_reported_=false;
     uint64_t dls2_modulation_omitted_frames_=0;
+    int dls2_modulation_last_omitted_scale_=0;
     bool dls2_modulation_reported_=false;
     uint64_t voice_mix_quanta_=0;
     bool processing_quantum_=false,processing_voice_=false;
@@ -1479,7 +1481,12 @@ private:
                                   (previous & ~field.mask) | (value & field.mask)))
                 device_fault("voice configuration DMA failed");
             else if((method==0x304 && ((previous^value)&0xfffffc00)) ||
-                    method==0x3a0 || method==0x3a4 || method==0x3d8 || method==0x3dc) {
+                    method==0x3a0 || method==0x3d8 ||
+                    ((method==0x3a4 || method==0x3dc) && ((previous^value)&field.mask))) {
+                // Original boot NOTE re-publishes unchanged LBO/EBO while an
+                // already-running library voice changes pitch without VOICE_ON.
+                // Preserve its buffered samples/envelopes at that boundary.
+                // Explicit base rebinding/CBO seek retain their existing reset.
                 voice_rates_[voice].reset();
                 voice_envelopes_[voice]={};
             }

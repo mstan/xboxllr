@@ -10,7 +10,8 @@ bool McpxApu::prepare_2d_filter(uint16_t voice,uint32_t format,uint32_t misc,
         (format&((1u<<21)|(1u<<22)|(1u<<24))) || (route&0x80008000);
     const unsigned mode=(misc>>16)&3;
     if(!adjacent && !mode)return true; // preserve bypass reads and arithmetic
-    if(!adjacent && mode==1 && signal_model_!=ApuSignalModel::NominalDls2LinearV1) {
+    if(!adjacent && mode==1 && signal_model_!=ApuSignalModel::NominalDls2LinearV1 &&
+       signal_model_!=ApuSignalModel::XemuStateVariableV1) {
         device_fault("VP DLS2 requires explicit nominal signal-model policy; strict profile remains guarded");return false;
     }
     uint32_t envelope1=0,a=0,b=0;
@@ -25,7 +26,12 @@ bool McpxApu::prepare_2d_filter(uint16_t voice,uint32_t format,uint32_t misc,
         device_fault(reason);return false;
     }
     if(!voice_filter_owned_[voice]) {device_fault("DLS2 nominal filter requires actual VOICE_ON history");return false;}
+    // Both declared software models retain the signed original register but
+    // omit its cutoff modulation. The pinned xemu reference explicitly leaves
+    // EF_FCSCALE unimplemented; inferring a hardware unit would invent a model.
+    // The actual render path counts and reports every affected sample frame.
     if(omitted_scale)*omitted_scale=int(envelope1>>24)-((envelope1&0x80000000)?256:0);
-    coefficients=ApuDls2Coefficients::decode(a);enabled=true;return true;
+    coefficients=ApuDls2Coefficients::decode(a,signal_model_==ApuSignalModel::XemuStateVariableV1);
+    enabled=true;return true;
 }
 } // namespace xlle

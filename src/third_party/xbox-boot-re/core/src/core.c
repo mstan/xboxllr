@@ -539,6 +539,8 @@ int xb_audio(xb_state *s, int16_t *buffer, uint32_t frames)
     if (!ready(s) || (!buffer && frames))
         return XB_ERR_ARG;
     if (audio_ready(s->sound)) {
+        if (!audio_claim(s->sound, 1))
+            return XB_ERR_ARG;
         audio_read(s, s->sound, buffer, frames);
     } else {
         for (i = 0; i < 2 * frames; i++)
@@ -551,8 +553,18 @@ int xb_audio_block(xb_state *s, xb_audio_out *out)
 {
     if (!ready(s) || !audio_ready(s->sound) || !out)
         return XB_ERR_ARG;
+    if (!audio_claim(s->sound, 1))
+        return XB_ERR_ARG;
     audio_block(s, s->sound, out);
     return XB_OK;
+}
+
+int xb_audio_native_block(xb_state *s, uint32_t hardware_active,
+                          uint32_t library_idle_ack, xb_audio_native_out *out)
+{
+    if (!ready(s) || !audio_ready(s->sound) || !out)
+        return XB_ERR_ARG;
+    return audio_native_block(s, s->sound, hardware_active, library_idle_ack, out);
 }
 
 int xb_audio_mute(xb_state *s, uint32_t mask)

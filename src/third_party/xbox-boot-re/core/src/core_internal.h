@@ -300,6 +300,9 @@ size_t audio_size(void);
 int  audio_ready(const xb_sound *a);
 void audio_start(const xb_state *s, xb_sound *a, int playing);
 void audio_block(const xb_state *s, xb_sound *a, xb_audio_out *out);
+int  audio_claim(xb_sound *a, uint32_t mode);
+int  audio_native_block(const xb_state *s, xb_sound *a, uint32_t hardware_active,
+                        uint32_t library_idle_ack, xb_audio_native_out *out);
 void audio_read(const xb_state *s, xb_sound *a, int16_t *buffer, uint32_t frames);
 void audio_gp(const xb_state *s, xb_sound *a, const int32_t *bin0, const int32_t *bin1,
               const int32_t *bin11, int32_t *left, int32_t *right);

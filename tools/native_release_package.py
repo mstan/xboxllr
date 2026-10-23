@@ -18,6 +18,36 @@ from windows_dependencies import inventory
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('native_release_runtime', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage')
+# Narrow native VP build closure. No machine/CPU executable, original input,
+# generated title body or private fixture is part of the startup source kit.
+BOOT_SHARED_SOURCES = (
+    'cmake/ApuRate.cmake', 'cmake/ApuAdpcm.cmake',
+    'LICENSES/libsamplerate-BSD.txt', 'src/third_party/libsamplerate/README.md',
+    'src/third_party/dr_wav/dr_wav.h', 'src/third_party/dr_wav/LICENSE',
+    'src/third_party/dr_wav/README.md',
+    *(f'src/machine/{name}' for name in (
+        'apu.hpp', 'apu_adpcm.c', 'apu_adpcm.h', 'apu_clock.hpp',
+        'apu_startup_config.hpp', 'apu_dsp_host.hpp', 'apu_gp_dma.hpp',
+        'apu_dsp_layout.hpp', 'apu_envelope_curve.hpp', 'apu_dls2_lpf.hpp',
+        'apu_signal_model.hpp', 'apu_ssl.hpp', 'apu_observation.hpp',
+        'apu_mix_word.hpp', 'mmio_device.hpp', 'io_device.hpp',
+        'apu_rate.cpp', 'apu_envelope.cpp', 'apu_voice_quantum.cpp', 'apu_filter.cpp')),
+)
+
+
+def startup_source_files():
+    """Explicit shared closure plus immediate authored/core source directories."""
+    files = [ROOT / name for name in ('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md',
+             'tools/native_boot_assets.py', 'docs/NATIVE-BOOT-INTRO.md', *BOOT_SHARED_SOURCES)]
+    for folder in ('pilots/native-boot', 'src/third_party/xbox-boot-re',
+                   'src/third_party/xbox-boot-re/core/include', 'src/third_party/xbox-boot-re/core/src'):
+        files.extend(p for p in (ROOT / folder).iterdir() if p.is_file() and
+                     (p.suffix.lower() in ('.c', '.cpp', '.h', '.md', '.txt') or p.name == 'LICENSE'))
+    result = sorted(set(files))
+    if any(not p.is_file() or p.is_symlink() or
+           getattr(p, 'is_junction', lambda: False)() for p in result):
+        raise ValueError('Startup sources must be present ordinary files')
+    return result
 
 
 def sha(path):
@@ -79,6 +109,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
             copy_tree(launcher.parent / folder, native / folder)
     if (runtime.parent / 'third_party').is_dir():
         copy_tree(runtime.parent / 'third_party', native / 'third_party')
+    if (boot_intro.parent / 'third_party').is_dir():
+        copy_tree(boot_intro.parent / 'third_party', native / 'third_party')
     for name in ('ARTWORK-NOTICE.md', 'XBOX-CONTROLLER-ARTWORK.md'):
         if (launcher.parent / name).is_file():
             shutil.copy2(launcher.parent / name, native / name)
@@ -112,13 +144,7 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     # Self-contained authored startup source and retained MIT notice accompany
     # the helper. Original pack/kernel/sample/model bytes are never copied.
     boot_source = output / 'source/native-startup'
-    files = [ROOT / name for name in ('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md',
-             'tools/native_boot_assets.py', 'docs/NATIVE-BOOT-INTRO.md')]
-    for folder in ('pilots/native-boot', 'src/third_party/xbox-boot-re',
-                   'src/third_party/xbox-boot-re/core/include', 'src/third_party/xbox-boot-re/core/src'):
-        files.extend(p for p in (ROOT / folder).iterdir() if p.is_file() and
-                     (p.suffix.lower() in ('.c', '.cpp', '.h', '.md', '.txt') or p.name == 'LICENSE'))
-    for path in files:
+    for path in startup_source_files():
         target = boot_source / path.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)

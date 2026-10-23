@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define XB_API_VERSION 2u
+#define XB_API_VERSION 3u /* xboxllr external native voice/idle-ack extension */
 
 /* The number type of the interface. A port without FPU may replace it by a
  * fixed-point type in its own P0; see docs/core.md, "Numerik". */
@@ -697,6 +697,31 @@ typedef struct xb_audio_state {
 } xb_audio_state;
 
 int xb_get_audio(const xb_state *s, xb_audio_state *out);
+
+/* xboxllr authored extension: original sequencer/library events without the
+ * approximate VP renderer. Hardware-active and library-idle acknowledgement
+ * are separate inputs: a hardware end alone MUST NOT authorize a note restart.
+ * The owner supplies actual device state and its actual idle-consumer result.
+ * Calls are ordered, with a post-call register snapshot for every event.
+ * This API and xb_audio/xb_audio_block are mutually exclusive until re-init.
+ * It produces no samples; feed real native VP bins to xb_audio_gp separately. */
+typedef struct xb_audio_native_event {
+    xb_audio_call call;
+    xb_voice voice;
+    uint32_t table;             /* XB_TABLE_*, UINT32_MAX before sample allocation */
+    uint32_t frames;            /* actual source length, not elapsed output */
+    uint32_t start;             /* original VOICE_ON envelope start fields */
+} xb_audio_native_event;
+
+typedef struct xb_audio_native_out {
+    uint32_t block, tick, n_cmds, n_events;
+    xb_audio_cmd cmd[XB_AUDIO_CHANNELS];
+    xb_audio_native_event event[XB_AUDIO_CHANNELS];
+    uint32_t library_on, hardware_active;
+} xb_audio_native_out;
+
+int xb_audio_native_block(xb_state *s, uint32_t hardware_active,
+                          uint32_t library_idle_ack, xb_audio_native_out *out);
 
 /* The frame routine of the GP program alone (Audio.md 6.2): takes one
  * block of the bins 0, 1 and 11 as 24-bit values and returns left and

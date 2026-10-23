@@ -92,13 +92,75 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(command[-2:], ['--volume', '75'])
 
     def test_failure_or_bad_helper_report_is_nonfatal(self):
-        for code, output in ((2, b'error'), (0, b'{}'), (0, b'[]'), (0, b'{"status":"completed"}')):
+        for code, output in ((2, b'error'), (0, b'{}'), (0, b'[]'), (0, b'{"status":"completed"}'),
+                             (0, b'diagnostic noise\n{"schema":"xboxllr.native-boot-run.v1",'
+                                 b'"implementation":"native-reconstruction","status":"completed"}')):
             child = Mock(returncode=code)
             child.communicate.return_value = (output, None)
             with self.ready(), patch.object(boot.subprocess, 'Popen', return_value=child):
                 result = boot.run(self.root, self.data, self.catalog, {}, self.log, automated=True)
             self.assertEqual(result['status'], 'failed')
             self.assertIn('directly', result['message'])
+
+    def test_large_stderr_does_not_block_ready_or_corrupt_owned_handoff_json(self):
+        # A real child fills much more than an OS pipe before signaling ready.
+        # Marker events keep this focused process/stream fixture portable; no
+        # native renderer, original bytes, desktop or console state is used.
+        ready = self.root/'ready.marker'
+        presented = self.root/'presented.marker'
+        cancel = self.root/'cancel.marker'
+        script = self.root/'authored-helper.py'
+        script.write_text('''import json, pathlib, sys, time
+ready, presented, cancel = map(pathlib.Path, sys.argv[1:])
+sys.stderr.buffer.write(b"D" * (2 * 1024 * 1024))
+sys.stderr.buffer.flush()
+ready.write_text("ready")
+deadline = time.monotonic() + 5
+while not presented.exists() and not cancel.exists() and time.monotonic() < deadline:
+    time.sleep(.005)
+sys.stderr.buffer.write(b"child redirect remains owned after parent close")
+sys.stderr.buffer.flush()
+print(json.dumps(dict(schema="xboxllr.native-boot-run.v1",
+    implementation="native-reconstruction", status="completed",
+    handoff="title-presented" if presented.exists() else "cancelled")))
+''', encoding='utf-8')
+        events = Mock(names={key: 'fixture-'+key for key in ('ready', 'presented', 'cancel')})
+        markers = dict(ready=ready, presented=presented, cancel=cancel)
+        events.signaled.side_effect = lambda key: markers[key].exists()
+        events.signal.side_effect = lambda key: markers[key].write_text('signaled')
+        real_popen = subprocess.Popen
+        children, redirects = [], []
+
+        def spawn(unused_command, **options):
+            redirects.append(options['stderr'])
+            child = real_popen([sys.executable, '-B', str(script), str(ready),
+                                str(presented), str(cancel)], **options)
+            children.append(child)
+            return child
+
+        title = Mock()
+        title.poll.return_value = None
+        with boot.Handoff(self.root, self.log) as handoff:
+            with self.ready(), patch.object(boot, '_Events', return_value=events), \
+                    patch.object(boot, 'TIMEOUT_SECONDS', 3), \
+                    patch.object(boot.subprocess, 'Popen', side_effect=spawn):
+                result = boot.run(self.root, self.data, self.catalog, dict(os.environ),
+                                  self.log, handoff=handoff)
+            self.assertEqual(result['status'], 'awaiting-title')
+            self.assertIsNone(children[0].poll())
+            self.assertTrue(redirects[0].closed)
+            presented.write_text('actual fixture title present')
+            handoff.title_started(title)
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(children[0].poll(), 0)
+        diagnostic = (self.root/'data/boot/helper-stderr.log').read_bytes()
+        self.assertEqual(diagnostic, b'D'*(2*1024*1024)+b'child redirect remains owned after parent close')
+        report = json.loads((self.root/'data/boot/helper.log').read_bytes())
+        self.assertEqual(report['handoff'], 'title-presented')
+        self.assertEqual(result['diagnostic_log'], 'data/boot/helper-stderr.log')
+        title.terminate.assert_not_called()
+        events.signal.assert_not_called()
+        events.close.assert_called_once_with()
 
     def test_timeout_terminates_only_helper_before_returning(self):
         child = Mock(returncode=-15)
