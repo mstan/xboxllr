@@ -260,6 +260,8 @@ def prepare(root, data, choice, *, fallback_kernel=''):
     helper = safe_path(root, startup['executable'])
     if not helper.is_file():
         return dict(status='unavailable', message='Startup intro helper is unavailable. The title launches directly.', pack=None)
+    if startup.get('module') and not safe_path(root, startup['module']).is_file():
+        return dict(status='unavailable', message='Startup window module is unavailable. The title launches directly.', pack=None)
     pack = safe_path(root, 'data/boot/assets/' + PACK_SHA256 + '/xboot.pak')
     # An explicitly selected kernel is always validated, even if an older cache
     # exists. Clearing it permits the already prepared private pack to be reused.
@@ -305,9 +307,23 @@ def ui_state(root, data, *, fallback_kernel=''):
     return dict(**choice, status=availability['message'], choice_path=choice_path)
 
 
+def _title_logo(root, title_image):
+    logo = read_title_logo(Path(title_image))
+    path = safe_path(root, 'data/boot/title-logo/' + TITLE_LOGO_SHA256 + '.rle')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and (not path.is_file() or path.stat().st_size != len(logo) or path.read_bytes() != logo):
+        raise ValueError('Prepared original title logo changed')
+    if not path.exists():
+        with path.open('xb') as output:
+            output.write(logo)
+    return path
+
+
 def run(root, data, catalog, environment, log, *, automated=False, handoff=None, title_image=None):
     """Optionally retain our final image; skip/failure preserve direct startup."""
     started = time.monotonic()
+    for key in ('XLLE_PILOT_BOOT_MODULE', 'XLLE_PILOT_BOOT_PACK', 'XLLE_PILOT_BOOT_LOGO', 'XLLE_PILOT_BOOT_REPORT'):
+        environment.pop(key, None)
     report = dict(schema='xboxllr.startup-handoff.v1', implementation='native-reconstruction')
     try:
         if skip_animation(catalog):
@@ -320,7 +336,18 @@ def run(root, data, catalog, environment, log, *, automated=False, handoff=None,
             available = prepare(root, data, choice,
                 fallback_kernel=(getattr(catalog, 'setup', None) or {}).get('kernel', ''))
         report.update(status=available['status'], message=available['message'])
-        if available['status'] == 'ready':
+        if available['status'] == 'ready' and data['startup'].get('module') and not automated:
+            if title_image is None:
+                raise ValueError('In-window startup requires the selected original title')
+            logo = _title_logo(root, title_image)
+            output = safe_path(root, 'data/boot/in-process.json')
+            output.unlink(missing_ok=True)  # Never accept a previous run's report.
+            environment.update(XLLE_PILOT_BOOT_MODULE=str(safe_path(root, data['startup']['module'])),
+                XLLE_PILOT_BOOT_PACK=str(available['pack']), XLLE_PILOT_BOOT_LOGO=str(logo),
+                XLLE_PILOT_BOOT_REPORT=str(output))
+            report.update(status='scheduled-in-title', message='Full startup will play in the title window.',
+                          presentation='same-title-window')
+        elif available['status'] == 'ready':
             helper = safe_path(root, data['startup']['executable'])
             env = {k: v for k, v in environment.items() if not k.startswith('XLLE_PILOT_')}
             for key, folder in [('TEMP', 'temp'), ('TMP', 'temp'),
@@ -333,14 +360,7 @@ def run(root, data, catalog, environment, log, *, automated=False, handoff=None,
             if title_image is not None:
                 # Explicit original title source, independent of modified4983's
                 # embedded Xecuter2 variant. Failure never swaps variants silently.
-                logo = read_title_logo(Path(title_image))
-                path = safe_path(root, 'data/boot/title-logo/' + TITLE_LOGO_SHA256 + '.rle')
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if path.exists() and (not path.is_file() or path.stat().st_size != len(logo) or path.read_bytes() != logo):
-                    raise ValueError('Prepared original title logo changed')
-                if not path.exists():
-                    with path.open('xb') as output:
-                        output.write(logo)
+                path = _title_logo(root, title_image)
                 command.extend(['--title-logo', str(path)])
                 report['after_image_source'] = 'selected-title-xbe-microsoft'
             else:
@@ -409,3 +429,25 @@ def run(root, data, catalog, environment, log, *, automated=False, handoff=None,
     except (ValueError, OSError):
         pass  # The optional stage may never prevent native-title startup.
     return report
+
+
+def finish_in_title(root, log):
+    """Consume only this launch's freshly cleared in-window result, after exit."""
+    try:
+        path = safe_path(root, 'data/boot/last-run.json')
+        if not path.is_file() or path.stat().st_size > 8192:
+            return
+        report = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(report, dict) or report.get('status') != 'scheduled-in-title':
+            return
+        result_path = safe_path(root, 'data/boot/in-process.json')
+        result = (json.loads(result_path.read_text(encoding='utf-8'))
+                  if result_path.is_file() and result_path.stat().st_size <= 65536 else {})
+        valid = (isinstance(result, dict) and result.get('schema') == 'xboxllr.native-boot-run.v1'
+                 and result.get('window_mode') == 'borrowed-title' and result.get('status') in ('completed', 'skipped'))
+        report.update(status=result['status'] if valid else 'failed',
+                      message='Startup used the same title window.' if valid else 'In-window startup did not report completion.')
+        atomic_json(path, report)
+        log.write('[STARTUP] ' + report['message'] + '\n')
+    except (ValueError, OSError, UnicodeError):
+        pass

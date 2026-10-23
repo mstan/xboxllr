@@ -203,6 +203,35 @@ existing startup preference and selected firmware. It does not change that
 preference, console identity or saves. The package and launcher expose this mod
 even when a title has no visual enhancement registry.
 
+### Same-window startup, 2026-10-23
+
+New packages include `native/XboxStartup.dll`. On a normal launch, the shared
+native graphics owner creates its title window once, then calls this authored
+module before starting the guest clock or executing the guest entry point. The
+title's graphics device is created afterward. This avoids advancing game timers
+or mixing game audio during the startup. The full original-derived
+animation and sound run in that same HWND. The module borrows only a window
+owned by its calling process and thread, restores its window procedure, and
+releases its private graphics/audio objects before returning. It never creates,
+moves, resizes, reparents or destroys that borrowed window. Dashboard then renders
+into the existing window. Position and size, including an owner resize during
+startup, survive the transition. Skipping uses the same window; closing exits
+the application normally. This is shared title code, without Dashboard-name checks.
+
+The loader accepts only the packaged `XboxStartup.dll` beside the native title.
+The launcher records the module result in private `data/boot/in-process.json`;
+the prior report is cleared before each launch. The optional skip mod schedules
+no module. Standalone helper execution and its original per-launch event handoff
+remain available for source-kit tools and automated offscreen validation; new
+interactive packages use the in-process path instead of a second window.
+
+Actual hidden, muted native Dashboard checks completed the full sequence,
+skipped it and closed it. Each retained one application HWND and unchanged
+position/size after a deliberate resize; close returned zero. Private receipts:
+`G:/Temp/Codex/xboxllr/skip-startup-mod-20261023/same-window-tests-004/receipt.json`.
+The owner had already accepted the startup presentation before this ownership
+change. Exact hardware voice precision remains a separate documented deferral.
+
 The core is C11 and independent of Win32, graphics and audio devices. The
 first live presentation host is Windows D3D11 only and is excluded entirely
 on other platforms. MSVC's strict scalar C math adapts the donor's three

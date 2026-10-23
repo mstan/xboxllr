@@ -92,7 +92,10 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     if not runtime.resolve().is_relative_to(cache.parent.resolve()):
         raise ValueError('Runtime is outside its declared build')
     boot_intro = Path(boot_intro)
-    closure = inventory([runtime, launcher, boot_intro], runtime_dirs)
+    boot_module = boot_intro.with_name('XboxStartup.dll')
+    if not boot_module.is_file():
+        raise ValueError('Build the same-window startup module beside its helper')
+    closure = inventory([runtime, launcher, boot_intro, boot_module], runtime_dirs)
     if not closure['complete']:
         raise ValueError('Missing Windows dependencies: ' + str(closure['missing']))
     # No output is created until metadata and all PE inputs have been checked.
@@ -223,6 +226,7 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         readme.write('\nStartup intro: optional under Settings. Default for this title: ' + ('on' if intro_default else 'off') + '.\n'
             'Mods > Xbox Startup > Skip startup animation goes straight to the title.\n'
             'The skip mod is off by default, so Dashboard plays the full sequence.\n'
+            'Startup and the title use one window, preserving its position and size.\n'
             'It uses startup data from your compatible complete kernel dump, prepared privately.\n'
             'A short save-signing dump is not enough. Missing/unsupported startup data launches\n'
             'the title directly. No boot assets are included, and console identity/saves stay unchanged.\n'
@@ -230,7 +234,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     files = {p.relative_to(output).as_posix(): sha(p) for p in output.rglob('*') if p.is_file()}
     record = dict(schema='xboxllr.native-preview.v1', title=title,
         executable='native/' + runtime.name, launcher_executable='native/Launcher.exe',
-        startup=dict(executable='native/XboxStartup.exe', default_enabled=intro_default),
+        startup=dict(executable='native/XboxStartup.exe', module='native/XboxStartup.dll',
+                     default_enabled=intro_default),
         capabilities=dict(visual_mods=available, startup_intro=True), mods=mods,
         launcher=dict(frame_modes=source.get('launcher', {}).get('frame_modes', []),
                       defaults=source.get('launcher', {}).get('defaults', {})),

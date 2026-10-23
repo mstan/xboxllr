@@ -4,10 +4,12 @@
 #include "boot_renderer.h"
 #include "boot_timeline.h"
 #include "boot_handoff.h"
+#include "boot_window_api.h"
 #ifdef XBOXLLR_BOOT_NATIVE_AUDIO
 #include "boot_audio_owner.h"
 #endif
 #include <algorithm>
+#include <atomic>
 #include <bcrypt.h>
 #include <chrono>
 #include <cstring>
@@ -29,6 +31,7 @@ constexpr size_t PACK_BYTES = 73120;
 constexpr const char *PACK_SHA256 =
     "e97b240aa8f0d20ce70d8c9ee2e4f3a150ca75808ba01c412c487335a7807dca";
 bool close_requested = false;
+WNDPROC borrowed_previous = nullptr;
 struct Aligned {
     void *data;
     size_t size;
@@ -141,6 +144,8 @@ struct Audio {
 LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     if (message == WM_CLOSE) {
         close_requested = true;
+        if (borrowed_previous)
+            return CallWindowProcW(borrowed_previous, window, message, wp, lp);
         return 0;
     }
     if (message == WM_KEYDOWN && !(lp & (LPARAM(1) << 30)) &&
@@ -148,14 +153,26 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         close_requested = true;
         return 0;
     }
-    return DefWindowProcW(window, message, wp, lp);
+    return borrowed_previous ? CallWindowProcW(borrowed_previous, window, message, wp, lp)
+                             : DefWindowProcW(window, message, wp, lp);
 }
 struct Window {
     Window(const Window &) = delete;
     Window &operator=(const Window &) = delete;
     HWND value = nullptr;
+    bool borrowed = false;
     HINSTANCE instance = GetModuleHandleW(nullptr);
-    explicit Window(bool headless) {
+    explicit Window(bool headless, HWND existing = nullptr) {
+        if (existing) {
+            value = existing;
+            borrowed = true;
+            SetLastError(0);
+            auto previous = (WNDPROC)SetWindowLongPtrW(value, GWLP_WNDPROC, (LONG_PTR)window_proc);
+            if (!previous)
+                throw std::runtime_error("Cannot borrow title window procedure");
+            borrowed_previous = previous;
+            return;
+        }
         if (headless)
             return;
         WNDCLASSW wc{};
@@ -174,7 +191,11 @@ struct Window {
             throw std::runtime_error("Cannot create startup window");
     }
     ~Window() {
-        if (value)
+        if (borrowed) {
+            if (IsWindow(value) && (WNDPROC)GetWindowLongPtrW(value,GWLP_WNDPROC)==window_proc)
+                SetWindowLongPtrW(value,GWLP_WNDPROC,(LONG_PTR)borrowed_previous);
+            borrowed_previous = nullptr;
+        } else if (value)
             DestroyWindow(value);
     }
 };
@@ -256,7 +277,9 @@ void wav(const std::filesystem::path &path, const std::vector<int16_t> &samples)
 }
 } // namespace
 
-int wmain(int argc, wchar_t **argv) {
+static int startup_main(int argc, wchar_t **argv, HWND existing = nullptr,
+                        bool keep_hidden = false, std::ostream &report = std::cout) {
+    close_requested = false;
     try {
         std::filesystem::path pack_path, capture_dir, audio_path, title_logo_path;
         std::wstring ready_event, presented_event, cancel_event;
@@ -376,7 +399,7 @@ int wmain(int argc, wchar_t **argv) {
             throw std::runtime_error("Startup synthesis was unexpectedly silent");
         if (!audio_path.empty())
             wav(audio_path, pcm);
-        Window window(headless || core_only);
+        Window window(headless || core_only, existing);
         ComPtr<ID3D11Device> device;
         ComPtr<ID3D11DeviceContext> context;
         ComPtr<IDXGISwapChain> swap;
@@ -418,8 +441,8 @@ int wmain(int argc, wchar_t **argv) {
         const bool play_audio = !mute && !core_only && volume;
         if (play_audio)
             audio.prepare(pcm);
-        if (window.value) {
-            ShowWindow(window.value, SW_SHOWNORMAL);
+        if (window.value && !keep_hidden) {
+            if (!IsWindowVisible(window.value)) ShowWindow(window.value, SW_SHOW);
             UpdateWindow(window.value);
         }
         const double setup_ms =
@@ -462,7 +485,7 @@ int wmain(int argc, wchar_t **argv) {
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
-                if (close_requested || controller.skip()) {
+                if (close_requested || !IsWindow(window.value) || controller.skip()) {
                     skipped = true;
                     break;
                 }
@@ -560,7 +583,7 @@ int wmain(int argc, wchar_t **argv) {
             }
             handoff_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
         }
-        std::cout << "{\"schema\":\"xboxllr.native-boot-run.v1\",\"implementation\":\"native-"
+        report << "{\"schema\":\"xboxllr.native-boot-run.v1\",\"implementation\":\"native-"
                      "reconstruction\",\"status\":\""
                   << (skipped ? "skipped" : "completed") << "\",\"frames\":" << frames
                   << ",\"time\":" << xb_time(state)
@@ -578,6 +601,8 @@ int wmain(int argc, wchar_t **argv) {
                   << ",\"final_nonblack_pixels\":" << lit_pixels << ",\"pcm_sha256\":\"" << pcm_hash
                   << "\",\"audio_output\":\"" << (!mute && !core_only && volume ? "enabled" : "muted")
                   << "\",\"graphics_validation\":" << (validate ? "true" : "false")
+                  << ",\"window_mode\":\"" << (existing ? "borrowed-title" : "separate") << "\""
+                  << ",\"window_handle\":" << reinterpret_cast<uintptr_t>(window.value)
                   << ",\"presentation\":\"" << (core_only ? "core-only" : "d3d11") << "\"}\n";
         return 0;
     } catch (const std::exception &error) {
@@ -585,3 +610,43 @@ int wmain(int argc, wchar_t **argv) {
         return 2;
     }
 }
+
+#ifdef XBOXLLR_BOOT_DLL
+extern "C" __declspec(dllexport) int XBOXLLR_BOOT_CALL
+XboxllrStartupRunWindowV1(const XboxllrBootWindowV1 *options) {
+    static std::atomic_flag busy = ATOMIC_FLAG_INIT;
+    if (!options || options->size != sizeof(*options) || options->volume > 100 ||
+        options->flags & ~(XBOXLLR_BOOT_WINDOW_MUTE | XBOXLLR_BOOT_WINDOW_HIDDEN) ||
+        !options->pack || !*options->pack || !options->window)
+        return XBOXLLR_BOOT_WINDOW_FAILED;
+    HWND window = (HWND)options->window;
+    DWORD process = 0;
+    if (GetWindowThreadProcessId(window,&process) != GetCurrentThreadId() || process != GetCurrentProcessId())
+        return XBOXLLR_BOOT_WINDOW_FAILED;
+    if (busy.test_and_set()) return XBOXLLR_BOOT_WINDOW_FAILED;
+    struct Unlock { std::atomic_flag &flag; ~Unlock(){flag.clear();} } unlock{busy};
+    try {
+        std::vector<std::wstring> args{L"XboxStartup",L"--pack",options->pack,
+                                       L"--volume",std::to_wstring(options->volume)};
+        if (options->title_logo && *options->title_logo)
+            args.insert(args.end(),{L"--title-logo",options->title_logo});
+        if (options->flags & XBOXLLR_BOOT_WINDOW_MUTE) args.push_back(L"--mute");
+        std::vector<wchar_t *> pointers;
+        for (auto &arg:args) pointers.push_back(arg.data());
+        std::ostringstream report;
+        const int result = startup_main((int)pointers.size(),pointers.data(),window,
+                                       (options->flags & XBOXLLR_BOOT_WINDOW_HIDDEN)!=0,report);
+        if (options->report && *options->report) {
+            std::ofstream output(std::filesystem::path(options->report),std::ios::binary|std::ios::trunc);
+            output << report.str();
+        }
+        std::cout << report.str();
+        return IsWindow(window) ? result : XBOXLLR_BOOT_WINDOW_CLOSED;
+    } catch (const std::exception &error) {
+        std::cerr << "Native startup window failed: " << error.what() << '\n';
+        return XBOXLLR_BOOT_WINDOW_FAILED;
+    }
+}
+#else
+int wmain(int argc, wchar_t **argv) { return startup_main(argc,argv); }
+#endif

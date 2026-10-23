@@ -61,6 +61,31 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(result['status'], 'disabled')
         process.assert_not_called()
 
+    def test_same_window_plan_uses_no_child_or_event_and_rejects_stale_result(self):
+        data = dict(self.data, startup=dict(self.data['startup'], module='native/XboxStartup.dll'))
+        (self.root/'native/XboxStartup.dll').write_bytes(b'authored module fixture')
+        logo = self.root/'title-logo.rle'
+        logo.write_bytes(b'authored logo fixture')
+        result_path = self.root/'data/boot/in-process.json'
+        result_path.parent.mkdir(parents=True)
+        result_path.write_text('{"old":"result"}')
+        environment = dict(XLLE_PILOT_BOOT_MODULE='stale module')
+        with self.ready(), patch.object(boot, '_title_logo', return_value=logo), \
+                patch.object(boot.subprocess, 'Popen') as process, patch.object(boot, '_Events') as events:
+            result = boot.run(self.root, data, self.catalog, environment, self.log, title_image=self.root/'original.xbe')
+        self.assertEqual(result['status'], 'scheduled-in-title')
+        self.assertEqual(environment['XLLE_PILOT_BOOT_MODULE'], str(self.root/'native/XboxStartup.dll'))
+        self.assertFalse(result_path.exists())
+        process.assert_not_called()
+        events.assert_not_called()
+        result_path.write_text(json.dumps(dict(schema='xboxllr.native-boot-run.v1',
+            window_mode='borrowed-title', status='completed')))
+        boot.finish_in_title(self.root, self.log)
+        self.assertEqual(json.loads((self.root/'data/boot/last-run.json').read_text())['status'], 'completed')
+        self.catalog.features = [dict(package=boot.MOD_PACKAGE, id='skip-animation', enabled=True)]
+        boot.run(self.root, data, self.catalog, environment, self.log)
+        self.assertFalse(any(key.startswith('XLLE_PILOT_BOOT_') for key in environment))
+
     def test_skip_mod_persists_and_restores_full_startup_without_rewriting_settings(self):
         state = self.root / 'data/mod-selection.json'
         boot.write_choice(self.root, dict(enabled=True, kernel='owned-kernel.img'))

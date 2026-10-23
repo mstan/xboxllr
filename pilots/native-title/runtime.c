@@ -1371,6 +1371,14 @@ int main(int argc,char **argv)
     }
     settings_region_bind_boot();
     load_image(argv[1]);
+#ifdef PILOT_TITLE_MODS
+    title_mod_initialize();
+#endif
+#ifdef PILOT_D3D_NATIVE
+    /* Host presentation finishes before the guest clock/threads start. The
+     * title's first device then reuses this exact window and owner geometry. */
+    if(pilot_gfx_prepare_startup()<0)stop("native startup window unavailable",0);
+#endif
 #ifdef PILOT_OPTICAL_EMPTY_NATIVE
     kernel_optical_initialize();
 #endif
@@ -1382,9 +1390,6 @@ int main(int argc,char **argv)
     for(size_t i=0;i<sizeof(pilot_imports)/sizeof(pilot_imports[0]);++i)
         if(pilot_imports[i].ordinal==156)tick_data=PILOT_KERNEL_TICK_COUNT;
     kernel_clock_initialize(tick_data,dispatch_clock_origin);
-#endif
-#ifdef PILOT_TITLE_MODS
-    title_mod_initialize();
 #endif
 #ifdef PILOT_FILES_LLE
     files_lle_start();

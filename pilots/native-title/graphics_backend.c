@@ -42,6 +42,8 @@ int32_t pilot_gfx_title(const char *utf8)
     memcpy(pilot_window_title,title,(wcslen(title)+1)*sizeof(WCHAR));return S_OK;
 }
 static int pilot_visible;
+static int pilot_startup_window_prepared;
+#include "graphics_startup_window.inc"
 /* A random, exclusive per-launch event is supplied only to this owned child.
  * Without it, historical window/show behavior remains unchanged. */
 static HANDLE pilot_boot_present_event;
@@ -325,23 +327,43 @@ int32_t pilot_gfx_parameters(const uint32_t p[17])
 #endif
     return S_OK;
 }
+static int32_t pilot_window_open(unsigned width,unsigned height)
+{
+    WNDCLASSW window_class={0};window_class.lpfnWndProc=pilot_window_proc;
+    window_class.hInstance=GetModuleHandleW(NULL);window_class.lpszClassName=L"xlle-native-reference";
+    if(!RegisterClassW(&window_class) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)
+        return HRESULT_FROM_WIN32(GetLastError());
+    RECT client=pilot_client_rectangle(width,height);
+    if(!pilot_window)pilot_window=CreateWindowW(window_class.lpszClassName,pilot_window_title,WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT,CW_USEDEFAULT,client.right-client.left,client.bottom-client.top,NULL,NULL,window_class.hInstance,NULL);
+    if(!pilot_window)return HRESULT_FROM_WIN32(GetLastError());
+    if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
+                    SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))return HRESULT_FROM_WIN32(GetLastError());
+    return S_OK;
+}
+int32_t pilot_gfx_prepare_startup(void)
+{
+    const char *module=getenv("XLLE_PILOT_BOOT_MODULE");
+    if(!module || !*module)return S_OK;
+    int32_t result=pilot_window_open(640,480);
+    if(result<0)return result;
+    pilot_startup_window();
+    pilot_startup_window_prepared=1;
+    return S_OK;
+}
 int32_t pilot_gfx_create(const uint32_t p[17])
 {
     if(pilot_device)return E_INVALIDARG;
     int32_t validation=pilot_gfx_parameters(p);if(validation<0)return validation;
     if(!pilot_presentation_parse(p,&pilot_presentation))return E_INVALIDARG;
     pilot_initializer.precision_policy=PILOT_COLOR_NATIVE_RGBA8;pilot_default_color_format=p[2];
-    WNDCLASSW window_class={0}; window_class.lpfnWndProc=pilot_window_proc;
-    window_class.hInstance=GetModuleHandleW(NULL); window_class.lpszClassName=L"xlle-native-reference";
-    if (!RegisterClassW(&window_class) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return HRESULT_FROM_WIN32(GetLastError());
-    RECT client=pilot_client_rectangle(p[0],p[1]);
     /* Hidden until scene qualification; a successful hidden present is not
      * treated as title cadence evidence. Tests read actual GPU output. */
-    if(!pilot_window)pilot_window=CreateWindowW(window_class.lpszClassName,pilot_window_title,WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,CW_USEDEFAULT,client.right-client.left,client.bottom-client.top,NULL,NULL,window_class.hInstance,NULL);
-    if (!pilot_window) return HRESULT_FROM_WIN32(GetLastError());
-    if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
-                    SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))return HRESULT_FROM_WIN32(GetLastError());
+    if(!pilot_startup_window_prepared) {
+        int32_t result=pilot_window_open(p[0],p[1]);
+        if(result<0)return result;
+    }
+    pilot_startup_window_prepared=0;
     pilot_factory=xbox_Direct3DCreate8(0);
     if (!pilot_factory) { pilot_gfx_close(); return E_OUTOFMEMORY; }
     D3DPRESENT_PARAMETERS pp={0};

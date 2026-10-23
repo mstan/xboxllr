@@ -383,6 +383,8 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
                     return 0
             else:
                 code = child.wait()
+            from native_boot_launcher import finish_in_title
+            finish_in_title(root, log)
             session.finish(code)
             return code
 
