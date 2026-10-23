@@ -46,6 +46,7 @@ static uint32_t graphics_reset(uint32_t pointer)
         header[3]=0x10021|(format<<8);header[4]=(extent[0]-1)|((extent[1]-1)<<12)|((pitch/64-1)<<24);header[5]=0;
     }
     memcpy(graphics_parameters,p,sizeof(p));graphics_swap_deadline=0;
+    graphics_render_presentation_cache(p[4]);
     MEM32(PILOT_D3D_PRESENT_INTERVAL)=p[12];
     /* Keep the previous current-target owner until SetTargets releases any
      * independent offscreen bindings; presentation headers are already new. */

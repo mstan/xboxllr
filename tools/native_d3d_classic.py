@@ -119,16 +119,8 @@ def inspect(context, proof):
                        'D3D_g_RenderState':'render_states','D3D_g_DeferredTextureState':'texture_states',
                        'D3DDevice__m_VBlankCallback_OFFSET':'vblank_callback'}.items():
         if variables.get(name) != field(path): raise ValueError('classic SDK variable changed: ' + name)
-    mapping = proof['render_cache']
-    expected = list(range(82)) + [-1]*10 + list(range(82,117)) + [-1]*9 + list(range(117,139)) + [-1] + list(range(139,146))
-    if (mapping.get('count') != 146 or mapping.get('map') != expected or
-            mapping.get('default_count') != 89 or mapping.get('default_skips') != [116,135]):
-        raise ValueError('unreviewed classic compact render-state contract')
-    if (variables.get('D3D_g_DeferredRenderState') != layout['render_states']+82*4 or
-            variables.get('D3D_g_ComplexRenderState') != layout['render_states']+117*4 or
-            variables.get('D3DRS_CullMode') != layout['render_states']+128*4 or
-            variables.get('D3DRS_YuvEnable') != layout['render_states']+140*4):
-        raise ValueError('classic compact state boundaries changed')
+    from native_d3d_compact import inspect as inspect_compact
+    compact = inspect_compact(proof,variables,layout,codes,read)
     if layout['yuv_state'] != 160: raise ValueError('invalid semantic YUV state')
     if not 0 < layout['device_bytes'] <= 0x10000: raise ValueError('invalid classic device extent')
     if (layout['device_object']+layout['device_bytes']!=layout['device_global'] or
@@ -163,7 +155,8 @@ def inspect(context, proof):
     matrices=layout['cache_fields']['transforms'];combined=layout['transform_fields']['projection_viewport']
     if not (combined+64 <= matrices or combined >= matrices+640):
         raise ValueError('classic combined transform aliases raw projection')
-    facts=dict(render_defaults=list(struct.unpack('<89I',read(layout['render_defaults'],356))),
+    default_count=compact['render_cache']['default_count']
+    facts=dict(render_defaults=list(struct.unpack(f'<{default_count}I',read(layout['render_defaults'],default_count*4))),
                texture_defaults=list(read(layout['texture_defaults'],32)),
                device_caps=list(struct.unpack('<53I',read(layout['device_caps'],212))),
                surface_formats=[dict(format=f,flags=read(layout['surface_formats']+f,1)[0])
@@ -171,7 +164,7 @@ def inspect(context, proof):
     binding=dict(xbe_sha256=context.image['sha256'],adapter=ADAPTER,device_global=layout['device_global'],
                  device_object=layout['device_object'],vertex_shader_offset=layout['cache_fields']['vertex_object'],
                  layout=copy.deepcopy(layout),calls=calls,helpers=proof['helpers'],stateblock=False,
-                 render_cache=copy.deepcopy(mapping),native_create_behavior_mask=0x40,
+                 **compact,native_create_behavior_mask=0x40,
                  original_create_driver_mask=0x10,**facts)
     if 'cpu_services' in proof:
         selected=proof['cpu_services'];by_name={c['name']:c for c in calls}

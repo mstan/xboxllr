@@ -106,12 +106,16 @@ def bind(xbe, output, symbols, profile=None):
         if variables[name] != proof['variables'][name]:
             raise ValueError('input variable differs from reviewed profile: ' + name)
     absent_types = absent_classes(context, proof, variables)
+    from native_input_reports import inspect as inspect_reports
+    report_processing = inspect_reports(context, proof, layout)
 
     binding = dict(xbe_sha256=context.image['sha256'], calls=calls, variables=variables,
                    set_last_error=dict(symbol=last_error['name'], sha256=proof['set_last_error']['sha256']),
                    **layout)
     if absent_types:
         binding['known_absent_classes'] = absent_types
+    if report_processing:
+        binding['report_processing'] = report_processing
     header = ['#pragma once', 'enum PilotInputEntry {']
     header += [f'    PILOT_INPUT_{c["name"]},' for c in calls]
     header += ['    PILOT_INPUT_COUNT', '};',
@@ -144,6 +148,8 @@ def bind(xbe, output, symbols, profile=None):
         header += ['};']
     if 'XInputPoll' in proof['calls']:
         header += ['#define PILOT_INPUT_HAS_POLL 1']
+    if report_processing:
+        header += ['#define PILOT_INPUT_ANALOG_BUTTON_FLOOR 0']
     wrapper = ['#include "pilot_input_bindings.h"',
                'extern void pilot_input_dispatch(unsigned, void (*)(void));',
                f'extern void {last_error["name"]}(void);']
@@ -174,6 +180,21 @@ def bind(xbe, output, symbols, profile=None):
     record = output / 'input-binding.aot-private.json'
     if (context.generated / 'pilot_input_binding.c').exists():
         prior=json.loads(record.read_text())
+        # A previously retained default can be corrected only by this complete
+        # newly inspected report proof. Original wrapper/body/layout identity
+        # must be unchanged, and neither header nor receipt may have drifted.
+        without_report={k:v for k,v in binding.items() if k!='report_processing'}
+        if report_processing and prior==without_report and context.manifest.get('input_binding')==prior:
+            prior_header=texts['pilot_input_bindings.h'].replace('#define PILOT_INPUT_ANALOG_BUTTON_FLOOR 0\n','')
+            if ((context.generated/'pilot_input_bindings.h').read_text()!=prior_header or
+                    (context.generated/'pilot_input_binding.c').read_text()!=texts['pilot_input_binding.c']):
+                raise ValueError('existing input source differs before report policy correction')
+            (context.generated/'pilot_input_bindings.h').write_text(texts['pilot_input_bindings.h'],encoding='utf-8',newline='\n')
+            record.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8',newline='\n')
+            context.manifest['input_binding']=binding
+            context.manifest['files']['pilot_input_bindings.h']=hashlib.sha256((context.generated/'pilot_input_bindings.h').read_bytes()).hexdigest()
+            context.manifest_path.write_text(json.dumps(context.manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+            return binding
         without_poll=dict(binding,calls=[c for c in calls if c['name']!='XInputPoll'])
         if 'XInputPoll' in call_blocks and prior==without_poll and context.manifest.get('input_binding')==prior:
             prior_header='\n'.join(line for line in texts['pilot_input_bindings.h'].splitlines() if

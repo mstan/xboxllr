@@ -16,6 +16,17 @@ static void graphics_render_map_check(void)
         if(index>=0 && (seen[index]++ || pilot_d3d_render_state_inverse[index]!=state))
             stop("aliased original render-state mapping",state);
     }
+#ifdef PILOT_D3D_LEGACY_SAMPLE_TYPE_CACHE_VERSION
+#if PILOT_D3D_LEGACY_SAMPLE_TYPE_CACHE_VERSION != 1 || PILOT_D3D_GUEST_RENDER_STATE_COUNT != 144 || PILOT_D3D_LEGACY_SAMPLE_TYPE_INDEX != 134
+#error Unsupported legacy sample cache policy
+#endif
+    /* The removed MultiSampleType has no semantic alias. Its storage is
+     * initialized from accepted presentation parameters, never API-remapped. */
+    unsigned legacy=PILOT_D3D_LEGACY_SAMPLE_TYPE_INDEX;
+    if(seen[legacy] || pilot_d3d_render_state_inverse[legacy]!=UINT16_MAX)
+        stop("aliased legacy sample cache",legacy);
+    seen[legacy]=1;
+#endif
     for(unsigned i=0;i<PILOT_D3D_GUEST_RENDER_STATE_COUNT;++i)
         if(!seen[i])stop("missing original render-state mapping",i);
 #endif
@@ -47,10 +58,25 @@ static unsigned graphics_render_from_guest(unsigned index)
 {
 #ifdef PILOT_D3D_RENDER_STATE_MAP_VERSION
     if(index>=PILOT_D3D_GUEST_RENDER_STATE_COUNT)stop("invalid original render state",index);
-    return pilot_d3d_render_state_inverse[index];
+    unsigned state=pilot_d3d_render_state_inverse[index];
+    if(state>=166)stop("unsupported guest-only render state",index);
+    return state;
 #else
     if(index>=166)stop("invalid original render state",index);
     return index;
+#endif
+}
+static void graphics_render_presentation_cache(uint32_t sample_type)
+{
+#ifdef PILOT_D3D_LEGACY_SAMPLE_TYPE_CACHE_VERSION
+    /* Original reset_buffers masks 16 bits and substitutes 0x11 when 0x3000
+     * flags are absent. These two existing accepted presentation values
+     * already have exactly that normalized representation. */
+    if(sample_type!=0x11 && sample_type!=0x2222)
+        stop("unqualified legacy presentation sample type",sample_type);
+    MEM32(PILOT_D3D_RENDER_STATES+4*PILOT_D3D_LEGACY_SAMPLE_TYPE_INDEX)=sample_type;
+#else
+    (void)sample_type;
 #endif
 }
 static void graphics_render_copy(uint32_t values[166])

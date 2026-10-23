@@ -431,7 +431,13 @@ static void test_input(void)
     input_ports[0].next_poll=UINT64_MAX;
     uint32_t packet=input_ports[0].packet;
     CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0);
-    const uint8_t expected_pad[18]={0x10,0,255,0,255,0,255,0,0,241,0,0x80,255,0x7f,0x2e,0xfb,0xe1,0x10};
+    const uint8_t expected_pad[18]={0x10,0,255,0,255,0,255,0,
+#if PILOT_INPUT_ANALOG_BUTTON_FLOOR == 0
+        17,
+#else
+        0,
+#endif
+        241,0,0x80,255,0x7f,0x2e,0xfb,0xe1,0x10};
     CHECK(packet && MEM32(out)==packet && !memcmp(memory+out+4,expected_pad,18) && MEM8(out-1)==0xcc && MEM8(out+22)==0xcc);
     unsigned calls=input_test_state_calls;
     input_ports[0].next_poll=UINT64_MAX;
@@ -441,7 +447,8 @@ static void test_input(void)
     input_test_states[0].Gamepad.wButtons|=XINPUT_GAMEPAD_B; input_ports[0].next_poll=0;
     CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM32(out)==++packet && MEM8(out+7)==255);
     input_test_states[0].Gamepad.bLeftTrigger=31;input_ports[0].next_poll=0;
-    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM8(out+12)==0);
+    CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 &&
+        MEM8(out+12)==(PILOT_INPUT_ANALOG_BUTTON_FLOOR?0:31));
     input_test_states[0].Gamepad.bLeftTrigger=32;input_ports[0].next_poll=0;
     CHECK(input_test_call(PILOT_INPUT_XInputGetState,handle,out,0,0)==0 && MEM8(out+12)==32);
     uint8_t last_state[22];memcpy(last_state,memory+out,22);

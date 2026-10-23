@@ -93,6 +93,7 @@ static void graphics_state_init(void)
             MEM32(PILOT_D3D_RENDER_STATES+(i+57)*4)=value;
     }
 #endif
+    graphics_render_presentation_cache(graphics_parameters[4]);
     graphics_render_write(143,graphics_parameters[8]!=0);
     graphics_render_copy(graphics_state_baseline);
     static const uint32_t render[]={57,58,59,60,61,62,63,64,66,67,68,69,70,71,72,73,74,

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 import struct
-from capstone import Cs, CS_ARCH_X86, CS_MODE_32
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_GRP_JUMP, CS_OP_IMM
 from native_binding import Binding, validate_body
 from native_audio_i3dl2 import bind_i3dl2
 from native_audio_spatial import bind_spatial
@@ -32,6 +32,97 @@ SEMANTIC_ENTRIES = (
 LISTENER_CALLS = {'SetAllParameters':12, 'SetDistanceFactor':12,
     'SetDopplerFactor':12, 'SetOrientation':32, 'SetPosition':20,
     'SetRolloffFactor':12, 'SetVelocity':20, 'CommitDeferredSettings':4}
+
+def _audio_body_code(context, function, proof, data):
+    """Decode one complete canonical extent from its original stored bytes."""
+    validate_body(proof)
+    try:
+        start, end = int(function['start'], 16), int(function['end'], 16)
+        size = function['size']
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError('invalid canonical audio extent') from error
+    if (type(size) is not int or size <= 0 or start < 0 or end > 0x100000000
+            or end-start != size):
+        raise ValueError('invalid canonical audio extent')
+    sections = [s for s in context.image['sections'] if s['address'] <= start
+                and end <= s['address']+s['raw_size']]
+    if len(sections) != 1 or not context.matches_body(function, proof):
+        raise ValueError('unreviewed original audio body')
+    raw = data(start, size)
+    if len(raw) != size or hashlib.sha256(raw).hexdigest() != proof['sha256']:
+        raise ValueError('changed original audio bytes')
+    decoder = Cs(CS_ARCH_X86, CS_MODE_32)
+    decoder.detail = True
+    code = list(decoder.disasm(raw, start))
+    if not code or sum(i.size for i in code) != size or code[-1].address+code[-1].size != end:
+        raise ValueError('incomplete original audio decode')
+    return code
+
+
+def public_audio_abi(context, symbol, proof, functions, data):
+    """Inspect a public ABI; optional JMP proof does not admit its semantics.
+
+    Unsupported public setters still use their original name and the existing
+    native dispatch stop. No target body is executed or replaced here.
+    """
+    name, address, stack = symbol['name'], symbol['address'], symbol['stack_bytes']
+    if symbol['call'] != 'stdcall' or not re.fullmatch('[A-Za-z_][A-Za-z_0-9]*', name):
+        raise ValueError('unqualified audio symbol ABI')
+    validate_body(proof)
+    if (type(stack) is not int or stack < 0 or stack > 256 or stack % 4
+            or proof.get('stack_bytes') != stack):
+        raise ValueError('unreviewed audio cleanup: '+name)
+    function = functions.get(address)
+    if function is None:
+        raise ValueError('missing canonical audio body: '+name)
+    code = _audio_body_code(context, function, proof, data)
+    if code[0].address != address:
+        raise ValueError('canonical audio entry disagrees: '+name)
+    tail = None
+    if 'tail_target' not in proof:
+        returns = {int(i.op_str or '0', 0) for i in code if i.mnemonic == 'ret'}
+        if returns != {stack}:
+            raise ValueError('audio return disagrees with symbol: '+name)
+    else:
+        selected = proof['tail_target']
+        if (not isinstance(selected, dict) or set(selected) != {'address', 'body'}
+                or type(selected['address']) is not int or not 0 < selected['address'] <= 0xffffffff
+                or not isinstance(selected['body'], dict)
+                or set(selected['body']) != {'sha256', 'bytes', 'stack_bytes'}
+                or type(proof.get('bytes')) is not int or proof['bytes'] != function['size']):
+            raise ValueError('invalid audio tail-target proof: '+name)
+        target, body = selected['address'], selected['body']
+        validate_body(body)
+        if type(body['bytes']) is not int or type(body['stack_bytes']) is not int or body['stack_bytes'] != stack:
+            raise ValueError('audio tail-target cleanup disagrees: '+name)
+        if (len(code) != 1 or code[0].mnemonic != 'jmp' or len(code[0].operands) != 1
+                or code[0].operands[0].type != CS_OP_IMM or code[0].operands[0].imm != target):
+            raise ValueError('audio tail-target requires one exact direct JMP: '+name)
+        matches = [f for f in context.functions if int(f['start'], 16) == target]
+        if len(matches) != 1 or functions.get(target) != matches[0]:
+            raise ValueError('missing or ambiguous canonical audio tail target: '+name)
+        target_function = matches[0]
+        target_code = _audio_body_code(context, target_function, body, data)
+        public_end, target_end = int(function['end'], 16), int(target_function['end'], 16)
+        if not (target_end <= address or target >= public_end):
+            raise ValueError('overlapping audio tail target: '+name)
+        returns = {int(i.op_str or '0', 0) for i in target_code if i.mnemonic == 'ret'}
+        if returns != {stack} or target_code[-1].mnemonic != 'ret':
+            raise ValueError('audio tail-target return disagrees: '+name)
+        starts = {i.address for i in target_code}
+        for instruction in target_code:
+            if instruction.group(CS_GRP_JUMP) and (len(instruction.operands) != 1
+                    or instruction.operands[0].type != CS_OP_IMM
+                    or instruction.operands[0].imm not in starts):
+                raise ValueError('unproved audio tail-target branch: '+name)
+        tail = dict(address=target, bytes=target_function['size'],
+                    stack_bytes=stack, sha256=body['sha256'])
+    call = dict(name=name, symbol=function['name'], address=address,
+                stack_bytes=stack, sha256=proof['sha256'])
+    if tail is not None:
+        call['tail_target'] = tail
+    return call
+
 
 def listener_binding(context, proof, calls, functions, data):
     """Optional whole listener family; no implicit admission for older profiles."""
@@ -88,17 +179,7 @@ def bind(xbe,output,symbols,profile=None):
         raise ValueError('audio symbol family differs from reviewed profile')
     calls=[]
     for s in selected:
-        f=functions[s['address']]
-        if s['call']!='stdcall' or not re.fullmatch('[A-Za-z_][A-Za-z_0-9]*',s['name']):
-            raise ValueError('unqualified audio symbol ABI')
-        body=proof['calls'][s['name']]
-        if body.get('stack_bytes')!=s['stack_bytes'] or not context.matches_body(f,body):
-            raise ValueError('unreviewed audio body: '+s['name'])
-        code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(s['address'],f['size']),s['address']))
-        returns={int(i.op_str or '0',0) for i in code if i.mnemonic=='ret'}
-        if returns!={s['stack_bytes']}:raise ValueError('audio return disagrees with symbol: '+s['name'])
-        calls.append(dict(name=s['name'],symbol=f['name'],address=s['address'],
-                          stack_bytes=s['stack_bytes'],sha256=context.digest(f)))
+        calls.append(public_audio_abi(context, s, proof['calls'][s['name']], functions, data))
     tables={}
     for kind,body in proof['constructors'].items():
         digest=body['sha256']

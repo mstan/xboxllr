@@ -343,15 +343,8 @@ def emit_text(binding,interface,behavior_mask):
     header += [f'#define {profile_define} 1','#define PILOT_D3D_STATEBLOCK_AVAILABLE 0',
                f'#define PILOT_D3D_CREATE_BEHAVIOR_MASK 0x{behavior_mask:x}u']
     if 'render_cache' in binding:
-        mapping=binding['render_cache'];inverse=[0]*mapping['count']
-        for state,index in enumerate(mapping['map']):
-            if index>=0:inverse[index]=state
-        header += ['#define PILOT_D3D_RENDER_STATE_MAP_VERSION 1',
-                   f'#define PILOT_D3D_GUEST_RENDER_STATE_COUNT {mapping["count"]}',
-                   f'#define PILOT_D3D_RENDER_DEFAULT_COUNT {mapping["default_count"]}',
-                   'static const int16_t pilot_d3d_render_state_map[166]={'+','.join(map(str,mapping['map']))+'};',
-                   'static const uint16_t pilot_d3d_render_state_inverse[]={'+','.join(map(str,inverse))+'};',
-                   'static const uint8_t pilot_d3d_render_default_skips[]={'+','.join(str(int(i+57 in mapping['default_skips'])) for i in range(mapping['default_count']))+'};']
+        from native_d3d_compact import emit as emit_compact
+        header += emit_compact(binding)
     if 'packed_pixel_constants' in layout:
         header += [f'#define PILOT_D3D_PIXEL_PACKED_CONSTANTS 0x{layout["packed_pixel_constants"]:x}u']
     if 'gamma_cache' in layout:

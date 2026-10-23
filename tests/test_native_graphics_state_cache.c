@@ -28,6 +28,7 @@ static void stop(const char *reason,uint32_t value)
 int main(void)
 {
     memset(memory_words,0x5a,sizeof(memory_words));
+    graphics_render_presentation_cache(0x11); /* No legacy feature: no write. */
 #ifdef TEST_COMPACT_CACHE
     /* Original simple/deferred boundaries are82/117. The original complex
      * dispatch table has no later SAMPLEALPHA slot; its last index is145. */

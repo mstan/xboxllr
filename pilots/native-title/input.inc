@@ -6,6 +6,7 @@
  */
 #include "pilot_input_bindings.h"
 #include "input_host.h"
+#include "input_report.h"
 
 /* Legacy generated headers describe the original packed XAPI ABI but predate
  * explicit layout metadata. New profiles must supply their own proved fields;
@@ -120,10 +121,10 @@ static void input_sample(unsigned port,uint64_t now,int force)
             p->connected=1; p->packet=0;
             MEM32(type)|=bit; MEM32(type+4)|=bit;
         }
-        /* Original XDK4831 filters analog buttons in its XID completion
-         * callback and advances the packet for every completed report, even
-         * an unchanged one. Host packet numbering is not the Xbox counter. */
-        for(unsigned i=2;i<10;++i)if(state[i]<32)state[i]=0;
+        /* Report conversion follows the source-proved SDK policy. The packet
+         * advances for every completed report, even an unchanged one; host
+         * packet numbering is not the Xbox counter. */
+        pilot_input_report_filter(state);
         ++p->packet;
         memcpy(p->gamepad,state,18);
         for (unsigned i=0;i<4;++i) {
