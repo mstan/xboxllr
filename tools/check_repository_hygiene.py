@@ -25,7 +25,10 @@ DOCUMENTATION_IMAGES = {
     'docs/screenshots/blinx-widescreen.jpg': '52c135a49255fc1271bc0142384fe602b3e1b946056e6fbc328cfb93920980e2',
     'docs/screenshots/dashboard.png': '9ad68fba44cf1deca41a95222c010f58eee339ac9ba416b53c598fcfd3587378',
     'docs/screenshots/jsrf-widescreen.png': 'f87db9810f706b99d88544368d56f8c4a68dd1b7c8f039d41d0ec018167397eb',
-    'titles/dashboard/assets/launcher/boxart.png': '9ad68fba44cf1deca41a95222c010f58eee339ac9ba416b53c598fcfd3587378',
+    'titles/dashboard/assets/launcher/boxart.png': (
+        'efa469ca1b82307111e04831f38aff71fbda1faff7283a3b217eb4f55306fcd3',
+        # The previous reviewed Dashboard capture remains in Git history.
+        '9ad68fba44cf1deca41a95222c010f58eee339ac9ba416b53c598fcfd3587378'),
 }
 SECRET_PATTERNS = {
     'private key': re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----'),
@@ -123,7 +126,8 @@ def scan(root, history=False):
             if reader.stdout.read(1) != b'\n':
                 raise RuntimeError('Truncated Git object stream')
             expected_image = DOCUMENTATION_IMAGES.get(path)
-            approved_image = expected_image is not None and hashlib.sha256(data).hexdigest() == expected_image
+            expected_hashes = (expected_image,) if isinstance(expected_image, str) else (expected_image or ())
+            approved_image = hashlib.sha256(data).hexdigest() in expected_hashes
             if expected_image is not None and not approved_image:
                 failures.add((label, 'documentation image differs from reviewed SHA256', 1))
             for category, line in content_findings(data, allow_binary=approved_image):

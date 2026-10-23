@@ -99,6 +99,26 @@ class HygieneTests(unittest.TestCase):
             self.assertEqual(hygiene.scan(root), 0)
             self.assertEqual(hygiene.scan(root, history=True), 1)
 
+    def test_replaced_reviewed_image_keeps_exact_old_and_new_history_fingerprints(self):
+        versions = (b'\x89PNG\0old reviewed capture', b'\x89PNG\0new owner-selected capture')
+        name = 'docs/screenshots/reviewed.png'
+        with tempfile.TemporaryDirectory() as temp, patch.dict(hygiene.DOCUMENTATION_IMAGES,
+                {name: tuple(hashlib.sha256(image).hexdigest() for image in versions)}, clear=True):
+            root = pathlib.Path(temp)
+            hygiene.git(root, 'init', '-q')
+            hygiene.git(root, 'config', 'user.email', 'fixture@example.invalid')
+            hygiene.git(root, 'config', 'user.name', 'Fixture')
+            path = root / name
+            path.parent.mkdir(parents=True)
+            for index, image in enumerate(versions):
+                path.write_bytes(image)
+                hygiene.git(root, 'add', '.')
+                hygiene.git(root, 'commit', '-qm', f'reviewed capture {index}')
+            self.assertEqual(hygiene.scan(root, history=True), 0)
+            path.write_bytes(versions[-1] + b'unreviewed change')
+            hygiene.git(root, 'add', '.')
+            self.assertEqual(hygiene.scan(root, history=True), 1)
+
 
 if __name__ == '__main__':
     unittest.main()
