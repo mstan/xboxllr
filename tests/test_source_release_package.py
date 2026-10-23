@@ -1,8 +1,10 @@
 """Source releases include exact submodule source and reject private payloads."""
 from pathlib import Path
+import hashlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
@@ -41,6 +43,27 @@ class SourceReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Private source path'):
             package(self.repo, self.base/'bad.zip')
         self.assertFalse((self.base/'bad.zip').exists())
+
+    def test_reviewed_image_history_requires_exact_path_and_hash(self):
+        name='docs/reviewed.png'
+        path=self.repo/name
+        path.parent.mkdir()
+        versions=(b'\x89PNG\r\n\x1a\nreviewed current', b'\x89PNG\r\n\x1a\nreviewed previous')
+        fingerprints=tuple(hashlib.sha256(data).hexdigest() for data in versions)
+        with patch.dict('source_release_package.DOCUMENTATION_IMAGES', {name:fingerprints}):
+            for index,data in enumerate(versions):
+                path.write_bytes(data);self.commit(self.repo)
+                output=self.base/f'reviewed-{index}.zip'
+                package(self.repo,output)
+                with zipfile.ZipFile(output) as archive:
+                    self.assertEqual(archive.read(name),data)
+            path.write_bytes(versions[0]+b'changed');self.commit(self.repo)
+            with self.assertRaisesRegex(ValueError,'Private source path'):
+                package(self.repo,self.base/'changed.zip')
+            path.write_bytes(versions[0]);path.rename(path.with_name('renamed.png'))
+            self.commit(self.repo)
+            with self.assertRaisesRegex(ValueError,'Private source path'):
+                package(self.repo,self.base/'renamed.zip')
 
     def test_translated_original_marker_is_rejected(self):
         (self.repo/'function.c').write_text('/* XLLE_PRIVATE_GUEST_ARTIFACT */\n')

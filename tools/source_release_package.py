@@ -65,7 +65,9 @@ def package(repo, output, *, revision='HEAD', images=None, definition=None):
                 if reader.stdout.read(1) != b'\n':
                     raise ValueError('Truncated source object')
                 digest = hashlib.sha256(data).hexdigest()
-                image = approved.get(relative) == digest or approved.get(name) == digest
+                expected = approved.get(relative, approved.get(name))
+                expected_hashes = (expected,) if isinstance(expected, str) else (expected or ())
+                image = digest in expected_hashes
                 compiled = Path(name).suffix.lower() in ('.exe','.dll','.lib','.obj','.pdb','.a','.so','.dylib')
                 if compiled or (private_path(name) and not image):
                     raise ValueError('Private source path: '+relative)
