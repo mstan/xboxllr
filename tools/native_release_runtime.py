@@ -344,6 +344,8 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
     elif player['source'] == 'gamepad':
         env.update(XLLE_PILOT_INPUT='sdl', XLLE_PILOT_INPUT_GUID=player['guid'])
     options = catalog_options(catalog, data)
+    from native_input_mods import environment as input_mod_environment
+    env.update(input_mod_environment(catalog))
     if data['capabilities']['visual_mods']:
         plan = root / 'data' / 'mods.plan'
         resolve(root / 'release.json', data, plan, **options, registry_available=True)

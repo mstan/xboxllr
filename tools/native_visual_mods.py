@@ -25,8 +25,10 @@ def aspect_value(value):
 
 
 def manifests(source, data):
+    from native_input_mods import manifest as input_manifest
     paths = [ROOT / 'mods/preloaded/packages' / pid / '1.0.0/manifest.toml'
              for pid in ('xboxlle.enhancement.visuals', 'xboxlle.enhancement.frame-rate')]
+    paths.append(input_manifest())
     wide = data.get('mods', {}).get('widescreen_manifest')
     if wide:
         paths.insert(0, (Path(source).parent / wide).resolve())

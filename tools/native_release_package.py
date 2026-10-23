@@ -16,7 +16,7 @@ import zipfile
 from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('native_release_runtime', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods',
+MODULES = ('native_release_runtime', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage')
 
 
@@ -127,7 +127,7 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     mods = {}
     available = bool(options.get('PILOT_TITLE_MOD_SOURCE'))
     if available:
-        for package in ('xboxlle.enhancement.visuals', 'xboxlle.enhancement.frame-rate'):
+        for package in ('xboxlle.enhancement.visuals', 'xboxlle.enhancement.frame-rate', 'xboxlle.enhancement.camera'):
             relative = Path('mods/preloaded/packages') / package / '1.0.0/manifest.toml'
             (output / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, output / relative)

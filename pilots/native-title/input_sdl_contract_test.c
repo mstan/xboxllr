@@ -29,8 +29,17 @@ static SDL_VirtualJoystickDesc descriptor(unsigned product)
     d.vendor_id=0x1209;d.product_id=(Uint16)product;d.name="xboxlle virtual controller fixture";
     d.button_mask=(1u<<SDL_CONTROLLER_BUTTON_MAX)-1;d.axis_mask=(1u<<SDL_CONTROLLER_AXIS_MAX)-1;return d;
 }
-int main(void)
+int main(int argc,char **argv)
 {
+    (void)argc;(void)argv;
+#ifdef PILOT_INPUT_SDL_HOST_TEST
+    int invert_x=argc==2 && strchr(argv[1],'x')!=NULL;
+    int invert_y=argc==2 && strchr(argv[1],'y')!=NULL;
+    CHECK(!_putenv_s("XLLE_PILOT_CAMERA_INVERT_X",invert_x?"1":"0"));
+    CHECK(!_putenv_s("XLLE_PILOT_CAMERA_INVERT_Y",invert_y?"1":"0"));
+#else
+    const int invert_x=0,invert_y=0;
+#endif
     CHECK(pilot_input_sdl_start(NULL)==ERROR_INVALID_PARAMETER);
     CHECK(pilot_input_sdl_start("not-a-guid")==ERROR_INVALID_PARAMETER);
     CHECK(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER)==0);
@@ -51,19 +60,24 @@ int main(void)
     CHECK(SDL_JoystickSetVirtualButton(chosen,SDL_CONTROLLER_BUTTON_START,1)==0);
     CHECK(SDL_JoystickSetVirtualAxis(chosen,SDL_CONTROLLER_AXIS_LEFTX,-32768)==0);
     CHECK(SDL_JoystickSetVirtualAxis(chosen,SDL_CONTROLLER_AXIS_LEFTY,-32768)==0);
+    CHECK(SDL_JoystickSetVirtualAxis(chosen,SDL_CONTROLLER_AXIS_RIGHTX,-32768)==0);
+    CHECK(SDL_JoystickSetVirtualAxis(chosen,SDL_CONTROLLER_AXIS_RIGHTY,-12345)==0);
     CHECK(SDL_JoystickSetVirtualAxis(chosen,SDL_CONTROLLER_AXIS_TRIGGERLEFT,32767)==0);
     uint8_t state[18],caps[18],rumble[4];int ready=0;
     /* SetVirtual calls publish separately; wait for the complete authored
      * state rather than mistaking the first changed button for all axes. */
     for(unsigned i=0;i<250;++i) {
         if(!pilot_input_sdl_state(0,state)) {
-            int16_t x,y;memcpy(&x,state+10,2);memcpy(&y,state+12,2);
-            if(state[0]==16&&state[1]==0&&state[2]==0&&state[4]==255&&state[8]==255&&x==-32768&&y==32767){ready=1;break;}
+            int16_t x,y,rx,ry;memcpy(&x,state+10,2);memcpy(&y,state+12,2);
+            memcpy(&rx,state+14,2);memcpy(&ry,state+16,2);
+            if(state[0]==16&&state[1]==0&&state[2]==0&&state[4]==255&&state[8]==255&&x==-32768&&y==32767&&
+               rx==(invert_x?32767:-32768)&&ry==(invert_y?-12345:12345)){ready=1;break;}
         }
         Sleep(4);
     }
     CHECK(ready);
     CHECK(!pilot_input_sdl_caps(0,caps,rumble)&&caps[0]==255&&caps[1]==0&&caps[10]==255);
+    CHECK(caps[14]==255&&caps[15]==255&&caps[16]==255&&caps[17]==255);
     CHECK(pilot_input_sdl_state(1,state)==ERROR_DEVICE_NOT_CONNECTED);
     CHECK(!pilot_input_sdl_rumble(0,0,0));
     SDL_JoystickClose(chosen);CHECK(!SDL_JoystickDetachVirtual(second));

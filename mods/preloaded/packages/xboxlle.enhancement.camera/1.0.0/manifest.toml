@@ -1,0 +1,28 @@
+format_version = 1
+id = "xboxlle.enhancement.camera"
+version = "1.0.0"
+name = "Camera controls"
+description = "Reverse either camera axis independently for Player 1. Applies to the right stick when the game starts."
+save_compatibility = "shared"
+
+[[target]]
+system = "xbox"
+native_title_mod_abi = 2
+
+[[feature]]
+id = "invert-horizontal"
+name = "Invert horizontal camera"
+description = "Reverse left and right on Player 1's camera stick. Movement and buttons stay the same."
+default_enabled = false
+[[plugin]]
+feature = "invert-horizontal"
+id = "xboxlle.camera.invert-horizontal"
+
+[[feature]]
+id = "invert-vertical"
+name = "Invert vertical camera"
+description = "Reverse up and down on Player 1's camera stick. Movement and buttons stay the same."
+default_enabled = false
+[[plugin]]
+feature = "invert-vertical"
+id = "xboxlle.camera.invert-vertical"

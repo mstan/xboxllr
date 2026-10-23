@@ -83,6 +83,8 @@ def select(source, data, paths, build, run, *, force=False):
         return None
     player = catalog.player
     environment = dict(RECOMP_VOLUME=str(catalog.volume))
+    from native_input_mods import environment as input_mod_environment
+    environment.update(input_mod_environment(catalog))
     if player['source'] in ('none', 'keyboard'):
         environment['XLLE_PILOT_INPUT'] = player['source']
     elif player['source'] == 'gamepad':

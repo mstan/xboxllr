@@ -131,7 +131,7 @@ static int feature_get(void *p,int index,RecompLauncherCModFeature *out) {
     auto &c=*(Catalog*)p;if(!out||index<0||size_t(index)>=c.features.size())return 0;
     *out={};auto &f=c.features[index];copy(out->id,f.id);copy(out->package_id,f.package);copy(out->name,f.name);copy(out->description,f.description);
     for(auto &v:c.packages)if(v.id==f.package){copy(out->package_version,v.version);copy(out->package_name,v.name);}
-    copy(out->group,"Visual enhancements");out->enabled=f.enabled;out->option_count=int(f.options.size());return 1;
+    copy(out->group,f.package=="xboxlle.enhancement.camera"?"Controls":"Visual enhancements");out->enabled=f.enabled;out->option_count=int(f.options.size());return 1;
 }
 static int option_get(void *p,const char *pid,const char *fid,int index,RecompLauncherCModOption *out) {
     auto *f=feature(*(Catalog*)p,pid,fid);if(!f||!out||index<0||size_t(index)>=f->options.size())return 0;

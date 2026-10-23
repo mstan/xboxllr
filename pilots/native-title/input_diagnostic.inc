@@ -175,10 +175,10 @@ static uint32_t input_diagnostic_deliver(unsigned kind,unsigned port,uint32_t ar
 uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 {
     InitOnceExecuteOnce(&input_diagnostic_once,input_diagnostic_initialize,NULL,NULL);
-    if(!input_diagnostic_record && !input_diagnostic_replay)return input_host_state_raw(port,gamepad);
+    if(!input_diagnostic_record && !input_diagnostic_replay)return input_host_state_mapped(port,gamepad);
     uint8_t payload[18]={0};uint32_t status;
     if(input_diagnostic_replay)status=input_diagnostic_deliver(1,port,0,payload,18);
-    else {status=input_host_state_raw(port,payload);input_diagnostic_publish(1,port,status,0,payload,18);}
+    else {status=input_host_state_mapped(port,payload);input_diagnostic_publish(1,port,status,0,payload,18);}
     if(!status)memcpy(gamepad,payload,18);
     return status;
 }

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "input_host.h"
 #include "input_sdl.h"
+#include "input_mods.h"
 #include "native_debug.h"
 #include "input_replay.inc"
 #include "input_control.inc"
@@ -22,6 +23,15 @@
 static INIT_ONCE input_host_once=INIT_ONCE_STATIC_INIT;
 static int input_host_keyboard;
 static int input_host_sdl,input_host_none,input_host_tcp;
+static unsigned input_host_invert_x,input_host_invert_y;
+static unsigned input_host_camera_flag(const char *name)
+{
+    const char *value=getenv(name);
+    if(!value || !*value || !strcmp(value,"0"))return 0;
+    if(!strcmp(value,"1"))return 1;
+    fprintf(stderr,"[PILOT INPUT STOP] invalid camera inversion option %s\n",name);ExitProcess(2);
+    return 0;
+}
 #ifdef PILOT_INPUT_REFERENCE_CLOCK
 static uint64_t input_host_reference_ms;
 uint32_t pilot_input_host_reference_time(uint64_t milliseconds)
@@ -40,6 +50,11 @@ static uint64_t input_host_replay_time(void)
 }
 static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID *context)
 {
+    input_host_invert_x=input_host_camera_flag("XLLE_PILOT_CAMERA_INVERT_X");
+    input_host_invert_y=input_host_camera_flag("XLLE_PILOT_CAMERA_INVERT_Y");
+    if(input_host_invert_x || input_host_invert_y)
+        fprintf(stderr,"[INPUT MOD] player=1 camera-invert-horizontal=%u camera-invert-vertical=%u\n",
+            input_host_invert_x,input_host_invert_y);
     char value[24]={0};
     GetEnvironmentVariableA("XLLE_PILOT_INPUT",value,sizeof(value));
     input_host_keyboard=!strcmp(value,"keyboard");
@@ -181,4 +196,12 @@ static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right
     return XInputSetState(port,&vibration);
 }
 
+/* Map successful Player 1 samples once, before diagnostic capture. Capability
+ * bitmasks, disconnected outputs and the other ports are never axis values. */
+static uint32_t input_host_state_mapped(unsigned port,uint8_t gamepad[18])
+{
+    uint32_t status=input_host_state_raw(port,gamepad);
+    if(!status && !port)pilot_input_camera_invert(gamepad,input_host_invert_x,input_host_invert_y);
+    return status;
+}
 #include "input_diagnostic.inc"

@@ -92,9 +92,8 @@ class Catalog:
                 saved = persisted.get('features', {}).get(key, defaults.get(key, {}))
                 feature = dict(package=pid, id=fid, name=entry['name'], description=entry.get('description', manifest['description']),
                                enabled=saved.get('enabled') is True, options=[])
-                for item in manifest.get('option', []):
-                    if item['feature'] != fid:
-                        continue
+                authored_options = [item for item in manifest.get('option', []) if item['feature'] == fid]
+                for item in authored_options:
                     oid = item['id']
                     if item['type'] == 'aspect':
                         values = ['adaptive', '4:3'] + item['presets']
@@ -122,7 +121,9 @@ class Catalog:
                     feature['options'].append(dict(id=oid, label=item.get('label', {'height': 'Render height', 'method': 'Method', 'axis': 'Samples',
                         'anisotropy': 'Filter strength', 'aspect': 'Aspect ratio', 'mode': 'Mode', 'rate': 'Target rate'}.get(oid, oid)),
                         value=selected, default=default, choices=choices))
-                if feature['options']:
+                # A checkbox-only feature has no authored options. A feature
+                # whose choices were all hidden must still remain unavailable.
+                if feature['options'] or not authored_options:
                     self.features.append(feature)
             if any(f['package'] == pid for f in self.features):
                 self.packages.append(dict(id=pid, name=manifest['name'], version=manifest['version'], description=manifest['description']))
