@@ -57,6 +57,8 @@ void pilot_gfx_frame_scope(uint32_t scope)
 }
 unsigned pilot_gfx_interpolation_rate(void)
 {return pilot_visual.frame_mode==PILOT_FRAMES_INTERPOLATED?pilot_visual.frame_rate:0;}
+int pilot_gfx_interpolation_ready(void)
+{return pilot_device && pilot_gfx_interpolation_rate() && pilot_visual_scope && pilot_visual_blend.count && !pilot_visibility_active();}
 void pilot_gfx_interpolation_stats(struct PilotInterpolationStats *out)
 {
     if(!out)return;memset(out,0,sizeof(*out));out->sources=pilot_visual_blend.sources;out->presents=pilot_visual_blend.presents;
@@ -83,7 +85,9 @@ int32_t pilot_d3d_visual_present(void)
 }
 HRESULT pilot_d3d_interpolate_image(uint64_t now,RhiView *output)
 {
-    if(!pilot_device || !pilot_gfx_interpolation_rate() || !pilot_visual_scope || !pilot_visual_blend.count || !output)return S_FALSE;
+    /* Host fullscreen draws must never contribute to a guest's live sample
+     * counter. A missed presentation can resume after its visibility End. */
+    if(!output || !pilot_gfx_interpolation_ready())return S_FALSE;
     if(!now)now=pilot_visual_now();
     float alpha=1;
     if(pilot_visual_blend.count>1 && pilot_visual_blend.current>pilot_visual_blend.previous && now>=pilot_visual_blend.current) {

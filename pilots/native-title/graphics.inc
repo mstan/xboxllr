@@ -758,6 +758,7 @@ graphics_dispatch_done:
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
     graphics_original_callback_sync();
 #endif
+    graphics_interpolation_service();
     ReleaseSRWLockExclusive(&graphics_lock);
     if(entered) {
         uint64_t ended=dispatch_monotonic();

@@ -1,5 +1,12 @@
 # Blinx: serial attract-sequence bring-up
 
+Stage 2-2 follow-up (2026-10-22): the shared
+[cooperative presentation fix](NATIVE-INTERPOLATION-COOPERATIVE-2026-10-22.md)
+prevents missed interpolation ticks during busy graphics dispatch. The same
+executable delivers 59.61 versus 33.15 accepted presentations/s with the fix
+enabled versus disabled, while game updates remain near 30/s. Owner entrance
+review remains on beads-xbox.1.7.20; no loading-stall or zero-stutter claim.
+
 Latest performance follow-up (2026-10-22): the shared
 [resource-write tracking fix](NATIVE-RESOURCE-WRITE-WATCH-2026-10-22.md) reduces
 process CPU/update by16.3% in its balanced2-1 comparison. The owner confirms

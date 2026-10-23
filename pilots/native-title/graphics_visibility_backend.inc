@@ -9,6 +9,8 @@ struct PilotVisibilityReport {
     struct PilotVisibilityReport *next;
 };
 static struct PilotVisibilityCounter *pilot_visibility_current;
+static int pilot_visibility_active(void)
+{return pilot_visibility_current && !pilot_visibility_current->ended;}
 static struct PilotVisibilityReport *pilot_visibility_reports;
 static unsigned pilot_visibility_counter_count,pilot_visibility_report_count;
 static void pilot_visibility_unref(struct PilotVisibilityCounter *c)

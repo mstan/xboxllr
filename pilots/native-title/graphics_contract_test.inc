@@ -24,6 +24,7 @@ static uint32_t call_graphics(unsigned entry,const uint32_t *args)
     return g_eax;
 }
 #include "graphics_state_contract_test.inc"
+#include "graphics_interpolation_contract_test.inc"
 #include "graphics_texture_contract_test.inc"
 #include "graphics_write_watch_contract_test.inc"
 #include "graphics_vertex_contract_test.inc"
@@ -81,6 +82,15 @@ static void test_graphics_guest_scheduler(void)
 }
 static void test_graphics(int focused_fixture)
 {
+    if(focused_fixture==19) {
+#ifdef PILOT_D3D_PHOBOS
+        struct PilotVisualMods options;pilot_visual_mods_default(&options);
+        options.frame_mode=PILOT_FRAMES_INTERPOLATED;options.frame_rate=60;
+        CHECK(pilot_gfx_visual_mods(&options));
+#else
+        fprintf(stderr,"SKIP: interpolation requires the qualified PHOBOS backend\n");exit(77);
+#endif
+    }
     if(focused_fixture>=4) {
         GRAPHICS_TEST_REQUIRE("deferred state relevance fixture",PILOT_D3D_Direct3D_CreateDevice,
             PILOT_D3D_D3DDevice_SetVertexShader,PILOT_D3D_D3DDevice_Release);
@@ -138,6 +148,7 @@ static void test_graphics(int focused_fixture)
             else if(focused_fixture==16)test_graphics_borrowed_depth_surface();
             else if(focused_fixture==17)test_graphics_states();
             else if(focused_fixture==18)test_graphics_texture_write_watch();
+            else if(focused_fixture==19)test_graphics_interpolation_service();
             else test_graphics_deferred_relevance((unsigned)focused_fixture-4);
             CHECK(!call_graphics(PILOT_D3D_D3DDevice_Release,NULL));
             CHECK(!graphics_active && !graphics_headers && !MEM32(PILOT_D3D_DEVICE_GLOBAL));
@@ -240,6 +251,9 @@ static void test_graphics(int focused_fixture)
         CHECK(vm_committed(0,0x100000000ull)==resident+(!pass?5*4096:0));
         if(!pass)CHECK(av_saved_data && MEM32(av_saved_data+64)==0xffff0000);
         CHECK(!vm_find(back,24));
+    }
+    if(focused_fixture==19) {
+        struct PilotVisualMods options;pilot_visual_mods_default(&options);CHECK(pilot_gfx_visual_mods(&options));
     }
     fprintf(stderr,"PASS: guest graphics ABI, failures/null output, real clear/present pixels, distinct front/back resources, references and release/recreate\n");
 }

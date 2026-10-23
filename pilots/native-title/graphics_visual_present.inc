@@ -195,6 +195,7 @@ int32_t pilot_gfx_gamma(const uint8_t ramp[768])
 static void pilot_visual_close(void){}
 void pilot_gfx_frame_scope(uint32_t scope){(void)scope;}
 unsigned pilot_gfx_interpolation_rate(void){return 0;}
+int pilot_gfx_interpolation_ready(void){return 0;}
 int32_t pilot_gfx_interpolate(uint64_t now){(void)now;return 1;}
 void pilot_gfx_interpolation_stats(struct PilotInterpolationStats *out){if(out)memset(out,0,sizeof(*out));}
 #endif

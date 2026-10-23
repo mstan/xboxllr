@@ -11,6 +11,7 @@ struct PilotInterpolationStats {
 };
 void pilot_gfx_frame_scope(uint32_t scope); /* 0: original presentation; new key: clear history */
 unsigned pilot_gfx_interpolation_rate(void);
+int pilot_gfx_interpolation_ready(void);
 int32_t pilot_gfx_interpolate(uint64_t now); /* 100ns QPC units; 0: sample clock */
 void pilot_gfx_interpolation_stats(struct PilotInterpolationStats *out);
 #include <stdint.h>

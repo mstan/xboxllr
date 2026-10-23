@@ -6,6 +6,7 @@
 #include <d3d11_3.h>
 #include "d3d8_combiners.h"
 #include "graphics_backend.h"
+static int pilot_visibility_active(void);
 #include "native_debug.h"
 #include "pilot_d3d_checks.h"
 #include <stdio.h>
