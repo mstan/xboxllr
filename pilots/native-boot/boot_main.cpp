@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Standalone presentation-stage prototype. No guest execution or native-title
-// handoff is implied: animation choreography is the MIT reconstructed core.
+// Native presentation child. Animation choreography is the MIT reconstructed
+// core; owned-child scanout handoff does not transfer firmware machine state.
 #include "boot_renderer.h"
+#include "boot_timeline.h"
+#include "boot_handoff.h"
 #include <algorithm>
 #include <bcrypt.h>
 #include <chrono>
@@ -19,9 +21,9 @@
 #include <xinput.h>
 
 namespace {
-constexpr size_t PACK_BYTES = 72224;
+constexpr size_t PACK_BYTES = 73120;
 constexpr const char *PACK_SHA256 =
-    "6c6df777c291a447a2de2693e3edfc4a69e0c4151548c8e058b512669a09233f";
+    "e97b240aa8f0d20ce70d8c9ee2e4f3a150ca75808ba01c412c487335a7807dca";
 bool close_requested = false;
 struct Aligned {
     void *data;
@@ -94,7 +96,7 @@ struct Audio {
     HWAVEOUT output = nullptr;
     WAVEHDR header{};
     bool prepared = false;
-    void start(std::vector<int16_t> &pcm) {
+    void prepare(std::vector<int16_t> &pcm) {
         WAVEFORMATEX format{};
         format.wFormatTag = WAVE_FORMAT_PCM;
         format.nChannels = 2;
@@ -109,6 +111,8 @@ struct Audio {
         if (waveOutPrepareHeader(output, &header, sizeof(header)) != MMSYSERR_NOERROR)
             throw std::runtime_error("Startup audio buffer unavailable");
         prepared = true;
+    }
+    void start() {
         if (waveOutWrite(output, &header, sizeof(header)) != MMSYSERR_NOERROR)
             throw std::runtime_error("Startup audio playback failed");
     }
@@ -250,7 +254,9 @@ void wav(const std::filesystem::path &path, const std::vector<int16_t> &samples)
 
 int wmain(int argc, wchar_t **argv) {
     try {
-        std::filesystem::path pack_path, capture_dir, audio_path;
+        std::filesystem::path pack_path, capture_dir, audio_path, title_logo_path;
+        std::wstring ready_event, presented_event, cancel_event;
+        DWORD owner_pid=0;
         bool headless = false, mute = false, warp = false, validate = false, realtime = false,
              core_only = false;
         unsigned skip_at = 0, volume = 100;
@@ -263,6 +269,20 @@ int wmain(int argc, wchar_t **argv) {
             };
             if (arg == L"--pack")
                 pack_path = value();
+            else if (arg == L"--title-logo")
+                title_logo_path = value();
+            else if (arg == L"--handoff-ready")
+                ready_event = value();
+            else if (arg == L"--handoff-presented")
+                presented_event = value();
+            else if (arg == L"--handoff-cancel")
+                cancel_event = value();
+            else if (arg == L"--handoff-parent") {
+                std::wstring number=value(); size_t end=0;
+                auto n=std::stoul(number,&end);
+                if (end!=number.size() || !n) throw std::runtime_error("Invalid startup owner");
+                owner_pid=DWORD(n);
+            }
             else if (arg == L"--capture-dir")
                 capture_dir = value();
             else if (arg == L"--audio-file")
@@ -305,6 +325,22 @@ int wmain(int argc, wchar_t **argv) {
         if (!capture_dir.empty() && !std::filesystem::create_directories(capture_dir))
             throw std::runtime_error("Capture directory already exists");
         auto input = read_pack(pack_path);
+        std::vector<unsigned char> title_logo;
+        if (!title_logo_path.empty()) {
+            if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(title_logo_path)) ||
+                std::filesystem::file_size(title_logo_path)!=690)
+                throw std::runtime_error("Unsupported selected-title startup logo size");
+            title_logo.resize(690);
+            std::ifstream file(title_logo_path,std::ios::binary);
+            file.read(reinterpret_cast<char *>(title_logo.data()),title_logo.size());
+            if (!file || sha256(title_logo.data(),title_logo.size())!=
+                    "7b6b049abaf7ebef37be861d1f5a868984e076c7d39347ac81e812d087ab7660")
+                throw std::runtime_error("Unsupported selected-title startup logo");
+        }
+        const auto after_image=BootAfterImage::load(input,title_logo);
+        BootHandoff handoff;
+        handoff.open(ready_event,presented_event,cancel_event,owner_pid);
+        if (handoff && core_only) throw std::runtime_error("Core-only run cannot own a presentation handoff");
         Aligned pack(input.size()), state_bytes(xb_state_size()), audio_bytes(xb_audio_size());
         std::memcpy(pack.data, input.data(), input.size());
         xb_state *state = (xb_state *)state_bytes.data;
@@ -357,27 +393,51 @@ int wmain(int argc, wchar_t **argv) {
                 check(device.As(&info), "Create graphics validation queue");
             renderer = std::make_unique<BootRenderer>(device.Get(), context.Get(), state);
         }
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
-                .count();
         Audio audio;
+        Controllers controller;
+        if (volume < 100)
+            for (auto &sample : pcm)
+                sample = (int16_t)((int)sample * (int)volume / 100);
+        const bool play_audio = !mute && !core_only && volume;
+        if (play_audio)
+            audio.prepare(pcm);
         if (window.value) {
             ShowWindow(window.value, SW_SHOWNORMAL);
             UpdateWindow(window.value);
         }
-        if (volume < 100)
-            for (auto &sample : pcm)
-                sample = (int16_t)((int)sample * (int)volume / 100);
-        if (!mute && !core_only && volume)
-            audio.start(pcm);
-        Controllers controller;
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                .count();
         auto animation_start = std::chrono::steady_clock::now();
+        if (play_audio)
+            audio.start();
+        const bool paced = window.value || realtime;
+        BootTimeline timeline;
         bool skipped = false;
         unsigned frames = 0, tick = 0;
         int result = XB_OK;
         std::vector<xb_draw> draws(core_only ? XB_FRAME_DRAWS_MAX : 0);
         std::vector<float> params(core_only ? XB_FRAME_PARAMS_MAX : 0);
         unsigned long long described = 0;
+        auto present = [&]() {
+            if (!window.value) return;
+            RECT rect{};
+            GetClientRect(window.value, &rect);
+            unsigned width = std::max(1L, rect.right), height = std::max(1L, rect.bottom);
+            ComPtr<ID3D11Texture2D> back;
+            check(swap->GetBuffer(0, IID_PPV_ARGS(&back)), "Get startup backbuffer");
+            D3D11_TEXTURE2D_DESC desc{};
+            back->GetDesc(&desc);
+            if (desc.Width != width || desc.Height != height) {
+                back.Reset();
+                check(swap->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0), "Resize startup window");
+                check(swap->GetBuffer(0, IID_PPV_ARGS(&back)), "Get resized startup backbuffer");
+            }
+            ComPtr<ID3D11RenderTargetView> target;
+            check(device->CreateRenderTargetView(back.Get(), nullptr, &target), "View startup backbuffer");
+            renderer->show(target.Get(), width, height);
+            check(swap->Present(0, 0), "Present startup");
+        };
         do {
             if (window.value) {
                 MSG msg;
@@ -390,45 +450,34 @@ int wmain(int argc, wchar_t **argv) {
                     break;
                 }
             }
-            tick = ((frames + 1) * 1000 + 59) / 60;
+            if (paced) {
+                std::this_thread::sleep_until(
+                    animation_start + std::chrono::milliseconds(timeline.next_deadline_ms()));
+                tick = timeline.observe(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::steady_clock::now() - animation_start)
+                                            .count());
+            } else
+                tick = static_cast<unsigned>(BootTimeline::frame_tick(frames + 1));
             if (skip_at && tick >= skip_at) {
                 skipped = true;
                 break;
             }
-            if (window.value || realtime)
-                std::this_thread::sleep_until(animation_start + std::chrono::milliseconds(tick));
             result = xb_advance(state, tick);
             if (result < 0)
                 throw std::runtime_error("Native startup advance failed");
             if (renderer) {
                 renderer->draw();
+                if (result == XB_DONE) {
+                    if (!capture_dir.empty()) renderer->capture((capture_dir / L"animation-final.bmp").wstring());
+                    renderer->after_image(after_image);
+                }
                 if (!capture_dir.empty() && (frames == 0 || frames == 119 || frames == 239 ||
                                              frames == 313 || frames == 358 || result == XB_DONE)) {
                     std::wostringstream file;
                     file << L"frame-" << std::setfill(L'0') << std::setw(3) << frames << L".bmp";
                     renderer->capture((capture_dir / file.str()).wstring());
                 }
-                if (window.value) {
-                    RECT rect{};
-                    GetClientRect(window.value, &rect);
-                    unsigned width = std::max(1L, rect.right), height = std::max(1L, rect.bottom);
-                    ComPtr<ID3D11Texture2D> back;
-                    check(swap->GetBuffer(0, IID_PPV_ARGS(&back)), "Get startup backbuffer");
-                    D3D11_TEXTURE2D_DESC desc{};
-                    back->GetDesc(&desc);
-                    if (desc.Width != width || desc.Height != height) {
-                        back.Reset();
-                        check(swap->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0),
-                              "Resize startup window");
-                        check(swap->GetBuffer(0, IID_PPV_ARGS(&back)),
-                              "Get resized startup backbuffer");
-                    }
-                    ComPtr<ID3D11RenderTargetView> target;
-                    check(device->CreateRenderTargetView(back.Get(), nullptr, &target),
-                          "View startup backbuffer");
-                    renderer->show(target.Get(), width, height);
-                    check(swap->Present(0, 0), "Present startup");
-                }
+                present();
             } else {
                 xb_frame_out frame{};
                 frame.draws = draws.data();
@@ -477,12 +526,33 @@ int wmain(int argc, wchar_t **argv) {
         }
         if (errors)
             throw std::runtime_error("Startup graphics validation reported errors");
+        const char *handoff_result="not-requested";
+        double handoff_ms=0;
+        if (handoff && !skipped) {
+            // The final original image remains the helper's scanout until the
+            // owned title acknowledges its first successful presentation.
+            auto began=std::chrono::steady_clock::now();
+            handoff.ready();
+            while (!(handoff_result=handoff.retirement())) {
+                MSG msg;
+                while (PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+                if (close_requested || (window.value && controller.skip())) { handoff_result="skipped"; break; }
+                if (std::chrono::steady_clock::now()-began>std::chrono::seconds(60)) { handoff_result="timeout"; break; }
+                present();
+                Sleep(10);
+            }
+            handoff_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
+        }
         std::cout << "{\"schema\":\"xboxllr.native-boot-run.v1\",\"implementation\":\"native-"
                      "reconstruction\",\"status\":\""
                   << (skipped ? "skipped" : "completed") << "\",\"frames\":" << frames
                   << ",\"time\":" << xb_time(state)
                   << ",\"draws\":" << (renderer ? renderer->draw_count() : described)
                   << ",\"setup_ms\":" << setup_ms << ",\"run_ms\":" << elapsed_ms
+                  << ",\"timeline\":\"" << (paced ? "monotonic-ms" : "deterministic-60hz") << "\""
+                  << ",\"firmware_profile\":\"modified-4983-xecuter2\",\"after_image\":\""
+                  << (title_logo.empty() ? "embedded-firmware-xecuter2" : "selected-title-xbe-microsoft") << "\""
+                  << ",\"handoff\":\"" << handoff_result << "\",\"handoff_ms\":" << handoff_ms
                   << ",\"audio_frames\":384000,\"audio_peak\":" << peak
                   << ",\"final_nonblack_pixels\":" << lit_pixels << ",\"pcm_sha256\":\"" << pcm_hash
                   << "\",\"audio_output\":\"" << (!mute && !core_only && volume ? "enabled" : "muted")

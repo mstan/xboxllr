@@ -602,6 +602,17 @@ void BootRenderer::draw() {
     context_->OMSetRenderTargets(0, nullptr, nullptr);
 }
 
+void BootRenderer::after_image(const BootAfterImage &image) {
+    // The original draws one opaque 100x17 quad after animation
+    // teardown. Full decoding proves every texel is written, including black.
+    context_->OMSetRenderTargets(0, nullptr, nullptr);
+    ID3D11ShaderResourceView *nulls[6]{};
+    context_->PSSetShaderResources(0, 6, nulls);
+    D3D11_BOX box{image.left,image.top,0,image.left+100,image.top+17,1};
+    context_->UpdateSubresource(surfaces_[XB_SURF_DISPLAY].texture.Get(),0,&box,
+                                image.rgba.data(),100*4,0);
+}
+
 void BootRenderer::show(ID3D11RenderTargetView *output, unsigned width, unsigned height) {
     const float black[4] = {0, 0, 0, 1};
     context_->ClearRenderTargetView(output, black);

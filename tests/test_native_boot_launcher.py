@@ -133,6 +133,121 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(identity.read_bytes(), b'owner console identity')
         self.assertEqual(path.read_text(), 'damaged choices')
 
+    def test_old_incomplete_pack_is_not_silently_reused(self):
+        old = self.root / 'data/boot/assets' / boot.LEGACY_PACK_SHA256 / 'xboot.pak'
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b'old private cache fixture')
+        result = boot.prepare(self.root, self.data, dict(enabled=True, kernel=''))
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertIn('lacks the required original after-image', result['message'])
+        self.assertEqual(old.read_bytes(), b'old private cache fixture')
+
+    def test_ready_helper_remains_owned_until_actual_title_present_event(self):
+        event = Mock(names={key: 'fixture-'+key for key in ('ready','presented','cancel')})
+        event.signaled.return_value = True
+        helper = Mock(returncode=0)
+        helper.poll.return_value = None
+        helper.communicate.return_value = (json.dumps(dict(schema='xboxllr.native-boot-run.v1',
+            implementation='native-reconstruction', status='completed', handoff='title-presented')).encode(), None)
+        title = Mock()
+        title.poll.return_value = None
+        with boot.Handoff(self.root, self.log) as handoff:
+            with self.ready(), patch.object(boot, '_Events', return_value=event), \
+                    patch.object(boot.subprocess, 'Popen', return_value=helper):
+                result = boot.run(self.root, self.data, self.catalog, {}, self.log, handoff=handoff)
+            self.assertEqual(result['status'], 'awaiting-title')
+            helper.communicate.assert_not_called()
+            self.assertEqual(handoff.environment, dict(XLLE_PILOT_BOOT_PRESENT_EVENT='fixture-presented'))
+            handoff.title_started(title)
+        self.assertEqual(result['status'], 'completed')
+        event.signal.assert_not_called()  # Only the native child can acknowledge presentation.
+        event.close.assert_called_once_with()
+        title.terminate.assert_not_called()
+        helper.terminate.assert_not_called()
+
+    def test_title_launch_exception_cancels_and_reaps_only_the_owned_helper(self):
+        event = Mock(names={key: 'fixture-'+key for key in ('ready','presented','cancel')})
+        event.signaled.return_value = True
+        helper = Mock(returncode=0)
+        helper.poll.return_value = None
+        helper.communicate.return_value = (b'{}', None)
+        with self.assertRaisesRegex(OSError, 'title spawn'):
+            with boot.Handoff(self.root, self.log) as handoff:
+                with self.ready(), patch.object(boot, '_Events', return_value=event), \
+                        patch.object(boot.subprocess, 'Popen', return_value=helper):
+                    boot.run(self.root, self.data, self.catalog, {}, self.log, handoff=handoff)
+                raise OSError('title spawn failed')
+        event.signal.assert_called_once_with('cancel')
+        helper.communicate.assert_called_once_with(timeout=2)
+        event.close.assert_called_once_with()
+
+    def test_missing_first_present_has_bounded_cleanup_without_stopping_title(self):
+        event = Mock(names={key: 'fixture-'+key for key in ('ready','presented','cancel')})
+        event.signaled.return_value = True
+        helper = Mock(returncode=0)
+        helper.poll.return_value = None
+        helper.communicate.return_value = (b'{}', None)
+        title = Mock()
+        title.poll.return_value = None
+        with boot.Handoff(self.root, self.log) as handoff:
+            with self.ready(), patch.object(boot, '_Events', return_value=event), \
+                    patch.object(boot.subprocess, 'Popen', return_value=helper):
+                result = boot.run(self.root, self.data, self.catalog, {}, self.log, handoff=handoff)
+            event.signaled.return_value = False
+            with patch.object(boot, 'HANDOFF_SECONDS', -1):
+                handoff.title_started(title)
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['handoff'], 'title-present-timeout')
+        event.signal.assert_called_once_with('cancel')
+        title.terminate.assert_not_called()
+
+    def test_disabled_stage_creates_no_ipc_and_preserves_direct_environment(self):
+        boot.write_choice(self.root, dict(enabled=False, kernel=''))
+        with boot.Handoff(self.root, self.log) as handoff, patch.object(boot, '_Events') as events:
+            boot.run(self.root, self.data, self.catalog, {}, self.log, handoff=handoff)
+            self.assertEqual(handoff.environment, {})
+        events.assert_not_called()
+
+    def test_skip_during_final_image_hold_is_not_failed_or_title_completion(self):
+        event = Mock(names={key: 'fixture-'+key for key in ('ready','presented','cancel')})
+        event.signaled.return_value = True
+        helper = Mock(returncode=0)
+        helper.poll.return_value = None
+        helper.communicate.return_value = (json.dumps(dict(schema='xboxllr.native-boot-run.v1',
+            implementation='native-reconstruction', status='completed', handoff='skipped')).encode(), None)
+        title = Mock()
+        title.poll.return_value = None
+        with boot.Handoff(self.root, self.log) as handoff:
+            with self.ready(), patch.object(boot, '_Events', return_value=event), \
+                    patch.object(boot.subprocess, 'Popen', return_value=helper):
+                result = boot.run(self.root, self.data, self.catalog, {}, self.log, handoff=handoff)
+            helper.poll.return_value = 0
+            event.signaled.return_value = False
+            handoff.title_started(title)
+        self.assertEqual(result['status'], 'skipped')
+        self.assertEqual(result['handoff'], 'skipped')
+        event.signal.assert_not_called()
+        title.terminate.assert_not_called()
+
+    def test_explicit_hold_skip_remains_distinct_when_native_present_races_it(self):
+        event = Mock(names={key: 'fixture-'+key for key in ('ready','presented','cancel')})
+        event.signaled.return_value = True
+        helper = Mock(returncode=0)
+        helper.poll.return_value = None
+        helper.communicate.return_value = (json.dumps(dict(schema='xboxllr.native-boot-run.v1',
+            implementation='native-reconstruction', status='completed', handoff='skipped')).encode(), None)
+        title = Mock()
+        title.poll.return_value = None
+        with boot.Handoff(self.root, self.log) as handoff:
+            with self.ready(), patch.object(boot, '_Events', return_value=event), \
+                    patch.object(boot.subprocess, 'Popen', return_value=helper):
+                result = boot.run(self.root, self.data, self.catalog, {}, self.log, handoff=handoff)
+            helper.poll.return_value = 0
+            handoff.title_started(title)
+        self.assertEqual(result['status'], 'skipped')
+        self.assertEqual(result['handoff'], 'skipped')
+        title.terminate.assert_not_called()
+
     @unittest.skipUnless(os.environ.get('XBOXLLR_BOOT_TEST_KERNEL') and
                          os.environ.get('XBOXLLR_BOOT_TEST_EXE'), 'requires private admitted input')
     def test_real_private_pack_preparation_and_native_handoff(self):

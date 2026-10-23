@@ -65,7 +65,7 @@ class BootAssetsTests(unittest.TestCase):
         self.assertEqual(words, tuple([0x8006EBF8] * 24 + [2]))
 
     def test_inventory_has_every_audio_and_geometry_range_and_no_embedded_assets(self):
-        self.assertEqual(len(assets.RANGES), 11)
+        self.assertEqual(len(assets.RANGES), 14)
         for name, logical, owned, size, fingerprint in assets.RANGES:
             with self.subTest(name=name):
                 self.assertLessEqual(len(name), 16)
@@ -73,7 +73,25 @@ class BootAssetsTests(unittest.TestCase):
                 self.assertGreater(size, 0)
                 self.assertGreaterEqual(owned, assets.BASE)
                 self.assertLessEqual(owned - assets.BASE + size, assets.KERNEL_BYTES)
-        self.assertEqual(sum(r[3] for r in assets.RANGES), 71779)
+        self.assertEqual(sum(r[3] for r in assets.RANGES), 72559)
+        self.assertEqual(list(assets.RANGES), sorted(assets.RANGES, key=lambda r: r[1]))
+        self.assertTrue({'after_image', 'after_quad', 'after_gray'}.issubset(r[0] for r in assets.RANGES))
+
+    def test_title_logo_header_bounds_and_fingerprint_are_checked_without_body_reads(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / 'authored.xbe'
+            header = bytearray(0x1000)
+            header[:4] = b'XBEH'
+            struct.pack_into('<II', header, 0x104, 0x10000, len(header))
+            struct.pack_into('<II', header, 0x170, 0x10200, assets.TITLE_LOGO_BYTES)
+            source.write_bytes(header)
+            with self.assertRaisesRegex(assets.AssetError, 'Unsupported XBE startup logo;'):
+                assets.read_title_logo(source)
+            for address, size in ((0x10000, 690), (0x10fff, 690), (0x10200, 4097), (0, 690)):
+                struct.pack_into('<II', header, 0x170, address, size)
+                source.write_bytes(header)
+                with self.assertRaisesRegex(assets.AssetError, 'extent'):
+                    assets.read_title_logo(source)
 
     @unittest.skipUnless(os.environ.get("XBOXLLR_BOOT_TEST_KERNEL"), "requires private owned kernel")
     def test_owned_extraction_is_exact_and_does_not_overwrite(self):
@@ -83,9 +101,10 @@ class BootAssetsTests(unittest.TestCase):
             target = Path(folder) / "assets"
             manifest = assets.write_pack(source, target)
             pack = (target / "xboot.pak").read_bytes()
-            self.assertEqual(len(pack), 72224)
+            self.assertEqual(len(pack), 73120)
             self.assertEqual(assets.sha256(pack),
-                             "6c6df777c291a447a2de2693e3edfc4a69e0c4151548c8e058b512669a09233f")
+                             "e97b240aa8f0d20ce70d8c9ee2e4f3a150ca75808ba01c412c487335a7807dca")
+            self.assertEqual(manifest['firmware_profile'], 'modified-4983-xecuter2')
             self.assertEqual(manifest["pack_sha256"], assets.sha256(pack))
             self.assertFalse(manifest["firmware_execution"])
             with self.assertRaises(FileExistsError):

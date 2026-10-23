@@ -29,10 +29,12 @@ class StartupPackageTests(unittest.TestCase):
                 z.writestr('pythonw.exe', b'MZ fixture')
             closure = dict(complete=True, missing=[], files=[dict(source=str(p), name=p.name)
                 for p in (runtime, launcher, helper)])
-            for name, enabled in (('Blinx', False), ('JSRF', False), ('Xbox Dashboard', True)):
+            for name, requested in (('Blinx', False), ('JSRF', False),
+                                    ('Xbox Dashboard', True), ('Another native game', None)):
+                enabled = requested is True
                 definition = root/'title.toml'
                 definition.write_text('[title]\nid="fixture"\nname="'+name+'"\nxbe_sha256="'+'a'*64+'"\n'
-                    '[launcher]\nstartup_intro='+str(enabled).lower()+'\n')
+                    + ('[launcher]\nstartup_intro='+str(requested).lower()+'\n' if requested is not None else ''))
                 output = root/(name.replace(' ', '-')+'-package')
                 with patch.object(package, 'inventory', return_value=closure):
                     record = package.stage(definition, runtime, launcher, cache, embed, [], output, boot_intro=helper)
@@ -40,6 +42,10 @@ class StartupPackageTests(unittest.TestCase):
                 self.assertTrue((output/'native/XboxStartup.exe').is_file())
                 self.assertTrue((output/'notices/xbox-boot-re/LICENSE').is_file())
                 self.assertTrue((output/'source/native-startup/pilots/native-boot/boot_main.cpp').is_file())
+                self.assertTrue((output/'source/native-startup/pilots/native-boot/boot_timeline.h').is_file())
+                self.assertTrue((output/'source/native-startup/pilots/native-boot/boot_timeline_test.cpp').is_file())
+                for source in ('boot_after_image.h', 'boot_after_image_test.cpp', 'boot_handoff.h'):
+                    self.assertTrue((output/'source/native-startup/pilots/native-boot'/source).is_file())
                 self.assertTrue((output/'source/native-startup/src/third_party/xbox-boot-re/core/src/Audio.c').is_file())
                 self.assertTrue((output/'tools/native_boot_launcher.py').is_file())
                 self.assertFalse(any(p.suffix in ('.pak', '.bin', '.img') for p in output.rglob('*')))

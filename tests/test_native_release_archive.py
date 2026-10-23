@@ -6,9 +6,11 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from native_release_archive import archive
+import native_release_archive as release_archive
 
 
 class ArchiveTests(unittest.TestCase):
@@ -74,6 +76,22 @@ class ArchiveTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             archive(self.source, self.output)
         self.assertEqual(self.output.read_bytes(), b'keep')
+
+    def test_loose_startup_logo_and_renamed_known_content_rejected(self):
+        # Authored payload only; a fingerprint fixture models content admission.
+        payload = b'authored private after-image fixture'
+        fingerprint = hashlib.sha256(payload).hexdigest()
+        for name in ('original-logo.rle', 'renamed-original-logo.dat'):
+            path = self.source / name
+            path.write_bytes(payload)
+            self.metadata['files'][name] = fingerprint
+            self.save()
+            with patch.object(release_archive, 'PRIVATE_STARTUP_LOGOS', frozenset({fingerprint})):
+                with self.assertRaisesRegex(ValueError, 'Private'):
+                    archive(self.source, self.output)
+            self.assertFalse(self.output.exists())
+            path.unlink()
+            del self.metadata['files'][name]
 
     def test_private_diagnostic_metadata_rejected_even_when_manifested(self):
         for folder in ('diagnostics', 'PRIVATE-DO-NOT-SHARE'):

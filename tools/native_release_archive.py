@@ -13,6 +13,13 @@ import zipfile
 
 from native_release_runtime import descriptor, inside, sha
 
+# Original private after-images are content, never redistributable source.
+# Fingerprints also reject a renamed loose logo, which has no magic header.
+PRIVATE_STARTUP_LOGOS = frozenset({
+    'e206fb21bf7a632460c3bb97a98774ebd6470d65ad9341afbcaa87fe07cd7e2d',
+    '7b6b049abaf7ebef37be861d1f5a868984e076c7d39347ac81e812d087ab7660',
+})
+
 
 def archive(source: Path, output: Path):
     source, output = source.resolve(strict=True), output.absolute()
@@ -28,12 +35,14 @@ def archive(source: Path, output: Path):
                 any(p in ('..', '.', '') for p in path.parts) or
                 any(p.casefold() in ('private-do-not-share', 'diagnostics') for p in path.parts) or
                 path.parts[0].lower() in ('data', 'local', 'setup inputs') or
-                path.suffix.lower() in ('.xbe', '.iso', '.xiso', '.img', '.qcow2', '.bin', '.pak', '.raw', '.rom')):
+                path.suffix.lower() in ('.xbe', '.iso', '.xiso', '.img', '.qcow2', '.bin', '.pak', '.rle', '.raw', '.rom')):
             raise ValueError('Private or unsafe package entry: ' + name)
         entry = inside(source, name)
         with entry.open('rb') as stream:
             if stream.read(4) == b'XBPK':
                 raise ValueError('Private startup data in package: ' + name)
+        if metadata['files'].get(name) in PRIVATE_STARTUP_LOGOS:
+            raise ValueError('Private original startup logo in package: ' + name)
     actual = set()
     for path in source.rglob('*'):
         if path.is_symlink() or getattr(path, 'is_junction', lambda: False)():

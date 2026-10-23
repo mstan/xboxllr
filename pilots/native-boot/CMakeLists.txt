@@ -15,6 +15,13 @@ add_library(xboxllr_boot_core STATIC
   ${BOOT_CORE}/src/Effects.c ${BOOT_CORE}/src/FrameOrder.c
   ${BOOT_CORE}/src/Audio.c)
 target_include_directories(xboxllr_boot_core PUBLIC ${BOOT_CORE}/include)
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(xboxllr_boot_timeline_test boot_timeline_test.cpp)
+  add_test(NAME native_boot_timeline COMMAND xboxllr_boot_timeline_test)
+  add_executable(xboxllr_boot_after_image_test boot_after_image_test.cpp)
+  add_test(NAME native_boot_after_image COMMAND xboxllr_boot_after_image_test)
+endif()
 if(MSVC)
   target_compile_options(xboxllr_boot_core PRIVATE /O2 /fp:strict)
   if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")

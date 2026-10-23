@@ -42,6 +42,27 @@ int32_t pilot_gfx_title(const char *utf8)
     memcpy(pilot_window_title,title,(wcslen(title)+1)*sizeof(WCHAR));return S_OK;
 }
 static int pilot_visible;
+/* A random, exclusive per-launch event is supplied only to this owned child.
+ * Without it, historical window/show behavior remains unchanged. */
+static HANDLE pilot_boot_present_event;
+static int pilot_boot_present_checked;
+static int pilot_boot_handoff(void)
+{
+    if(!pilot_boot_present_checked) {
+        pilot_boot_present_checked=1;
+        const char *name=getenv("XLLE_PILOT_BOOT_PRESENT_EVENT");
+        static const char prefix[]="Local\\xboxllr-boot-",suffix[]="-presented";
+        size_t begin=sizeof(prefix)-1;
+        if(name && strlen(name)==begin+32+sizeof(suffix)-1 && !strncmp(name,prefix,begin) &&
+           !strcmp(name+begin+32,suffix)) {
+            unsigned i;for(i=0;i<32;++i) {
+                char c=name[begin+i];if(!((c>='0' && c<='9') || (c>='a' && c<='f')))break;
+            }
+            if(i==32)pilot_boot_present_event=OpenEventA(EVENT_MODIFY_STATE,FALSE,name);
+        }
+    }
+    return pilot_boot_present_event!=NULL;
+}
 static PilotPresentation pilot_presentation={0,0,0x11,1,0};
 int pilot_d3d_has_auto_depth(void){return pilot_presentation.depth!=0;}
 /* Optional raster policy is owned by the resolved static mod registry. */
@@ -561,7 +582,8 @@ int32_t pilot_gfx_present(void)
         for(unsigned i=0;i<pilot_surface_refs[3];++i)ID3D11Texture2D_AddRef(pilot_surfaces[3]);
     }
     const char *visible=getenv("XLLE_PILOT_VISIBLE");
-    if(!pilot_visible && visible && !strcmp(visible,"1")) {
+    int boot_handoff=pilot_boot_handoff();
+    if(!boot_handoff && !pilot_visible && visible && !strcmp(visible,"1")) {
         ShowWindow(pilot_window,SW_SHOWNOACTIVATE);UpdateWindow(pilot_window);pilot_visible=1;
     }
     uint64_t started=pilot_gpu_call_begin();
@@ -583,6 +605,17 @@ int32_t pilot_gfx_present(void)
     pilot_visual_real_present=0;
 #endif
     pilot_gpu_call_end("donor Swap",started);
+    if(boot_handoff && SUCCEEDED(result) && !pilot_visible && visible && !strcmp(visible,"1")) {
+        /* Show the prepared title window without stealing focus from the
+         * retained boot window. An occluded swap may show it, but cannot retire
+         * the boot helper; only an actual S_OK presentation acknowledges it. */
+        ShowWindow(pilot_window,SW_SHOWNOACTIVATE);UpdateWindow(pilot_window);pilot_visible=1;
+    }
+    if(boot_handoff && result==S_OK && pilot_visible) {
+        if(!SetEvent(pilot_boot_present_event))
+            fprintf(stderr,"[STARTUP] first-present acknowledgement failed: %lu\n",GetLastError());
+        CloseHandle(pilot_boot_present_event);pilot_boot_present_event=NULL;
+    }
     if(SUCCEEDED(result))pilot_debug_frame();
 #ifndef PILOT_D3D_PHOBOS
     uint64_t request=pilot_debug_capture_requested();

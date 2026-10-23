@@ -12,6 +12,7 @@
 #undef small // Win32 RPC annotation conflicts with the portable core's name.
 #endif
 #include "xboot.h"
+#include "boot_after_image.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -23,6 +24,7 @@ class BootRenderer {
     BootRenderer(const BootRenderer &) = delete;
     BootRenderer &operator=(const BootRenderer &) = delete;
     void draw();
+    void after_image(const BootAfterImage &image);
     void show(ID3D11RenderTargetView *output, unsigned width, unsigned height);
     void capture(const std::wstring &path);
     void capture_presentation(const std::wstring &path, unsigned width, unsigned height);

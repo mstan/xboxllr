@@ -18,14 +18,22 @@ KERNEL_BYTES = 710720
 KERNEL_SHA256 = "be30b43eecc31d46459bb2b0fb57d117dbc7bd8b56a23b369c6eaed48c16d86d"
 BASE = 0x80010000
 MAX_INPUT_BYTES = 2 * 1024 * 1024
-SCHEMA = "xboxllr.native-boot-assets.v1"
+SCHEMA = "xboxllr.native-boot-assets.v2"
 DONOR_COMMIT = "12a3396aa77f72c8d2fd94c0988c7e11539b47e7"
+TITLE_LOGO_BYTES = 690
+TITLE_LOGO_SHA256 = "7b6b049abaf7ebef37be861d1f5a868984e076c7d39347ac81e812d087ab7660"
 
 # Logical 4627 address consumed by the reconstructed core, owned 4983
 # address, length, canonical SHA-256. These are fingerprints, not ROM bytes.
 RANGES = (
+    ("after_image", 0x8003E170, 0x8003E170, 0x274,
+     "e206fb21bf7a632460c3bb97a98774ebd6470d65ad9341afbcaa87fe07cd7e2d"),
     ("gp_program", 0x80053568, 0x80067F68, 0x1894,
      "f3f4c38c2af16b45d583eeaf36feafc905baa76063b92e0f55c0beae7559c76e"),
+    ("after_quad", 0x80065618, 0x8007A028, 144,
+     "2acbc099425fb10a12f4eca604ee521ad117a86195b891dafdcaec064f1a7ff5"),
+    ("after_gray", 0x800656A8, 0x8007A0B8, 8,
+     "cfd6905b9d1e481501d3fa939faa223e85d6239f94f55399571fa36bf1f5bfce"),
     ("asin_factors", 0x80066030, 0x8007AA40, 0xC4,
      "5771b2f1106de7aaa9f27d216568adb10c6f3235163039aac650c02155786a98"),
     ("pcm_80066ac0", 0x80066AC0, 0x8007B4D0, 0x5540,
@@ -118,12 +126,39 @@ def extract(kernel: bytes) -> tuple[bytes, dict]:
         pack[begin:begin + len(block)] = block
     manifest = {"schema": SCHEMA, "renderer": "native-reconstruction",
                 "kernel_version": "4983", "kernel_sha256": KERNEL_SHA256,
+                "firmware_profile": "modified-4983-xecuter2",
+                "embedded_after_image": "Xecuter2; an explicit selected-title XBE logo may be supplied separately",
                 "kernel_bytes": len(kernel), "core_commit": DONOR_COMMIT,
                 "pack_bytes": len(pack), "pack_sha256": sha256(pack),
                 "ranges": inventory,
                 "audio": "sequencer and GP reconstruction; approximate voice synthesis",
                 "firmware_execution": False}
     return bytes(pack), manifest
+
+
+def read_title_logo(path: Path) -> bytes:
+    """Read only the original XBE header's admitted stock after-image extent.
+
+    This is a separate, explicit source from the modified firmware's embedded
+    Xecuter2 bitmap. No executable body or other title assets are copied.
+    """
+    if path.is_symlink() or not path.is_file():
+        raise AssetError("Choose a regular original XBE for its startup logo")
+    with path.open("rb") as stream:
+        header = stream.read(0x178)
+        if len(header) != 0x178 or header[:4] != b"XBEH":
+            raise AssetError("Startup logo source is not an XBE")
+        base, headers = struct.unpack_from("<II", header, 0x104)
+        address, size = struct.unpack_from("<II", header, 0x170)
+        offset = address - base
+        if (size != TITLE_LOGO_BYTES or offset < 0x178 or headers > 2 * 1024 * 1024
+                or offset + size > headers or offset + size > path.stat().st_size):
+            raise AssetError("Unsupported XBE startup logo extent")
+        stream.seek(offset)
+        logo = stream.read(size)
+    if sha256(logo) != TITLE_LOGO_SHA256:
+        raise AssetError("Unsupported XBE startup logo; firmware variant was not changed")
+    return logo
 
 
 def read_kernel(path: Path) -> bytes:
