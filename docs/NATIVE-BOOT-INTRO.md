@@ -206,13 +206,15 @@ even when a title has no visual enhancement registry.
 ### Same-window startup, 2026-10-23
 
 New packages include `native/XboxStartup.dll`. On a normal launch, the shared
-native graphics owner creates its title window once, then calls this authored
-module before starting the guest clock or executing the guest entry point. The
-title's graphics device is created afterward. This avoids advancing game timers
-or mixing game audio during the startup. The full original-derived
+native graphics owner creates its title window once on the long-lived rendering
+thread, then calls this authored module before creating the first title device.
+The XBE's short-lived bootstrap thread does not own the window. The full original-derived
 animation and sound run in that same HWND. The module borrows only a window
 owned by its calling process and thread, restores its window procedure, and
-releases its private graphics/audio objects before returning. It never creates,
+clears and flushes graphics bindings and releases its private graphics/audio objects
+before returning. The module stays loaded until the application exits because
+DXGI may retire a window subclass asynchronously; its inactive thunk forwards
+all messages and keys to the title's original procedure. It never creates,
 moves, resizes, reparents or destroys that borrowed window. Dashboard then renders
 into the existing window. Position and size, including an owner resize during
 startup, survive the transition. Skipping uses the same window; closing exits
@@ -225,12 +227,21 @@ no module. Standalone helper execution and its original per-launch event handoff
 remain available for source-kit tools and automated offscreen validation; new
 interactive packages use the in-process path instead of a second window.
 
-Actual hidden, muted native Dashboard checks completed the full sequence,
-skipped it and closed it. Each retained one application HWND and unchanged
-position/size after a deliberate resize; close returned zero. Private receipts:
-`G:/Temp/Codex/xboxllr/skip-startup-mod-20261023/same-window-tests-004/receipt.json`.
+An early check stopped after intro completion and missed the later bootstrap
+thread exit destroying its window. That ownership mistake was corrected.
+Actual muted native Dashboard checks now wait for at least 60 real frames and
+capture the Home menu before and after navigation, retaining one visible HWND
+and the deliberately resized position/size. The captured menu responds to input.
+Normal window closing exits zero. Private receipts:
+`G:/Temp/Codex/xboxllr/skip-startup-mod-20261023/same-window-tests-004/complete/transition-006/receipt.json`.
 The owner had already accepted the startup presentation before this ownership
 change. Exact hardware voice precision remains a separate documented deferral.
+
+New Windows packages use `Start Game.exe`, a GUI entry point that starts the
+packaged Python runtime without a developer console. The launcher and native
+title children also suppress console creation while retaining diagnostic logs.
+The compatibility `.cmd` entries delegate to this executable and exit. A private
+fixture verifies the GUI subsystem, absence of a console and quoted arguments.
 
 The core is C11 and independent of Win32, graphics and audio devices. The
 first live presentation host is Windows D3D11 only and is excluded entirely

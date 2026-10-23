@@ -35,7 +35,9 @@ static void pilot_startup_window(void)
     if(mute && !strcmp(mute,"1"))options.flags|=XBOXLLR_BOOT_WINDOW_MUTE;
     if(!visible || strcmp(visible,"1"))options.flags|=XBOXLLR_BOOT_WINDOW_HIDDEN;
     int result=run?run(&options):XBOXLLR_BOOT_WINDOW_FAILED;
-    FreeLibrary(library);
+    /* DXGI may retain/restore a swap-chain window thunk after GPU teardown.
+     * Keep the authored code loaded for the application's window lifetime;
+     * the inactive thunk forwards all input/messages to the title procedure. */
     if(result==XBOXLLR_BOOT_WINDOW_CLOSED)ExitProcess(0); /* Owner closed this app. */
     pilot_visible=IsWindowVisible(pilot_window)!=0;
     fprintf(stderr,"[STARTUP] Same title window %p returned %d\n",(void*)pilot_window,result);

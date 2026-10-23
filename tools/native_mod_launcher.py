@@ -253,7 +253,8 @@ class Catalog:
         command = [str(binary), str(source.resolve()), str(target.resolve()), str(image)]
         if validate:
             command.append('--validate')
-        subprocess.run(command, cwd=Path(binary).parent, env=env, check=True)
+        subprocess.run(command, cwd=Path(binary).parent, env=env, check=True,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         result, selected_image = self.ingest(target)
         if result in (0, 1):
             atomic_json(self.state_path, self.selection())

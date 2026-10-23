@@ -95,7 +95,10 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     boot_module = boot_intro.with_name('XboxStartup.dll')
     if not boot_module.is_file():
         raise ValueError('Build the same-window startup module beside its helper')
-    closure = inventory([runtime, launcher, boot_intro, boot_module], runtime_dirs)
+    launch_stub = launcher.with_name('xboxllr_start.exe')
+    if not launch_stub.is_file():
+        raise ValueError('Build the windowed release entry point beside the launcher')
+    closure = inventory([runtime, launcher, boot_intro, boot_module, launch_stub], runtime_dirs)
     if not closure['complete']:
         raise ValueError('Missing Windows dependencies: ' + str(closure['missing']))
     # No output is created until metadata and all PE inputs have been checked.
@@ -104,6 +107,9 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     native.mkdir()
     for record in closure['files']:
         origin = Path(record['source']).resolve()
+        if origin == launch_stub.resolve():
+            shutil.copy2(record['source'], output / 'Start Game.exe')
+            continue
         name = ('Launcher.exe' if origin == launcher.resolve() else
                 'XboxStartup.exe' if origin == boot_intro.resolve() else record['name'])
         shutil.copy2(record['source'], native / name)
@@ -192,12 +198,12 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
                     choices.setdefault(key, set()).update(values)
         (output / 'mods/ui-visibility.json').write_text(json.dumps(dict(version=1,
             hidden_features=sorted(hidden), hidden_choices={key: sorted(v) for key, v in choices.items()}), indent=2)+'\n')
-    command = '@echo off\r\nsetlocal\r\n"%~dp0python\\pythonw.exe" "%~dp0tools\\native_release_runtime.py" %*\r\n'
+    command = '@echo off\r\nsetlocal\r\nstart "" "%~dp0Start Game.exe" %*\r\n'
     (output / 'Start Game.cmd').write_bytes(command.encode('ascii'))
     diagnostic_command = command.replace('setlocal\r\n', 'setlocal\r\nset "XBOXLLR_DIAGNOSTICS=1"\r\n')
     (output / 'Start with Diagnostics.cmd').write_bytes(diagnostic_command.encode('ascii'))
     (output / 'README-FIRST.txt').write_text(
-        title['name'] + '\n\nOpen Start Game.cmd. The first-launch popup asks about optional Xbox files.\n'
+        title['name'] + '\n\nOpen Start Game.exe. The first-launch popup asks about optional Xbox files.\n'
         'Choose Skip for a new local console and automatic private save storage.\n'
         'That choice is remembered. Original saves may need their original console files;\n'
         'new local saves are not guaranteed to work on a real Xbox. Xbox Live is unavailable.\n\n'

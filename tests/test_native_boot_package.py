@@ -58,6 +58,8 @@ class StartupPackageTests(unittest.TestCase):
                 path.write_bytes(b'MZ authored PE fixture')
             module = helper.with_name('XboxStartup.dll')
             module.write_bytes(b'MZ authored startup module fixture')
+            launch_stub=launcher.with_name('xboxllr_start.exe')
+            launch_stub.write_bytes(b'MZ authored GUI entry point fixture')
             helper_notice = helper.parent/'third_party/libsamplerate/README.md'
             helper_notice.parent.mkdir(parents=True)
             helper_notice.write_bytes(b'authored helper dependency notice fixture')
@@ -69,7 +71,7 @@ class StartupPackageTests(unittest.TestCase):
                 z.writestr('python312._pth', 'python312.zip\n.\n')
                 z.writestr('pythonw.exe', b'MZ fixture')
             closure = dict(complete=True, missing=[], files=[dict(source=str(p), name=p.name)
-                for p in (runtime, launcher, helper, module)])
+                for p in (runtime, launcher, helper, module, launch_stub)])
             for name, requested, camera_enabled in (('Blinx', False, False), ('JSRF', False, False),
                     ('Xbox Dashboard', True, False), ('Another native game', None, False),
                     ('Blinx admitted revision', False, True)):
@@ -95,6 +97,7 @@ class StartupPackageTests(unittest.TestCase):
                 self.assertTrue((output/'native/XboxStartup.exe').is_file())
                 self.assertEqual(record['startup']['module'], 'native/XboxStartup.dll')
                 self.assertEqual((output/'native/XboxStartup.dll').read_bytes(), module.read_bytes())
+                self.assertEqual((output/'Start Game.exe').read_bytes(), launch_stub.read_bytes())
                 self.assertEqual((output/'native/third_party/libsamplerate/README.md').read_bytes(),
                                  helper_notice.read_bytes())
                 self.assertTrue((output/'notices/xbox-boot-re/LICENSE').is_file())

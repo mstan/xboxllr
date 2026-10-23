@@ -367,7 +367,8 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
                         handoff=startup if automated_seconds is None else None, title_image=image)
             env.update(startup.environment)
             try:
-                child = subprocess.Popen(command, cwd=state, env=env, stdout=log, stderr=log)
+                child = subprocess.Popen(command, cwd=state, env=env, stdout=log, stderr=log,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             except OSError:
                 session.finish(None, reason='launch-failed')
                 raise

@@ -42,7 +42,7 @@ int32_t pilot_gfx_title(const char *utf8)
     memcpy(pilot_window_title,title,(wcslen(title)+1)*sizeof(WCHAR));return S_OK;
 }
 static int pilot_visible;
-static int pilot_startup_window_prepared;
+static int pilot_window_persistent;
 #include "graphics_startup_window.inc"
 /* A random, exclusive per-launch event is supplied only to this owned child.
  * Without it, historical window/show behavior remains unchanged. */
@@ -306,7 +306,9 @@ void pilot_gfx_close(void)
 #endif
     if (pilot_device) { pilot_device->lpVtbl->Release(pilot_device); pilot_device=NULL; }
     if (pilot_factory) { pilot_factory->lpVtbl->Release(pilot_factory); pilot_factory=NULL; }
-    if(pilot_window && pilot_saved_display) {InvalidateRect(pilot_window,NULL,FALSE);UpdateWindow(pilot_window);}
+    if(pilot_window && (pilot_saved_display || pilot_window_persistent)) {
+        if(pilot_saved_display){InvalidateRect(pilot_window,NULL,FALSE);UpdateWindow(pilot_window);}
+    }
     else {
         if (pilot_window) { DestroyWindow(pilot_window); pilot_window=NULL; }
         pilot_visible=0;
@@ -341,16 +343,6 @@ static int32_t pilot_window_open(unsigned width,unsigned height)
                     SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))return HRESULT_FROM_WIN32(GetLastError());
     return S_OK;
 }
-int32_t pilot_gfx_prepare_startup(void)
-{
-    const char *module=getenv("XLLE_PILOT_BOOT_MODULE");
-    if(!module || !*module)return S_OK;
-    int32_t result=pilot_window_open(640,480);
-    if(result<0)return result;
-    pilot_startup_window();
-    pilot_startup_window_prepared=1;
-    return S_OK;
-}
 int32_t pilot_gfx_create(const uint32_t p[17])
 {
     if(pilot_device)return E_INVALIDARG;
@@ -359,11 +351,15 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     pilot_initializer.precision_policy=PILOT_COLOR_NATIVE_RGBA8;pilot_default_color_format=p[2];
     /* Hidden until scene qualification; a successful hidden present is not
      * treated as title cadence evidence. Tests read actual GPU output. */
-    if(!pilot_startup_window_prepared) {
+    if(!pilot_window || !pilot_window_persistent) {
         int32_t result=pilot_window_open(p[0],p[1]);
         if(result<0)return result;
     }
-    pilot_startup_window_prepared=0;
+    /* The real graphics thread owns and pumps this window for the title's
+     * lifetime. The XBE bootstrap thread may terminate after creating it. */
+    const char *startup_module=getenv("XLLE_PILOT_BOOT_MODULE");
+    if(startup_module && *startup_module)pilot_window_persistent=1;
+    pilot_startup_window();
     pilot_factory=xbox_Direct3DCreate8(0);
     if (!pilot_factory) { pilot_gfx_close(); return E_OUTOFMEMORY; }
     D3DPRESENT_PARAMETERS pp={0};
@@ -580,6 +576,13 @@ int32_t pilot_gfx_transform(unsigned state,const float matrix[16])
 }
 int32_t pilot_gfx_present(void)
 {
+    /* This HWND belongs to the rendering thread, not SDL's input/bootstrap
+     * thread. Dispatch its ordinary move/resize/close messages every frame. */
+    MSG message;
+    while(PeekMessageW(&message,NULL,0,0,PM_REMOVE)) {
+        if(message.message==WM_QUIT)ExitProcess(0);
+        TranslateMessage(&message);DispatchMessageW(&message);
+    }
     pilot_gfx_batch_flush();
     pilot_strip_batch_profile();
     if (!pilot_device) return E_FAIL;

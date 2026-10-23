@@ -32,6 +32,7 @@ constexpr const char *PACK_SHA256 =
     "e97b240aa8f0d20ce70d8c9ee2e4f3a150ca75808ba01c412c487335a7807dca";
 bool close_requested = false;
 WNDPROC borrowed_previous = nullptr;
+bool borrowed_active = false;
 struct Aligned {
     void *data;
     size_t size;
@@ -142,6 +143,8 @@ struct Audio {
     }
 };
 LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if (borrowed_previous && !borrowed_active)
+        return CallWindowProcW(borrowed_previous,window,message,wp,lp);
     if (message == WM_CLOSE) {
         close_requested = true;
         if (borrowed_previous)
@@ -171,6 +174,7 @@ struct Window {
             if (!previous)
                 throw std::runtime_error("Cannot borrow title window procedure");
             borrowed_previous = previous;
+            borrowed_active = true;
             return;
         }
         if (headless)
@@ -192,9 +196,9 @@ struct Window {
     }
     ~Window() {
         if (borrowed) {
-            if (IsWindow(value) && (WNDPROC)GetWindowLongPtrW(value,GWLP_WNDPROC)==window_proc)
+            if (IsWindow(value))
                 SetWindowLongPtrW(value,GWLP_WNDPROC,(LONG_PTR)borrowed_previous);
-            borrowed_previous = nullptr;
+            borrowed_active = false;
         } else if (value)
             DestroyWindow(value);
     }
@@ -604,6 +608,12 @@ static int startup_main(int argc, wchar_t **argv, HWND existing = nullptr,
                   << ",\"window_mode\":\"" << (existing ? "borrowed-title" : "separate") << "\""
                   << ",\"window_handle\":" << reinterpret_cast<uintptr_t>(window.value)
                   << ",\"presentation\":\"" << (core_only ? "core-only" : "d3d11") << "\"}\n";
+        // Drop backbuffer bindings before releasing the old swap chain. DXGI
+        // may retire its window subclass asynchronously; the DLL remains
+        // loaded and its inactive thunk forwards to the original title proc.
+        renderer.reset();
+        if(context){context->ClearState();context->Flush();}
+        info.Reset();swap.Reset();context.Reset();device.Reset();
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "Native startup failed: " << error.what() << "\n";
