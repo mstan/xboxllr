@@ -124,6 +124,44 @@ def public_audio_abi(context, symbol, proof, functions, data):
     return call
 
 
+def audio_object_guards(context, proof, tables, functions, data):
+    """Prove stop addresses, including explicitly selected one-JMP guards.
+
+    Constructor vtable entries supply the addresses; a tail proof cannot select
+    another entry or make its target callable. The emitted guard still stops
+    before the original teardown code runs on a native object.
+    """
+    selected = proof.get('object_guard_tails', {})
+    names = {f'{kind}_{name}' for kind in tables
+             for name in ('Destructor', 'InnerRelease')}
+    if not isinstance(selected, dict) or not set(selected) <= names:
+        raise ValueError('unknown or unused audio object guard tail')
+    guards, tails = [], {}
+    for kind, table in tables.items():
+        for slot, suffix in ((0, 'Destructor'), (2, 'InnerRelease')):
+            name, address = f'{kind}_{suffix}', table['entries'][slot]
+            function = functions.get(address)
+            if function is None:
+                raise ValueError('missing canonical audio object guard: '+name)
+            if name in selected:
+                body = selected[name]
+                if (not isinstance(body, dict)
+                        or set(body) != {'sha256', 'bytes', 'stack_bytes', 'tail_target'}):
+                    raise ValueError('incomplete audio object guard tail: '+name)
+                matches = [f for f in context.functions if int(f['start'], 16) == address]
+                if len(matches) != 1 or matches[0] != function:
+                    raise ValueError('ambiguous canonical audio object guard: '+name)
+                tails[name] = public_audio_abi(context, dict(name=name, address=address,
+                    call='stdcall', stack_bytes=4), body, functions, data)
+            else:
+                code = list(Cs(CS_ARCH_X86, CS_MODE_32).disasm(data(address, function['size']), address))
+                if {int(i.op_str or '0', 0) for i in code if i.mnemonic == 'ret'} != {4}:
+                    raise ValueError('unreviewed audio object guard cleanup')
+            guards.append(dict(name=name, address=address, bytes=function['size'],
+                               sha256=context.digest(function)))
+    return guards, tails
+
+
 def listener_binding(context, proof, calls, functions, data):
     """Optional whole listener family; no implicit admission for older profiles."""
     listener=proof.get('listener')
@@ -221,13 +259,9 @@ def bind(xbe,output,symbols,profile=None):
     # public Release owns native teardown; an original CPU must stop before
     # running an inner Release or ECX scalar destructor on a native object.
     header+=['static const struct { const char *name; uint32_t address, bytes; const char *sha256; } pilot_audio_guards[] = {']
-    for kind,table in tables.items():
-        for slot,name in ((0,'Destructor'),(2,'InnerRelease')):
-            address=table['entries'][slot];function=functions[address]
-            code=list(Cs(CS_ARCH_X86,CS_MODE_32).disasm(data(address,function['size']),address))
-            if {int(i.op_str or '0',0) for i in code if i.mnemonic=='ret'}!={4}:
-                raise ValueError('unreviewed audio object guard cleanup')
-            header.append(f'    {{"{kind}_{name}", {address}u, {function["size"]}u, "{context.digest(function)}"}},')
+    guards,guard_tails=audio_object_guards(context,proof,tables,functions,data)
+    if guard_tails:binding['object_guard_tails']=guard_tails
+    header += [f'    {{"{g["name"]}", {g["address"]}u, {g["bytes"]}u, "{g["sha256"]}"}},' for g in guards]
     header+=['};']
     header+=[f'#define PILOT_AUDIO_{kind}_VTABLE 0x{v["address"]:08x}u' for kind,v in tables.items()]
     header+=[f'#define PILOT_AUDIO_HAS_DSP {int(bool(dsp))}']

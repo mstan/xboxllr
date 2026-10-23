@@ -25,12 +25,22 @@ def inspect(context, proof):
     if (proof.get('native_create_behavior_mask'), proof.get('original_create_driver_mask')) != (0x40, 0x10):
         raise ValueError('unreviewed classic creation policy')
     functions = {int(f['start'], 16): f for f in context.functions}
+    if 'classic_layout' in proof and len(functions)!=len(context.functions):
+        raise ValueError('ambiguous full-index canonical function inventory')
     symbols = [s for s in context.symbols if s['library'] == 'D3D8' and s['kind'] == 'function']
     rows = proof['functions']
     if (len({r['address'] for r in rows}) != len(rows) or len({r['name'] for r in rows}) != len(rows) or
             {(r['address'], r['source_name']) for r in rows} != {(s['address'], s['name']) for s in symbols}):
         raise ValueError('classic graphics inventory changed')
     def read(address, size):
+        if 'classic_layout' in proof:
+            sections=[s for s in context.image['sections'] if s['address']<=address and
+                      address+size<=s['address']+s['raw_size']]
+            if len(sections)!=1:raise ValueError('full-index proof outside unique original bytes')
+            offset=sections[0]['raw_offset']+address-sections[0]['address']
+            raw=context.blob[offset:offset+size]
+            if len(raw)!=size:raise ValueError('truncated full-index original proof')
+            return raw
         section = next((s for s in context.image['sections'] if s['address'] <= address and
                         address + size <= s['address'] + s['raw_size']), None)
         if section is None: raise ValueError('classic proof outside original bytes')
@@ -123,7 +133,10 @@ def inspect(context, proof):
     compact = inspect_compact(proof,variables,layout,codes,read)
     if layout['yuv_state'] != 160: raise ValueError('invalid semantic YUV state')
     if not 0 < layout['device_bytes'] <= 0x10000: raise ValueError('invalid classic device extent')
-    if (layout['device_object']+layout['device_bytes']!=layout['device_global'] or
+    if 'classic_layout' in proof:
+        from native_d3d_full import inspect_layout
+        compact['full_index_layout']=inspect_layout(context,proof,layout,codes)
+    elif (layout['device_object']+layout['device_bytes']!=layout['device_global'] or
             layout['vertex_constants']-layout['device_object']+192*16!=layout['vertex_program_cache'] or
             layout['vertex_program_cache']+136*16!=layout['shader_mode']):
         raise ValueError('classic static device/cache extents disagree')

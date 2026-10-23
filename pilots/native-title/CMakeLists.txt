@@ -1247,9 +1247,11 @@ pilot_add_test(NAME pilot_native_audio_binding COMMAND "${Python3_EXECUTABLE}"
 set_tests_properties(pilot_native_audio_binding PROPERTIES TIMEOUT 30)
 pilot_add_test(NAME pilot_native_compact_policy COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_d3d_compact.py")
+pilot_add_test(NAME pilot_native_full_index_policy COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_d3d_full.py")
 pilot_add_test(NAME pilot_native_input_report_policy COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_input_reports.py")
-set_tests_properties(pilot_native_compact_policy pilot_native_input_report_policy PROPERTIES TIMEOUT 30)
+set_tests_properties(pilot_native_compact_policy pilot_native_full_index_policy pilot_native_input_report_policy PROPERTIES TIMEOUT 30)
 foreach(report_floor 0 32)
   add_executable(pilot_input_report_${report_floor}_test "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_input_report.c")
   target_include_directories(pilot_input_report_${report_floor}_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

@@ -39,6 +39,9 @@ def matches_policy(mapping,expected):
 
 
 def inspect(proof,variables,layout,codes,read):
+    if 'classic_layout' in proof:
+        from native_d3d_full import inspect_cache
+        return inspect_cache(proof,variables,layout,codes,read)
     version=proof.get('compact_layout','xdk-4134')
     if version not in ('xdk-4134','xdk-3925'):
         raise ValueError('unknown classic compact layout policy')
