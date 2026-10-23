@@ -53,6 +53,10 @@ static DWORD WINAPI sdl_worker(void *unused)
     /* Rendering owns a native HWND, not an SDL window. Input routing is the
      * selected physical device, as in the existing XInput transport. */
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
+    /* SDL2's Windows RawInput/device-notification HWND needs a Win32 message
+     * pump. SDL_PumpEvents alone cannot dispatch it without SDL video, which
+     * this native renderer does not initialize. Let SDL own that pump too. */
+    SDL_SetHint(SDL_HINT_JOYSTICK_THREAD,"1");
     if(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER)!=0) {
         s_start_status=ERROR_NOT_SUPPORTED;
         fprintf(stderr,"[PILOT INPUT STOP] SDL controller initialization failed: %s\n",SDL_GetError());

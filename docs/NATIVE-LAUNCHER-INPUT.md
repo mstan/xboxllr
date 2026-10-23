@@ -11,6 +11,11 @@ unconsumed remap/deadzone controls remain hidden.
 
 `PILOT_SDL2_DIR` optionally enables the SDL2 host transport using the same SDK
 as the launcher. One worker owns SDL event pumping and controller handles.
+Before initializing SDL, it enables `SDL_HINT_JOYSTICK_THREAD` so SDL's Windows
+notification window has its own Win32 message pump. The native renderer does
+not initialize SDL video; `SDL_PumpEvents` alone does not dispatch the Windows
+RawInput messages in that configuration. Without the notification pump, a pad
+can enumerate and open successfully while every sampled button/axis stays zero.
 It publishes locked Xbox-format snapshots, uses the existing face/Black/White
 mapping, converts down-positive Y and signed triggers to the existing Xbox
 report, and queues rumble to the handle owner. Only guest port 0 is assigned.
@@ -33,3 +38,12 @@ trigger endpoints, wrong-device isolation, disconnect/reconnect and cleanup;
 the existing input/replay/stop contracts; compiled launcher/provider selection
 round-trips and malformed-state rejection; and the no-SDL portable compile.
 Physical device feel and hot-plug remain useful owner playtests.
+
+The headless Windows event-pump test targets only the current process's SDL
+message-only window with `WM_NULL`, checks dispatch while the caller is idle,
+and verifies shutdown removes the window. It needs no physical controller and
+fails with a timeout on the original unpumped transport. This covers a boundary
+that SDL virtual joystick samples do not exercise. An Xbox One physical capture
+also compared simultaneous default, manually pumped, and SDL-threaded samples:
+the threaded path received A/Menu and full-range sticks with the original GUID,
+while the default path queued hundreds of unprocessed RawInput messages.
