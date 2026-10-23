@@ -14,6 +14,7 @@ import native_boot_launcher as boot
 import native_input_mods as camera
 from native_mod_launcher import Catalog
 from native_release_archive import archive
+from native_title_switches import manifests as title_manifests, environment as title_environment
 
 
 class StartupPackageTests(unittest.TestCase):
@@ -77,16 +78,38 @@ class StartupPackageTests(unittest.TestCase):
                     ('Blinx admitted revision', False, True)):
                 enabled = requested is True
                 definition = root/'title.toml'
-                definition.write_text('[title]\nid="fixture"\nname="'+name+'"\nxbe_sha256="'+'a'*64+'"\n'
+                definition.write_text('[title]\nid="fixture"\ngame_id="12345678"\nname="'+name+'"\nxbe_sha256="'+'a'*64+'"\n'
                     + ('[launcher]\nstartup_intro='+str(requested).lower()+'\n' if requested is not None else ''))
                 if camera_enabled:
                     definition.write_text('[game]\nname="Blinx admitted revision"\nregion="NTSC-U"\n'
                         'title_id="4D530013"\nxbe_sha256="e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"\n')
+                title_switch = name == 'JSRF'
+                if title_switch:
+                    with definition.open('a') as file:
+                        file.write('[launcher.defaults."fixture.enhancement.unlock/early-unlock"]\n'
+                            'enabled=true\n[mods]\n'
+                            'switches=[{manifest="mods/preloaded/packages/fixture.enhancement.unlock/1.0.0/manifest.toml",'
+                            'package="fixture.enhancement.unlock",feature="early-unlock",key="EARLY_UNLOCK"}]\n')
+                    manifest=root/'mods/preloaded/packages/fixture.enhancement.unlock/1.0.0/manifest.toml'
+                    manifest.parent.mkdir(parents=True)
+                    manifest.write_text('format_version=1\nid="fixture.enhancement.unlock"\nname="Early unlock"\n'
+                        'version="1.0.0"\ndescription="Reviewed static title mod"\n[[target]]\ngame_id="12345678"\nxbe_sha256="'+'a'*64+'"\n'
+                        '[[feature]]\nid="early-unlock"\nname="Early unlock"\ndefault_enabled=false\n')
+                cache.write_text('PILOT_NATIVE_OPTIMIZATION:STRING=OPTIMIZED\n'
+                    'PILOT_IO_DEVICE:BOOL=OFF\nPILOT_SCHEDULING:STRING=NATIVE\n'
+                    + ('PILOT_TITLE_MOD_SOURCE:FILEPATH=reviewed-title.c\n' if title_switch else ''))
                 output = root/(name.replace(' ', '-')+'-package')
                 with patch.object(package, 'inventory', return_value=closure):
                     record = package.stage(definition, runtime, launcher, cache, embed, [], output, boot_intro=helper)
                 self.assertEqual(record['startup']['default_enabled'], enabled)
-                self.assertFalse(record['capabilities']['visual_mods'])
+                self.assertEqual(record['capabilities']['visual_mods'], title_switch)
+                self.assertTrue((output/'tools/native_title_switches.py').is_file())
+                if title_switch:
+                    choices=Catalog(title_manifests(output/'release.json',record),output/'selection.json',
+                                    defaults=record['launcher']['defaults'])
+                    self.assertEqual(title_environment(choices,record),{'XLLE_PILOT_TITLE_MOD_EARLY_UNLOCK':'1'})
+                    choices.features[0]['enabled']=False
+                    self.assertEqual(title_environment(choices,record),{'XLLE_PILOT_TITLE_MOD_EARLY_UNLOCK':'0'})
                 self.assertEqual((output/'mods/preloaded/packages'/camera.PACKAGE/'1.0.0/manifest.toml').is_file(),
                                  camera_enabled)
                 relative = Path('mods/preloaded/packages') / boot.MOD_PACKAGE / '1.0.0/manifest.toml'

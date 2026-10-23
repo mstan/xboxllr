@@ -100,6 +100,20 @@ muted, and cannot detach. Only that created process is stopped at its deadline.
 The authored tests mock process creation: they do not validate dashboard boot,
 rendering, input, audio output, or native performance.
 
+Trusted title registries can expose checkbox-only gameplay mods through
+`[mods].switches`. Each declaration names a bundled manifest, package/feature
+pair and an uppercase `key`; the launcher passes its selected boolean as
+`XLLE_PILOT_TITLE_MOD_<key>=0|1`. The compiled title registry implements the
+behavior through the existing mod interface. Packages do not load executable
+code. Manifests must target the exact title ID and XBE hash and use
+`mods/preloaded/packages/<package>/1.0.0/manifest.toml`.
+
+Use `[launcher.defaults."<package>/<feature>"] enabled = true` for a title
+default; a saved explicit OFF always wins. Keep the manifest's generic default
+false. Both development and packaged launchers apply the same defaults and
+selection mapping, and release staging includes the declared manifest. A title
+without switches gets no extra controls or environment entries.
+
 `--link-profile ITERATIVE` selects MSVC incremental linking for development.
 Pass the same selection to configure, build and run; the build receipt binds
 it so a different selection cannot silently launch an older artifact. It keeps

@@ -346,6 +346,8 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
     options = catalog_options(catalog, data)
     from native_input_mods import environment as input_mod_environment
     env.update(input_mod_environment(catalog))
+    from native_title_switches import environment as title_mod_environment
+    env.update(title_mod_environment(catalog, data))
     if data['capabilities']['visual_mods']:
         plan = root / 'data' / 'mods.plan'
         resolve(root / 'release.json', data, plan, **options, registry_available=True)

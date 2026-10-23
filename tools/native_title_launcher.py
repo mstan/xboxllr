@@ -74,7 +74,8 @@ def select(source, data, paths, build, run, *, force=False):
     root = Path(source).parent
     catalog = Catalog(manifests(source, data), paths.get('mod_selection', root / 'local/mod-selection.json'),
                       visibility=[ROOT / 'mods/ui-visibility.json', root / 'mods/ui-visibility.json'],
-                      frame_modes=data.get('launcher', {}).get('frame_modes', []))
+                      frame_modes=data.get('launcher', {}).get('frame_modes', []),
+                      defaults=data.get('launcher', {}).get('defaults', {}))
     result, image = 0, str(paths['xbe'])
     if force or not catalog.skip_launcher:
         result, image = catalog.run(binary(build), run, title=data['title']['name'],
@@ -85,6 +86,8 @@ def select(source, data, paths, build, run, *, force=False):
     environment = dict(RECOMP_VOLUME=str(catalog.volume))
     from native_input_mods import environment as input_mod_environment
     environment.update(input_mod_environment(catalog))
+    from native_title_switches import environment as title_mod_environment
+    environment.update(title_mod_environment(catalog, data))
     if player['source'] in ('none', 'keyboard'):
         environment['XLLE_PILOT_INPUT'] = player['source']
     elif player['source'] == 'gamepad':

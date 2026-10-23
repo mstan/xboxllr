@@ -16,7 +16,7 @@ import zipfile
 from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('native_release_runtime', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods',
+MODULES = ('native_release_runtime', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage')
 # Narrow native VP build closure. No machine/CPU executable, original input,
 # generated title body or private fixture is part of the startup source kit.
@@ -198,6 +198,16 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
                     choices.setdefault(key, set()).update(values)
         (output / 'mods/ui-visibility.json').write_text(json.dumps(dict(version=1,
             hidden_features=sorted(hidden), hidden_choices={key: sorted(v) for key, v in choices.items()}), indent=2)+'\n')
+    from native_title_switches import declarations as switch_declarations, manifests as switch_manifests
+    switches = switch_declarations(source)
+    if switches:
+        if not available:
+            raise ValueError('Title switches require a compiled trusted registry')
+        for path in switch_manifests(definition, source):
+            relative = path.relative_to(definition.resolve().parent)
+            (output / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, output / relative)
+        mods['switches'] = switches
     command = '@echo off\r\nsetlocal\r\nstart "" "%~dp0Start Game.exe" %*\r\n'
     (output / 'Start Game.cmd').write_bytes(command.encode('ascii'))
     diagnostic_command = command.replace('setlocal\r\n', 'setlocal\r\nset "XBOXLLR_DIAGNOSTICS=1"\r\n')

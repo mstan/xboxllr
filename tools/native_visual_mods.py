@@ -32,6 +32,8 @@ def manifests(source, data):
     wide = data.get('mods', {}).get('widescreen_manifest')
     if wide:
         paths.insert(0, (Path(source).parent / wide).resolve())
+    from native_title_switches import manifests as switch_manifests
+    paths.extend(switch_manifests(source, data))
     return paths
 
 

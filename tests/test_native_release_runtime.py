@@ -16,6 +16,21 @@ from test_native_save_keys import authored_xbe
 
 
 class FirstRunTests(unittest.TestCase):
+    def test_title_switch_selection_reaches_native_process(self):
+        runtime.writable_environment(self.root)
+        profile = runtime.prepare_profile(self.root, self.data, self.image)
+        (self.root/'game.exe').write_bytes(b'authored game fixture')
+        data = dict(self.data, executable='game.exe', runtime={}, capabilities=dict(visual_mods=False),
+            mods=dict(switches=[dict(package='fixture.enhancement.unlock',feature='early-unlock',
+                manifest='mods/preloaded/packages/fixture.enhancement.unlock/1.0.0/manifest.toml',key='EARLY_UNLOCK')]))
+        catalog=Catalog([],self.root/'selection.json')
+        catalog.features=[dict(package='fixture.enhancement.unlock',id='early-unlock',enabled=False,options=[])]
+        child=unittest.mock.Mock(pid=1,returncode=0)
+        child.wait.return_value=0
+        with patch('native_boot_launcher.run',return_value=None), patch.object(runtime.subprocess,'Popen',return_value=child) as spawn:
+            self.assertEqual(runtime.launch_game(self.root,data,self.image,profile,catalog),0)
+        self.assertEqual(spawn.call_args.kwargs['env']['XLLE_PILOT_TITLE_MOD_EARLY_UNLOCK'],'0')
+
     def test_intro_failure_returns_before_native_title_and_preserves_save_identity(self):
         runtime.writable_environment(self.root)
         profile = runtime.prepare_profile(self.root, self.data, self.image)
