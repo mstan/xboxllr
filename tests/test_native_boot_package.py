@@ -10,6 +10,8 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import native_release_package as package
+import native_boot_launcher as boot
+from native_mod_launcher import Catalog
 from native_release_archive import archive
 
 
@@ -75,6 +77,12 @@ class StartupPackageTests(unittest.TestCase):
                 with patch.object(package, 'inventory', return_value=closure):
                     record = package.stage(definition, runtime, launcher, cache, embed, [], output, boot_intro=helper)
                 self.assertEqual(record['startup']['default_enabled'], enabled)
+                self.assertFalse(record['capabilities']['visual_mods'])
+                relative = Path('mods/preloaded/packages') / boot.MOD_PACKAGE / '1.0.0/manifest.toml'
+                self.assertEqual((output/relative).read_bytes(), (package.ROOT/relative).read_bytes())
+                catalog = Catalog([output/relative], output/'data/mod-selection.json')
+                self.assertFalse(boot.skip_animation(catalog))
+                self.assertEqual(catalog.features[0]['name'], 'Skip startup animation')
                 self.assertTrue((output/'native/XboxStartup.exe').is_file())
                 self.assertEqual((output/'native/third_party/libsamplerate/README.md').read_bytes(),
                                  helper_notice.read_bytes())

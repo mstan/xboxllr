@@ -23,6 +23,20 @@ PACK_SHA256 = "e97b240aa8f0d20ce70d8c9ee2e4f3a150ca75808ba01c412c487335a7807dca"
 LEGACY_PACK_SHA256 = "6c6df777c291a447a2de2693e3edfc4a69e0c4151548c8e058b512669a09233f"
 TIMEOUT_SECONDS = 25
 HANDOFF_SECONDS = 55
+MOD_PACKAGE = 'xboxllr.enhancement.startup'
+
+
+def manifests(data):
+    """Presentation-only mods do not require the native visual mod registry."""
+    if not data.get('startup', {}).get('executable'):
+        return []
+    return [Path(__file__).resolve().parents[1] / 'mods/preloaded/packages' /
+            MOD_PACKAGE / '1.0.0/manifest.toml']
+
+
+def skip_animation(catalog):
+    return any(feature['package'] == MOD_PACKAGE and feature['id'] == 'skip-animation'
+               and feature['enabled'] is True for feature in getattr(catalog, 'features', ()))
 
 
 class _Events:
@@ -296,10 +310,15 @@ def run(root, data, catalog, environment, log, *, automated=False, handoff=None,
     started = time.monotonic()
     report = dict(schema='xboxllr.startup-handoff.v1', implementation='native-reconstruction')
     try:
-        choice = ({k: catalog.boot[k] for k in ('enabled', 'kernel')}
-                  if getattr(catalog, 'boot', None) is not None else read_choice(root, data))
-        available = prepare(root, data, choice,
-            fallback_kernel=(getattr(catalog, 'setup', None) or {}).get('kernel', ''))
+        if skip_animation(catalog):
+            # A launch-time presentation override, not a change to the owner's
+            # startup/asset settings. Skip before any kernel or pack access.
+            available = dict(status='skipped-by-mod', message='Startup animation skipped by mod.', pack=None)
+        else:
+            choice = ({k: catalog.boot[k] for k in ('enabled', 'kernel')}
+                      if getattr(catalog, 'boot', None) is not None else read_choice(root, data))
+            available = prepare(root, data, choice,
+                fallback_kernel=(getattr(catalog, 'setup', None) or {}).get('kernel', ''))
         report.update(status=available['status'], message=available['message'])
         if available['status'] == 'ready':
             helper = safe_path(root, data['startup']['executable'])

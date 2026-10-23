@@ -152,6 +152,11 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     shutil.copy2(ROOT / 'src/third_party/xbox-boot-re/LICENSE', notices / 'xbox-boot-re/LICENSE')
     mods = {}
     available = bool(options.get('PILOT_TITLE_MOD_SOURCE'))
+    # Startup is a launcher presentation mod, available without a visual registry.
+    from native_boot_launcher import MOD_PACKAGE
+    relative = Path('mods/preloaded/packages') / MOD_PACKAGE / '1.0.0/manifest.toml'
+    (output / relative).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / relative, output / relative)
     if available:
         for package in ('xboxlle.enhancement.visuals', 'xboxlle.enhancement.frame-rate', 'xboxlle.enhancement.camera'):
             relative = Path('mods/preloaded/packages') / package / '1.0.0/manifest.toml'
@@ -211,6 +216,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         'Source and build information accompany the download on its release page.\n', encoding='utf-8')
     with (output / 'README-FIRST.txt').open('a', encoding='utf-8') as readme:
         readme.write('\nStartup intro: optional under Settings. Default for this title: ' + ('on' if intro_default else 'off') + '.\n'
+            'Mods > Xbox Startup > Skip startup animation goes straight to the title.\n'
+            'The skip mod is off by default, so Dashboard plays the full sequence.\n'
             'It uses startup data from your compatible complete kernel dump, prepared privately.\n'
             'A short save-signing dump is not enough. Missing/unsupported startup data launches\n'
             'the title directly. No boot assets are included, and console identity/saves stay unchanged.\n'

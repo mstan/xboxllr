@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import native_boot_launcher as boot
+from native_mod_launcher import Catalog, atomic_json
 
 
 class StartupTests(unittest.TestCase):
@@ -59,6 +60,48 @@ class StartupTests(unittest.TestCase):
             result = boot.run(self.root, self.data, self.catalog, {}, self.log)
         self.assertEqual(result['status'], 'disabled')
         process.assert_not_called()
+
+    def test_skip_mod_persists_and_restores_full_startup_without_rewriting_settings(self):
+        state = self.root / 'data/mod-selection.json'
+        boot.write_choice(self.root, dict(enabled=True, kernel='owned-kernel.img'))
+        choice = (self.root / 'data/boot-choice.txt').read_bytes()
+        catalog = Catalog(boot.manifests(self.data), state)
+        self.assertFalse(boot.skip_animation(catalog))
+        catalog.features[0]['enabled'] = True
+        atomic_json(state, catalog.selection())
+        saved = Catalog(boot.manifests(self.data), state)
+        self.assertTrue(boot.skip_animation(saved))
+        with patch.object(boot, 'prepare') as prepare, patch.object(boot, 'read_choice') as read, \
+                patch.object(boot.subprocess, 'Popen') as process, patch.object(boot, '_Events') as events:
+            result = boot.run(self.root, self.data, saved, {}, self.log)
+        self.assertEqual(result['status'], 'skipped-by-mod')
+        prepare.assert_not_called()
+        read.assert_not_called()
+        process.assert_not_called()
+        events.assert_not_called()
+        self.assertEqual((self.root / 'data/boot-choice.txt').read_bytes(), choice)
+        saved.features[0]['enabled'] = False
+        atomic_json(state, saved.selection())
+        restored = Catalog(boot.manifests(self.data), state)
+        child = Mock(returncode=0)
+        child.communicate.return_value = (b'{"schema":"xboxllr.native-boot-run.v1",'
+            b'"implementation":"native-reconstruction","status":"completed"}', None)
+        with self.ready() as prepare, patch.object(boot.subprocess, 'Popen', return_value=child) as process:
+            result = boot.run(self.root, self.data, restored, {}, self.log, automated=True)
+        self.assertEqual(result['status'], 'completed')
+        self.assertTrue(prepare.call_args.args[2]['enabled'])
+        process.assert_called_once()
+        self.assertEqual((self.root / 'data/boot-choice.txt').read_bytes(), choice)
+        self.assertFalse((self.root / 'data/console').exists())
+
+    def test_games_keep_startup_off_and_legacy_packages_have_no_unusable_skip_mod(self):
+        data = dict(startup=dict(default_enabled=False, executable='native/XboxStartup.exe'))
+        catalog = Catalog(boot.manifests(data), self.root / 'selection.json')
+        self.assertFalse(boot.skip_animation(catalog))
+        with patch.object(boot.subprocess, 'Popen') as process:
+            self.assertEqual(boot.run(self.root, data, catalog, {}, self.log)['status'], 'disabled')
+        process.assert_not_called()
+        self.assertEqual(boot.manifests({}), [])
 
     def test_complete_and_skip_are_distinct_and_automated_run_has_no_input_window(self):
         for status in ('completed', 'skipped'):

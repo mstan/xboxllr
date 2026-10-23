@@ -195,6 +195,14 @@ original logo fingerprint are also rejected when renamed. The Dashboard title de
 `launcher.startup_intro = true`; other titles default off without game-name
 checks in the shared runtime. Saved settings override the initial default.
 
+`Mods > Xbox Startup > Skip startup animation` is a checkbox-only, presentation
+mod. It defaults off: Dashboard plays the complete sequence, and games retain
+their startup-off default. Enabling the mod goes directly to the title, before
+reading startup settings, firmware or cached assets. Disabling it restores the
+existing startup preference and selected firmware. It does not change that
+preference, console identity or saves. The package and launcher expose this mod
+even when a title has no visual enhancement registry.
+
 The core is C11 and independent of Win32, graphics and audio devices. The
 first live presentation host is Windows D3D11 only and is excluded entirely
 on other platforms. MSVC's strict scalar C math adapts the donor's three

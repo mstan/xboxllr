@@ -16,6 +16,7 @@ PID = 'xboxlle.enhancement.visuals'
 class LauncherPolicy(unittest.TestCase):
     @unittest.skipUnless(os.environ.get('XLLE_TEST_LAUNCHER'), 'Native launcher is an optional separate target')
     def test_compiled_startup_settings_roundtrip_without_changing_locked_console(self):
+        import native_boot_launcher as boot_mod
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             setup = dict(required=False, kernel='signing-only.bin', acknowledged=True,
@@ -23,12 +24,17 @@ class LauncherPolicy(unittest.TestCase):
                          choice_path=str(root / 'console-choice.txt'))
             boot = dict(enabled=True, kernel='G:/Owned firmware/complete.img', status='Ready',
                         choice_path=str(root / 'boot-choice.txt'))
-            c = ui.Catalog([], root / 'selection.json', setup=setup, boot=boot)
+            manifests = boot_mod.manifests(dict(startup=dict(executable='native/XboxStartup.exe')))
+            c = ui.Catalog(manifests, root / 'selection.json', setup=setup, boot=boot)
+            c.features[0]['enabled'] = True
             result, image = c.run(Path(os.environ['XLLE_TEST_LAUNCHER']), root / 'run',
                 title='Startup fixture', region='Test', sha='a' * 64, image='owned.xbe', validate=True)
             self.assertEqual(result, 0)
             self.assertEqual(c.boot, boot)
             self.assertEqual(c.setup, setup)
+            self.assertTrue(boot_mod.skip_animation(c))
+            reloaded = ui.Catalog(manifests, root / 'selection.json', setup=setup, boot=boot)
+            self.assertTrue(boot_mod.skip_animation(reloaded))
             target = root / 'run/launcher.result'
             before = dict(c.boot)
             target.write_text(target.read_text().replace('boot 1 ', 'boot 7 '))

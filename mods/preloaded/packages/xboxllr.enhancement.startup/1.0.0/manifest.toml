@@ -1,0 +1,16 @@
+format_version = 1
+id = "xboxllr.enhancement.startup"
+version = "1.0.0"
+name = "Xbox Startup"
+description = "Control the original Xbox startup animation before the title opens."
+save_compatibility = "shared"
+
+[[target]]
+system = "xbox"
+native_title_mod_abi = 2
+
+[[feature]]
+id = "skip-animation"
+name = "Skip startup animation"
+description = "Go straight to the title. Turn this off for the full animation when startup is enabled in Settings. Dashboard enables startup by default; games leave it off."
+default_enabled = false

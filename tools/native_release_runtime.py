@@ -426,8 +426,10 @@ def interactive(root, data, writable, minimized):
             verify_profile(root, data)
         choice_path = writable / 'console-choice.txt'
         choice = read_console_choice(choice_path)
-        from native_boot_launcher import ui_state as startup_ui
-        catalog = Catalog(manifests(root / 'release.json', data) if data['capabilities']['visual_mods'] else [],
+        from native_boot_launcher import ui_state as startup_ui, manifests as startup_manifests
+        catalogs = (manifests(root / 'release.json', data) if data['capabilities']['visual_mods'] else [])
+        catalogs += startup_manifests(data)
+        catalog = Catalog(catalogs,
             writable / 'mod-selection.json', visibility=[root / 'mods/ui-visibility.json'],
             frame_modes=data.get('launcher', {}).get('frame_modes', []),
             defaults=data.get('launcher', {}).get('defaults', {}),
