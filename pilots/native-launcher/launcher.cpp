@@ -3,8 +3,10 @@
  * Hex UTF-8 fields keep the handoff bounded and independent of shell quoting. */
 #include "recomp_launcher.h"
 #include "launcher_profile.h"
+#include "common/launcher_model.h"
 #include "visual_mods.h"
 #include "console_setup.h"
+#include "xbe_identity.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cctype>
@@ -15,6 +17,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <memory>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -29,6 +32,8 @@ struct Catalog {
     RecompLauncherCSettings settings={};
     bool setup=false,needs_setup=false;
     bool console=false;
+    bool has_game_id=false;
+    uint32_t game_id=0;
     std::string choice_path;
     bool boot=false;
     std::string boot_choice_path;
@@ -77,6 +82,10 @@ static Catalog read_catalog(const char *path) {
             if(t[1].size()!=64||t[1].find_first_not_of("0123456789abcdef")!=std::string::npos||c.identities.size()>=32||
                std::find(c.identities.begin(),c.identities.end(),t[1])!=c.identities.end())throw std::runtime_error("Invalid XBE identity");
             c.identities.push_back(t[1]);
+        } else if(t[0]=="game-id"&&t.size()==2&&!c.has_game_id) {
+            if(t[1].size()!=8||t[1].find_first_not_of("0123456789abcdef")!=std::string::npos)
+                throw std::runtime_error("Invalid launcher title ID");
+            c.game_id=(uint32_t)std::stoul(t[1],nullptr,16);c.has_game_id=true;
         } else if(t[0]=="volume"&&t.size()==2) {
             if(t[1].empty()||t[1].find_first_not_of("0123456789")!=std::string::npos||t[1].size()>3)throw std::runtime_error("Invalid audio volume");
             c.settings.volume=std::stoi(t[1]);if(c.settings.volume>100)throw std::runtime_error("Invalid audio volume");
@@ -250,13 +259,18 @@ static void save(const Catalog &c,const char *path,int result,const char *image)
 }
 int main(int argc,char **argv) {
     try {
-        if(argc!=4&&argc!=5)throw std::runtime_error("Usage: xlle_launcher catalog result owned.xbe [--validate]");
+        if(argc!=4&&argc!=5)throw std::runtime_error("Usage: xlle_launcher catalog result owned.xbe [--validate|--validate-xbe]");
         Catalog c=read_catalog(argv[1]);
+        xboxllr_expected_title_id=c.game_id;xboxllr_has_expected_title_id=c.has_game_id;
         if(c.console){c.console_ui.persist=persist_console;c.console_ui.persist_boot=persist_boot;c.console_ui.context=&c;xboxllr_console_setup=&c.console_ui;}
-        if(argc==5){if(std::string(argv[4])!="--validate"||!commit(&c,argv[3]))throw std::runtime_error(c.error);save(c,argv[2],0,argv[3]);return 0;}
+        if(argc==5&&std::string(argv[4])=="--validate") {
+            if(!commit(&c,argv[3]))throw std::runtime_error(c.error);
+            save(c,argv[2],0,argv[3]);return 0;
+        }
+        if(argc==5&&std::string(argv[4])!="--validate-xbe")throw std::runtime_error("Unknown launcher check");
         /* Only first use chooses a default. Saved/disconnected pads retain
          * their GUID and the shared UI's normal hot-plug/offline behavior. */
-        if(c.player_source=="auto") {
+        if(c.player_source=="auto"&&argc!=5) {
             c.settings.player_src[0]=1;
             if(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER)==0) {
                 for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i)) {
@@ -288,6 +302,13 @@ int main(int argc,char **argv) {
         for(size_t n=0;n<c.identities.size();++n)for(unsigned i=0;i<32;++i)
             sha[n][i]=(uint8_t)std::stoul(c.identities[n].substr(i*2,2),nullptr,16);
         game.known_sha256=sha;game.num_known_sha256=(int)c.identities.size();
+        if(argc==5) {
+            // Exercise the real launcher fingerprint gate without a window or game.
+            auto model=std::make_unique<LauncherModel>();
+            launcher_model_init(model.get(),&c.settings,&game,argv[3]);
+            if(!launcher_model_rom_verified(model.get()))throw std::runtime_error(xboxllr_xbe_rejection());
+            save(c,argv[2],0,argv[3]);return 0;
+        }
         char image[4096]={};int result=recomp_launcher_run_window(c.title.c_str(),&c.settings,&game,"assets",argv[3],image,sizeof(image));
         save(c,argv[2],result,image);return result==RECOMP_LAUNCHER_RESULT_UNAVAILABLE?2:0;
     } catch(const std::exception &e){std::fprintf(stderr,"[XBOX LAUNCHER] %s\n",e.what());return 2;}

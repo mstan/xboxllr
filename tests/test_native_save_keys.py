@@ -79,7 +79,7 @@ class NativeSigningTests(unittest.TestCase):
         for size in [0x1c0, 0x210]:
             image = bytearray(self.xbe)
             struct.pack_into('<I', image, 0x200, size)
-            with self.subTest(size=size), self.assertRaisesRegex(ValueError, 'Signing certificate'):
+            with self.subTest(size=size), self.assertRaisesRegex(ValueError, '(Signing|XBE) certificate'):
                 s.prepare(bytes(image), self.kernel, self.eeprom, self.output)
         self.assertFalse(self.output.exists())
 

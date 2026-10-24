@@ -13,9 +13,23 @@ import native_save_keys
 from native_mod_launcher import Catalog, encoded
 from create_eeprom import generate_eeprom
 from test_native_save_keys import authored_xbe
+from test_xbe_identity import fixture as identity_fixture
 
 
 class FirstRunTests(unittest.TestCase):
+    def test_certificate_diagnostics_never_admit_an_unknown_hash_or_create_saves(self):
+        data = dict(title=dict(name='Halo', game_id='4D530004', xbe_sha256='a' * 64))
+        self.image.write_bytes(identity_fixture('Another title', 0x5345000a))
+        with self.assertRaisesRegex(ValueError, r'Wrong game: selected Another title.*SE-010.*Expected Halo.*MS-004'):
+            runtime.prepare_profile(self.root, data, self.image)
+        self.image.write_bytes(identity_fixture('Halo'))
+        with self.assertRaisesRegex(ValueError, r'not a supported original revision.*Halo.*MS-004'):
+            runtime.prepare_profile(self.root, data, self.image)
+        self.image.write_bytes(b'XBEH')
+        with self.assertRaisesRegex(ValueError, 'Cannot read its title identity'):
+            runtime.prepare_profile(self.root, data, self.image)
+        self.assertFalse((self.root / 'data').exists())
+
     def test_title_switch_selection_reaches_native_process(self):
         runtime.writable_environment(self.root)
         profile = runtime.prepare_profile(self.root, self.data, self.image)

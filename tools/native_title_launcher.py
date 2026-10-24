@@ -79,7 +79,8 @@ def select(source, data, paths, build, run, *, force=False):
     result, image = 0, str(paths['xbe'])
     if force or not catalog.skip_launcher:
         result, image = catalog.run(binary(build), run, title=data['title']['name'],
-                                    region=data['title'].get('region', ''), sha=data['title']['xbe_sha256'], image=paths['xbe'])
+                                    region=data['title'].get('region', ''), sha=data['title']['xbe_sha256'], image=paths['xbe'],
+                                    game_id=data['title'].get('game_id'))
     if result != 0:
         return None
     player = catalog.player

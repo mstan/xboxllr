@@ -14,6 +14,9 @@ import json
 from pathlib import Path
 import struct
 
+from xbe_identity import parse_identity
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -69,7 +72,7 @@ def parse_xbe(data):
     # Public title and launch constraints only, never LAN/signature keys.
     if cert < base or cert - base + 0xa4 > headers:
         raise ValueError("certificate identity outside headers")
-    title_id = words(data, cert - base + 8)[0]
+    identity = parse_identity(data)
     allowed_media, region = words(data, cert - base + 0x9c, 2)
     libraries = []
     lib_count, lib_table = words(data, 0x160, 2)
@@ -81,7 +84,7 @@ def parse_xbe(data):
         libraries.append(dict(name=record[:8].split(b"\0", 1)[0].decode("ascii", errors="replace"),
                               major=major, minor=minor, build=build))
     return dict(format="xbe", sha256=sha(data), base=base, image_size=image_size,
-                title_id=title_id, allowed_media=allowed_media, region=region,
+                **identity, allowed_media=allowed_media, region=region,
                 entry=entries[0][1], encoding=entries[0][0],
                 sections=sections, libraries=libraries)
 

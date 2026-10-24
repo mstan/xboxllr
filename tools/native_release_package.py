@@ -17,7 +17,7 @@ from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('native_release_runtime', 'native_revisions', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
-           'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage')
+           'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage', 'xbe_identity')
 # Narrow native VP build closure. No machine/CPU executable, original input,
 # generated title body or private fixture is part of the startup source kit.
 BOOT_SHARED_SOURCES = (

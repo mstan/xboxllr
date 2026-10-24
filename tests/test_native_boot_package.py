@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -104,6 +105,10 @@ class StartupPackageTests(unittest.TestCase):
                 self.assertEqual(record['startup']['default_enabled'], enabled)
                 self.assertEqual(record['capabilities']['visual_mods'], title_switch)
                 self.assertTrue((output/'tools/native_title_switches.py').is_file())
+                self.assertTrue((output/'tools/xbe_identity.py').is_file())
+                subprocess.run([sys.executable, '-I', '-B', '-c',
+                    'import sys; sys.path.insert(0, sys.argv[1]); import native_release_runtime',
+                    str(output/'tools')], check=True)
                 if title_switch:
                     choices=Catalog(title_manifests(output/'release.json',record),output/'selection.json',
                                     defaults=record['launcher']['defaults'])

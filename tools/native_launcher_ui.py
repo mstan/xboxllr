@@ -38,7 +38,7 @@ def prepare(source, output, git='git'):
                 path.mkdir(parents=True, exist_ok=True)
             else:
                 if item.filename in ('src/consoles/xbox/xbox_profile.h', 'src/common/backends/imgui/launcher_imgui.cpp',
-                                     'src/common/launcher_platform_sdl2.c'):
+                                     'src/common/launcher_platform_sdl2.c', 'src/common/launcher_model.c'):
                     continue
                 path.parent.mkdir(parents=True, exist_ok=True)
                 data = files.read(item)
@@ -70,7 +70,8 @@ def prepare(source, output, git='git'):
     with zipfile.ZipFile(io.BytesIO(archive)) as files:
         code = files.read('src/common/backends/imgui/launcher_imgui.cpp').decode('utf-8')
     adapter = Path(__file__).resolve().parents[1] / 'pilots/native-launcher'
-    for source, name in [('console_setup.h','xboxllr_console_setup.h'), ('console_setup_ui.inc','xboxllr_console_setup_ui.inc')]:
+    for source, name in [('console_setup.h','xboxllr_console_setup.h'), ('console_setup_ui.inc','xboxllr_console_setup_ui.inc'),
+                         ('xbe_identity.h', 'xboxllr_xbe_identity.h')]:
         data = (adapter / source).read_bytes()
         target = output / 'src/common' / name
         if not target.exists() or target.read_bytes() != data:
@@ -78,7 +79,24 @@ def prepare(source, output, git='git'):
     boundary = 'int avail_system(const LauncherModel* m) { return launcher_model_bios_applies(m); }'
     if code.count(boundary) != 1:
         raise ValueError('Unreviewed native console-settings boundary')
-    code = code.replace('#include "launcher_debug.h"', '#include "launcher_debug.h"\n#include "xboxllr_console_setup.h"')
+    code = code.replace('#include "launcher_debug.h"', '#include "launcher_debug.h"\n#include "xboxllr_console_setup.h"\n#include "xboxllr_xbe_identity.h"')
+    replacements = {
+        '        float reserve = px(198.0f);':
+            '        float reserve = px(198.0f);\n        if (xboxllr_xbe_identity.valid) reserve += px(56.0f);',
+        '        else                   snprintf(line, sizeof(line), "%s not recognized", noun);':
+            '        else                   snprintf(line, sizeof(line), "%s", xboxllr_xbe_rejection());',
+        '        kv_row("File",   m->rom_file, th, false, false);':
+            '''        if (xboxllr_xbe_identity.valid) {
+            if (xboxllr_xbe_identity.title_name[0])
+                kv_row("Title", xboxllr_xbe_identity.title_name, th, false, false);
+            kv_row("Title ID", xboxllr_xbe_identity.title_label, th, false, false);
+        }
+        kv_row("File",   m->rom_file, th, false, false);''',
+    }
+    for old, new in replacements.items():
+        if code.count(old) != 1:
+            raise ValueError('Unreviewed XBE identity UI boundary: ' + old)
+        code = code.replace(old, new)
     code = code.replace(boundary, '#include "xboxllr_console_setup_ui.inc"\n'
         'int avail_system(const LauncherModel* m) { return xboxllr_console_setup || launcher_model_bios_applies(m); }')
     boundary = 'void draw_system_controls(LauncherModel* m, const LauncherTheme& th) {'
@@ -164,6 +182,21 @@ def prepare(source, output, git='git'):
     data = code.encode('utf-8')
     if not view.exists() or view.read_bytes() != data:
         view.write_bytes(data)
+    model = output / 'src/common/launcher_model.c'
+    with zipfile.ZipFile(io.BytesIO(archive)) as files:
+        code = files.read('src/common/launcher_model.c').decode('utf-8')
+    old = '    m->rom_sha1_hex[0] = \'\\0\';'
+    if code.count(old) != 1:
+        raise ValueError('Unreviewed XBE selection boundary')
+    code = code.replace('#include "launcher_model.h"', '#include "launcher_model.h"\n#include "xboxllr_xbe_identity.h"')
+    code = code.replace(old, '    xboxllr_xbe_select(m->rom_full);\n' + old)
+    old = 'size_t hdr = ((size_t)n % 1024 == 512) ? 512 : 0;'
+    if code.count(old) != 1:
+        raise ValueError('Unreviewed XBE whole-file fingerprint boundary')
+    code = code.replace(old, 'size_t hdr = 0; /* XBE hashes include every header byte. */')
+    data = code.encode('utf-8')
+    if not model.exists() or model.read_bytes() != data:
+        model.write_bytes(data)
     platform = output / 'src/common/launcher_platform_sdl2.c'
     with zipfile.ZipFile(io.BytesIO(archive)) as files:
         code = files.read('src/common/launcher_platform_sdl2.c').decode('utf-8')
@@ -190,7 +223,7 @@ def prepare(source, output, git='git'):
         raise ValueError('Changed controller photograph')
     inventory = {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'xboxlle-ui.json'}
-    manifest = dict(version=1, adapter_version=9, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
+    manifest = dict(version=1, adapter_version=10, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
                     adapter='Xbox native host: mod provider, console storage and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
     (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
@@ -200,7 +233,7 @@ def prepare(source, output, git='git'):
 def verify(output):
     output = Path(output).resolve()
     manifest = json.loads((output / 'xboxlle-ui.json').read_text(encoding='utf-8'))
-    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 9:
+    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 10:
         raise ValueError('Unreviewed prepared UI profile')
     if manifest.get('controller_photo') != dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256):
         raise ValueError('Unreviewed controller photograph provenance')

@@ -2,10 +2,13 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
 spec = importlib.util.spec_from_file_location('native_mod_launcher', ROOT / 'tools/native_mod_launcher.py')
 ui = importlib.util.module_from_spec(spec);spec.loader.exec_module(ui)
 MANIFESTS = [ROOT / 'mods/preloaded/packages' / p / '1.0.0/manifest.toml'
@@ -14,6 +17,40 @@ PID = 'xboxlle.enhancement.visuals'
 
 
 class LauncherPolicy(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get('XLLE_TEST_LAUNCHER'), 'Native launcher is an optional separate target')
+    def test_compiled_xbe_gate_hashes_the_whole_file_and_rejects_spoofed_identity(self):
+        import hashlib
+        from test_xbe_identity import fixture
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            image, catalog, result = root/'owned.xbe', root/'catalog', root/'result'
+            original = fixture()
+            alternate = fixture('Halo retail revision')
+            self.assertEqual(len(original) % 1024, 512)  # Never strip this as a SNES copier header.
+            ui.Catalog([], root/'state').write(catalog, 'Halo', '',
+                [hashlib.sha256(blob).hexdigest() for blob in (original, alternate)], game_id='4D530004')
+            command = [os.environ['XLLE_TEST_LAUNCHER'], str(catalog), str(result), str(image), '--validate-xbe']
+            for blob in (original, alternate):
+                image.write_bytes(blob)
+                subprocess.run(command, check=True, capture_output=True)
+                self.assertIn('result 0', result.read_text())
+            for blob, reason in ((fixture('Halo patched'), 'Unsupported XBE revision'),
+                                 (fixture('Halo', 0x5345000a), 'Wrong game selected'), (b'XBEH', 'Not an XBE image')):
+                image.write_bytes(blob)
+                checked = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(checked.returncode, 2)
+                self.assertIn(reason, checked.stderr)
+
+    def test_title_id_handoff_is_optional_and_validated(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'catalog.txt'
+            catalog = ui.Catalog([], Path(folder) / 'state.json')
+            catalog.write(path, 'Halo', '', 'a' * 64, game_id='4D530004')
+            self.assertIn('game-id 4d530004\n', path.read_text())
+            for value in ('wrong', '4d530004\nend', 0x4d530004):
+                with self.assertRaisesRegex(ValueError, 'title ID'):
+                    catalog.write(path, 'Halo', '', 'a' * 64, game_id=value)
+
     @unittest.skipUnless(os.environ.get('XLLE_TEST_LAUNCHER'), 'Native launcher is an optional separate target')
     def test_compiled_startup_settings_roundtrip_without_changing_locked_console(self):
         import native_boot_launcher as boot_mod
@@ -111,7 +148,8 @@ class LauncherPolicy(unittest.TestCase):
             for f in c.features:
                 f['enabled'] = True
             result, image = c.run(Path(os.environ['XLLE_TEST_LAUNCHER']), Path(d) / 'run',
-                                  title='Policy fixture', region='Test', sha='a' * 64, image='owned.xbe', validate=True)
+                                  title='Policy fixture', region='Test', sha='a' * 64, image='owned.xbe', validate=True,
+                                  game_id='4D530004')
             self.assertEqual(result, 0)
             self.assertEqual(image, 'owned.xbe')
             self.assertEqual(len(c.values()), 4)

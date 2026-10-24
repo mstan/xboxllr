@@ -70,7 +70,7 @@ def checked_image(data, image):
     image = Path(image).resolve(strict=True)
     if not image.is_file() or image.stat().st_size > 256 * 1024 * 1024:
         raise ValueError('Choose the supported extracted Xbox executable')
-    select_revision(data.get('_catalog', data), sha(image))
+    select_revision(data.get('_catalog', data), sha(image), image=image)
     return image
 
 
@@ -458,7 +458,7 @@ def interactive(root, data, writable, minimized):
         run = writable / 'launcher' / uuid.uuid4().hex
         result, image = catalog.run(inside(root, data['launcher_executable']), run,
             title=data['title']['name'], region=data['title'].get('region', ''),
-            sha=revision_hashes(catalog_data), image=config.get('image', ''))
+            sha=revision_hashes(catalog_data), image=config.get('image', ''), game_id=data['title'].get('game_id'))
         config = dict(image=image)
         atomic_json(config_path, config)
         if catalog.boot is not None and result in (0, 1):

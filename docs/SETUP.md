@@ -31,6 +31,12 @@ storage; the choice is saved immediately and the popup does not reappear.
 Select the supported extracted `.xbe` on the **main screen**, keeping it
 inside its complete asset tree. This preview does not accept an ISO directly.
 
+The launcher reads the selected XBE's certificate to show its title name and
+title ID and distinguish a wrong game from an unsupported revision. The name
+is display text; exact XBE SHA-256 matching still selects a supported native
+program. A matching title ID alone does not admit another revision or a patched
+executable. Invalid certificate addresses or lengths report an identity error.
+
 **Settings** contains optional kernel/EEPROM import and shared save-storage
 selection. A new virtual console requires none of these files. Local saves use
 real signing/verification under a generated persistent identity; they are not

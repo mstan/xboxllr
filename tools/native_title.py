@@ -145,7 +145,9 @@ def private_paths(path):
 
 def check_image(title, paths):
     if "xbe" not in paths or digest(paths["xbe"]) != title["xbe_sha256"]:
-        raise ValueError("supplied XBE differs from the selected title")
+        from xbe_identity import unsupported_image_message
+        detail = unsupported_image_message(paths['xbe'], title) if 'xbe' in paths else 'No XBE was supplied.'
+        raise ValueError("supplied XBE differs from the selected title. " + detail)
 
 
 def check_generated(output, title):

@@ -128,12 +128,16 @@ class Catalog:
             if any(f['package'] == pid for f in self.features):
                 self.packages.append(dict(id=pid, name=manifest['name'], version=manifest['version'], description=manifest['description']))
 
-    def write(self, path, title, region, sha):
+    def write(self, path, title, region, sha, *, game_id=None):
         identities = [sha] if isinstance(sha, str) else list(sha)
         if not identities or len(identities) > 32 or len(set(identities)) != len(identities):
             raise ValueError('Invalid launcher revision identities')
         lines = ['xlle-launcher 1', f'title {encoded(title)} {encoded(region)}',
                  *[f'identity {identity}' for identity in identities], f'volume {self.volume}', f'skip {int(self.skip_launcher)}']
+        if game_id is not None:
+            if not isinstance(game_id, str) or not re.fullmatch(r'[0-9A-Fa-f]{8}', game_id):
+                raise ValueError('Invalid launcher title ID')
+            lines.append('game-id ' + game_id.lower())
         lines.append(f'player {self.player["source"]} {encoded(self.player["guid"])}')
         if self.setup is not None:
             lines.append(f'setup {int(self.setup["required"])} {encoded(self.setup["kernel"])}')
@@ -250,10 +254,10 @@ class Catalog:
     def values(self):
         return {(f['package'], f['id'], o['id']): o['value'] for f in self.features if f['enabled'] for o in f['options']}
 
-    def run(self, binary, output, *, title, region, sha, image, validate=False, env=None):
+    def run(self, binary, output, *, title, region, sha, image, validate=False, env=None, game_id=None):
         output = Path(output);output.mkdir(parents=True, exist_ok=True)
         source, target = output / 'launcher.catalog', output / 'launcher.result'
-        self.write(source, title, region, sha)
+        self.write(source, title, region, sha, game_id=game_id)
         command = [str(binary), str(source.resolve()), str(target.resolve()), str(image)]
         if validate:
             command.append('--validate')

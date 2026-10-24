@@ -2,6 +2,8 @@
 from copy import deepcopy
 import re
 
+from xbe_identity import unsupported_image_message
+
 
 def entries(data):
     data = data.get('_catalog', data)
@@ -29,7 +31,7 @@ def hashes(data):
     return [entry['title']['xbe_sha256'] for entry in entries(data)]
 
 
-def select(data, digest):
+def select(data, digest, *, image=None):
     data = data.get('_catalog', data)
     for entry in entries(data):
         if entry['title']['xbe_sha256'] == digest:
@@ -41,7 +43,8 @@ def select(data, digest):
             # Preserve the original catalog when selecting again after a UI switch.
             selected['_catalog'] = data.get('_catalog', data)
             return selected
-    raise ValueError('This Xbox executable is not a supported original revision')
+    raise ValueError(unsupported_image_message(image, data['title']) if image is not None else
+                     'This Xbox executable is not a supported original revision')
 
 
 def profile_relative(data):

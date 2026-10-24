@@ -18,11 +18,12 @@ def xbe(code, entry=0x11000):
     put(0x104, 0x10000, 0x400, 0x2000, 0x178)
     put(0x118, 0x10200, 1, 0x10300)
     put(0x128, entry ^ 0xA8FC57AB)
+    put(0x200, 0xa4)
     put(0x208, 0x12345678)
     put(0x29c, 2, 1)  # Authored DVD-X2-only, region 1 launch constraints.
     put(0x300, 6, 0x11000, 0x1000, 0x400, len(code), 0x10380)
     data[0x380:0x386] = b".text\0"
-    data[0x240:0x260] = b"PRIVATE_CERTIFICATE_SENTINEL".ljust(32, b"!")
+    data[0x260:0x280] = b"PRIVATE_CERTIFICATE_SENTINEL".ljust(32, b"!")
     data[0x400:] = code
     return data
 
@@ -33,6 +34,7 @@ class InventoryTests(unittest.TestCase):
         image = inventory.parse_xbe(data)
         self.assertEqual(image["entry"], 0x11000)
         self.assertEqual(image["title_id"], 0x12345678)
+        self.assertEqual(image["title_name"], '')
         self.assertEqual(image["allowed_media"], 2)
         self.assertEqual(image["region"], 1)
         self.assertEqual(image["sections"][0]["raw_sha256"], inventory.sha(b"\x90\xc3"))
