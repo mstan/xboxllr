@@ -126,10 +126,16 @@ Check the extracted **XBE**, not the ISO's hash:
 | --- | --- |
 | Blinx: The Time Sweeper, NTSC-U | `e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249` |
 | Jet Set Radio Future, NTSC-U | `f4441696fdd007c31a712815cdde967836fbc3ab97fcb2f58e1db56974644219` |
+| Jet Set Radio Future, USA standalone revision 1 (updated package) | `fd19055756719893c466302809b433b785ecf5732df0441286f3f605f0f3ef9c` |
 
 These identities come from the game projects' revision metadata. Other regions,
 releases or modified executables need their own admission; the game title on
 the disc label alone is insufficient.
+
+The October 23 JSRF download accepts only the first identity. The updated
+two-revision package chooses the native program automatically and preserves
+separate default console/save profiles. Keep the entire package `data` directory
+when updating. See [native title revisions](NATIVE-TITLE-REVISIONS.md).
 
 ## 2. Set up or import a console profile
 

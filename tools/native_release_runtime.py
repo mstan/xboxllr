@@ -25,6 +25,7 @@ from native_save_keys import prepare as prepare_keys
 from native_save_keys import prepare_virtual
 from native_console_settings import prepare as prepare_settings
 from create_eeprom import generate_eeprom, read_eeprom_file, validate_eeprom
+from native_revisions import hashes as revision_hashes, select as select_revision, profile_relative
 
 
 def sha(path):
@@ -69,15 +70,15 @@ def checked_image(data, image):
     image = Path(image).resolve(strict=True)
     if not image.is_file() or image.stat().st_size > 256 * 1024 * 1024:
         raise ValueError('Choose the supported extracted Xbox executable')
-    if sha(image) != data['title']['xbe_sha256']:
-        raise ValueError('This Xbox executable is not the supported original revision')
+    select_revision(data.get('_catalog', data), sha(image))
     return image
 
 
 def prepare_profile(root, data, image, kernel=None, imported_eeprom=None, *, virtual_root=None):
     """Publish only a complete new profile. Existing saves/identity are untouched."""
     image = checked_image(data, image)
-    destination = inside(root, 'data/console')
+    data = select_revision(data.get('_catalog', data), sha(image))
+    destination = inside(root, profile_relative(data) + '/console')
     if destination.exists() or destination.is_symlink():
         raise ValueError('A console profile already exists; keep it and its saves')
     # Validate every supplied private input before creating output files.
@@ -246,7 +247,7 @@ def disk_identity(root, disk, kernel=None, eeprom=None, *, prepared=None):
 
 
 def verify_profile(root, data):
-    profile = inside(root, 'data/console')
+    profile = inside(root, profile_relative(data) + '/console')
     record = json.loads((profile / 'profile.json').read_text(encoding='utf-8'))
     if (record.get('schema') != 'xboxllr.console-preview.v1' or
             record.get('xbe_sha256') != data['title']['xbe_sha256'] or
@@ -324,7 +325,10 @@ def choose_eeprom():
 
 def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, storage=None, hdd=None):
     image = checked_image(data, image)
-    state = Path(storage) if storage is not None else root / 'data' / 'state'
+    data = select_revision(data.get('_catalog', data), sha(image))
+    if profile != verify_profile(root, data):
+        raise ValueError('Selected native revision does not match its console profile')
+    state = Path(storage) if storage is not None else inside(root, profile_relative(data) + '/state')
     state.mkdir(parents=True, exist_ok=True)
     # Developer probe/replay/state overrides must not leak into an owner run.
     env = {key: value for key, value in os.environ.items() if not key.startswith('XLLE_PILOT_')}
@@ -413,7 +417,7 @@ def main():
             parser.error('--prepare-only requires --image')
         with session_lock(writable):
             prepare_profile(root, data, args.image, args.kernel, args.eeprom)
-            verify_profile(root, data)
+            verify_profile(root, select_revision(data, sha(args.image)))
         return 0
     with session_lock(writable):
         return interactive(root, data, writable, args.start_minimized)
@@ -426,7 +430,14 @@ def interactive(root, data, writable, minimized):
     if minimized:
         os.environ['XLLE_LAUNCHER_START_MINIMIZED'] = '1'
     while True:
-        ready = (writable / 'console').exists()
+        catalog_data = data.get('_catalog', data)
+        data = catalog_data
+        if config.get('image'):
+            try:
+                data = select_revision(catalog_data, sha(Path(config['image'])))
+            except (ValueError, OSError):
+                pass  # Keep the launcher available to choose another supported XBE.
+        ready = inside(root, profile_relative(data) + '/console').exists()
         if ready:
             verify_profile(root, data)
         choice_path = writable / 'console-choice.txt'
@@ -447,7 +458,7 @@ def interactive(root, data, writable, minimized):
         run = writable / 'launcher' / uuid.uuid4().hex
         result, image = catalog.run(inside(root, data['launcher_executable']), run,
             title=data['title']['name'], region=data['title'].get('region', ''),
-            sha=data['title']['xbe_sha256'], image=config.get('image', ''))
+            sha=revision_hashes(catalog_data), image=config.get('image', ''))
         config = dict(image=image)
         atomic_json(config_path, config)
         if catalog.boot is not None and result in (0, 1):
@@ -461,8 +472,10 @@ def interactive(root, data, writable, minimized):
             return 0
         try:
             checked_image(data, image)
+            data = select_revision(catalog_data, sha(Path(image)))
+            ready = inside(root, profile_relative(data) + '/console').exists()
             choice = read_console_choice(choice_path)
-            binding = writable / 'console/storage.json'
+            binding = inside(root, profile_relative(data) + '/console/storage.json')
             selected = json.loads(binding.read_text()) if ready and binding.exists() else dict(path=choice['storage'],hdd=choice.get('hdd',''))
             storage, hdd_path = selected['path'], selected.get('hdd','')
             with ExitStack() as locks:
@@ -471,7 +484,7 @@ def interactive(root, data, writable, minimized):
                     # Image priority is explicit. Never use the folder after
                     # an image admission failure or a busy-image error.
                     hdd = disk_identity(root,hdd_path,choice['kernel'] or None,choice['eeprom'] or None,
-                        prepared=writable/'console' if ready else None)
+                        prepared=inside(root, profile_relative(data) + '/console') if ready else None)
                     locks.enter_context(session_lock(hdd['owner']))
                     storage = str(hdd['owner']/'state')
                 elif storage:

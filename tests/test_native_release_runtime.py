@@ -216,7 +216,7 @@ class FirstRunTests(unittest.TestCase):
                     capabilities=dict(visual_mods=False))
         catalog = Catalog([], self.root / 'selection.json')
         catalog.player = dict(source='keyboard', guid='')
-        profile = self.root / 'data/console'
+        profile = runtime.prepare_profile(self.root, data, self.image)
         (self.root / 'game.exe').write_bytes(b'authored launcher fixture')
         with patch.dict('os.environ', dict(XLLE_PILOT_INPUT_REPLAY='old-replay',
                 XLLE_PILOT_MOD_PLAN='old-plan', XLLE_PILOT_SAVE_KEYS_FILE='old-keys',

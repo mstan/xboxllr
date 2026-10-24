@@ -1,0 +1,69 @@
+"""Revision routing must never select a different binary or replace old saves."""
+from pathlib import Path
+import hashlib
+import json
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+import native_release_runtime as runtime
+from native_mod_launcher import Catalog
+from native_revisions import hashes, select
+from test_native_save_keys import authored_xbe
+
+
+class RevisionsTests(unittest.TestCase):
+    def test_exact_binary_and_persistent_profile_selection(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first = root/'first.xbe'
+            first.write_bytes(authored_xbe())
+            second = root/'second.xbe'
+            alternate = bytearray(authored_xbe())
+            alternate[0x114:0x118] = b'USA1'
+            second.write_bytes(alternate)
+            title = dict(game_id='5345000A', name='Jet Set Radio Future', xbe_sha256=runtime.sha(first))
+            data = dict(title=title, executable='first.exe', runtime={}, capabilities=dict(visual_mods=False),
+                revisions=[dict(id='usa-standalone', title=dict(title, xbe_sha256=runtime.sha(second)), executable='second.exe')])
+            profile1 = runtime.prepare_profile(root, data, first)
+            marker = root/'data/state/Partition1/progress.sav'
+            marker.parent.mkdir(parents=True)
+            marker.write_bytes(b'original owner progress')
+            before = {p.relative_to(root): p.read_bytes() for p in profile1.iterdir() if p.is_file()}
+            profile2 = runtime.prepare_profile(root, data, second)
+            selected = select(data, runtime.sha(second))
+            self.assertEqual(runtime.verify_profile(root, selected), profile2)
+            self.assertNotEqual(profile1, profile2)
+            self.assertEqual(runtime.verify_profile(root, data), profile1)
+            self.assertEqual(select(selected, runtime.sha(first))['executable'], 'first.exe')
+            catalog = Catalog([], root/'mods.json')
+            (root/'second.exe').write_bytes(b'authored process fixture')
+            child = unittest.mock.Mock(pid=1, returncode=0)
+            child.wait.return_value = 0
+            with patch('native_boot_launcher.run'), patch('platform.uname', return_value=unittest.mock.Mock(system='Windows', release='test', machine='x64')), patch.object(runtime.subprocess, 'Popen', return_value=child) as spawn:
+                self.assertEqual(runtime.launch_game(root, data, second, profile2, catalog), 0)
+            command = spawn.call_args.args[0]
+            self.assertEqual(Path(command[0]), root/'second.exe')
+            self.assertEqual(Path(command[-1]), root/'data/revisions/usa-standalone/state')
+            self.assertEqual(marker.read_bytes(), b'original owner progress')
+            self.assertEqual(before, {p.relative_to(root): p.read_bytes() for p in profile1.iterdir() if p.is_file()})
+            with self.assertRaisesRegex(ValueError, 'profile'):
+                runtime.launch_game(root, data, second, profile1, catalog)
+            with self.assertRaisesRegex(ValueError, 'not a supported'):
+                select(data, '0'*64)
+            catalog.write(root/'catalog.txt', title['name'], 'NTSC-U', hashes(data))
+            lines = (root/'catalog.txt').read_text().splitlines()
+            self.assertEqual([line for line in lines if line.startswith('identity ')],
+                ['identity '+runtime.sha(first), 'identity '+runtime.sha(second)])
+
+    def test_ambiguous_or_unsafe_revisions_are_rejected(self):
+        title = dict(game_id='5345000A', xbe_sha256='a'*64)
+        for key, digest, game in [('bad/path','b'*64,'5345000A'), ('usa','a'*64,'5345000A'), ('usa','b'*64,'wrong')]:
+            with self.subTest(key=key, digest=digest, game=game), self.assertRaisesRegex(ValueError, 'catalog'):
+                hashes(dict(title=title, revisions=[dict(id=key, title=dict(game_id=game,xbe_sha256=digest),executable='usa.exe')]))
+
+
+if __name__ == '__main__':
+    unittest.main()

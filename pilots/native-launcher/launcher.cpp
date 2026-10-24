@@ -24,7 +24,7 @@ struct Option {std::string id,label,value,initial;std::vector<Choice> choices;};
 struct Feature {std::string package,id,name,description;int enabled=0;std::vector<Option> options;};
 struct Package {std::string id,name,version,description;};
 struct Catalog {
-    std::string title,region,sha,error;std::vector<Package> packages;std::vector<Feature> features;
+    std::string title,region,error;std::vector<std::string> identities;std::vector<Package> packages;std::vector<Feature> features;
     std::string player_source="auto",player_guid;
     RecompLauncherCSettings settings={};
     bool setup=false,needs_setup=false;
@@ -74,7 +74,9 @@ static Catalog read_catalog(const char *path) {
         auto x=[&](size_t i){return unhex(t.at(i));};
         if(t[0]=="title"&&t.size()==3){c.title=x(1);c.region=x(2);}
         else if(t[0]=="identity"&&t.size()==2) {
-            c.sha=t[1];if(c.sha.size()!=64||c.sha.find_first_not_of("0123456789abcdef")!=std::string::npos)throw std::runtime_error("Invalid XBE identity");
+            if(t[1].size()!=64||t[1].find_first_not_of("0123456789abcdef")!=std::string::npos||c.identities.size()>=32||
+               std::find(c.identities.begin(),c.identities.end(),t[1])!=c.identities.end())throw std::runtime_error("Invalid XBE identity");
+            c.identities.push_back(t[1]);
         } else if(t[0]=="volume"&&t.size()==2) {
             if(t[1].empty()||t[1].find_first_not_of("0123456789")!=std::string::npos||t[1].size()>3)throw std::runtime_error("Invalid audio volume");
             c.settings.volume=std::stoi(t[1]);if(c.settings.volume>100)throw std::runtime_error("Invalid audio volume");
@@ -116,7 +118,7 @@ static Catalog read_catalog(const char *path) {
         } else if(t[0]=="end"&&t.size()==1)end=true;
         else throw std::runtime_error("Unknown launcher record");
     }
-    if(!end||c.title.empty()||c.sha.empty())throw std::runtime_error("Incomplete launcher catalog");
+    if(!end||c.title.empty()||c.identities.empty())throw std::runtime_error("Incomplete launcher catalog");
     for(auto &f:c.features)for(auto &o:f.options)if(o.choices.empty()||std::none_of(o.choices.begin(),o.choices.end(),[&](const Choice &v){return v.value==o.value;}))throw std::runtime_error("Unsupported persisted option");
     return c;
 }
@@ -282,8 +284,10 @@ int main(int argc,char **argv) {
         }
         if(std::ifstream("assets/img/boxart.png",std::ios::binary).good())
             game.boxart_path="assets/img/boxart.png";
-        uint8_t sha[1][32];for(unsigned i=0;i<32;++i)sha[0][i]=(uint8_t)std::stoul(c.sha.substr(i*2,2),nullptr,16);
-        game.known_sha256=sha;game.num_known_sha256=1;
+        uint8_t sha[32][32];
+        for(size_t n=0;n<c.identities.size();++n)for(unsigned i=0;i<32;++i)
+            sha[n][i]=(uint8_t)std::stoul(c.identities[n].substr(i*2,2),nullptr,16);
+        game.known_sha256=sha;game.num_known_sha256=(int)c.identities.size();
         char image[4096]={};int result=recomp_launcher_run_window(c.title.c_str(),&c.settings,&game,"assets",argv[3],image,sizeof(image));
         save(c,argv[2],result,image);return result==RECOMP_LAUNCHER_RESULT_UNAVAILABLE?2:0;
     } catch(const std::exception &e){std::fprintf(stderr,"[XBOX LAUNCHER] %s\n",e.what());return 2;}

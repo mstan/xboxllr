@@ -2,6 +2,7 @@
 from pathlib import Path, PurePosixPath
 import re
 import tomllib
+from native_revisions import supports_target
 
 PREFIX = 'XLLE_PILOT_TITLE_MOD_'
 
@@ -39,7 +40,7 @@ def manifests(source, data):
         target = [dict(game_id=data['title']['game_id'], xbe_sha256=data['title']['xbe_sha256'])]
         features = [f for f in catalog.get('feature', []) if f.get('id') == switch['feature']]
         if (catalog.get('format_version') != 1 or catalog.get('version') != '1.0.0' or
-                catalog.get('id') != switch['package'] or catalog.get('target') != target or
+                catalog.get('id') != switch['package'] or not supports_target(catalog.get('target'), target[0]) or
                 len(features) != 1 or features[0].get('default_enabled') is not False or
                 any(o.get('feature') == switch['feature'] for o in catalog.get('option', []))):
             raise ValueError('Unsupported bundled title mod switch')

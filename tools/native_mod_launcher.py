@@ -129,7 +129,11 @@ class Catalog:
                 self.packages.append(dict(id=pid, name=manifest['name'], version=manifest['version'], description=manifest['description']))
 
     def write(self, path, title, region, sha):
-        lines = ['xlle-launcher 1', f'title {encoded(title)} {encoded(region)}', f'identity {sha}', f'volume {self.volume}', f'skip {int(self.skip_launcher)}']
+        identities = [sha] if isinstance(sha, str) else list(sha)
+        if not identities or len(identities) > 32 or len(set(identities)) != len(identities):
+            raise ValueError('Invalid launcher revision identities')
+        lines = ['xlle-launcher 1', f'title {encoded(title)} {encoded(region)}',
+                 *[f'identity {identity}' for identity in identities], f'volume {self.volume}', f'skip {int(self.skip_launcher)}']
         lines.append(f'player {self.player["source"]} {encoded(self.player["guid"])}')
         if self.setup is not None:
             lines.append(f'setup {int(self.setup["required"])} {encoded(self.setup["kernel"])}')

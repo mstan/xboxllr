@@ -74,6 +74,11 @@ target_link_libraries(xlle_native_title PRIVATE pilot_memory_write_watch)
 target_compile_definitions(xlle_native_title PRIVATE PILOT_MEMORY_WRITE_WATCH)
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../src/storage" storage)
 target_link_libraries(xlle_native_title PRIVATE xboxllr_storage)
+if(WIN32)
+  add_custom_command(TARGET xlle_native_title POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:xboxllr_storage>" "$<TARGET_FILE_DIR:xlle_native_title>")
+endif()
 add_library(pilot_section_mods STATIC section_mods.c)
 add_library(pilot_graphics_commands STATIC graphics_commands.c)
 target_link_libraries(xlle_native_title PRIVATE pilot_graphics_commands)

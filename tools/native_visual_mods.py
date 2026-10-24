@@ -63,8 +63,12 @@ def resolve(source, data, output, *, aspect=None, height=0, supersample=1,
     def catalog(pid, target, features, plugins):
         path = selected[pid]
         manifest = tomllib.loads(path.read_text(encoding='utf-8'))
+        from native_revisions import supports_target
+        targets_match = (supports_target(manifest.get('target'), target[0])
+                         if len(target) == 1 and set(target[0]) == {'game_id', 'xbe_sha256'}
+                         else manifest.get('target') == target)
         if (manifest.get('format_version') != 1 or manifest.get('id') != pid or manifest.get('version') != '1.0.0'
-            or manifest.get('target') != target or [f['id'] for f in manifest['feature']] != features
+            or not targets_match or [f['id'] for f in manifest['feature']] != features
             or any(f['default_enabled'] is not False for f in manifest['feature']) or manifest.get('plugin') != plugins):
             raise ValueError('Unsupported bundled visual catalog: ' + pid)
         catalogs[pid] = hashlib.sha256(path.read_bytes()).hexdigest()
