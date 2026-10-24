@@ -93,9 +93,12 @@ xboxllr is intended to publish the **recompiler toolkit** and a separate
 reuse build/release tooling from a pinned xboxllr version. Windows x64 ZIPs are
 the current target; native Linux releases are deferred. Shared packaging now
 produces self-contained local candidates with a bundled launcher and Python.
-The current [release](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-22)
+The current [release](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-23.2)
 provides the recompiler/framework source toolkit and a precompiled Windows
 Dashboard application, with source and dependency-source downloads. The toolkit
+includes the shared Windows controller event-pump fix; the Dashboard and both
+game previews use the same correction. See the
+[controller hotfix notes](docs/RELEASE-NOTES-2026-10-23.2.md). The toolkit
 is Python/source tooling rather than a standalone compiler EXE. Users supply
 their own supported original title data; see [license scope](LICENSE-SCOPE.md)
 and [original rights notice](RIGHTS-NOTICE.md).

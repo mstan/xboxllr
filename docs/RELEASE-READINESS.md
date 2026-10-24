@@ -1,15 +1,15 @@
 # xboxllr release readiness
 
-Dashboard updated October 23, 2026. Tracking: `beads-xbox.1.196`;
+Controller hotfix updated October 23, 2026. Tracking: `beads-s7mu`;
 initial preparation `.1.187`; licensing `.1.21`.
 All three repositories remain private. The owner selected GPL distribution and
 authorized playable Windows prereleases. Native Linux releases remain deferred.
 
 | Repository | Windows preview and source downloads |
 | --- | --- |
-| [xboxllr](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-23.1) | Recompiler/framework source toolkit, updated native Xbox Dashboard Windows application, source kit and prepared dependency-source supplement |
-| [BlinxRecomp](https://github.com/mstan/BlinxRecomp/releases/tag/windows-preview-2026-10-22) | Blinx Windows application, recursively pinned source kit and prepared dependency-source supplement |
-| [JSRFRecomp](https://github.com/mstan/JSRFRecomp/releases/tag/windows-preview-2026-10-22) | JSRF Windows application, recursively pinned source kit and prepared dependency-source supplement |
+| [xboxllr](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-23.2) | Recompiler/framework source toolkit, native Xbox Dashboard Windows application, source kit and prepared dependency-source supplement |
+| [BlinxRecomp](https://github.com/mstan/BlinxRecomp/releases/tag/windows-preview-2026-10-23.2) | Blinx Windows application, recursively pinned source kit and prepared dependency-source supplement |
+| [JSRFRecomp](https://github.com/mstan/JSRFRecomp/releases/tag/windows-preview-2026-10-23.2) | JSRF Windows application, recursively pinned source kit and prepared dependency-source supplement |
 
 ## Completed release preparation
 
@@ -35,6 +35,16 @@ The Dashboard-only October 23 refresh has owner acceptance, a real native
 startup-to-menu/navigation/normal-close check, four native startup fixtures,
 and 61 passing Python regression tests (one additional private-input skip).
 Blinx and JSRF builds, pins and releases are unchanged by this refresh.
+
+The subsequent shared controller hotfix updates all three native applications.
+SDL's Windows notification thread now processes RawInput messages even though
+the native renderer does not initialize SDL video. A controller could previously
+appear connected while its buttons and sticks remained zero. The fix is enabled
+in the executable, preserves selected controller GUIDs and existing console/save
+profiles, and requires no Steam or global environment changes. The real Windows
+message-dispatch regression fails on the old transport and passes with the fix;
+physical same-GUID samples and the focused virtual transport/host tests cover
+the input correction. See [release notes](RELEASE-NOTES-2026-10-23.2.md).
 
 ## Packaging and evidence
 
