@@ -20,7 +20,8 @@ enum PilotSessionValue {
     PILOT_SESSION_ENTROPY, PILOT_SESSION_INPUT, PILOT_SESSION_CAPABILITIES,
     PILOT_SESSION_RUMBLE, PILOT_SESSION_WAIT, PILOT_SESSION_GPU_BUSY,
     PILOT_SESSION_AUDIO_STATE, PILOT_SESSION_WINDOW, PILOT_SESSION_FRAME,
-    PILOT_SESSION_FILE_RESULT, PILOT_SESSION_SERVICE, PILOT_SESSION_FAULT
+    PILOT_SESSION_FILE_RESULT, PILOT_SESSION_SERVICE, PILOT_SESSION_FAULT,
+    PILOT_SESSION_AUDIO_MIX, PILOT_SESSION_AUDIO_OUTPUT
 };
 typedef struct PilotSessionTurn {
     uint32_t actor, boundary;
@@ -47,15 +48,29 @@ uint64_t pilot_session_value64(uint32_t tag, uint64_t argument, uint64_t value);
  * the recorded owner without holding another owner's state locks. */
 int pilot_session_next_turn(PilotSessionTurn *turn);
 void pilot_session_turn(const PilotSessionTurn *turn);
+/* Monotonic completed-turn generation for progress-based stall detection. */
+uint64_t pilot_session_progress(void);
 /* Final drains are for an orderly boundary only, never an SEH/VEH observer. */
 int pilot_session_finish(void);
 void pilot_session_incomplete(const char *reason);
 void pilot_session_diverge(const char *reason, uint64_t sequence);
+void pilot_session_describe_activity(void);
 typedef int (*PilotSessionDeviceEnter)(uint32_t actor);
 typedef void (*PilotSessionDeviceLeave)(int token);
 void pilot_session_bind_devices(PilotSessionDeviceEnter enter, PilotSessionDeviceLeave leave);
+void pilot_session_bind_device_try(PilotSessionDeviceEnter try_enter);
 int pilot_session_device_enter(uint32_t actor);
+/* Physical presentation callbacks must not wait for a future simulation turn:
+ * engine teardown can be waiting for that same callback to return. */
+int pilot_session_device_try_enter(uint32_t actor);
 void pilot_session_device_leave(int token);
+typedef int (*PilotSessionHostWaitBegin)(void);
+typedef void (*PilotSessionHostWaitEnd)(int token);
+void pilot_session_bind_host_wait(PilotSessionHostWaitBegin begin, PilotSessionHostWaitEnd end);
+/* Drop CPU/device ownership around a genuine host wait. Nesting is inert.
+ * End restores the same logical owner using the normal recorded admission. */
+int pilot_session_host_wait_begin(void);
+void pilot_session_host_wait_end(int token);
 typedef void (*PilotSessionTerminal)(const char *reason,uint32_t code);
 void pilot_session_bind_terminal(PilotSessionTerminal terminal);
 void pilot_session_report_stop(const char *reason,uint32_t code);
@@ -64,6 +79,9 @@ void pilot_session_report_stop(const char *reason,uint32_t code);
  * retains lock ordering for blocking services that run outside a CPU turn. */
 void pilot_session_lock_enter(uint32_t lock_id);
 void pilot_session_lock_acquired(uint32_t lock_id);
+/* Establish the intentional process-exit cut after obtaining the CPU permit.
+ * Nonterminal recorders park instead of adding post-exit observations. */
+void pilot_session_terminal_begin(void);
 #ifdef __cplusplus
 }
 #endif

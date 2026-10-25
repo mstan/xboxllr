@@ -76,10 +76,44 @@ static void full_bank_fixture(void)
     pilot_dsp_destroy(d);pilot_dsp_image_destroy(image);free(storage);
     data[0x804/4]=4094;CHECK(!pilot_dsp_decode(data,bytes,123,&error));free(data);
 }
+static void isolated_fixture(void)
+{
+    uint32_t data[1024];unsigned bytes=fixture(data);const char *error=NULL;
+    PilotDspImage *image=pilot_dsp_decode(data,bytes,123,&error);CHECK(image && !error);
+    unsigned size=pilot_dsp_storage_bytes(image);uint8_t *storage=malloc(size+16),*before=malloc(size);CHECK(storage && before);
+    memset(storage+size,0x5a,16);
+    PilotDsp *d=pilot_dsp_create_isolated(image,storage,0x10000000);CHECK(d);
+    uint32_t mix[1024]={0},out[192];
+    uint32_t *x=(uint32_t*)(storage+0x4000);
+    for(unsigned n=0;n<100;++n) {
+        mix[3]=n*137;memcpy(before,storage,size);
+        pilot_dsp_begin(d);pilot_dsp_process(d,mix,out);
+        CHECK(!memcmp(before,storage,size)); // Live execution never touches guest memory.
+        uint32_t patch=n+77;struct PilotDspPatch rejected={0,4,&patch};
+        CHECK(!pilot_dsp_effect_patch(d,0,1,&rejected));
+        x[3000]=n+1; // A concurrent CPU-only write must survive publication.
+        x[0xc04]=0xffffff; // The real graph's changed output publishes later.
+        pilot_dsp_publish(d);
+        CHECK(x[3000]==n+1 && x[0xc04]==0x123456 && x[0xc03]==mix[3]);
+        CHECK(out[4]==0x123456 && out[3]==mix[3]);
+    }
+    // Program changes made through guest memory must invalidate native blocks.
+    ((uint32_t*)(storage+0x1000))[3]=0x654321;
+    pilot_dsp_begin(d);pilot_dsp_process(d,mix,out);pilot_dsp_publish(d);
+    CHECK(out[4]==0x654321 && x[0xc04]==0x654321);
+    uint32_t patch=0x765432,read=0;struct PilotDspPatch accepted={0,4,&patch};
+    CHECK(pilot_dsp_effect_patch(d,0,1,&accepted));
+    CHECK(pilot_dsp_effect_read(d,0,0,&read,4) && read==patch);
+    uint32_t *desc=(uint32_t*)(storage+pilot_dsp_descriptor_offset(image));
+    CHECK(*(uint32_t*)(storage+desc[4]-0x10000000)==patch);
+    for(unsigned i=0;i<16;++i)CHECK(storage[size+i]==0x5a);
+    pilot_dsp_destroy(d);pilot_dsp_image_destroy(image);free(before);free(storage);
+}
 int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     full_bank_fixture();
+    isolated_fixture();
     uint32_t data[1024];unsigned bytes=fixture(data);const char *error=NULL;
     PilotDspImage *image=pilot_dsp_decode(data,bytes,123,&error);CHECK(image && !error);
     unsigned storage_bytes=pilot_dsp_storage_bytes(image);uint8_t *storage=malloc(storage_bytes+16);CHECK(storage);

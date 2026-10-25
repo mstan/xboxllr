@@ -29,8 +29,6 @@ def manifests(source, data):
     paths = [ROOT / 'mods/preloaded/packages' / pid / '1.0.0/manifest.toml'
              for pid in ('xboxlle.enhancement.visuals', 'xboxlle.enhancement.frame-rate')]
     paths.extend(input_manifests(data))
-    from native_session_mods import manifests as session_manifests
-    paths.extend(session_manifests(data))
     wide = data.get('mods', {}).get('widescreen_manifest')
     if wide:
         paths.insert(0, (Path(source).parent / wide).resolve())

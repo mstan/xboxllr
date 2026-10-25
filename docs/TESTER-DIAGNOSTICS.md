@@ -1,86 +1,82 @@
 # Tester diagnostics
 
-Each packaged native title retains its own game log and exit report beneath
-`data/diagnostics/<UTC time>-<session>/`. Starting the game again creates a new
-session; it does not overwrite the previous crash. `data/diagnostics/last-run.json`
-points to the newest session. Reports record the actual executable/package hashes,
-framework revision, selected mods/controller/options, operating system, process
-exit code and a terminal native stop reason when one was printed. A session left
-`running` means its supervisor did not finish reporting; it is not proof of a crash.
+Each packaged native title retains its game log and exit report beneath
+`data/diagnostics/<UTC time>-<session>/`. A new launch creates a new session;
+it does not overwrite the previous crash. `data/diagnostics/last-run.json`
+points to the newest session. Reports identify the actual executable, package,
+game revision, framework, mods, controller settings and terminal stop.
 
 ## Recording a problem
 
-1. Open **Start with Diagnostics.cmd** instead of Start Game.cmd. This enables
-   recording for this launch only; choose your controller/mods normally.
-2. Reproduce the problem, then close the game if it is still running.
-3. Send the session's **report.json** and describe the stage/action. Keep the
-   matching private directory locally so a developer can request the specific
-   evidence needed to reproduce it. There is no automatic upload.
+Blinx and both supported JSRF revisions enable **Replay diagnostics** in the
+Mods menu by default. Its saved setting applies on the next launch. Start the
+game normally, reproduce the problem and close the game if it remains open.
+Send **report.json** and describe the stage/action. Keep the matching private
+folder locally so a developer can request the specific evidence needed.
+**Start with Diagnostics.cmd** also enables recording for one launch.
 
-**Do not upload `PRIVATE-DO-NOT-SHARE` wholesale.** It can contain the EEPROM,
-console signing keys, private saves and raw logs with original file paths. No
-original game XBE, assets, kernel dump or HDD image is copied into the session.
-Do not include your original game files in bug reports.
+There is no automatic upload. **Do not upload `PRIVATE-DO-NOT-SHARE` wholesale.**
+It contains private starting saves, console identity/signing secrets, runtime
+journals and logs with local paths. Cache files can contain original game data;
+a selected HDD image is also copied privately. Original game files must not be
+included in public reports or release archives.
 
-Diagnostic mode makes a bounded copy of the initial native save/profile state,
-records the resolved mod plan and runtime settings, and captures each state,
-capability and rumble result at the actual native controller boundary. Changes
-made by the game continue to use its normal saves; recording does not replace
-or restore the user's persistent progress. Initial snapshots have a 128 MiB
-budget each. A selected HDD image is **not** cloned automatically: that session
-retains inputs/logs but reports that initial disk state is unavailable. Linked
-or oversized save trees likewise report that reproduction is unavailable.
-The state copy includes persistent partition1 (`E:`, including UDATA/TDATA).
-Partition2 original Dashboard content, utility cache partitions3–5 and the
-utility-cache manifest are omitted. Reproduction rebuilds caches from the
-owned game files; it starts with cold caches and cannot reproduce a cache
-corruption or cache-timing issue exactly from this recording alone.
+Recording takes an independent copy of the complete initial writable state,
+including empty directories and utility caches, plus the console profile and
+any selected HDD image. The game continues to write its normal persistent
+progress. Replay uses a new disposable copy and never restores or replaces the
+owner's saves. Linked storage, a changing snapshot or insufficient space makes
+replay explicitly unavailable instead of creating a partial baseline.
 
-The input writer has a fixed 256 KiB queue, drains every 100 ms (or 256 records),
-and stops capture at 128 MiB. A full queue or I/O failure stops recording with an
-explicit warning while gameplay continues. An abrupt exit can lose the queued
-tail, normally up to 100 ms. Existing sessions are never silently deleted;
-remove unwanted diagnostic session directories yourself when finished with them.
-An intentional native stop drains the queue for up to two seconds before
-exiting. `input_delivery_complete` is true only when the native writer confirms
-that every queued record was flushed and the final count matches the file.
-Hard process termination and native hardware exceptions can still leave an
-explicitly unconfirmed tail; the recorder never drains locks in an exception
-handler.
+## Verified session replay
 
-## Offline reproduction
+Replay starts at the recorded launch using the identical binary, dependencies,
+owned game revision and mod plan. Normal translated execution rebuilds native
+call stacks. The journal captures CPU/device admission, input and rumble,
+clocks, entropy, window observations, file metadata and asynchronous completion
+observations. CPU/register/call-flow checks at each turn and rotating memory
+checks at frames stop at the first divergence. Actual disk/GPU/audio work must
+still complete; a recorded result never bypasses required device work.
+
+This is a replay from launch, not an arbitrary-PC checkpoint or a portable save
+state. Native C call stacks are reconstructed by execution. A matching terminal
+boundary, every recorded observation and the original exit code are required
+before the tool reports `verified: true`. A recorded intentional renderer/native
+stop can therefore be a successful reproduction even when its exit code is 2.
+A mismatch exits 3 and retains its first divergence in the private replay log.
+Hard termination or a hardware exception can leave an unsealed journal; its
+logs remain useful but it cannot claim a verified terminal reproduction.
+
+The asynchronous writer has an 8 MiB queue, flushes at most every 100 ms and
+compresses journals as gzip with zlib 1.3.2. Journal storage is limited to
+8 GiB compressed and 64 GiB expanded per session. Initial state is limited to 2 GiB,
+console profiles to 128 MiB and selected HDD images to 32 GiB. Local history
+reserves at most 32 GiB and retains at least 4 GiB free space. Existing sessions
+are never silently deleted. Remove unwanted sessions after preserving any
+needed evidence. A queue/storage/write failure stops recording with an explicit
+incomplete warning while gameplay continues. Intentional stops drain accepted
+records for up to two seconds. `journal_delivery_complete` requires confirmation
+that all accepted records reached the journal; a valid file alone is insufficient.
 
 With the **identical extracted release package** and your own matching game:
 
 ```powershell
-python tools/replay_native_diagnostic.py G:/Reports/session --check
-python tools/replay_native_diagnostic.py G:/Reports/session --root G:/Builds/Blinx --image G:/Owned/Blinx/default.xbe --work-dir G:/Temp/Blinx-reproduction --visible
+python tools/replay_native_session.py G:/Reports/session --check
+python tools/replay_native_session.py G:/Reports/session --root G:/Builds/JSRF --image G:/Owned/JSRF/default.xbe --work-dir G:/Temp/JSRF-reproduction
 ```
 
-`--work-dir` must be a new directory outside the package/session/game assets.
-Reproduction copies only the verified initial snapshot entries and writes to
-that disposable storage. It never writes to the original saves. The recording's
-binary, package, game, snapshot and mod hashes are checked before starting.
-Reproductions are muted, have a five-minute limit by default (`--seconds`), and
-never enable a debug listener or reuse an original HDD path from the recording.
-The packaged Python executable can also run the helper: replace `python` with
-`python/python.exe` from the extracted release.
+`--work-dir` must be new and outside the package, recording and game assets.
+Replay verifies the package, executable, game, baseline and journal hashes before
+starting. It uses isolated saves, settings, caches, temporary paths and any HDD
+copy. It is hidden and muted by default, has a one-hour timeout (`--seconds`)
+and enables no debug listener. `--visible` shows the game while keeping it muted.
+The new directory retains `game.log` and `reproduction.json`.
+The bundled `python/python.exe` can run the helper in place of system `python`.
 
-**This is input-boundary reproduction, not deterministic full-machine replay.**
-Unlike the SNES/PSX checkpoint recorders that informed this design, the native
-Xbox host does not yet restore a complete CPU/device/scheduler checkpoint here.
-Host clocks, thread scheduling and external content can diverge. A changed call
-kind/port/rumble argument stops with exit 3; exhausted recorded input stops with
-exit 4 rather than claiming successful reproduction. The private reproduction
-directory retains its own `game.log` and `reproduction.json`. A matching input
-stream alone does not prove that the original crash was reproduced. Full native
-checkpoint/replay and an explicitly prepared initial HDD clone remain separate
-extensions; old save-state compatibility is not required.
-
-Developers can enable the same session mode through `XBOXLLR_DIAGNOSTICS=1`.
-Small authored tests exercise the real C input recorder/replayer, queue overflow,
-changed call order, malformed input, snapshot ownership and separate save storage
-without starting a game. This code is shared by Blinx, JSRF and Dashboard.
+Older input-only recordings retain their separate helper,
+`tools/replay_native_diagnostic.py`. They are not full session recordings and
+cannot establish deterministic simulation or terminal failure reproduction.
+Developer launches can request diagnostics with `XBOXLLR_DIAGNOSTICS=1`.
 
 ## Focused renderer captures
 

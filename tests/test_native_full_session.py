@@ -1,5 +1,6 @@
 """Complete storage baselines, sealed journals, isolated replay and refusal cases."""
 import json
+import gzip
 import os
 from pathlib import Path
 import struct
@@ -16,7 +17,7 @@ from native_diagnostics import digest
 
 
 def actor_file(path, identity, actor, observations):
-    with path.open('wb') as output:
+    with gzip.open(path, 'wb') as output:
         output.write(session.HEADER.pack(session.MAGIC, 2, actor, bytes.fromhex(identity)))
         for sequence, (tag, argument, payload) in enumerate(observations):
             first = struct.pack('<QIIQ', sequence, tag, len(payload), argument)
@@ -100,12 +101,17 @@ class FullSessionTests(unittest.TestCase):
         captured, _ = self.capture()
         self.seal(captured)
         path = captured.private / 'journal/actor-00000000.xlr'
-        raw = path.read_bytes()
+        original = path.read_bytes()
+        raw = gzip.decompress(original)
         for bad in (raw[:-1], raw[:48+12] + b'\xff'*4 + raw[48+16:], raw[:-1] + b'X'):
-            path.write_bytes(bad)
+            path.write_bytes(gzip.compress(bad))
             with self.assertRaises(ValueError):
                 session.inspect_session(captured.path)
-        path.write_bytes(raw)
+        for bad in (original[:-6],original[:-8]+bytes([original[-8]^1])+original[-7:]):
+            path.write_bytes(bad)
+            with self.assertRaisesRegex(ValueError,'Compressed journal'):
+                session.inspect_session(captured.path)
+        path.write_bytes(original)
         self.assertTrue(session.inspect_session(captured.path)[2]['terminal_complete'])
 
     def test_hdd_is_an_independent_sparse_snapshot(self):

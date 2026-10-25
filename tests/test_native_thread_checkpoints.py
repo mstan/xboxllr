@@ -1,8 +1,9 @@
 import unittest
 import sys
+import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from native_thread_checkpoints import instrument
+from native_thread_checkpoints import instrument, apply, HEADER
 
 
 def function(name, code):
@@ -26,6 +27,16 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertTrue(result.endswith(second))
         self.assertIn('if (x) goto loc_A; else return;', result)
+
+    def test_header_upgrade_preserves_following_extensions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'recomp_types.h'
+            suffix='\nvoid pilot_cpu_wbinvd(void);\n'
+            path.write_text('/* prefix */\n'+HEADER+suffix)
+            apply(Path(folder))
+            self.assertEqual(path.read_text(),'/* prefix */\n'+HEADER+suffix)
+            apply(Path(folder))
+            self.assertTrue(path.read_text().endswith(suffix))
 
     def test_no_cross_function_target(self):
         source = function('sub_A', 'loc_A: ;\n') + function('sub_B', '    goto loc_A;\n')

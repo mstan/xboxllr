@@ -26,6 +26,32 @@
 
 static void fail(const char *what,HRESULT hr=E_FAIL)
 {fprintf(stderr,"[PILOT AUDIO STOP] %s: %08x\n",what,(unsigned)hr);fflush(stderr);pilot_session_report_stop(what,2);ExitProcess(2);}
+struct SessionHostWait {
+    int token=pilot_session_host_wait_begin();
+    ~SessionHostWait(){pilot_session_host_wait_end(token);}
+};
+template<class Voice> static void destroy_voice(Voice *voice)
+{SessionHostWait wait;voice->DestroyVoice();}
+/* XAudio's mixer is an external producer. Retain its actual 24-bit input,
+ * sparsely by active bin, then execute the original DSP graph normally.
+ * The DSP's guest-visible storage is mutated only inside its device turn. */
+static void session_dsp_mix(uint64_t block,uint32_t bins[1024])
+{
+    uint32_t mask=0;
+    for(unsigned c=0;c<32;++c)for(unsigned i=0;i<32;++i)
+        if(bins[c*32+i]){mask|=UINT32_C(1)<<c;break;}
+    uint64_t recorded=pilot_session_value64(PILOT_SESSION_AUDIO_MIX,block,mask);
+    if(recorded>UINT32_MAX)pilot_session_diverge("invalid DSP mixer bin mask",block);
+    mask=(uint32_t)recorded;
+    if(pilot_session_mode()==PILOT_SESSION_REPLAY)memset(bins,0,1024*sizeof(*bins));
+    for(unsigned c=0;c<32;++c)if(mask&(UINT32_C(1)<<c)) {
+        uint8_t wire[96];
+        for(unsigned i=0;i<32;++i)for(unsigned b=0;b<3;++b)wire[i*3+b]=(uint8_t)(bins[c*32+i]>>(8*b));
+        pilot_session_value(PILOT_SESSION_AUDIO_MIX,(block<<6)|c,wire,sizeof(wire));
+        if(pilot_session_mode()==PILOT_SESSION_REPLAY)
+            for(unsigned i=0;i<32;++i)bins[c*32+i]=(uint32_t)wire[i*3]|((uint32_t)wire[i*3+1]<<8)|((uint32_t)wire[i*3+2]<<16);
+    }
+}
 static bool float_format(const WAVEFORMATEX *f,unsigned channels)
 {
     if(!f || f->nChannels!=channels || f->nSamplesPerSec!=48000 || f->wBitsPerSample!=32 ||
@@ -48,6 +74,7 @@ class Effects final:public IXAPO {
     bool locked=false;
     UINT32 max_frames=0,offset=0;
     uint32_t bins[1024]{},speakers[192]{};
+    uint64_t session_pass=0,session_block=0;
 public:
     PilotDsp *graph=nullptr; // Changed only while XAudio2's engine is stopped.
     std::atomic<unsigned> headroom[32]{};
@@ -100,6 +127,21 @@ public:
                                    XAPO_PROCESS_BUFFER_PARAMETERS *out,BOOL enabled) override {
         if(!locked || ni!=1 || no!=1 || !in || !out || in->ValidFrameCount>max_frames ||
            out->ValidFrameCount!=in->ValidFrameCount)fail("XAPO processing shape");
+        const bool session=pilot_session_mode()!=PILOT_SESSION_OFF && graph && enabled;
+        const uint32_t previous_actor=pilot_session_actor_id();
+        const int session_token=!session?0:pilot_session_mode()==PILOT_SESSION_REPLAY?
+            pilot_session_device_try_enter(68):pilot_session_device_enter(68);
+        if(session && !session_token) {
+            // XAudio's physical cadence is not the replay simulation clock.
+            // An early/extra callback returns silence without advancing the
+            // DSP or its carry. Recorded DSP turns still execute in full.
+            memset(out->pBuffer,0,(size_t)out->ValidFrameCount*6*sizeof(float));
+            out->BufferFlags=XAPO_BUFFER_SILENT;pilot_session_actor(previous_actor);return;
+        }
+        if(session) {
+            uint64_t shape=((uint64_t)offset<<32)|in->ValidFrameCount;
+            pilot_session_verify(PILOT_SESSION_AUDIO_MIX,UINT64_C(0x8000000000000000)|session_pass++,&shape,sizeof(shape));
+        }
         const auto *src=static_cast<const float*>(in->pBuffer);auto *dst=static_cast<float*>(out->pBuffer);
         if(capture_stamps && capture_frames<capture_capacity && capture_frames>=capture_next_stamp) {
             if(capture_stamp_count==capture_stamp_capacity)fail("audio capture clock capacity");
@@ -108,6 +150,7 @@ public:
         }
         float gains[32];for(unsigned c=0;c<32;++c)
             gains[c]=1.0f/(1u<<headroom[c].load(std::memory_order_relaxed));
+        if(session){pilot_dsp_begin(graph);pilot_session_device_leave(session_token);}
         bool nonzero=false;
         for(UINT32 frame=0;frame<in->ValidFrameCount;++frame) {
             // Carry imposes a documented 32/48000-second transport latency and
@@ -134,17 +177,41 @@ public:
                     fail("audio capture completion event",HRESULT_FROM_WIN32(GetLastError()));
             }
             if(++offset==32) {
+                if(session)session_dsp_mix(session_block,bins);
                 if(graph && enabled)pilot_dsp_process(graph,bins,speakers);
                 else memcpy(speakers,bins,sizeof(speakers));
+                if(session) {
+                    uint64_t hash=UINT64_C(14695981039346656037);
+                    const auto *bytes=reinterpret_cast<const uint8_t*>(speakers);
+                    for(size_t i=0;i<sizeof(speakers);++i)hash=(hash^bytes[i])*UINT64_C(1099511628211);
+                    pilot_session_verify(PILOT_SESSION_AUDIO_OUTPUT,session_block++,&hash,sizeof(hash));
+                }
                 offset=0;
             }
         }
         out->BufferFlags=nonzero?XAPO_BUFFER_VALID:XAPO_BUFFER_SILENT;
+        if(session){
+            uint64_t fingerprint=pilot_dsp_fingerprint(graph);
+            pilot_session_verify(PILOT_SESSION_AUDIO_OUTPUT,UINT64_C(0x8000000000000000)|session_pass,&fingerprint,sizeof(fingerprint));
+            int publishing=pilot_session_device_enter(68);pilot_dsp_publish(graph);
+            pilot_session_device_leave(publishing);pilot_session_actor(previous_actor);
+        }
     }
     UINT32 STDMETHODCALLTYPE CalcInputFrames(UINT32 n) override {return n;}
     UINT32 STDMETHODCALLTYPE CalcOutputFrames(UINT32 n) override {return n;}
 };
 static IXAudio2 *engine;
+static void stop_engine(){
+    if(pilot_session_mode()==PILOT_SESSION_REPLAY) {
+        // Keep callbacks alive until all DSP turns preceding this recorded
+        // barrier have run. Once the caller is readmitted, replay callbacks
+        // use nonblocking admission, so the genuine engine barrier can finish.
+        int token=pilot_session_host_wait_begin();pilot_session_host_wait_end(token);
+        engine->StopEngine();
+    } else {SessionHostWait wait;engine->StopEngine();}
+}
+static HRESULT start_engine(){SessionHostWait wait;return engine->StartEngine();}
+
 static IXAudio2MasteringVoice *master;
 static IXAudio2SubmixVoice *mixer;
 static Effects *effects;
@@ -158,7 +225,26 @@ struct EngineEvents final:public IXAudio2EngineCallback {
     void STDMETHODCALLTYPE OnCriticalError(HRESULT hr) override {fail("native audio device failed",hr);}
 };
 static EngineEvents engine_events;
-struct Guard {Guard(){AcquireSRWLockExclusive(&lock);}~Guard(){ReleaseSRWLockExclusive(&lock);}};
+/* Every caller yields before waiting for this owner, including the feeder.
+ * Engine barriers may then yield while holding it without a CPU/lock cycle. */
+struct Guard {
+    Guard(){
+        int mode=pilot_session_mode();
+        if(!mode){AcquireSRWLockExclusive(&lock);return;}
+        bool fast=mode==PILOT_SESSION_RECORD && TryAcquireSRWLockExclusive(&lock);
+        uint64_t observed=pilot_session_value64(PILOT_SESSION_WAIT,UINT64_C(0x4c4f434b00000002),fast);
+        if(observed>1)pilot_session_diverge("invalid audio owner acquisition",2);
+        if(observed) {
+            pilot_session_lock_enter(2);
+            if(mode==PILOT_SESSION_REPLAY)AcquireSRWLockExclusive(&lock);
+            pilot_session_lock_acquired(2);
+        } else {
+            SessionHostWait wait;pilot_session_lock_enter(2);
+            AcquireSRWLockExclusive(&lock);pilot_session_lock_acquired(2);
+        }
+    }
+    ~Guard(){ReleaseSRWLockExclusive(&lock);}
+};
 struct Chunk {std::atomic<bool> busy{false};BYTE data[2048];};
 struct Buffer final:public IXAudio2VoiceCallback {
     IXAudio2SourceVoice *voice=nullptr;
@@ -365,13 +451,14 @@ int32_t pilot_audio_open(void)
 }
 void pilot_audio_close(void)
 {
+    SessionHostWait wait;
     diagnostic_capture_close();
     exiting=true;if(wake)SetEvent(wake);
     if(feeder){WaitForSingleObject(feeder,INFINITE);CloseHandle(feeder);feeder=nullptr;}
     for(auto *b:buffers)if(b)fail("closing device with owned voices");
-    if(engine)engine->StopEngine();
-    if(mixer){mixer->DestroyVoice();mixer=nullptr;}
-    if(master){master->DestroyVoice();master=nullptr;}
+    if(engine)stop_engine();
+    if(mixer){destroy_voice(mixer);mixer=nullptr;}
+    if(master){destroy_voice(master);master=nullptr;}
     if(effects){effects->Release();effects=nullptr;}
     if(engine){engine->UnregisterForCallbacks(&engine_events);engine->Release();engine=nullptr;}
     if(wake){CloseHandle(wake);wake=nullptr;}
@@ -380,10 +467,10 @@ void pilot_audio_close(void)
 int32_t pilot_audio_effects_install(PilotDsp *graph)
 {
     if(!engine || !effects || !graph)return E_INVALIDARG;
-    // StopEngine completes its current quantum before returning; Process takes
-    // no guest/owner lock. Installation replaces the graph only at this boundary.
-    Guard guard;engine->StopEngine();PilotDsp *old=effects->graph;effects->graph=graph;effects->Reset();
-    HRESULT hr=engine->StartEngine();if(FAILED(hr))effects->graph=old;
+    // Complete the current quantum with CPU ownership released. Process owns
+    // the DSP publication turn; installation replaces it at this boundary.
+    Guard guard;stop_engine();PilotDsp *old=effects->graph;effects->graph=graph;effects->Reset();
+    HRESULT hr=start_engine();if(FAILED(hr))effects->graph=old;
     return hr;
 }
 int32_t pilot_audio_effects_patch(PilotDsp *graph,unsigned effect,unsigned count,const PilotDspPatch *patches)
@@ -392,9 +479,9 @@ int32_t pilot_audio_effects_patch(PilotDsp *graph,unsigned effect,unsigned count
     if(!engine || !effects || !graph || effects->graph!=graph)return E_INVALIDARG;
     // Complete the current quantum; change the complete batch between Process
     // calls without resetting the graph, queued source data or effect history.
-    engine->StopEngine();
+    stop_engine();
     int accepted=pilot_dsp_effect_patch(graph,effect,count,patches);
-    HRESULT hr=engine->StartEngine();
+    HRESULT hr=start_engine();
     return FAILED(hr)?hr:accepted?S_OK:E_INVALIDARG;
 }
 static int32_t audio_capture_begin(float *samples,uint32_t frames,int after_effects,
@@ -404,11 +491,11 @@ static int32_t audio_capture_begin(float *samples,uint32_t frames,int after_effe
     Guard guard;
     if(!effects->capture_done)effects->capture_done=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     if(!effects->capture_done || !ResetEvent(effects->capture_done))return HRESULT_FROM_WIN32(GetLastError());
-    engine->StopEngine();effects->capture=samples;effects->capture_capacity=frames;
+    stop_engine();effects->capture=samples;effects->capture_capacity=frames;
     effects->capture_frames=0;effects->capture_output=!!after_effects;
     effects->capture_stamps=stamps;effects->capture_stamp_capacity=stamp_capacity;
     effects->capture_stamp_count=effects->capture_next_stamp=0;
-    HRESULT hr=engine->StartEngine();if(FAILED(hr)){effects->capture=nullptr;effects->capture_stamps=nullptr;}return hr;
+    HRESULT hr=start_engine();if(FAILED(hr)){effects->capture=nullptr;effects->capture_stamps=nullptr;}return hr;
 }
 int32_t pilot_audio_capture_begin(float *samples,uint32_t frames,int after_effects)
 {return audio_capture_begin(samples,frames,after_effects,nullptr,0);}
@@ -429,8 +516,8 @@ int32_t pilot_audio_capture_wait(uint32_t milliseconds)
 uint32_t pilot_audio_capture_end(void)
 {
     if(!engine || !effects)return 0;
-    Guard guard;engine->StopEngine();UINT32 frames=effects->capture_frames;effects->capture=nullptr;effects->capture_stamps=nullptr;
-    HRESULT hr=engine->StartEngine();if(FAILED(hr))fail("audio capture restart",hr);return frames;
+    Guard guard;stop_engine();UINT32 frames=effects->capture_frames;effects->capture=nullptr;effects->capture_stamps=nullptr;
+    HRESULT hr=start_engine();if(FAILED(hr))fail("audio capture restart",hr);return frames;
 }
 /* Opt-in title diagnostic through the same sample tap as the audio fixtures.
  * Capture a bounded span of actual six-channel GP output, float32 at 48 kHz.
@@ -662,8 +749,8 @@ static int32_t buffer_create(uint32_t bytes,unsigned channels,unsigned rate,unsi
         }
     }
     if(FAILED(hr)){
-        if(b->voice)b->voice->DestroyVoice();
-        if(b->spatial_voice)b->spatial_voice->DestroyVoice();
+        if(b->voice)destroy_voice(b->voice);
+        if(b->spatial_voice)destroy_voice(b->spatial_voice);
         if(b->spatial_effect)b->spatial_effect->Release();
         delete[] b->data;delete b;return hr;
     }
@@ -694,8 +781,8 @@ void pilot_audio_buffer_destroy(void *opaque)
     auto *b=static_cast<Buffer*>(opaque);if(!b)return;
     {Guard guard;audio_stream_record(b,"destroy");audio_ingress_record(b,5,0,nullptr,0);for(auto &p:buffers)if(p==b)p=nullptr;
      notifications_progress(b);notifications_close(b);}
-    b->voice->DestroyVoice();
-    if(b->spatial_voice)b->spatial_voice->DestroyVoice();
+    destroy_voice(b->voice);
+    if(b->spatial_voice)destroy_voice(b->spatial_voice);
     if(b->spatial_effect)b->spatial_effect->Release();
     delete[] b->data;delete b;
 }

@@ -8,6 +8,9 @@
 #include <string.h>
 #include "dsp56300.h"
 #include "audio_dsp.h"
+#ifdef PILOT_SESSION_RUNTIME
+#include "session_replay.h"
+#endif
 
 enum { CODE_OFFSET=0x818, P_OFFSET=0, X_OFFSET=0x4000, Y_OFFSET=0x8000,
        SCRATCH_OFFSET=0xa000, SCRATCH_PREFIX=0xc000, MAX_SCRATCH=8*1024*1024,
@@ -26,6 +29,8 @@ struct PilotDsp {
     uint8_t *shadow;
     uint32_t count,ranges[64][2]; /* X-word start and byte extent. */
     uint64_t blocks,nodes;
+    uint8_t *owned,*guest,*dirty,*published;
+    uint32_t storage_bytes,processing;
 };
 static uint32_t word(const void *p) {uint32_t v;memcpy(&v,p,4);return v;}
 static int range(uint32_t start,uint32_t bytes,uint32_t begin,uint32_t end)
@@ -113,7 +118,26 @@ void pilot_dsp_image_destroy(PilotDspImage *image)
 uint32_t pilot_dsp_storage_bytes(const PilotDspImage *image){return image->storage_bytes;}
 uint32_t pilot_dsp_descriptor_offset(const PilotDspImage *image){return SCRATCH_OFFSET+image->scratch_bytes;}
 static void invalid(const char *reason,uint32_t value)
-{fprintf(stderr,"[PILOT DSP STOP] %s: %08x\n",reason,value);fflush(stderr);ExitProcess(2);}
+{
+    fprintf(stderr,"[PILOT DSP STOP] %s: %08x\n",reason,value);fflush(stderr);
+#ifdef PILOT_SESSION_RUNTIME
+    pilot_session_report_stop(reason,2);
+#endif
+    ExitProcess(2);
+}
+static void mark_store(PilotDsp *d,const void *pointer,unsigned bytes)
+{
+    uintptr_t p=(uintptr_t)pointer,base=(uintptr_t)d->owned;
+    if(!d->owned || p<base || p+bytes>base+d->storage_bytes)return;
+    uint32_t offset=(uint32_t)(p-base);
+    for(unsigned i=0;i<bytes;++i)d->dirty[(offset+i)/8]|=(uint8_t)(1u<<((offset+i)&7));
+}
+static uint32_t isolated_x_read(void *opaque,uint32_t address){PilotDsp *d=opaque;return d->x[address];}
+static void isolated_x_write(void *opaque,uint32_t address,uint32_t value){PilotDsp *d=opaque;d->x[address]=value;mark_store(d,d->x+address,4);}
+static uint32_t isolated_y_read(void *opaque,uint32_t address){PilotDsp *d=opaque;return d->y[address];}
+static void isolated_y_write(void *opaque,uint32_t address,uint32_t value){PilotDsp *d=opaque;d->y[address]=value;mark_store(d,d->y+address,4);}
+static uint32_t isolated_p_read(void *opaque,uint32_t address){PilotDsp *d=opaque;return d->p[address];}
+static void isolated_p_write(void *opaque,uint32_t address,uint32_t value){PilotDsp *d=opaque;d->p[address]=value;mark_store(d,d->p+address,4);}
 static uint32_t *dma_word(PilotDsp *d,uint32_t address)
 {
     if(address<4096)return d->x+address;
@@ -137,12 +161,12 @@ static void transfer(PilotDsp *d)
             uint32_t *dst=dma_word(d,n[3]+i),sample=(control&2)?(*dst&0xffffff)<<8:0;
             for(unsigned b=0;b<4;++b) {
                 uint8_t *byte=d->scratch+n[5]+offset;
-                if(control&2)*byte=(uint8_t)(sample>>(8*b));else sample|=(uint32_t)*byte<<(8*b);
+                if(control&2){*byte=(uint8_t)(sample>>(8*b));mark_store(d,byte,1);}else sample|=(uint32_t)*byte<<(8*b);
                 if(++offset==size)offset=0;
             }
-            if(!(control&2))*dst=sample>>8;
+            if(!(control&2)){*dst=sample>>8;mark_store(d,dst,4);}
         }
-        if(control&16)*dma_word(d,at+4)=offset;
+        if(control&16){uint32_t *position=dma_word(d,at+4);*position=offset;mark_store(d,position,4);}
         d->next=n[0];++d->nodes;
     }
     if(d->next&~0x7fff)invalid("DMA terminal address",d->next);
@@ -181,10 +205,16 @@ static void unmapped_write(void *opaque,uint32_t address,uint32_t value)
 {(void)opaque;(void)value;invalid("unmapped DSP memory write",address);}
 #define BUFFER(a,b,c) {a,b,DSP56300_REGION_BUFFER,{.buffer={c,0}}}
 #define GUARD(a,b) {a,b,DSP56300_REGION_CALLBACK,{.callback={NULL,unmapped_read,unmapped_write}}}
-PilotDsp *pilot_dsp_create(const PilotDspImage *image,void *storage,uint32_t guest_base)
+static PilotDsp *create(const PilotDspImage *image,void *storage,uint32_t guest_base,int isolated)
 {
     if(!image || !storage || ((uintptr_t)storage&3) || (uint64_t)guest_base+image->storage_bytes>0x100000000ull)return NULL;
     PilotDsp *d=calloc(1,sizeof(*d));if(!d)return NULL;
+    if(isolated) {
+        d->owned=malloc((size_t)image->storage_bytes*2+(image->storage_bytes+7)/8);
+        if(!d->owned){free(d);return NULL;}
+        d->guest=storage;d->storage_bytes=image->storage_bytes;
+        storage=d->owned;d->published=d->owned+d->storage_bytes;d->dirty=d->published+d->storage_bytes;
+    }
     memset(storage,0,image->storage_bytes);
     d->p=(uint32_t*)((uint8_t*)storage+P_OFFSET);d->x=(uint32_t*)((uint8_t*)storage+X_OFFSET);
     d->y=(uint32_t*)((uint8_t*)storage+Y_OFFSET);d->scratch=(uint8_t*)storage+SCRATCH_OFFSET;
@@ -210,12 +240,54 @@ PilotDsp *pilot_dsp_create(const PilotDspImage *image,void *storage,uint32_t gue
     Dsp56300MemoryRegion xr[]={BUFFER(0,4096,d->x),GUARD(4096,0x1400),BUFFER(0x1400,0x1800,d->mix),
         {0x1800,0x1000000,DSP56300_REGION_CALLBACK,{.callback={d,peripheral_read,peripheral_write}}}};
     Dsp56300MemoryRegion yr[]={BUFFER(0,2048,d->y),GUARD(2048,0x1000000)};
+    if(isolated) {
+        pr[0]=(Dsp56300MemoryRegion){0,4096,DSP56300_REGION_CALLBACK,{.callback={d,isolated_p_read,isolated_p_write}}};
+        xr[0]=(Dsp56300MemoryRegion){0,4096,DSP56300_REGION_CALLBACK,{.callback={d,isolated_x_read,isolated_x_write}}};
+        yr[0]=(Dsp56300MemoryRegion){0,2048,DSP56300_REGION_CALLBACK,{.callback={d,isolated_y_read,isolated_y_write}}};
+    }
     Dsp56300CreateInfo info={.memory_map={xr,4,yr,2,pr,2}};
     d->core=dsp56300_create(&info);
-    if(!d->core){free(d);return NULL;}
+    if(!d->core){free(d->owned);free(d);return NULL;}
+    if(d->owned){memcpy(d->guest,storage,d->storage_bytes);memcpy(d->published,storage,d->storage_bytes);}
     return d;
 }
-void pilot_dsp_destroy(PilotDsp *d){if(d){dsp56300_destroy(d->core);free(d);}}
+PilotDsp *pilot_dsp_create(const PilotDspImage *image,void *storage,uint32_t guest_base)
+{return create(image,storage,guest_base,0);}
+PilotDsp *pilot_dsp_create_isolated(const PilotDspImage *image,void *storage,uint32_t guest_base)
+{return create(image,storage,guest_base,1);}
+void pilot_dsp_begin(PilotDsp *d)
+{
+    if(!d || !d->owned || d->processing)invalid("invalid isolated DSP begin",0);
+    for(uint32_t at=0;at<d->storage_bytes;at+=4096) {
+        uint32_t n=d->storage_bytes-at;if(n>4096)n=4096;
+        if(!memcmp(d->guest+at,d->published+at,n))continue;
+        for(uint32_t i=at;i<at+n;i+=4)
+            if(word(d->guest+i)!=word(d->published+i)) {
+                if(i<0x4000)dsp56300_write_memory(d->core,DSP56300_MEM_SPACE_P,i/4,word(d->guest+i));
+                else memcpy(d->owned+i,d->guest+i,4);
+            }
+    }
+    memset(d->dirty,0,(d->storage_bytes+7)/8);d->processing=1;
+}
+void pilot_dsp_publish(PilotDsp *d)
+{
+    if(!d || !d->owned || !d->processing)invalid("invalid isolated DSP publication",0);
+    for(uint32_t at=0;at<d->storage_bytes;at+=4096) {
+        uint32_t n=d->storage_bytes-at;if(n>4096)n=4096;
+        static const uint8_t clean[512]={0};
+        if(!memcmp(d->dirty+at/8,clean,(n+7)/8) && !memcmp(d->guest+at,d->published+at,n))continue;
+        for(uint32_t i=at;i<at+n;i+=4) {
+            unsigned mask=(d->dirty[i/8]>>(i&7))&15;
+            if(mask==15)memcpy(d->guest+i,d->owned+i,4);
+            else if(!mask)memcpy(d->owned+i,d->guest+i,4);
+            else for(unsigned b=0;b<4;++b) {
+                if(mask&(1u<<b))d->guest[i+b]=d->owned[i+b];else d->owned[i+b]=d->guest[i+b];
+            }
+        }
+    }
+    memcpy(d->published,d->guest,d->storage_bytes);d->processing=0;
+}
+void pilot_dsp_destroy(PilotDsp *d){if(d){dsp56300_destroy(d->core);free(d->owned);free(d);}}
 void pilot_dsp_process(PilotDsp *d,const uint32_t mix[1024],uint32_t output[192])
 {
     if(!d || !mix || !output)invalid("missing DSP processing storage",0);
@@ -223,11 +295,31 @@ void pilot_dsp_process(PilotDsp *d,const uint32_t mix[1024],uint32_t output[192]
     /* The six direct speaker bins seed the GP output, then the downloaded graph
      * adds effect returns. This is the bounded host GP-framework contract. */
     memcpy(d->x+0xc00,d->mix,192*4);
+    if(d->owned)memset(d->dirty+(X_OFFSET+0xc00*4)/8,255,192*4/8);
     Dsp56300State s;dsp56300_get_state(d->core,&s);
     s.pc=d->call_pc;s.power_state=0;s.halt_requested=false;
     dsp56300_set_state(d->core,&s);dsp56300_run(d->core,1000000);dsp56300_get_state(d->core,&s);
     if(s.pc!=d->call_pc+2 || s.power_state!=2 || s.registers[DSP56300_REG_SP])invalid("DSP graph failed to return within budget",s.pc);
     memcpy(output,d->x+0xc00,192*4);++d->blocks;
+}
+static uint64_t fingerprint_word(uint64_t h,uint64_t value,unsigned bytes)
+{for(unsigned i=0;i<bytes;++i)h=(h^(uint8_t)(value>>(i*8)))*UINT64_C(1099511628211);return h;}
+uint64_t pilot_dsp_fingerprint(const PilotDsp *d)
+{
+    Dsp56300State s;memset(&s,0,sizeof(s));dsp56300_get_state(d->core,&s);
+    uint64_t h=UINT64_C(14695981039346656037);
+#define H32(v) h=fingerprint_word(h,(uint32_t)(v),4)
+    H32(s.pc);H32(s.pc_advance);H32(s.pc_on_rep);H32(s.cycle_count);H32(s.cycle_budget);
+    for(unsigned i=0;i<2;++i)h=fingerprint_word(h,s.interrupts.pending_bits[i],8);
+    H32(s.interrupts.pipeline_stage);H32(s.interrupts.vector_addr);H32(s.interrupts.saved_pc);H32(s.interrupts.state);
+    for(unsigned i=0;i<128;++i)H32((uint8_t)s.interrupts.ipl[i]);
+    H32(s.interrupts.ipl_to_raise);H32(s.loop_rep);H32(s.halt_requested);H32(s.power_state);
+    for(unsigned i=0;i<64;++i)H32(s.registers[i]);
+    for(unsigned i=0;i<2;++i)for(unsigned j=0;j<16;++j)H32(s.stack[i][j]);
+    H32(d->next);H32(d->control);H32(d->irq);
+    h=fingerprint_word(h,d->blocks,8);h=fingerprint_word(h,d->nodes,8);
+#undef H32
+    return h;
 }
 uint64_t pilot_dsp_blocks(const PilotDsp *d){return d->blocks;}
 uint64_t pilot_dsp_dma_nodes(const PilotDsp *d){return d->nodes;}
@@ -241,17 +333,22 @@ static uint32_t effect_shadow_offset(const PilotDsp *d,unsigned effect)
 int pilot_dsp_effect_read(const PilotDsp *d,unsigned effect,uint32_t offset,void *data,uint32_t bytes)
 {
     if(!data || !effect_range(d,effect,offset,bytes))return 0;
-    memcpy(data,d->shadow+effect_shadow_offset(d,effect)+offset,bytes);return 1;
+    const uint8_t *shadow=d->owned?d->guest+(d->shadow-d->owned):d->shadow;
+    memcpy(data,shadow+effect_shadow_offset(d,effect)+offset,bytes);return 1;
 }
 int pilot_dsp_effect_patch(PilotDsp *d,unsigned effect,unsigned count,const struct PilotDspPatch *patches)
 {
-    if(!patches || !count || count>16)return 0;
+    if(!d || d->processing || !patches || !count || count>16)return 0;
     for(unsigned i=0;i<count;++i)
         if(!patches[i].data || !effect_range(d,effect,patches[i].offset,patches[i].bytes))return 0;
     for(unsigned i=0;i<count;++i) {
         const struct PilotDspPatch *p=&patches[i];
         memcpy(d->shadow+effect_shadow_offset(d,effect)+p->offset,p->data,p->bytes);
         memcpy((uint8_t*)(d->x+d->ranges[effect][0])+p->offset,p->data,p->bytes);
+        if(d->owned) {
+            memcpy(d->guest+(d->shadow-d->owned)+effect_shadow_offset(d,effect)+p->offset,p->data,p->bytes);
+            memcpy(d->guest+X_OFFSET+d->ranges[effect][0]*4+p->offset,p->data,p->bytes);
+        }
     }
     return 1;
 }

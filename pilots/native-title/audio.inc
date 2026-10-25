@@ -413,7 +413,7 @@ static int32_t audio_download_effects(const uint32_t *a)
     fprintf(stderr,"[AUDIO EFFECTS LOCATION] reverb=%08x crosstalk=%08x\n",location[0],location[1]);
     uint32_t storage=0,bytes=pilot_dsp_storage_bytes(image),offset=pilot_dsp_descriptor_offset(image);
     if(vm_allocate(&storage,0,&bytes,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE)){pilot_dsp_image_destroy(image);stop("effects allocation failure continuation is unqualified",(uint32_t)0x8007000e);}
-    PilotDsp *graph=pilot_dsp_create(image,memory+storage,storage);pilot_dsp_image_destroy(image);
+    PilotDsp *graph=g_pilot_session_enabled?pilot_dsp_create_isolated(image,memory+storage,storage):pilot_dsp_create(image,memory+storage,storage);pilot_dsp_image_destroy(image);
     uint32_t count=MEM32(storage+offset);
     /* Original location setter stores both values verbatim (or -1 for NULL).
      * These select subsequent parameter services, not execution of the graph.
@@ -440,9 +440,19 @@ void pilot_audio_dispatch(unsigned entry)
     ++audio_original_dispatch_depth;
 #endif
     const uint32_t *a=audio_pointer(g_esp+4,pilot_audio_calls[entry].stack_bytes);
-    pilot_session_verify(PILOT_SESSION_SERVICE,UINT64_C(0x200000000)|entry,a,pilot_audio_calls[entry].stack_bytes);
+    session_service_evidence(UINT64_C(0x200000000)|entry,a,pilot_audio_calls[entry].stack_bytes);
     int32_t result=0;
-    AcquireSRWLockExclusive(&audio_lock);
+    if(g_pilot_session_enabled) {
+        int mode=pilot_session_mode();
+        uint64_t fast=mode==PILOT_SESSION_RECORD && TryAcquireSRWLockExclusive(&audio_lock);
+        fast=pilot_session_value64(PILOT_SESSION_WAIT,UINT64_C(0x4c4f434b00000003),fast);
+        if(fast>1)pilot_session_diverge("invalid audio dispatch acquisition",3);
+        int owner_wait=fast?0:scheduler_block_begin();
+        pilot_session_lock_enter(3);
+        if(!fast || mode==PILOT_SESSION_REPLAY)AcquireSRWLockExclusive(&audio_lock);
+        pilot_session_lock_acquired(3);
+        scheduler_block_end(owner_wait);
+    } else AcquireSRWLockExclusive(&audio_lock);
     int configuration=audio_configuration_enabled();
     struct PilotAudioBuffer before_release;unsigned configuration_slot=0;
     if(pilot_verbose){fprintf(stderr,"[AUDIO] %s return=%08x",pilot_audio_calls[entry].name,MEM32(g_esp));

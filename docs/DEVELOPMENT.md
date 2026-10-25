@@ -293,3 +293,7 @@ additional hygiene. See [Windows dependency preflight](WINDOWS-RELEASE-DEPENDENC
 and [release readiness](RELEASE-READINESS.md) for packaging, exact DLL closure,
 licenses and clean-profile acceptance. No release or title-pin update is
 established by these setup commands alone.
+
+Native session replay links the portable, unmodified zlib 1.3.2 static library.
+CMake verifies the pinned source archive SHA-256; offline builds can set
+`FETCHCONTENT_SOURCE_DIR_XBOXLLR_ZLIB` to an extracted source tree.

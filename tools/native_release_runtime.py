@@ -430,6 +430,15 @@ def main():
         return interactive(root, data, writable, args.start_minimized)
 
 
+def launcher_manifests(root, data):
+    from native_boot_launcher import manifests as startup_manifests
+    from native_input_mods import manifests as input_manifests
+    from native_session_mods import manifests as session_manifests
+    paths = (manifests(root / 'release.json', data) if data['capabilities']['visual_mods']
+             else input_manifests(data))
+    return paths + session_manifests(data) + startup_manifests(data)
+
+
 def interactive(root, data, writable, minimized):
     config_path = writable / 'setup.json'
     config = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
@@ -451,10 +460,7 @@ def interactive(root, data, writable, minimized):
         choice = read_console_choice(choice_path)
         from native_boot_launcher import ui_state as startup_ui, manifests as startup_manifests
         from native_input_mods import manifests as input_manifests
-        catalogs = (manifests(root / 'release.json', data) if data['capabilities']['visual_mods'] else [])
-        if not data['capabilities']['visual_mods']:
-            catalogs += input_manifests(data)
-        catalogs += startup_manifests(data)
+        catalogs = launcher_manifests(root, data)
         catalog = Catalog(catalogs,
             writable / 'mod-selection.json', visibility=[root / 'mods/ui-visibility.json'],
             frame_modes=data.get('launcher', {}).get('frame_modes', []),

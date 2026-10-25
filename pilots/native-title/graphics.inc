@@ -827,7 +827,7 @@ void pilot_d3d_dispatch(unsigned entry)
         entry==PILOT_D3D_D3DDevice_Release;
     if(g_pilot_session_enabled && entry<PILOT_D3D_COUNT) {
         const void *arguments=graphics_pointer(g_esp+4,pilot_d3d_calls[entry].stack_bytes);
-        pilot_session_verify(PILOT_SESSION_SERVICE,UINT64_C(0x100000000)|entry,arguments,pilot_d3d_calls[entry].stack_bytes);
+        session_service_evidence(UINT64_C(0x100000000)|entry,arguments,pilot_d3d_calls[entry].stack_bytes);
     }
     int blocked=waits?scheduler_block_begin():0;
     if(!graphics_service_profile_enabled() || dispatch_in_dpc || entry>=PILOT_D3D_COUNT) {

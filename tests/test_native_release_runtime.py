@@ -17,6 +17,19 @@ from test_xbe_identity import fixture as identity_fixture
 
 
 class FirstRunTests(unittest.TestCase):
+    def test_packaged_session_mod_uses_title_default_and_keeps_owner_choice(self):
+        from native_session_mods import enabled
+        data = dict(title=dict(game_id='5345000A', xbe_sha256=
+            'fd19055756719893c466302809b433b785ecf5732df0441286f3f605f0f3ef9c'),
+            capabilities=dict(visual_mods=False))
+        paths=runtime.launcher_manifests(self.root,data)
+        defaults={'xboxllr.diagnostics/session-replay':dict(enabled=True)}
+        state=self.root/'selection.json'
+        self.assertTrue(enabled(Catalog(paths,state,defaults=defaults)))
+        state.write_text(json.dumps(dict(version=1,features={
+            'xboxllr.diagnostics/session-replay':dict(enabled=False,options={})})))
+        self.assertFalse(enabled(Catalog(paths,state,defaults=defaults)))
+
     def test_certificate_diagnostics_never_admit_an_unknown_hash_or_create_saves(self):
         data = dict(title=dict(name='Halo', game_id='4D530004', xbe_sha256='a' * 64))
         self.image.write_bytes(identity_fixture('Another title', 0x5345000a))

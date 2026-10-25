@@ -24,8 +24,8 @@ Coverage is scoped in the linked title records below.*
 [Credits](CREDITS.md)
 
 For crash reports, see [tester diagnostics](docs/TESTER-DIAGNOSTICS.md): retained
-per-launch logs and optional private input reproduction sessions are shared by
-the native title packages.
+per-launch logs and private session replay are shared by the native title
+packages. Blinx and JSRF enable the replay diagnostics mod by default.
 
 ## Native code and low-level contracts
 

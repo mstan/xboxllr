@@ -1,5 +1,6 @@
 """Exercise the compiled transport: concurrent actors, exact replay and hostile journals."""
 import os
+import gzip
 from pathlib import Path
 import shutil
 import subprocess
@@ -27,7 +28,7 @@ class TransportTests(unittest.TestCase):
             run('replay', capture, 0)
             for mode in ('identity', 'evidence', 'schedule'):
                 self.assertIn('SESSION REPLAY DIVERGENCE', run(mode, capture, 3))
-            original = (capture / 'actor-00000000.xlr').read_bytes()
+            original = gzip.decompress((capture / 'actor-00000000.xlr').read_bytes())
             for change in ('truncated', 'payload', 'reserved', 'oversized', 'sequence'):
                 corrupt = root / change
                 shutil.copytree(capture, corrupt)
@@ -42,11 +43,26 @@ class TransportTests(unittest.TestCase):
                     altered[48+12:48+16] = (0xffffffff).to_bytes(4, 'little')
                 else:
                     altered[48] = 1
-                (corrupt / 'actor-00000000.xlr').write_bytes(altered)
+                (corrupt / 'actor-00000000.xlr').write_bytes(gzip.compress(altered))
+                self.assertIn('SESSION REPLAY DIVERGENCE', run('replay', corrupt, 3))
+            for change in ('gzip-truncated', 'gzip-checksum'):
+                corrupt = root / change
+                shutil.copytree(capture, corrupt)
+                path = corrupt / 'actor-00000000.xlr'
+                raw = bytearray(path.read_bytes())
+                if change == 'gzip-truncated':
+                    raw = raw[:-6]
+                else:
+                    raw[-8] ^= 1
+                path.write_bytes(raw)
                 self.assertIn('SESSION REPLAY DIVERGENCE', run('replay', corrupt, 3))
             overflow = root / 'overflow'
             overflow.mkdir()
             self.assertIn('INCOMPLETE', run('overflow', overflow, 0))
+            terminal = root / 'terminal'
+            terminal.mkdir()
+            self.assertIn('complete=1', run('terminal-cut', terminal, 0))
+            self.assertEqual([p.name for p in terminal.iterdir()], ['actor-00000000.xlr'])
             # Exclusive new-session ownership: never truncate an existing run.
             before = {p.name: p.read_bytes() for p in capture.iterdir()}
             run('record', capture, 10)

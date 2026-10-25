@@ -1100,7 +1100,7 @@ static void kernel_dispatch(void)
 {
     if(g_pilot_session_enabled) {
         uint32_t registers[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp};
-        pilot_session_verify(PILOT_SESSION_SERVICE,next_kernel_ordinal,registers,sizeof(registers));
+        session_service_evidence(next_kernel_ordinal,registers,sizeof(registers));
     }
 #ifdef PILOT_USB_LLE
 #ifdef PILOT_SCHEDULING_LLE
@@ -1118,7 +1118,7 @@ static void kernel_dispatch(void)
     scheduler_block_end(blocked);
     if(g_pilot_session_enabled) {
         uint32_t returned[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp};
-        pilot_session_verify(PILOT_SESSION_SERVICE,UINT64_C(0x8000000000000000)|completing_ordinal,returned,sizeof(returned));
+        session_service_evidence(UINT64_C(0x8000000000000000)|completing_ordinal,returned,sizeof(returned));
     }
     if(g_eax==0xc0u && (completing_ordinal==99 || completing_ordinal==230 || completing_ordinal==233 ||
        completing_ordinal==234 || completing_ordinal==235) && native_apc_pending())native_apc_deliver();
@@ -1398,6 +1398,8 @@ int main(int argc,char **argv)
         BCryptDestroyHash(executable_hash);
         g_pilot_session_enabled=pilot_session_open(session_record,session_replay,hash)!=PILOT_SESSION_OFF;
         pilot_session_actor(0);pilot_session_bind_devices(session_device_enter,session_device_leave);
+        pilot_session_bind_device_try(session_device_try_enter);
+        pilot_session_bind_host_wait(session_host_wait_begin,session_host_wait_end);
         pilot_session_bind_terminal(session_terminal);
     }
     const char *window_title=getenv("XLLE_PILOT_WINDOW_TITLE");

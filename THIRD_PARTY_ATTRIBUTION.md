@@ -1909,3 +1909,8 @@ This is a native animation reconstruction, with approximate voice synthesis;
 it does not execute firmware or hand its machine state into a native title.
 See `docs/NATIVE-BOOT-INTRO.md` for provenance and the remaining integration
 and qualification work.
+
+Native session journals use unmodified zlib 1.3.2, statically linked from the
+SHA-256-pinned official source archive in `pilots/native-title/session_zlib.cmake`.
+The zlib license is retained in `LICENSES/zlib.txt`. Offline builds can supply
+`FETCHCONTENT_SOURCE_DIR_XBOXLLR_ZLIB`.

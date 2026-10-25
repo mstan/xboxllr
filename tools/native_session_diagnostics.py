@@ -7,6 +7,7 @@ their separate inspector and are never promoted to this replay contract.
 """
 from __future__ import annotations
 import hashlib
+import gzip
 import os
 from pathlib import Path
 import re
@@ -22,10 +23,12 @@ MAGIC = b'XLRRPLY2'
 HEADER = struct.Struct('<8sII32s')
 RECORD = struct.Struct('<QIIQII')
 TURN = struct.Struct('<IIQQ')
+ASYNC_ACTOR = 0xfffe0000
 SCHEDULE_ACTOR = 0xfffffffe
 TURN_TAG = 0x5455524e
 VALUE_LIMIT = 1024 * 1024
-JOURNAL_LIMIT = 2 * 1024**3
+JOURNAL_LIMIT = 8 * 1024**3
+RAW_JOURNAL_LIMIT = 64 * 1024**3
 STATE_LIMIT = 2 * 1024**3
 PROFILE_LIMIT = 128 * 1024**2
 HDD_LIMIT = 32 * 1024**3
@@ -39,22 +42,32 @@ LIMITATION = ('Replay starts at the recorded launch with the identical executabl
 
 
 def journal_records(path, identity, actor):
+    try:
+        yield from _journal_records(path, identity, actor)
+    except (OSError, EOFError, zlib.error) as error:
+        raise ValueError('Compressed journal is incomplete or corrupt') from error
+
+
+def _journal_records(path, identity, actor):
     """Streaming, allocation-bounded parser shared by inspection and tests."""
     path = Path(path)
     if path.is_symlink() or getattr(path, 'is_junction', lambda: False)() or not path.is_file():
         raise ValueError('Journal entries must be ordinary files')
-    if not HEADER.size <= path.stat().st_size <= JOURNAL_LIMIT:
+    if not 18 <= path.stat().st_size <= JOURNAL_LIMIT:
         raise ValueError('Journal file is missing or oversized')
-    with path.open('rb') as source:
+    with gzip.open(path, 'rb') as source:
         raw = source.read(HEADER.size)
         if len(raw) != HEADER.size or HEADER.unpack(raw) != (MAGIC, 2, actor, bytes.fromhex(identity)):
             raise ValueError('Journal executable identity or header differs')
-        sequence = 0
+        sequence, expanded = 0, HEADER.size
         while raw := source.read(RECORD.size):
             if len(raw) != RECORD.size:
                 raise ValueError('Journal ends in an incomplete record header')
             seq, tag, size, argument, checksum, reserved = RECORD.unpack(raw)
-            if seq != sequence or not tag or size > VALUE_LIMIT or reserved:
+            expanded += RECORD.size + size
+            if expanded > RAW_JOURNAL_LIMIT:
+                raise ValueError('Expanded journal budget exceeded')
+            if seq != sequence or not tag or size > VALUE_LIMIT or (not 0x10000 <= reserved < ASYNC_ACTOR if actor == ASYNC_ACTOR else reserved != 0):
                 raise ValueError('Invalid journal sequence, tag, size or reserved bytes')
             payload = source.read(size)
             if len(payload) != size or zlib.crc32(payload, zlib.crc32(raw[:24])) != checksum:
@@ -69,6 +82,7 @@ def inspect_journals(directory, identity):
     if not paths or len(paths) > MAX_ACTORS:
         raise ValueError('Missing or excessive actor journals')
     files, records, total, frames, fault = {}, 0, 0, 0, None
+    expanded = 0
     turns, terminal, previous = 0, False, {}
     for path in sorted(paths):
         match = re.fullmatch(r'actor-([0-9a-f]{8})\.xlr', path.name)
@@ -79,7 +93,11 @@ def inspect_journals(directory, identity):
         if total > JOURNAL_LIMIT + MAX_ACTORS * HEADER.size:
             raise ValueError('Session journal budget exceeded')
         count = 0
+        expanded += HEADER.size
         for _, tag, argument, payload in journal_records(path, identity, actor):
+            expanded += RECORD.size + len(payload)
+            if expanded > RAW_JOURNAL_LIMIT + MAX_ACTORS * HEADER.size:
+                raise ValueError('Expanded session journal budget exceeded')
             if actor == SCHEDULE_ACTOR:
                 if tag != TURN_TAG or argument or len(payload) != TURN.size or terminal:
                     raise ValueError('Invalid record in CPU/device schedule')
@@ -107,7 +125,7 @@ def inspect_journals(directory, identity):
         records += count
     if not turns:
         raise ValueError('Session has no complete CPU/device turns')
-    return dict(files=files, records=records, turns=turns, frames=frames, bytes=total,
+    return dict(files=files, records=records, turns=turns, frames=frames, bytes=total, expanded_bytes=expanded,
                 terminal_complete=terminal and fault is not None, terminal=fault)
 
 
@@ -265,7 +283,7 @@ class FullSession(Session):
                 sum(f['size'] for f in self.replay['console_files'].values()) +
                 (self.replay['hdd']['size'] if self.replay['hdd'] else 0) + info['bytes'] + self.log_path.stat().st_size)
             self.report.pop('reserved_bytes', None)
-        except (OSError, ValueError, KeyError, UnicodeError) as error:
+        except (OSError, ValueError, KeyError, UnicodeError, EOFError) as error:
             self.report['replay_error'] = 'Replay is incomplete or invalid; see the private capture log.'
             private_error(self.private, 'full replay journal', error)
         self.persist()

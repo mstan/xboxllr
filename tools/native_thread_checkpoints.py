@@ -75,7 +75,14 @@ def apply(directory):
         # The instrumentation footer is appended by this module. Upgrade its
         # entire versioned contract instead of retaining an older macro.
         start=text.index('/* Guest scheduler safe points:')
-        text=text[:start].rstrip()+'\n'+HEADER
+        directive=text.index('#ifndef PILOT_THREAD_CHECKPOINT',start)
+        depth=0; end=None
+        for match in re.finditer(r'^#(if(?:n?def)?|endif)\b[^\n]*\n?',text[directive:],re.M):
+            depth += -1 if match[1]=='endif' else 1
+            if depth==0:
+                end=directive+match.end();break
+        if end is None:raise ValueError('unterminated checkpoint header')
+        text=text[:start].rstrip()+'\n'+HEADER+text[end:]
     else:
         text+=HEADER
     changes.append((header, text))

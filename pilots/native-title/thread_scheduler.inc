@@ -82,14 +82,16 @@ static void scheduler_publish(unsigned slot,int suspended,int delta)
 }
 static void scheduler_acquire_locked(void)
 {
-    uint64_t began=GetTickCount64();
+    uint64_t began=GetTickCount64(),progress=pilot_session_progress();
     while(scheduler_owner || !scheduler_ready(scheduler_slot) ||
           (pilot_session_mode()==PILOT_SESSION_REPLAY?!session_actor_next_locked(scheduler_slot):
            session_pending_locked() || scheduler_best_locked()!=scheduler_slot+1)) {
         if(!SleepConditionVariableSRW(&scheduler_changed,&scheduler_lock,1000,0) && GetLastError()!=ERROR_TIMEOUT)
             stop("guest CPU wait failed",GetLastError());
+        uint64_t next_progress=pilot_session_progress();
+        if(next_progress!=progress){progress=next_progress;began=GetTickCount64();}
         if(pilot_session_mode()==PILOT_SESSION_REPLAY && GetTickCount64()-began>30000)
-            pilot_session_diverge("guest could not reach recorded admission",scheduler_slot);
+            session_admission_failure("guest could not reach recorded admission",scheduler_slot);
     }
     scheduler_owner=scheduler_slot+1;scheduler_since=scheduler_clock();scheduler_budget=256;
     scheduler_notify_locked();
