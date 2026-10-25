@@ -12,6 +12,7 @@
 #include "memory_write_watch_runtime.h"
 #include "event_trace.h"
 #include "native_debug.h"
+#include "session_replay.h"
 #ifdef PILOT_INPUT_NATIVE
 #include "input_host.h"
 #endif
@@ -59,6 +60,8 @@ static int trace_original_usb;
 static unsigned trace_original_usb_count;
 #endif
 static int pilot_verbose=1;
+static RECOMP_TLS int session_exception_observer;
+static void session_terminal(const char *reason,uint32_t code);
 static int cpu_interrupt_flag=1,cpu_interrupt_shadow;
 #ifdef PILOT_KERNEL_CLOCK_NATIVE
 static uint64_t kernel_clock_tsc_counter(void);
@@ -72,6 +75,42 @@ static SRWLOCK thread_lock = SRWLOCK_INIT;
 static CONDITION_VARIABLE thread_condition = CONDITION_VARIABLE_INIT;
 RECOMP_TLS volatile uint32_t *g_pilot_suspend_count;
 static SRWLOCK vm_lock=SRWLOCK_INIT;
+/* Fatal renderer stops can originate in a blocking service, outside a guest
+ * CPU turn. Release only this thread's observed renderer lock before asking
+ * the current CPU owner to park at its normal safe point. Never inspect an
+ * SRWLOCK's private representation or release another thread's lock. */
+static SRWLOCK *session_watched_graphics_lock;
+static RECOMP_TLS SRWLOCK *session_held_graphics_lock;
+static void session_acquire_exclusive(PSRWLOCK lock)
+{
+    if(lock==session_watched_graphics_lock)pilot_session_lock_enter(1);
+    AcquireSRWLockExclusive(lock);
+    if(lock==session_watched_graphics_lock){session_held_graphics_lock=lock;pilot_session_lock_acquired(1);}
+}
+static void session_release_exclusive(PSRWLOCK lock)
+{if(lock==session_held_graphics_lock)session_held_graphics_lock=NULL;ReleaseSRWLockExclusive(lock);}
+static BOOLEAN session_try_exclusive(PSRWLOCK lock)
+{BOOLEAN result=TryAcquireSRWLockExclusive(lock);if(result && lock==session_watched_graphics_lock)session_held_graphics_lock=lock;return result;}
+static BOOL session_condition_wait(PCONDITION_VARIABLE condition,PSRWLOCK lock,DWORD milliseconds,ULONG flags)
+{
+    int watched=lock==session_held_graphics_lock;
+    if(watched)session_held_graphics_lock=NULL;
+    BOOL result=SleepConditionVariableSRW(condition,lock,milliseconds,flags);
+    DWORD error=GetLastError();
+    if(watched) {
+        if(pilot_session_mode()==PILOT_SESSION_REPLAY) {
+            ReleaseSRWLockExclusive(lock);pilot_session_lock_enter(1);AcquireSRWLockExclusive(lock);
+        }
+        session_held_graphics_lock=lock;pilot_session_lock_acquired(1);
+    }
+    SetLastError(error);return result;
+}
+static void session_release_terminal_graphics(void)
+{if(session_held_graphics_lock){SRWLOCK *lock=session_held_graphics_lock;session_held_graphics_lock=NULL;ReleaseSRWLockExclusive(lock);}}
+#define AcquireSRWLockExclusive session_acquire_exclusive
+#define ReleaseSRWLockExclusive session_release_exclusive
+#define TryAcquireSRWLockExclusive session_try_exclusive
+#define SleepConditionVariableSRW session_condition_wait
 /* Native-export backing is transport storage, outside hardware apertures.
  * FD000000 is NV2A, so putting XboxHardwareInfo there masks real MMIO reads. */
 #include "guest_layout.h"
@@ -80,7 +119,7 @@ struct PilotThread {
     /* execution_handle owns the host lifetime. handle is its borrowed view
      * while the independently identified guest handle remains open. */
     HANDLE handle,reference_handle,execution_handle;
-    uint32_t routine,context1,context2,tls_size,stack_size,extra,tid,object,object_refs;
+    uint32_t routine,context1,context2,tls_size,stack_size,extra,tid,host_tid,object,object_refs;
     uint32_t identity;
     int32_t priority;
     volatile uint32_t suspend_count;
@@ -148,6 +187,7 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
     fprintf(stderr, "\n");
     stop_capture();
     fflush(stderr);
+    if(!session_exception_observer)session_terminal(reason,2);
 #ifdef PILOT_INPUT_NATIVE
     pilot_input_diagnostic_flush();
 #endif
@@ -382,6 +422,7 @@ void recomp_trace_enter(const char *name, uint32_t va)
     (void)name;
     recent[recent_pos++ & 31] = va;
     ++entries;
+    if(g_pilot_session_enabled)session_flow=session_hash(session_flow,&va,sizeof(va));
     if (entries <= 24) fprintf(stderr, "[ENTER] %08x\n", va);
     if(trace_function && va==trace_function &&
        (!trace_function_trigger || !*trace_function_trigger ||
@@ -412,8 +453,9 @@ uint64_t xbox_ReadTimeStampCounter(void)
     LARGE_INTEGER now, frequency;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&frequency);
-    return (uint64_t)(now.QuadPart / frequency.QuadPart) * 733333333ull +
+    uint64_t value=(uint64_t)(now.QuadPart / frequency.QuadPart) * 733333333ull +
            (uint64_t)(now.QuadPart % frequency.QuadPart) * 733333333ull / frequency.QuadPart;
+    return pilot_session_value64(PILOT_SESSION_MONOTONIC,1,value);
 #endif
 }
 void recomp_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t out[4])
@@ -437,6 +479,7 @@ static DWORD WINAPI title_thread(void *argument)
 {
     thread_guest_cpu_enter();
     unsigned slot=(unsigned)(uintptr_t)argument;
+    pilot_session_actor(slot);
     struct PilotThread *thread=&threads[slot];
     current_thread_slot=slot;
     g_pilot_suspend_count=&thread->suspend_count;
@@ -526,6 +569,8 @@ static void create_thread(void)
         ReleaseSRWLockExclusive(&thread_lock); g_eax=0xc000009au; return;
     }
     thread->handle=thread->execution_handle;
+    thread->host_tid=tid;
+    tid=(DWORD)pilot_session_value64(PILOT_SESSION_THREAD_ID,thread->identity,tid);
     thread->tid=tid;
     scheduler_publish(slot,thread->suspend_count,thread->priority);
     MEM32(thread->object+0x28)=thread->tls_size?context_base+0x100000u-thread->tls_size:0;
@@ -1053,6 +1098,10 @@ static void kernel_dispatch_impl(void)
 #endif
 static void kernel_dispatch(void)
 {
+    if(g_pilot_session_enabled) {
+        uint32_t registers[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp};
+        pilot_session_verify(PILOT_SESSION_SERVICE,next_kernel_ordinal,registers,sizeof(registers));
+    }
 #ifdef PILOT_USB_LLE
 #ifdef PILOT_SCHEDULING_LLE
     if(usb_device_callback_depth) {
@@ -1067,6 +1116,10 @@ static void kernel_dispatch(void)
     unsigned completing_ordinal=next_kernel_ordinal;
     kernel_dispatch_impl();
     scheduler_block_end(blocked);
+    if(g_pilot_session_enabled) {
+        uint32_t returned[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp};
+        pilot_session_verify(PILOT_SESSION_SERVICE,UINT64_C(0x8000000000000000)|completing_ordinal,returned,sizeof(returned));
+    }
     if(g_eax==0xc0u && (completing_ordinal==99 || completing_ordinal==230 || completing_ordinal==233 ||
        completing_ordinal==234 || completing_ordinal==235) && native_apc_pending())native_apc_deliver();
 #ifdef PILOT_USB_LLE
@@ -1133,9 +1186,10 @@ static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
         fprintf(stderr, "[FAULT] host=%p guest=%08llx access=%llu\n", (void*)at,
                 (unsigned long long)(at - (uintptr_t)memory),
                 (unsigned long long)exception->ExceptionRecord->ExceptionInformation[0]);
+        session_exception_observer=1;
         stop("unmapped guest access or native lowering fault", (uint32_t)(at-(uintptr_t)memory));
     }
-    stop("native exception", code);
+    session_exception_observer=1;stop("native exception", code);
 }
 
 static LONG WINAPI unhandled_fault_handler(EXCEPTION_POINTERS *exception)
@@ -1328,6 +1382,24 @@ static void load_image(const char *path)
 
 int main(int argc,char **argv)
 {
+    const char *session_record=getenv("XLLE_PILOT_SESSION_RECORD"),*session_replay=getenv("XLLE_PILOT_SESSION_REPLAY");
+    if((session_record && *session_record) || (session_replay && *session_replay)) {
+        char executable_path[32768];DWORD length=GetModuleFileNameA(NULL,executable_path,sizeof(executable_path));
+        if(!length || length>=sizeof(executable_path))stop("cannot identify session executable",GetLastError());
+        FILE *executable_file=fopen(executable_path,"rb");
+        BCRYPT_HASH_HANDLE executable_hash=NULL;uint8_t hash[32],buffer[65536];
+        if(!executable_file || BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE,&executable_hash,NULL,0,NULL,0,0)<0)
+            stop("cannot hash session executable",0);
+        size_t bytes;
+        while((bytes=fread(buffer,1,sizeof(buffer),executable_file))!=0)
+            if(BCryptHashData(executable_hash,buffer,(ULONG)bytes,0)<0)stop("session executable hash failed",0);
+        if(ferror(executable_file) || fclose(executable_file) || BCryptFinishHash(executable_hash,hash,32,0)<0)
+            stop("session executable hash finalization failed",0);
+        BCryptDestroyHash(executable_hash);
+        g_pilot_session_enabled=pilot_session_open(session_record,session_replay,hash)!=PILOT_SESSION_OFF;
+        pilot_session_actor(0);pilot_session_bind_devices(session_device_enter,session_device_leave);
+        pilot_session_bind_terminal(session_terminal);
+    }
     const char *window_title=getenv("XLLE_PILOT_WINDOW_TITLE");
     if(!window_title || !*window_title)window_title=PILOT_TITLE_NAME;
     fprintf(stderr,"[TITLE] id=%s name=%s route=native-title\n",PILOT_TITLE_ID,window_title);
@@ -1527,6 +1599,10 @@ int main(int argc,char **argv)
     return 0;
 #endif
     thread_guest_cpu_enter();
+    if(g_pilot_session_enabled) {
+        PilotSessionTurn boot={0,PILOT_SESSION_BOOT,0,0};pilot_session_turn(&boot);
+        InterlockedExchange(&session_started,1);
+    }
     scheduler_publish(0,0,0);scheduler_enter(0);
     entry();
 #ifdef PILOT_D3D_NATIVE

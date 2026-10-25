@@ -440,6 +440,7 @@ void pilot_audio_dispatch(unsigned entry)
     ++audio_original_dispatch_depth;
 #endif
     const uint32_t *a=audio_pointer(g_esp+4,pilot_audio_calls[entry].stack_bytes);
+    pilot_session_verify(PILOT_SESSION_SERVICE,UINT64_C(0x200000000)|entry,a,pilot_audio_calls[entry].stack_bytes);
     int32_t result=0;
     AcquireSRWLockExclusive(&audio_lock);
     int configuration=audio_configuration_enabled();

@@ -6,6 +6,7 @@
 #include <d3d11_3.h>
 #include "d3d8_combiners.h"
 #include "graphics_backend.h"
+#include "session_replay.h"
 static int pilot_visibility_active(void);
 #include "native_debug.h"
 #include "pilot_d3d_checks.h"
@@ -96,9 +97,13 @@ int pilot_gfx_frame_shape(uint32_t numerator,uint32_t denominator)
 }
 int pilot_gfx_client_size(uint32_t size[2])
 {
-    RECT client;
-    if(!size || !pilot_window || !GetClientRect(pilot_window,&client) || client.right<=0 || client.bottom<=0)return 0;
-    size[0]=(uint32_t)client.right;size[1]=(uint32_t)client.bottom;return 1;
+    RECT client;uint32_t row[3]={0};
+    if(!size)return 0;
+    if(pilot_window && GetClientRect(pilot_window,&client) && client.right>0 && client.bottom>0) {
+        row[0]=1;row[1]=(uint32_t)client.right;row[2]=(uint32_t)client.bottom;
+    }
+    pilot_session_value(PILOT_SESSION_WINDOW,0,row,sizeof(row));
+    if(row[0]){size[0]=row[1];size[1]=row[2];}return row[0]!=0;
 }
 /* Called by the pinned donor's presentation resolve, after its default fit
  * policy. Rendering remains in the original guest-sized scene allocation. */
@@ -238,7 +243,8 @@ int32_t pilot_gfx_pixel_program(const uint32_t states[57],uint32_t texture_modes
 
 __declspec(noreturn) void pilot_d3d_backend_stop(const char *reason)
 {
-    fprintf(stderr,"[D3D BACKEND STOP] %s\n",reason); fflush(stderr); ExitProcess(2);
+    fprintf(stderr,"[D3D BACKEND STOP] %s\n",reason); fflush(stderr);
+    pilot_session_report_stop(reason,2);ExitProcess(2);
 }
 HRESULT pilot_d3d_require(HRESULT result,const char *file,unsigned line)
 {
@@ -578,11 +584,13 @@ int32_t pilot_gfx_present(void)
 {
     /* This HWND belongs to the rendering thread, not SDL's input/bootstrap
      * thread. Dispatch its ordinary move/resize/close messages every frame. */
-    MSG message;
+    MSG message;uint32_t quit=0;
     while(PeekMessageW(&message,NULL,0,0,PM_REMOVE)) {
-        if(message.message==WM_QUIT)ExitProcess(0);
+        if(message.message==WM_QUIT){quit=1;break;}
         TranslateMessage(&message);DispatchMessageW(&message);
     }
+    pilot_session_value(PILOT_SESSION_WINDOW,1,&quit,sizeof(quit));
+    if(quit){pilot_session_report_stop("window closed",0);ExitProcess(0);}
     pilot_gfx_batch_flush();
     pilot_strip_batch_profile();
     if (!pilot_device) return E_FAIL;
@@ -830,8 +838,13 @@ static uint32_t pilot_feedback_validate(void)
         uint64_t dh=pilot_depth_target==UINT32_MAX?pilot_gfx_height():pilot_texture(pilot_depth_target)->height;
         int64_t dx=(int64_t)(c.Width*dw)-(int64_t)(d.Width*cw);
         int64_t dy=(int64_t)(c.Height*dh)-(int64_t)(d.Height*ch);
-        if(llabs(dx)>(int64_t)(cw>dw?cw:dw) || llabs(dy)>(int64_t)(ch>dh?ch:dh))
+        if(llabs(dx)>(int64_t)(cw>dw?cw:dw) || llabs(dy)>(int64_t)(ch>dh?ch:dh)) {
+            fprintf(stderr,"[D3D RASTER GRIDS] color=%08x guest=%llux%llu host=%ux%u depth=%08x guest=%llux%llu host=%ux%u z=%u stencil=%u\n",
+                pilot_color_target,(unsigned long long)cw,(unsigned long long)ch,c.Width,c.Height,
+                pilot_depth_target,(unsigned long long)dw,(unsigned long long)dh,d.Width,d.Height,
+                d3d8_GetRenderStates()[D3DRS_ZENABLE],d3d8_GetRenderStates()[D3DRS_STENCILENABLE]);
             pilot_d3d_backend_stop("enhanced target and depth use incompatible raster grids");
+        }
     }
     uint32_t mask=pilot_gfx_feedback_mask();
     if(mask&0xf00u)pilot_d3d_backend_stop("depth-output feedback is unqualified");

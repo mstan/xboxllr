@@ -31,6 +31,7 @@ static uint32_t media_directory(HANDLE file,IO_STATUS_BLOCK *io,const uint32_t a
     for(;;) {
         memset(&result,0,sizeof(result));io->Information=0;
         status=(uint32_t)media_nt_directory(file,NULL,NULL,NULL,io,result.bytes,sizeof(result),1,TRUE,a[8]?&mask:NULL,restart);
+        if(!status)pilot_session_value(PILOT_SESSION_FILE_RESULT,UINT64_C(0x4000000000000000)|a[0],result.bytes,sizeof(result.bytes));
         restart=FALSE;
         if(status){io->Information=0;return status;}
         memcpy(&length,result.bytes+60,4);

@@ -174,6 +174,12 @@ static uint32_t input_diagnostic_deliver(unsigned kind,unsigned port,uint32_t ar
 
 uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 {
+    if(pilot_session_mode()) {
+        uint8_t row[24]={0};uint32_t status=0;
+        if(pilot_session_mode()!=PILOT_SESSION_REPLAY)status=input_host_state_mapped(port,row+4);
+        input_diagnostic_u32(row,status);pilot_session_value(PILOT_SESSION_INPUT,port,row,sizeof(row));
+        status=input_diagnostic_get32(row);if(!status)memcpy(gamepad,row+4,18);return status;
+    }
     InitOnceExecuteOnce(&input_diagnostic_once,input_diagnostic_initialize,NULL,NULL);
     if(!input_diagnostic_record && !input_diagnostic_replay)return input_host_state_mapped(port,gamepad);
     uint8_t payload[18]={0};uint32_t status;
@@ -184,6 +190,12 @@ uint32_t pilot_input_host_state(unsigned port,uint8_t gamepad[18])
 }
 uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
 {
+    if(pilot_session_mode()) {
+        uint8_t row[28]={0};uint32_t status=0;
+        if(pilot_session_mode()!=PILOT_SESSION_REPLAY)status=input_host_caps_raw(port,row+4,row+22);
+        input_diagnostic_u32(row,status);pilot_session_value(PILOT_SESSION_CAPABILITIES,port,row,sizeof(row));
+        status=input_diagnostic_get32(row);if(!status){memcpy(gamepad,row+4,18);memcpy(rumble,row+22,4);}return status;
+    }
     InitOnceExecuteOnce(&input_diagnostic_once,input_diagnostic_initialize,NULL,NULL);
     if(!input_diagnostic_record && !input_diagnostic_replay)return input_host_caps_raw(port,gamepad,rumble);
     uint8_t payload[22]={0};uint32_t status;
@@ -193,6 +205,11 @@ uint32_t pilot_input_host_caps(unsigned port,uint8_t gamepad[18],uint8_t rumble[
 }
 uint32_t pilot_input_host_rumble(unsigned port,uint16_t left,uint16_t right)
 {
+    if(pilot_session_mode()) {
+        uint64_t argument=((uint64_t)port<<32)|left|((uint32_t)right<<16);
+        uint32_t status=pilot_session_mode()==PILOT_SESSION_REPLAY?0:input_host_rumble_raw(port,left,right);
+        return (uint32_t)pilot_session_value64(PILOT_SESSION_RUMBLE,argument,status);
+    }
     InitOnceExecuteOnce(&input_diagnostic_once,input_diagnostic_initialize,NULL,NULL);
     if(!input_diagnostic_record && !input_diagnostic_replay)return input_host_rumble_raw(port,left,right);
     uint32_t argument=(uint32_t)left|((uint32_t)right<<16);

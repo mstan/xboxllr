@@ -8,6 +8,7 @@
 #include <bcrypt.h>
 #include <stdlib.h>
 #include "network_host.h"
+#include "session_replay.h"
 
 static SRWLOCK network_host_lock=SRWLOCK_INIT;
 struct NetworkPrivateOwner { unsigned offline_policy; };
@@ -37,7 +38,10 @@ int pilot_network_host_entropy(void *context,unsigned bytes,unsigned char *outpu
 {
     (void)context;
     if(!output || !bytes || bytes>PILOT_NETWORK_RANDOM_MAX_BYTES)return 0;
-    return BCryptGenRandom(NULL,output,bytes,BCRYPT_USE_SYSTEM_PREFERRED_RNG)>=0;
+    int success=pilot_session_mode()==PILOT_SESSION_REPLAY?1:BCryptGenRandom(NULL,output,bytes,BCRYPT_USE_SYSTEM_PREFERRED_RNG)>=0;
+    success=(int)pilot_session_value64(PILOT_SESSION_ENTROPY,bytes,(uint32_t)success);
+    if(success)pilot_session_value(PILOT_SESSION_ENTROPY,(uint64_t)bytes|UINT64_C(0x100000000),output,bytes);
+    return success;
 }
 int pilot_network_host_link(void *context,uint32_t *flags)
 {

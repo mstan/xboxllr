@@ -12,6 +12,7 @@
 #include "input_sdl.h"
 #include "input_mods.h"
 #include "native_debug.h"
+#include "session_replay.h"
 #include "input_replay.inc"
 #include "input_control.inc"
 

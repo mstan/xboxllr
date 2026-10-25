@@ -392,6 +392,7 @@ static uint32_t media_query_full_attributes(uint32_t attributes,uint32_t output)
     if(status)return status;
     union {uint64_t alignment;unsigned char bytes[56];} stage={0};
     status=(uint32_t)media_nt_query(file,&io,stage.bytes,sizeof(stage.bytes),34);
+    if(!status)pilot_session_value(PILOT_SESSION_FILE_RESULT,UINT64_C(0x1000000000000000)|output,stage.bytes,sizeof(stage.bytes));
     if(status==0x103u)stop("synchronous named metadata unexpectedly pending",210);
     if(!CloseHandle(file))stop("named metadata handle release failed",210);
     if(!status) {
@@ -474,6 +475,7 @@ static void media_kernel(unsigned ordinal)
                 else {
                     struct { LARGE_INTEGER total,available; ULONG sectors,bytes; } geometry={0};
                     g_eax=(uint32_t)media_nt_volume(file,&io,&geometry,sizeof(geometry),3);
+                    if(!g_eax)pilot_session_value(PILOT_SESSION_FILE_RESULT,UINT64_C(0x2000000000000000)|a[0],&geometry,sizeof(geometry));
                     if (!g_eax) {
                         uint64_t unit=(uint64_t)geometry.sectors*geometry.bytes;
                         if (!unit || geometry.total.QuadPart<0 || geometry.available.QuadPart<0 ||
@@ -508,6 +510,8 @@ static void media_kernel(unsigned ordinal)
                      * semantics, including zero fields meaning unchanged. */
                     if (ordinal==226) memcpy(stage.bytes,memory+a[2],size);
                     g_eax=(uint32_t)(ordinal==226 ? media_nt_set : media_nt_query)(file,&io,stage.bytes,size,a[4]);
+                    if(ordinal==211 && !g_eax && a[4]==34)
+                        pilot_session_value(PILOT_SESSION_FILE_RESULT,UINT64_C(0x3000000000000000)|a[0],stage.bytes,size);
                     if (ordinal==211 && !g_eax) {
                         if(a[4]==34) {
                             memcpy(stage.bytes+32,stage.bytes+40,8);

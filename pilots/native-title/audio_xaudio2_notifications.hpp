@@ -9,7 +9,7 @@ static void notifications_close(Buffer *b)
 static void notifications_progress(Buffer *b)
 {
     if(!b->notification_count || !b->playing)return;
-    XAUDIO2_VOICE_STATE state;b->voice->GetState(&state);
+    XAUDIO2_VOICE_STATE state;session_voice_state(b,&state);
     UINT64 now=(state.SamplesPlayed-b->baseline)*b->align,previous=b->notification_bytes;
     if(now<previous)fail("notification playback epoch regressed");
     UINT32 end=b->looping && b->origin<b->loop_end?b->loop_end:b->bytes;
@@ -51,7 +51,7 @@ int32_t pilot_audio_buffer_notifications(void *opaque,unsigned count,const Pilot
         return result;
     }
     Guard guard;notifications_progress(b);
-    XAUDIO2_VOICE_STATE state;b->voice->GetState(&state);
+    XAUDIO2_VOICE_STATE state;session_voice_state(b,&state);
     notifications_close(b);memcpy(b->notifications,staged,count*sizeof(*staged));
     b->notification_count=count;b->notification_bytes=(state.SamplesPlayed-b->baseline)*b->align;
     return S_OK;

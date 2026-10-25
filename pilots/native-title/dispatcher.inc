@@ -47,7 +47,7 @@ static uint64_t dispatch_host_wall_time(void)
      * cost. Windows' precise clock supplies the same 100ns/1601 epoch directly,
      * shared with our absolute timers; no fabricated per-call advancement. */
     FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
-    return ((uint64_t)ft.dwHighDateTime<<32)|ft.dwLowDateTime;
+    return pilot_session_value64(PILOT_SESSION_WALL,0,((uint64_t)ft.dwHighDateTime<<32)|ft.dwLowDateTime);
 }
 static uint64_t dispatch_shift_time(uint64_t time,int64_t offset)
 {
@@ -82,8 +82,9 @@ static void dispatch_native_absolute_end(int token)
 static uint64_t dispatch_monotonic(void)
 {
     LARGE_INTEGER q,f; QueryPerformanceCounter(&q); QueryPerformanceFrequency(&f);
-    return (uint64_t)(q.QuadPart/f.QuadPart)*10000000ull+
+    uint64_t value=(uint64_t)(q.QuadPart/f.QuadPart)*10000000ull+
            (uint64_t)(q.QuadPart%f.QuadPart)*10000000ull/(uint64_t)f.QuadPart;
+    return pilot_session_value64(PILOT_SESSION_MONOTONIC,0,value);
 }
 static uint64_t dispatch_relative_deadline(uint64_t now,uint64_t delta)
 {
@@ -151,17 +152,19 @@ static void dispatch_wake_locked(void)
 static DWORD WINAPI dispatch_worker(void *unused)
 {
     (void)unused;
+    pilot_session_actor(66);
     const uint32_t base=0x72000000u,top=base+0x20000u;
     commit(base,0x20000);
     g_fs_base=base;
     MEM32(base)=0xffffffffu; MEM32(base+4)=top; MEM32(base+8)=base+0x2000;
     MEM32(base+0x18)=base; MEM32(base+0x1c)=base; MEM32(base+0x20)=base+0x28;
-    MEM32(base+0x28)=base+0x1000; MEM32(base+0x1000+0x12c)=GetCurrentThreadId();
+    MEM32(base+0x28)=base+0x1000; MEM32(base+0x1000+0x12c)=(uint32_t)pilot_session_value64(PILOT_SESSION_THREAD_ID,0,GetCurrentThreadId());
     AcquireSRWLockExclusive(&dispatch_lock);
     dispatch_worker_ready=1;WakeAllConditionVariable(&dispatch_pulse_idle);
     ReleaseSRWLockExclusive(&dispatch_lock);
     HANDLE waits[]={dispatch_changed,dispatch_absolute,dispatch_relative,NULL};
     for (;;) {
+        session_worker_begin(66);
         AcquireSRWLockExclusive(&dispatch_lock);
         uint64_t mono=dispatch_monotonic();
         dispatch_expire_locked(mono,dispatch_wall_time());
@@ -174,7 +177,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
             scheduler_callback_enter();
             AcquireSRWLockExclusive(&dispatch_lock);
             if(!dispatch_dpc_count) {
-                ReleaseSRWLockExclusive(&dispatch_lock);scheduler_retire();continue;
+                ReleaseSRWLockExclusive(&dispatch_lock);scheduler_retire();session_worker_end();continue;
             }
             struct PilotDpc d=dispatch_dpcs[0];
             memmove(dispatch_dpcs,dispatch_dpcs+1,--dispatch_dpc_count*sizeof(*dispatch_dpcs));
@@ -188,6 +191,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
             scheduler_retire();
             if (g_esp!=top) stop("DPC callback stack imbalance",d.routine);
             dispatch_in_dpc=0; MEM8(base+0x24)=0;
+            session_worker_end();
             continue;
         }
         if(dispatch_pulse_routine && dispatch_pulse_deadline<=mono) {
@@ -202,6 +206,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
             AcquireSRWLockExclusive(&dispatch_lock);
             dispatch_pulse_running=0;WakeAllConditionVariable(&dispatch_pulse_idle);
             ReleaseSRWLockExclusive(&dispatch_lock);
+            session_worker_end();
             continue;
         }
         if(dispatch_gpu_routine && (dispatch_gpu_deadline<=mono ||
@@ -219,6 +224,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
             }
             dispatch_gpu_running=0;WakeAllConditionVariable(&dispatch_pulse_idle);
             ReleaseSRWLockExclusive(&dispatch_lock);
+            session_worker_end();
             continue;
         }
         uint64_t absolute=UINT64_MAX,relative=UINT64_MAX;
@@ -242,6 +248,7 @@ static DWORD WINAPI dispatch_worker(void *unused)
         } else CancelWaitableTimer(dispatch_relative);
         waits[3]=dispatch_gpu_event;
         ReleaseSRWLockExclusive(&dispatch_lock);
+        session_worker_end();
         if (WaitForMultipleObjects(waits[3]?4:3,waits,FALSE,INFINITE)==WAIT_FAILED) stop("dispatcher wait failed",GetLastError());
     }
 }

@@ -252,6 +252,7 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
 #include "graphics_commands.inc"
 static void graphics_dispatch_impl(unsigned entry)
 {
+    if(g_pilot_session_enabled)session_watched_graphics_lock=&graphics_lock;
     if (entry>=PILOT_D3D_COUNT) stop("invalid graphics entry",entry);
     const uint32_t *arguments=graphics_pointer(g_esp+4,pilot_d3d_calls[entry].stack_bytes);
     if(pilot_verbose){fprintf(stderr,"[D3D] %s return=%08x",pilot_d3d_calls[entry].name,MEM32(g_esp));
@@ -824,9 +825,14 @@ void pilot_d3d_dispatch(unsigned entry)
         entry==PILOT_D3D_D3DDevice_BlockOnFence || entry==PILOT_D3D_D3DDevice_Swap ||
         entry==PILOT_D3D_Direct3D_CreateDevice || entry==PILOT_D3D_D3DDevice_Reset ||
         entry==PILOT_D3D_D3DDevice_Release;
+    if(g_pilot_session_enabled && entry<PILOT_D3D_COUNT) {
+        const void *arguments=graphics_pointer(g_esp+4,pilot_d3d_calls[entry].stack_bytes);
+        pilot_session_verify(PILOT_SESSION_SERVICE,UINT64_C(0x100000000)|entry,arguments,pilot_d3d_calls[entry].stack_bytes);
+    }
     int blocked=waits?scheduler_block_begin():0;
     if(!graphics_service_profile_enabled() || dispatch_in_dpc || entry>=PILOT_D3D_COUNT) {
         graphics_dispatch_impl(entry);scheduler_block_end(blocked);
+        if(entry==PILOT_D3D_D3DDevice_Swap)session_frame_boundary(graphics_swap_submitted);
 #ifdef PILOT_DISPLAY_LLE
         if(entry==PILOT_D3D_Direct3D_CreateDevice && !(g_eax&0x80000000u))
             display_lle_open(graphics_parameters[0],graphics_parameters[1],graphics_clock_hz,graphics_clock_origin);
@@ -841,6 +847,7 @@ void pilot_d3d_dispatch(unsigned entry)
     graphics_dispatch_impl(entry);
     graphics_service_profile_record(entry,begin,dispatch_monotonic());
     scheduler_block_end(blocked);
+    if(entry==PILOT_D3D_D3DDevice_Swap)session_frame_boundary(graphics_swap_submitted);
 #ifdef PILOT_DISPLAY_LLE
     if(entry==PILOT_D3D_Direct3D_CreateDevice && !(g_eax&0x80000000u))
         display_lle_open(graphics_parameters[0],graphics_parameters[1],graphics_clock_hz,graphics_clock_origin);

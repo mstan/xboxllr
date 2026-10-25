@@ -11,6 +11,12 @@ static void thread_reap_slot(unsigned slot)
         if(!thread->execution_handle || thread->reference_handle)
             stop("thread retirement lost its execution ownership",slot);
         DWORD status=WaitForSingleObject(thread->execution_handle,0);
+        DWORD observed=(DWORD)pilot_session_value64(PILOT_SESSION_WAIT,UINT64_C(0x100000000)|thread->identity,status);
+        if(pilot_session_mode()==PILOT_SESSION_REPLAY && observed==WAIT_OBJECT_0 && status==WAIT_TIMEOUT) {
+            status=WaitForSingleObject(thread->execution_handle,30000);
+            if(status!=WAIT_OBJECT_0)pilot_session_diverge("recorded native thread did not exit",thread->identity);
+        }
+        status=observed;
         if(status==WAIT_TIMEOUT)goto done;
         if(status!=WAIT_OBJECT_0)stop("thread exit observation failed",GetLastError());
         thread->retiring=1;

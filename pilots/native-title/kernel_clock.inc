@@ -29,10 +29,17 @@ static uint64_t kernel_clock_sample_locked(uint64_t now)
 static DWORD WINAPI kernel_clock_publish(void *argument)
 {
     (void)argument;
+    pilot_session_actor(65);
     HANDLE waits[2]={kernel_clock_stop,kernel_clock_timer};
+    if(g_pilot_session_enabled) {
+        AcquireSRWLockExclusive(&kernel_clock_lock);kernel_clock_phase=KERNEL_CLOCK_RUNNING;
+        ReleaseSRWLockExclusive(&kernel_clock_lock);
+        if(!SetEvent(kernel_clock_ready))stop("native kernel clock ready publication failed",GetLastError());
+    }
     for(;;) {
+        session_worker_begin(65);
         AcquireSRWLockExclusive(&kernel_clock_lock);
-        if(kernel_clock_phase==KERNEL_CLOCK_STOPPING){ReleaseSRWLockExclusive(&kernel_clock_lock);return 0;}
+        if(kernel_clock_phase==KERNEL_CLOCK_STOPPING){ReleaseSRWLockExclusive(&kernel_clock_lock);session_worker_end();return 0;}
         uint64_t now=dispatch_monotonic();kernel_clock_sample_locked(now);
         uint64_t deadline=pilot_kernel_clock_next_tick(&kernel_clock_model);
         uint64_t delay=deadline>kernel_clock_model.latest?deadline-kernel_clock_model.latest:1;
@@ -47,6 +54,7 @@ static DWORD WINAPI kernel_clock_publish(void *argument)
         int starting=kernel_clock_phase==KERNEL_CLOCK_STARTING;
         kernel_clock_phase=KERNEL_CLOCK_RUNNING;
         ReleaseSRWLockExclusive(&kernel_clock_lock);
+        session_worker_end();
         if(starting && !SetEvent(kernel_clock_ready))stop("native kernel clock ready publication failed",GetLastError());
         DWORD result=WaitForMultipleObjects(2,waits,FALSE,INFINITE);
         if(result==WAIT_OBJECT_0)return 0;

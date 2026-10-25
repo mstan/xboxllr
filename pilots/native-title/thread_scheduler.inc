@@ -20,9 +20,15 @@ static unsigned scheduler_owner; /* slot + 1, zero means no guest executing */
 static uint64_t scheduler_order,scheduler_since;
 static RECOMP_TLS unsigned scheduler_slot,scheduler_budget;
 static RECOMP_TLS int scheduler_attached;
+static int session_pending_locked(void);
+static int session_actor_next_locked(uint32_t actor);
+static void session_guest_begin_locked(void);
+static void session_guest_end_locked(unsigned boundary);
+static void scheduler_notify_locked(void);
 #ifdef PILOT_USB_LLE
 static volatile LONG scheduler_usb_pending;
 #endif
+#include "session_scheduler.inc"
 
 static uint64_t scheduler_clock(void)
 {
@@ -48,9 +54,10 @@ static unsigned scheduler_best_locked(void)
 }
 static void scheduler_notify_locked(void)
 {
-    if(scheduler_owner) {
+    if(scheduler_owner && scheduler_owner!=UINT32_MAX) {
         struct PilotScheduledThread *owner=&scheduled[scheduler_owner-1];
         uint32_t request=owner->suspended?4:0;
+        if(session_pending_locked())request|=1;
 #ifdef PILOT_USB_LLE
         if(scheduler_usb_pending)request|=8;
 #endif
@@ -75,12 +82,18 @@ static void scheduler_publish(unsigned slot,int suspended,int delta)
 }
 static void scheduler_acquire_locked(void)
 {
-    while(scheduler_owner || scheduler_best_locked()!=scheduler_slot+1) {
-        if(!SleepConditionVariableSRW(&scheduler_changed,&scheduler_lock,INFINITE,0))
+    uint64_t began=GetTickCount64();
+    while(scheduler_owner || !scheduler_ready(scheduler_slot) ||
+          (pilot_session_mode()==PILOT_SESSION_REPLAY?!session_actor_next_locked(scheduler_slot):
+           session_pending_locked() || scheduler_best_locked()!=scheduler_slot+1)) {
+        if(!SleepConditionVariableSRW(&scheduler_changed,&scheduler_lock,1000,0) && GetLastError()!=ERROR_TIMEOUT)
             stop("guest CPU wait failed",GetLastError());
+        if(pilot_session_mode()==PILOT_SESSION_REPLAY && GetTickCount64()-began>30000)
+            pilot_session_diverge("guest could not reach recorded admission",scheduler_slot);
     }
     scheduler_owner=scheduler_slot+1;scheduler_since=scheduler_clock();scheduler_budget=256;
     scheduler_notify_locked();
+    session_guest_begin_locked();
 }
 static void scheduler_enter(unsigned slot)
 {
@@ -102,6 +115,15 @@ static void scheduler_control(unsigned slot,int suspended,int delta)
 static void scheduler_checkpoint(void)
 {
     if(!scheduler_attached)return;
+    if(pilot_session_mode()==PILOT_SESSION_REPLAY) {
+        if(g_pilot_session_checkpoints>g_pilot_session_deadline)
+            pilot_session_diverge("guest passed recorded checkpoint",g_pilot_session_checkpoints);
+        if(g_pilot_session_checkpoints!=g_pilot_session_deadline || session_expected_boundary!=PILOT_SESSION_PREEMPT)return;
+        AcquireSRWLockExclusive(&scheduler_lock);
+        session_guest_end_locked(PILOT_SESSION_PREEMPT);
+        scheduled[scheduler_slot].order=++scheduler_order;scheduler_owner=0;
+        scheduler_notify_locked();scheduler_acquire_locked();ReleaseSRWLockExclusive(&scheduler_lock);return;
+    }
 #ifdef PILOT_USB_LLE
     /* The original kernel owns the single guest CPU's IRQL. DPC readiness
      * cannot preempt a caller at DISPATCH_LEVEL or a hardware ISR. */
@@ -116,10 +138,11 @@ static void scheduler_checkpoint(void)
     AcquireSRWLockExclusive(&scheduler_lock);
     if(scheduler_owner!=scheduler_slot+1)stop("guest executed without CPU ownership",scheduler_slot);
     unsigned best=scheduler_best_locked();
-    int yield=scheduled[scheduler_slot].suspended ||
+    int yield=session_pending_locked() || scheduled[scheduler_slot].suspended ||
         (best && scheduled[best-1].priority>scheduled[scheduler_slot].priority);
     if(!yield && (request&2) && scheduler_clock()-scheduler_since>=2000)yield=1;
     if(yield) {
+        session_guest_end_locked(PILOT_SESSION_PREEMPT);
         scheduled[scheduler_slot].order=++scheduler_order;scheduler_owner=0;
         scheduler_notify_locked();scheduler_acquire_locked();
     } else scheduler_notify_locked();
@@ -164,6 +187,7 @@ static int scheduler_block_begin(void)
      * the outer owner restores eligibility; nested wait scopes are inert. */
     if(scheduled[scheduler_slot].blocked){ReleaseSRWLockExclusive(&scheduler_lock);return 0;}
     if(scheduler_owner!=scheduler_slot+1)stop("blocking without guest CPU",scheduler_slot);
+    session_guest_end_locked(PILOT_SESSION_BLOCK);
     scheduled[scheduler_slot].blocked=1;scheduler_owner=0;scheduler_notify_locked();
     ReleaseSRWLockExclusive(&scheduler_lock);return 1;
 }
@@ -185,14 +209,19 @@ static void scheduler_retire(void)
     }
 #endif
     AcquireSRWLockExclusive(&scheduler_lock);
+    session_guest_end_locked(PILOT_SESSION_RETIRE);
     scheduled[scheduler_slot].live=0;
     if(scheduler_owner==scheduler_slot+1)scheduler_owner=0;
     scheduler_notify_locked();ReleaseSRWLockExclusive(&scheduler_lock);
     scheduler_attached=0;g_pilot_suspend_count=NULL;
+    if(session_device_suspended) {
+        session_device_suspended=0;pilot_session_actor(66);session_device_enter(66);
+    }
 }
 static void scheduler_callback_enter(void)
 {
     if(!scheduler_enabled)return;
+    if(session_device_owned) {session_device_leave(1);session_device_suspended=1;}
     if(scheduler_attached)stop("recursive guest interrupt execution unqualified",scheduler_slot);
     scheduler_publish(SCHEDULER_CALLBACK_SLOT,0,0);
     scheduler_enter(SCHEDULER_CALLBACK_SLOT);

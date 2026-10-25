@@ -16,7 +16,7 @@ import zipfile
 from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('native_release_runtime', 'native_revisions', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
+MODULES = ('native_release_runtime', 'native_revisions', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_session_diagnostics', 'replay_native_session', 'native_session_mods', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage', 'xbe_identity')
 # Narrow native VP build closure. No machine/CPU executable, original input,
 # generated title body or private fixture is part of the startup source kit.
@@ -200,7 +200,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     (output / relative).parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / relative, output / relative)
     from native_input_mods import manifests as input_manifests
-    for path in input_manifests(source):
+    from native_session_mods import manifests as session_manifests
+    for path in input_manifests(source) + session_manifests(source):
         relative = path.relative_to(ROOT)
         (output / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, output / relative)
@@ -289,7 +290,7 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         executable='native/' + runtime.name, launcher_executable='native/Launcher.exe',
         startup=dict(executable='native/XboxStartup.exe', module='native/XboxStartup.dll',
                      default_enabled=intro_default),
-        capabilities=dict(visual_mods=available, startup_intro=True), mods=mods,
+        capabilities=dict(visual_mods=available, startup_intro=True, session_replay_version=2), mods=mods,
         launcher=dict(frame_modes=source.get('launcher', {}).get('frame_modes', []),
                       defaults=source.get('launcher', {}).get('defaults', {})),
         runtime=source.get('runtime', {}), files=files,

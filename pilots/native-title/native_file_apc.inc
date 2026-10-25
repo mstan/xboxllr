@@ -53,7 +53,8 @@ static struct NativeFileApc *native_apc_prepare(uint32_t routine,uint32_t contex
     *status=0xc000009au;if(!apc)return NULL;
     AcquireSRWLockShared(&thread_lock);
     struct PilotThread *thread=&threads[current_thread_slot];
-    if(!thread->identity || thread->finished || thread->retiring || thread->tid!=GetCurrentThreadId())
+    if(!thread->identity || thread->finished || thread->retiring ||
+       (thread->host_tid?thread->host_tid:thread->tid)!=GetCurrentThreadId())
         stop("file APC lost requesting thread identity",current_thread_slot);
     int copied=DuplicateHandle(GetCurrentProcess(),thread->execution_handle,GetCurrentProcess(),&apc->thread,
                                THREAD_SET_CONTEXT|SYNCHRONIZE,FALSE,0);

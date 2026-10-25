@@ -20,9 +20,21 @@ HEADER = '''
 #ifndef PILOT_THREAD_CHECKPOINT
 extern RECOMP_TLS volatile uint32_t *g_pilot_suspend_count;
 void pilot_thread_checkpoint(void);
+#ifdef PILOT_SESSION_RUNTIME
+extern int g_pilot_session_enabled;
+extern RECOMP_TLS uint64_t g_pilot_session_checkpoints,g_pilot_session_deadline;
+#define PILOT_THREAD_CHECKPOINT() do { \\
+    if (g_pilot_session_enabled) { \\
+        ++g_pilot_session_checkpoints; \\
+        if (g_pilot_session_checkpoints>=g_pilot_session_deadline || \\
+            (g_pilot_suspend_count && *g_pilot_suspend_count)) pilot_thread_checkpoint(); \\
+    } else if (g_pilot_suspend_count && *g_pilot_suspend_count) pilot_thread_checkpoint(); \\
+} while (0)
+#else
 #define PILOT_THREAD_CHECKPOINT() do { \\
     if (g_pilot_suspend_count && *g_pilot_suspend_count) pilot_thread_checkpoint(); \\
 } while (0)
+#endif
 #endif
 '''
 
@@ -59,13 +71,18 @@ def apply(directory):
         changes.append((path, code)); total += count
     header = directory / 'recomp_types.h'
     text = header.read_text(encoding='utf-8')
-    if '#ifndef PILOT_THREAD_CHECKPOINT' not in text:
-        text += HEADER
+    if '#ifndef PILOT_THREAD_CHECKPOINT' in text:
+        # The instrumentation footer is appended by this module. Upgrade its
+        # entire versioned contract instead of retaining an older macro.
+        start=text.index('/* Guest scheduler safe points:')
+        text=text[:start].rstrip()+'\n'+HEADER
+    else:
+        text+=HEADER
     changes.append((header, text))
     for path, code in changes:
         if path.read_bytes()!=code.encode('utf-8'):
             path.write_text(code, encoding='utf-8', newline='\n')
-    return dict(version=1, loop_targets=total, function_entry='recomp_trace_enter')
+    return dict(version=2, loop_targets=total, function_entry='recomp_trace_enter', session_checkpoints=True)
 
 
 def upgrade(output):

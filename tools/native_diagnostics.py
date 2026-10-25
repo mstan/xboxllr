@@ -125,7 +125,7 @@ def stop_summary(log):
         source.seek(0, 2)
         source.seek(max(0, source.tell() - 65536))
         tail = source.read().decode('utf-8', errors='replace')
-    matches = re.findall(r'\[PILOT STOP\] ([A-Za-z0-9 _(),=:+.-]{1,180})', tail)
+    matches = re.findall(r'\[(?:PILOT STOP|D3D BACKEND STOP|PILOT AUDIO STOP|PILOT INPUT STOP|SESSION REPLAY DIVERGENCE)\] ([A-Za-z0-9 _(),=:+.-]{1,180})', tail)
     return matches[-1] if matches else None
 
 

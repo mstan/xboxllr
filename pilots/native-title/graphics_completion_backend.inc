@@ -78,11 +78,19 @@ static void pilot_completion_events_init(void)
     }
     fprintf(stderr,"[GPU COMPLETION] native_events=%u\n",pilot_completion_context!=NULL);
 }
-static int pilot_completion_event_ready(HANDLE event)
+static int pilot_completion_event_ready_raw(HANDLE event)
 {
     DWORD result=WaitForSingleObject(event,0);
     if(result==WAIT_FAILED)pilot_d3d_backend_stop("native GPU event wait failed");
     return result==WAIT_OBJECT_0;
+}
+static int pilot_completion_event_ready(HANDLE event)
+{
+    int actual=pilot_completion_event_ready_raw(event);
+    int recorded=(int)pilot_session_value64(PILOT_SESSION_GPU_BUSY,UINT64_C(0x8000000000000000),actual);
+    if(pilot_session_mode()==PILOT_SESSION_REPLAY && recorded && !actual && WaitForSingleObject(event,30000)!=WAIT_OBJECT_0)
+        pilot_session_diverge("recorded GPU event did not signal",0);
+    return recorded;
 }
 static uint64_t pilot_mark_work(void)
 {
@@ -101,8 +109,19 @@ static void pilot_completion_poll(void)
         HRESULT hr=ID3D11DeviceContext_GetData(context,(ID3D11Asynchronous*)entry->query,&complete,sizeof(complete),0);
         pilot_gpu_call_end("GetData",started);
         pilot_d3d_require(hr,__FILE__,__LINE__);
-        if(hr!=S_OK || !complete)break;
-        if(entry->event && !pilot_completion_event_ready(entry->event))break;
+        int ready=hr==S_OK && complete && (!entry->event || pilot_completion_event_ready_raw(entry->event));
+        int recorded=(int)pilot_session_value64(PILOT_SESSION_GPU_BUSY,entry->serial,ready);
+        if(!recorded)break;
+        if(pilot_session_mode()==PILOT_SESSION_REPLAY && !ready) {
+            uint64_t began=GetTickCount64();
+            do {
+                if(GetTickCount64()-began>30000)pilot_session_diverge("recorded GPU work did not complete",entry->serial);
+                Sleep(1);complete=FALSE;
+                hr=ID3D11DeviceContext_GetData(context,(ID3D11Asynchronous*)entry->query,&complete,sizeof(complete),0);
+                pilot_d3d_require(hr,__FILE__,__LINE__);
+                ready=hr==S_OK && complete && (!entry->event || pilot_completion_event_ready_raw(entry->event));
+            } while(!ready);
+        }
         pilot_completed=entry->serial;pilot_completion_head=entry->next;
         if(!pilot_completion_head)pilot_completion_tail=NULL;
         started=pilot_gpu_call_begin();

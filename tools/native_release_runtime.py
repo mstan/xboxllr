@@ -361,8 +361,15 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
     command = [str(inside(root, data['executable'])), str(image),
                str(profile / 'eeprom.bin'), str(image.parent), str(state)]
     from native_diagnostics import Session
-    session = Session(root, data, command[0], image, profile, state, catalog.selection(), env,
-        enabled=os.environ.get('XBOXLLR_DIAGNOSTICS') == '1', hdd=hdd)
+    from native_session_mods import enabled as session_mod_enabled
+    full_capture = data.get('capabilities', {}).get('session_replay_version') == 2 and (
+        session_mod_enabled(catalog) or os.environ.get('XBOXLLR_DIAGNOSTICS') == '1')
+    if full_capture:
+        from native_session_diagnostics import FullSession
+        session = FullSession(root, data, command[0], image, profile, state, catalog.selection(), env, hdd=hdd)
+    else:
+        session = Session(root, data, command[0], image, profile, state, catalog.selection(), env,
+            enabled=os.environ.get('XBOXLLR_DIAGNOSTICS') == '1', hdd=hdd)
     log = session.log_path.open('w', encoding='utf-8')
     with log:
         # Only this launch's startup/native children participate. The original

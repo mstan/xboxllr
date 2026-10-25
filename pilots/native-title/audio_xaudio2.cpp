@@ -22,9 +22,10 @@
 #include "audio_backend.h"
 #include "audio_dsp.h"
 #include "audio_capture_windows.hpp"
+#include "session_replay.h"
 
 static void fail(const char *what,HRESULT hr=E_FAIL)
-{fprintf(stderr,"[PILOT AUDIO STOP] %s: %08x\n",what,(unsigned)hr);fflush(stderr);ExitProcess(2);}
+{fprintf(stderr,"[PILOT AUDIO STOP] %s: %08x\n",what,(unsigned)hr);fflush(stderr);pilot_session_report_stop(what,2);ExitProcess(2);}
 static bool float_format(const WAVEFORMATEX *f,unsigned channels)
 {
     if(!f || f->nChannels!=channels || f->nSamplesPerSec!=48000 || f->wBitsPerSample!=32 ||
@@ -183,13 +184,20 @@ struct Buffer final:public IXAudio2VoiceCallback {
     void STDMETHODCALLTYPE OnVoiceError(void*,HRESULT hr) override {error=hr;SetEvent(wake);}
 };
 static Buffer *buffers[256];
+static void session_voice_state(Buffer *b,XAUDIO2_VOICE_STATE *out,UINT32 flags=0)
+{
+    b->voice->GetState(out,flags);
+    uint64_t observation[]={out->SamplesPlayed,out->BuffersQueued};
+    pilot_session_value(PILOT_SESSION_AUDIO_STATE,(b->capture_id<<8)|flags,observation,sizeof(observation));
+    out->SamplesPlayed=observation[0];out->BuffersQueued=(UINT32)observation[1];
+}
 #include "audio_xaudio2_notifications.hpp"
 static LONG64 audio_capture_next_id;
 static void diagnostic_capture_start(void);
 static void diagnostic_capture_close(void);
 static UINT32 position(Buffer *b,XAUDIO2_VOICE_STATE *state=nullptr)
 {
-    XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
+    XAUDIO2_VOICE_STATE s;session_voice_state(b,&s);
     UINT64 cursor=(UINT64)b->origin+(s.SamplesPlayed-b->baseline)*b->align;
     if(state)*state=s;
     if(!b->looping)return cursor>=b->bytes?0:(UINT32)cursor;
@@ -271,7 +279,7 @@ static HRESULT fill(Buffer *b)
     if(!b->playing)return S_OK;
     notifications_progress(b);
     if(b->paused || b->submitted_end)return S_OK;
-    XAUDIO2_VOICE_STATE s;b->voice->GetState(&s,XAUDIO2_VOICE_NOSAMPLESPLAYED);
+    XAUDIO2_VOICE_STATE s;session_voice_state(b,&s,XAUDIO2_VOICE_NOSAMPLESPLAYED);
     if(!s.BuffersQueued)audio_stream_record(b,"empty");
     UINT32 frames=b->frequency/100;if(!frames)frames=1;if(frames>512)frames=512;
     // Four nominal 10-ms chunks, more at high playback rates. Every queued
@@ -280,7 +288,21 @@ static HRESULT fill(Buffer *b)
     if(target<4)target=4;if(target>32)target=32;
     for(auto &chunk:b->chunks) {
         if(s.BuffersQueued>=target || b->submitted_end)break;
-        bool free=false;if(!chunk.busy.compare_exchange_strong(free,true))continue;
+        bool free=false;
+        if(pilot_session_mode()==PILOT_SESSION_REPLAY) {
+            bool available=pilot_session_value64(PILOT_SESSION_AUDIO_STATE,(b->capture_id<<16)|0x8000u|(uint32_t)(&chunk-b->chunks),0)!=0;
+            if(!available)continue;
+            uint64_t began=GetTickCount64();
+            while(!chunk.busy.compare_exchange_strong(free,true)) {
+                free=false;
+                if(GetTickCount64()-began>30000)pilot_session_diverge("audio chunk did not retire",b->capture_id);
+                Sleep(1);
+            }
+        } else {
+            bool available=chunk.busy.compare_exchange_strong(free,true);
+            pilot_session_value64(PILOT_SESSION_AUDIO_STATE,(b->capture_id<<16)|0x8000u|(uint32_t)(&chunk-b->chunks),available?1:0);
+            if(!available)continue;
+        }
         UINT32 n=frames*b->align;if(!b->looping && n>b->bytes-b->next)n=b->bytes-b->next;
         UINT32 copied=0,cursor=b->next;
         while(copied<n) {
@@ -303,8 +325,13 @@ static DWORD WINAPI feed(void*)
     while(!exiting.load()) {
         DWORD wait=WaitForSingleObject(wake,20);
         if(wait!=WAIT_OBJECT_0 && wait!=WAIT_TIMEOUT)fail("audio feeder event",HRESULT_FROM_WIN32(GetLastError()));
-        Guard guard;
-        for(auto *b:buffers)if(b && b->playing){HRESULT hr=fill(b);if(FAILED(hr))fail("audio source queue",hr);}
+        if(exiting.load())break;
+        int session_token=pilot_session_device_enter(67);
+        {
+            Guard guard;
+            for(auto *b:buffers)if(b && b->playing){HRESULT hr=fill(b);if(FAILED(hr))fail("audio source queue",hr);}
+        }
+        pilot_session_device_leave(session_token);
     }
     return 0;
 }
@@ -687,7 +714,7 @@ static HRESULT seek(Buffer *b,UINT32 at,bool play);
 static XAUDIO2_VOICE_STATE refresh(Buffer *b)
 {
     notifications_progress(b);
-    XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
+    XAUDIO2_VOICE_STATE s;session_voice_state(b,&s);
     if(b->playing && !b->paused && b->submitted_end && !s.BuffersQueued){b->playing=false;b->origin=b->next=0;b->baseline=s.SamplesPlayed;b->notification_bytes=0;b->submitted_end=false;audio_ingress_record(b,4,0,nullptr,0);}
     return s;
 }
@@ -708,7 +735,7 @@ static HRESULT seek(Buffer *b,UINT32 at,bool play)
     notifications_progress(b);
     HRESULT hr=b->voice->Stop();if(SUCCEEDED(hr))hr=b->voice->FlushSourceBuffers();
     if(FAILED(hr))return hr;
-    XAUDIO2_VOICE_STATE s;b->voice->GetState(&s);
+    XAUDIO2_VOICE_STATE s;session_voice_state(b,&s);
     b->origin=b->next=at;b->baseline=s.SamplesPlayed;b->notification_bytes=0;b->submitted_end=false;b->playing=play;
     if(!play)b->paused=false;
     audio_ingress_record(b,4,0,nullptr,0);
