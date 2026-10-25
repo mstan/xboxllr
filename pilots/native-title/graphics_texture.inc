@@ -257,7 +257,7 @@ static unsigned graphics_surface_adopt_cpu(uint32_t header)
     if(!allocation || allocation->borrowers==UINT32_MAX)stop("caller depth surface requires owned physical backing",header);
     ++allocation->borrowers;ReleaseSRWLockExclusive(&vm_lock);
 #endif
-    int32_t result=pilot_gfx_texture_create_usage(width,height,1,surface.format,surface.usage,&surface.native);
+    int32_t result=pilot_gfx_depth_surface_create(width,height,&surface.native);
     if(result<0) {
         graphics_texture_borrow_release(&surface);
         stop("native borrowed depth surface creation failed",(uint32_t)result);

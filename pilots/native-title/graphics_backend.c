@@ -70,6 +70,7 @@ static PilotPresentation pilot_presentation={0,0,0x11,1,0};
 int pilot_d3d_has_auto_depth(void){return pilot_presentation.depth!=0;}
 /* Optional raster policy is owned by the resolved static mod registry. */
 __declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);
+static int pilot_depth_surface_raster;
 #include "graphics_visual_backend.inc"
 static uint32_t pilot_window_aspect[2],pilot_window_height,pilot_frame_aspect[2];
 static int pilot_aspect_valid(uint32_t n,uint32_t d)
@@ -975,7 +976,7 @@ int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 }
 int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle)
 {return pilot_gfx_texture_create_usage(width,height,levels,format,0,handle);}
-int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,uint32_t *handle)
+static int32_t pilot_texture_create_policy(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,int depth_surface,uint32_t *handle)
 {
     if(!pilot_device || !handle) return E_INVALIDARG;
     int yuv=format==0x24 || format==0x25;
@@ -1002,7 +1003,9 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
      * Keep guest layout/format in the bridge; use ordinary BGRA storage on
      * either donor and expand only changed CPU uploads. This is not V8U8.
      * Reference: xemu GL/Vulkan SZ_G8B8 swizzles, Cxbx G8B8 conversion. */
+    pilot_depth_surface_raster=depth_surface;
     HRESULT hr=d3d8_CreateTextureImpl(width,height,levels,usage,(D3DFORMAT)(format==0x28?6:format),&object);
+    pilot_depth_surface_raster=0;
     if(FAILED(hr)) return hr;
     ID3D11RenderTargetView *rtv=NULL;
     ID3D11DepthStencilView *dsv=NULL;
@@ -1031,6 +1034,10 @@ int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t l
     *handle=slot+1;
     return S_OK;
 }
+int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,uint32_t *handle)
+{return pilot_texture_create_policy(width,height,levels,format,usage,0,handle);}
+int32_t pilot_gfx_depth_surface_create(uint32_t width,uint32_t height,uint32_t *handle)
+{return pilot_texture_create_policy(width,height,1,0x2e,2,1,handle);}
 void pilot_gfx_texture_destroy(uint32_t handle)
 {
     D3D8Texture *texture=pilot_texture(handle);

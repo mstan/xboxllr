@@ -56,6 +56,16 @@ class HostInputDiagnosticTests(unittest.TestCase):
             self.assertEqual(concurrent.returncode, 0, concurrent.stderr)
             # inspect_inputs checks every sequence and timestamp, not just size.
             self.assertEqual(inspect_inputs(concurrent_path)['records'], 2401)
+            timed = work / 'timed.bin'
+            press_a=bytes([0,0,255])+bytes(19)
+            press_b=bytes([0,0,0,255])+bytes(18)
+            rows=[(500,1,0,press_a),(500,2,0,bytes([255])*22),
+                  (600,1,0,bytes(22)),(700,1,0,press_b),(800,1,1167,bytes(22))]
+            timed.write_bytes(INPUT_HEADER+b''.join(INPUT_RECORD.pack(seq,at,kind,0,status,0,payload,bytes(10))
+                for seq,(at,kind,status,payload) in enumerate(rows)))
+            played=run('timed',timed)
+            self.assertEqual(played.returncode,0,played.stderr)
+            self.assertIn('INPUT PLAYBACK END',played.stderr)
             corrupt = work / 'corrupt.bin'
             changed = bytearray(capture.read_bytes())
             changed[16+63] = 1  # Reserved byte cannot become a hidden input.

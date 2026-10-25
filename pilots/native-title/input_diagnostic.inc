@@ -15,7 +15,12 @@ static uint8_t input_diagnostic_queue[INPUT_DIAGNOSTIC_QUEUE][64];
 static unsigned input_diagnostic_read,input_diagnostic_write;
 static volatile LONG input_diagnostic_failed,input_diagnostic_done;
 static DWORD input_diagnostic_worker_id;
-static int input_diagnostic_record,input_diagnostic_replay;
+static volatile LONG input_diagnostic_finishing;
+static int input_diagnostic_record,input_diagnostic_replay,input_diagnostic_timed;
+static int input_timed_pending,input_timed_eof,input_timed_started;
+static uint8_t input_timed_row[64],input_timed_payload[4][2][22];
+static uint32_t input_timed_status[4][3];
+static uint64_t input_timed_start,input_timed_origin;
 static uint64_t input_diagnostic_sequence,input_diagnostic_started,input_diagnostic_previous_time;
 
 static void input_diagnostic_u32(uint8_t *p,uint32_t value)
@@ -64,6 +69,7 @@ static DWORD WINAPI input_diagnostic_writer(LPVOID unused)
 static void input_diagnostic_finish(void)
 {
     if(input_diagnostic_worker) {
+        if(InterlockedCompareExchange(&input_diagnostic_finishing,1,0))return;
         if(GetCurrentThreadId()==input_diagnostic_worker_id){input_diagnostic_fail("writer cannot drain itself");return;}
         InterlockedExchange(&input_diagnostic_done,1);SetEvent(input_diagnostic_event);
         /* Explicit terminal stops and normal CRT shutdown only, never an
@@ -114,7 +120,9 @@ static BOOL CALLBACK input_diagnostic_initialize(PINIT_ONCE once,PVOID parameter
             fprintf(stderr,"[DIAGNOSTIC INPUT STOP] invalid replay size/header\n");ExitProcess(3);
         }
         input_diagnostic_replay=1;
-        fprintf(stderr,"[DIAGNOSTIC INPUTS] strict call-sequence replay; clocks/scheduler are not restored\n");
+        char timed[2]={0};input_diagnostic_timed=GetEnvironmentVariableA("XLLE_PILOT_DIAGNOSTIC_TIMED",timed,sizeof(timed))==1 && timed[0]=='1';
+        for(unsigned p=0;p<4;++p){input_timed_status[p][0]=input_timed_status[p][1]=ERROR_DEVICE_NOT_CONNECTED;input_timed_status[p][2]=ERROR_NOT_SUPPORTED;}
+        fprintf(stderr,"[DIAGNOSTIC INPUTS] %s; clocks/scheduler are not restored\n",input_diagnostic_timed?"elapsed-time controller playback":"strict call-sequence replay");
     }
     return TRUE;
 }
@@ -142,10 +150,51 @@ static void input_diagnostic_publish(unsigned kind,unsigned port,uint32_t status
     else if(full)input_diagnostic_fail("bounded writer queue overflow");
     else if(signal)SetEvent(input_diagnostic_event);
 }
+/* Lightweight playback follows the recorded input timeline independently of
+ * host polling frequency. It repeats controls; it makes no machine-determinism
+ * claim. Validation and the small per-port cache remain allocation-bounded. */
+static uint32_t input_diagnostic_timed_deliver(unsigned kind,unsigned port,uint8_t *payload,unsigned bytes)
+{
+    if(port>3 || kind<1 || kind>3){fprintf(stderr,"[DIAGNOSTIC INPUT STOP] invalid timed input request\n");ExitProcess(3);}
+    uint64_t now=GetTickCount64();
+    if(!input_timed_started){input_timed_started=1;input_timed_start=now;}
+    uint64_t elapsed=now-input_timed_start;
+    for(;;) {
+        if(!input_timed_pending && !input_timed_eof) {
+            DWORD count=0;
+            if(!ReadFile(input_diagnostic_file,input_timed_row,64,&count,NULL) || (count && count!=64)) {
+                fprintf(stderr,"[DIAGNOSTIC INPUT STOP] truncated timed input record\n");ExitProcess(3);
+            }
+            if(!count){input_timed_eof=1;fprintf(stderr,"[DIAGNOSTIC INPUT PLAYBACK END] consumed=%llu; controls repeated, original outcome not established\n",(unsigned long long)input_diagnostic_sequence);}
+            else {
+                unsigned k=input_diagnostic_get32(input_timed_row+16),p=input_diagnostic_get32(input_timed_row+20);
+                uint64_t at=input_diagnostic_get64(input_timed_row+8);
+                unsigned used=k==1?18:k==2?22:0;
+                int invalid=input_diagnostic_get64(input_timed_row)!=input_diagnostic_sequence || at<input_diagnostic_previous_time || k<1 || k>3 || p>3 || (k!=3 && input_diagnostic_get32(input_timed_row+28));
+                for(unsigned i=32+used;i<64;++i)if(input_timed_row[i])invalid=1;
+                if(invalid){fprintf(stderr,"[DIAGNOSTIC INPUT STOP] invalid timed input record\n");ExitProcess(3);}
+                if(!input_diagnostic_sequence)input_timed_origin=at;
+                input_diagnostic_previous_time=at;input_timed_pending=1;
+            }
+        }
+        if(!input_timed_pending || input_diagnostic_previous_time-input_timed_origin>elapsed)break;
+        unsigned k=input_diagnostic_get32(input_timed_row+16),p=input_diagnostic_get32(input_timed_row+20);
+        input_timed_status[p][k-1]=input_diagnostic_get32(input_timed_row+24);
+        if(k<3)memcpy(input_timed_payload[p][k-1],input_timed_row+32,k==1?18:22);
+        input_timed_pending=0;++input_diagnostic_sequence;
+    }
+    uint32_t status=input_timed_status[port][kind-1];
+    if(!status && bytes)memcpy(payload,input_timed_payload[port][kind-1],bytes);
+    return status;
+}
 static uint32_t input_diagnostic_deliver(unsigned kind,unsigned port,uint32_t argument,uint8_t *payload,unsigned bytes)
 {
     uint8_t row[64];DWORD count=0;
     AcquireSRWLockExclusive(&input_diagnostic_lock);
+    if(input_diagnostic_timed) {
+        uint32_t status=input_diagnostic_timed_deliver(kind,port,payload,bytes);
+        ReleaseSRWLockExclusive(&input_diagnostic_lock);return status;
+    }
     if(!ReadFile(input_diagnostic_file,row,64,&count,NULL)) {
         fprintf(stderr,"[DIAGNOSTIC INPUT STOP] replay read failure\n");ExitProcess(3);
     }

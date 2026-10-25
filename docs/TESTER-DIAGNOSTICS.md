@@ -8,28 +8,48 @@ game revision, framework, mods, controller settings and terminal stop.
 
 ## Recording a problem
 
-Blinx and both supported JSRF revisions enable **Replay diagnostics** in the
-Mods menu by default. Its saved setting applies on the next launch. Start the
-game normally, reproduce the problem and close the game if it remains open.
+Blinx and both supported JSRF revisions enable **Crash and input logs** in the
+Mods menu by default. Its saved setting applies on the next launch. Play
+normally and reproduce the problem. Each launch retains its game log, exit
+report, controller input timeline and private starting saves/settings.
+**Start with Diagnostics.cmd** enables input recording for one launch.
+
+Renderer stops include target dimensions, guest registers and recent translated
+calls, and drain the input writer before exiting. Hardware faults or forced
+termination may leave an incomplete final input tail; the report distinguishes
+that from a confirmed final flush. Recording uses a bounded 256 KiB writer queue
+and a 128 MiB input-file budget. A writer failure is explicit and gameplay
+continues. Full scheduler, clock and DSP recording is disabled in normal play.
+
 Send **report.json** and describe the stage/action. Keep the matching private
-folder locally so a developer can request the specific evidence needed.
-**Start with Diagnostics.cmd** also enables recording for one launch.
+folder locally. There is no automatic upload. **Do not upload
+`PRIVATE-DO-NOT-SHARE` wholesale:** it contains starting saves, console identity
+and signing secrets, inputs and logs with local paths.
 
-There is no automatic upload. **Do not upload `PRIVATE-DO-NOT-SHARE` wholesale.**
-It contains private starting saves, console identity/signing secrets, runtime
-journals and logs with local paths. Cache files can contain original game data;
-a selected HDD image is also copied privately. Original game files must not be
-included in public reports or release archives.
+## Lightweight input playback
 
-Recording takes an independent copy of the complete initial writable state,
-including empty directories and utility caches, plus the console profile and
-any selected HDD image. The game continues to write its normal persistent
-progress. Replay uses a new disposable copy and never restores or replaces the
-owner's saves. Linked storage, a changing snapshot or insufficient space makes
-replay explicitly unavailable instead of creating a partial baseline.
+Use the identical package, your own matching game and a new disposable work
+directory. The helper restores a copy of the starting persistent partition and
+console profile, uses cold utility caches and keeps the owner's saves untouched.
 
-## Verified session replay
+```powershell
+python tools/replay_native_diagnostic.py G:/Reports/session --check
+python tools/replay_native_diagnostic.py G:/Reports/session --root G:/Builds/JSRF --image G:/Owned/JSRF/default.xbe --work-dir G:/Temp/JSRF-input-playback --detail
+```
 
+Playback is hidden and muted by default. `--visible` shows it with muted audio;
+`--detail` enables verbose diagnostic traces during playback. Recorded controller
+states follow their elapsed-time timeline independently of host polling frequency.
+`--strict-input-calls` retains the older exact input-call checker.
+Input playback repeats controls; scheduling, clocks and device timing are not
+restored, so it cannot claim deterministic simulation or the same crash outcome.
+The report explicitly records that limitation. The bundled `python/python.exe`
+can run either helper in place of system Python.
+
+## Full session replay development mode
+
+The heavier full recorder is separate development tooling, enabled explicitly
+with `XBOXLLR_FULL_REPLAY=1`. It is not the default play-session logger.
 Replay starts at the recorded launch using the identical binary, dependencies,
 owned game revision and mod plan. Normal translated execution rebuilds native
 call stacks. The journal captures CPU/device admission, input and rumble,
@@ -73,10 +93,8 @@ and enables no debug listener. `--visible` shows the game while keeping it muted
 The new directory retains `game.log` and `reproduction.json`.
 The bundled `python/python.exe` can run the helper in place of system `python`.
 
-Older input-only recordings retain their separate helper,
-`tools/replay_native_diagnostic.py`. They are not full session recordings and
-cannot establish deterministic simulation or terminal failure reproduction.
-Developer launches can request diagnostics with `XBOXLLR_DIAGNOSTICS=1`.
+`XBOXLLR_DIAGNOSTICS=1` requests the lightweight input logger.
+Full-session development captures use their separate schema and helper.
 
 ## Focused renderer captures
 

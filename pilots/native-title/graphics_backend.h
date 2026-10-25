@@ -110,6 +110,8 @@ struct PilotRasterObservation {
 int32_t pilot_gfx_reference_raster(struct PilotRasterObservation *out);
 int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle);
 int32_t pilot_gfx_texture_alias(unsigned kind,uint32_t source,uint32_t format,uint32_t *handle);
+/* Output-only standalone depth uses the scene pixel grid regardless of shape. */
+int32_t pilot_gfx_depth_surface_create(uint32_t width,uint32_t height,uint32_t *handle);
 int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,uint32_t *handle);
 int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color);
 int32_t pilot_gfx_texture_clear_depth(uint32_t handle,uint32_t flags,float depth,uint32_t stencil);

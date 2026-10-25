@@ -163,6 +163,15 @@ static void session_host_wait_end(int token)
 }
 static void session_terminal(const char *reason,uint32_t code)
 {
+    fprintf(stderr,"[NATIVE STOP CONTEXT] reason=%s code=%u host_thread=%u entries=%llu eax=%08x ecx=%08x edx=%08x ebx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x fs=%08x kernel=%u\n",
+        reason,code,GetCurrentThreadId(),(unsigned long long)entries,g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_ebp,g_esp,g_fs_base,next_kernel_ordinal);
+    fprintf(stderr,"[NATIVE STOP RECENT]");
+    unsigned count=recent_pos<32?recent_pos:32;
+    for(unsigned i=recent_pos-count;i<recent_pos;++i)fprintf(stderr," %08x",recent[i&31]);
+    fprintf(stderr,"\n");fflush(stderr);
+#ifdef PILOT_INPUT_NATIVE
+    pilot_input_diagnostic_flush();
+#endif
     if(!g_pilot_session_enabled)return;
     // Intentional owner stops only. VEH/SEH calls must not wait on this lock.
     pilot_session_verify(PILOT_SESSION_FAULT,code,reason,strlen(reason));

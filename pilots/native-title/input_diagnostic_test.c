@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "session_replay.h"
 static volatile LONG raw_calls;
 static unsigned failures;
 static uint32_t input_host_state_raw(unsigned port,uint8_t pad[18])
@@ -18,6 +19,7 @@ static uint32_t input_host_caps_raw(unsigned port,uint8_t pad[18],uint8_t rumble
 }
 static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right)
 {(void)port;(void)left;(void)right;InterlockedIncrement(&raw_calls);return ERROR_NOT_SUPPORTED;}
+#define input_host_state_mapped input_host_state_raw
 #include "input_diagnostic.inc"
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %u: %s\n",__LINE__,#x);++failures;}}while(0)
 static DWORD WINAPI concurrent_inputs(LPVOID unused)
@@ -40,6 +42,17 @@ int main(int argc,char **argv)
     int capture=!strcmp(argv[1],"capture") || !strcmp(argv[1],"overflow") || fatal || concurrent;
     SetEnvironmentVariableW(capture?L"XLLE_PILOT_DIAGNOSTIC_RECORD":L"XLLE_PILOT_DIAGNOSTIC_REPLAY",path);
     uint8_t pad[18]={0},rumble[4]={0};
+    if(!strcmp(argv[1],"timed")) {
+        SetEnvironmentVariableA("XLLE_PILOT_DIAGNOSTIC_TIMED","1");
+        CHECK(!pilot_input_host_caps(0,pad,rumble));
+        for(unsigned i=0;i<100;++i){CHECK(!pilot_input_host_state(0,pad));CHECK(pad[2]==255 && !pad[3]);}
+        input_timed_start-=150;CHECK(!pilot_input_host_state(0,pad));CHECK(!pad[2] && !pad[3]);
+        CHECK(pilot_input_host_rumble(0,123,456)==ERROR_NOT_SUPPORTED);
+        input_timed_start-=100;CHECK(!pilot_input_host_state(0,pad));CHECK(!pad[2] && pad[3]==255);
+        input_timed_start-=100;CHECK(pilot_input_host_state(0,pad)==ERROR_DEVICE_NOT_CONNECTED);
+        CHECK(input_timed_eof && raw_calls==0);return failures?1:0;
+    }
+
     if(!strcmp(argv[1],"diverge")) {
         pilot_input_host_caps(0,pad,rumble);return 8;
     }

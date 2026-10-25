@@ -1382,6 +1382,7 @@ static void load_image(const char *path)
 
 int main(int argc,char **argv)
 {
+    pilot_session_bind_terminal(session_terminal);
     const char *session_record=getenv("XLLE_PILOT_SESSION_RECORD"),*session_replay=getenv("XLLE_PILOT_SESSION_REPLAY");
     if((session_record && *session_record) || (session_replay && *session_replay)) {
         char executable_path[32768];DWORD length=GetModuleFileNameA(NULL,executable_path,sizeof(executable_path));

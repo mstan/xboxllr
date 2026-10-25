@@ -1,8 +1,8 @@
 format_version = 1
 id = "xboxllr.diagnostics"
 version = "1.0.0"
-name = "Replay diagnostics"
-description = "Keep a private recording of each play session for local replay and diagnosis. Recordings are never uploaded automatically."
+name = "Crash and input logs"
+description = "Keep private crash context and controller input logs for local reproduction. Logs are never uploaded automatically."
 save_compatibility = "shared"
 
 [[target]]
@@ -17,8 +17,8 @@ xbe_sha256 = "fd19055756719893c466302809b433b785ecf5732df0441286f3f605f0f3ef9c"
 
 [[feature]]
 id = "session-replay"
-name = "Replay diagnostics"
-description = "Record controls, timing, scheduling and state checks from launch. Keeps private starting saves and settings for isolated replay. Takes effect next launch."
+name = "Crash and input logs"
+description = "Record controller inputs and timing with private starting saves and settings. Lightweight input replay repeats controls; timing-dependent outcomes can vary. Takes effect next launch."
 # Blinx and JSRF explicitly enable this in their launcher defaults. An owner's
 # saved choice takes precedence, including after an installation is updated.
 default_enabled = false

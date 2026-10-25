@@ -16,14 +16,15 @@ import subprocess
 from native_diagnostics import digest, durable_json, inspect_session, safe_relative, SCHEMA
 
 
-def reproduce(session, root, image, work, *, seconds=300, visible=False):
+def reproduce(session, root, image, work, *, seconds=300, visible=False, strict=False, detail=False):
     from native_release_runtime import checked_image, descriptor, inside
     if not isinstance(seconds, (float, int)) or not 0 < seconds <= 3600:
         raise ValueError('Reproduction timeout must be between 0 and 3600 seconds')
     session, root, image = map(lambda p: Path(p).resolve(strict=True), (session, root, image))
     work = Path(work).resolve()
     report, replay, inputs = inspect_session(session)
-    data = descriptor(root)
+    from native_revisions import select
+    data = select(descriptor(root), digest(image))
     checked_image(data, image)
     executable = inside(root, data['executable'])
     if (digest(executable) != replay['executable_sha256'] or
@@ -64,6 +65,7 @@ def reproduce(session, root, image, work, *, seconds=300, visible=False):
         env[name] = str(path)
     env.update(PYTHONDONTWRITEBYTECODE='1', XLLE_PILOT_INPUT='diagnostic-replay',
         XLLE_PILOT_DIAGNOSTIC_REPLAY=str(work / 'inputs.bin'),
+        XLLE_PILOT_DIAGNOSTIC_TIMED='0' if strict else '1', XLLE_PILOT_TRACE='1' if detail else '0',
         XLLE_PILOT_SAVE_KEYS_FILE=str(work / 'console/save-keys.bin'),
         XLLE_PILOT_CONSOLE_SETTINGS_FILE=str(work / 'console/console-settings.bin'),
         XLLE_PILOT_VISIBLE='1' if visible else '0', XLLE_PILOT_AUDIO_OUTPUT_MUTE='1', RECOMP_VOLUME='0', SDL_AUDIODRIVER='dummy')
@@ -72,7 +74,8 @@ def reproduce(session, root, image, work, *, seconds=300, visible=False):
         env['XLLE_PILOT_MOD_PLAN'] = str(work / 'mods.plan')
     command = [str(executable), str(image), str(work / 'console/eeprom.bin'), str(image.parent), str(work / 'state')]
     outcome = dict(schema=SCHEMA, source_session=session.name, input_records=inputs['records'],
-        deterministic_machine_replay=False, original_exit_code=report.get('exit_code'))
+        deterministic_machine_replay=False, input_playback='strict-calls' if strict else 'elapsed-time',
+        original_exit_code=report.get('exit_code'))
     durable_json(work / 'reproduction.json', dict(outcome, state='starting'))
     with (work / 'game.log').open('w', encoding='utf-8') as log:
         child = subprocess.Popen(command, cwd=work / 'state', env=env, stdout=log, stderr=log)
@@ -96,6 +99,8 @@ def main():
     parser.add_argument('--image', type=Path, help='your own matching original .xbe')
     parser.add_argument('--work-dir', type=Path, help='new disposable reproduction directory')
     parser.add_argument('--seconds', type=float, default=300)
+    parser.add_argument('--strict-input-calls', action='store_true', help='Require the original input API call sequence')
+    parser.add_argument('--detail', action='store_true', help='Enable verbose native service logs during playback')
     parser.add_argument('--visible', action='store_true', help='show the reproduction with muted audio')
     args = parser.parse_args()
     report, replay, inputs = inspect_session(args.session)
@@ -104,7 +109,7 @@ def main():
         return 0
     if not all((args.root, args.image, args.work_dir)):
         parser.error('reproduction requires --root, --image and --work-dir')
-    result = reproduce(args.session, args.root, args.image, args.work_dir, seconds=args.seconds, visible=args.visible)
+    result = reproduce(args.session, args.root, args.image, args.work_dir, seconds=args.seconds, visible=args.visible, strict=args.strict_input_calls, detail=args.detail)
     print(json.dumps(result, indent=2))
     # An exhausted input stream is a useful attempt, not a successful complete
     # simulation replay. The native boundary uses exit 4 for exhaustion.

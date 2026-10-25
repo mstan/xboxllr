@@ -297,7 +297,7 @@ extern "C" void pilot_session_host_wait_end(int token) {
 }
 extern "C" void pilot_session_bind_terminal(PilotSessionTerminal terminal) {state().terminal=terminal;}
 extern "C" void pilot_session_report_stop(const char *reason,uint32_t code) {
-    auto& s=state();if(s.mode && s.terminal)s.terminal(reason,code);
+    auto& s=state();if(s.terminal)s.terminal(reason,code);
 }
 extern "C" void pilot_session_terminal_begin(void) {
     auto& s=state();std::lock_guard<std::mutex> guard(s.lock);
