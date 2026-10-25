@@ -85,7 +85,19 @@ int main(void)
             ++runs;
         }
     }
-    CHECK(!fesetenv(&environment));free(memory);
-    printf("PASS %u SSE control stores: absolute/indexed DWORD, four rounding modes, preserved CPU flags, x87 state, native environment and adjacent bytes\n",runs);
+    CHECK(runs==40 && !fesetenv(&environment));runs=0;
+    for(unsigned source=0;source<8;++source)for(unsigned top=0;top<8;++top)
+    for(unsigned p=0;p<5;++p) {
+        uint32_t a=pairs[p][0],b=pairs[p][1];g_eax=a;g_ebx=b;g_edx=0;g_esp=0x18000;
+        double before[8];for(unsigned i=0;i<8;++i)before[i]=g_fp_stack[i]=i+1.25;
+        g_fp_top=top;g_fp_cmp=-1;g_fp_cc=0x4500;g_fp_control_word=0x027f;
+        free_cases[source]();
+        CHECK(g_fp_top==(int)top && g_fp_cmp==-1 && g_fp_cc==0x4500 && g_fp_control_word==0x027f);
+        CHECK(!memcmp(before,g_fp_stack,sizeof(before)) && g_esp==0x18004);
+        CHECK(g_edx==((a==b)|((a<b)<<8)|(parity(a-b)<<16)));++runs;
+    }
+    printf("PASS %u register frees: every ST/TOP, preserved values, conditions, control and CPU flags in tag-less native model\n",runs);
+    free(memory);
+    puts("PASS 40 SSE control stores: absolute/indexed DWORD, four rounding modes, preserved CPU flags, x87 state, native environment and adjacent bytes");
     return 0;
 }

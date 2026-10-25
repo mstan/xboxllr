@@ -56,6 +56,17 @@ def install(module):
             # FCMOV changes neither CPU flags, x87 condition codes nor TOP.
         flush();return statements,flag_state
     def lift_fpu(lifter,instruction,mnemonic,operands):
+        if mnemonic=='ffree':
+            index=register_index(operands[0]) if len(operands)==1 else None
+            if index is None:return [guard(instruction,'unqualified x87 free operand')]
+            # Intel SDM Vol. 2A, FFREE: only the selected register's tag is
+            # emptied; its bits, TOP and condition codes remain unchanged.
+            # The existing native stack has no tags or stack exceptions.
+            # Tag-restoring/observing instructions remain explicit guards;
+            # do not zero the value or pop TOP to approximate this operation.
+            sites[instruction.address]=dict(address=instruction.address,mnemonic=mnemonic,
+                status='lowered',contract='tag-less native stack; data/TOP/flags preserved')
+            return [f'(void)0; /* ffree st({index}): release tag; data/TOP/flags unchanged */']
         if mnemonic=='fnclex':
             sites[instruction.address]=dict(address=instruction.address,mnemonic=mnemonic,status='lowered')
             # g_fp_cc contributes the status bits to FNSTSW; TOP is separate.

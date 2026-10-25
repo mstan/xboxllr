@@ -52,7 +52,12 @@ class NativeX87(unittest.TestCase):
         cls.parts[cls.stored]=bytes.fromhex('39d80fae1d001001000f94c20f92c67b0681ca00000100c3')
         cls.indexed=0x10000+len(cls.parts)*64
         cls.parts[cls.indexed]=bytes.fromhex('39d80fae5e040f94c20f92c67b0681ca00000100c3')
-        image=bytearray(4096)
+        cls.freed=[]
+        for index in range(8):
+            address=0x10000+len(cls.parts)*64
+            cls.parts[address]=bytes.fromhex('39d8')+bytes((0xdd,0xc0+index))+bytes.fromhex('0f94c20f92c67b0681ca00000100c3')
+            cls.freed.append(address)
+        image=bytearray(8192)
         for address,raw in cls.parts.items():image[address-0x10000:address-0x10000+len(raw)]=raw
         config._install([config.Section('.text',0x10000,len(image),0,len(image),True)],entry_point=0x10000,kernel_thunk_addr=0,origin='authored-x87-conditional-moves')
         db={a:dict(_addr=a,start=hex(a),end=a+len(raw),size=len(raw)) for a,raw in cls.parts.items()}
@@ -64,7 +69,9 @@ class NativeX87(unittest.TestCase):
         shutil.copyfile(donor/'templates/runtime/recomp_types.h',cls.out/'recomp_types.h')
         (cls.out/'recomp_funcs.h').write_text('#include "recomp_types.h"\n'+'\n'.join(f'void sub_{a:08X}(void);' for a in db)+'\n')
         declarations='\n'.join(f'sub_{a:08X},' for a in cls.predicates)
-        (cls.out/'cases.h').write_text('static recomp_func_t cases[]={'+declarations+'};\n'+f'#define MINIMUM sub_{cls.minimum:08X}\n#define MAXIMUM sub_{cls.maximum:08X}\n#define JOINED sub_{cls.joined:08X}\n#define CLEARED sub_{cls.cleared:08X}\n#define STORED sub_{cls.stored:08X}\n#define INDEXED sub_{cls.indexed:08X}\n')
+        (cls.out/'cases.h').write_text('static recomp_func_t cases[]={'+declarations+'};\n'+
+            'static recomp_func_t free_cases[]={'+','.join(f'sub_{a:08X}' for a in cls.freed)+'};\n'+
+            f'#define MINIMUM sub_{cls.minimum:08X}\n#define MAXIMUM sub_{cls.maximum:08X}\n#define JOINED sub_{cls.joined:08X}\n#define CLEARED sub_{cls.cleared:08X}\n#define STORED sub_{cls.stored:08X}\n#define INDEXED sub_{cls.indexed:08X}\n')
         exe=cls.out/('native-x87.exe' if sys.platform=='win32' else 'native-x87')
         cc=fixture_compiler(os.environ.get('CC'))
         command=[cc,'-std=c11','-O2','-I'+str(cls.out),'-I'+str(ROOT/'pilots/native-title'),str(cls.out/'lifted.c'),str(ROOT/'tests/fixtures/native_x87_host.c'),'-lm','-o',str(exe)]
@@ -78,6 +85,7 @@ class NativeX87(unittest.TestCase):
         self.assertIn('PASS 8960 conditional moves',self.output)
         self.assertIn('PASS 128 min/max',self.output)
         self.assertIn('PASS 40 SSE control stores',self.output)
+        self.assertIn('PASS 320 register frees',self.output)
     def test_missing_flags_and_unknown_x87_are_explicit_guards(self):
         decoder=self.disassembler()
         for raw,reason in ((bytes.fromhex('dac9'),'conditional move flags/operands'),(bytes.fromhex('d9f4'),'x87 instruction fxtract'),(bytes.fromhex('0fae1500100100'),'SSE control write')):
