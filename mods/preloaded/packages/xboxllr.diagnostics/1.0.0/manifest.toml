@@ -2,6 +2,7 @@ format_version = 1
 id = "xboxllr.diagnostics"
 version = "1.0.0"
 name = "Crash and input logs"
+category = "Diagnostics"
 description = "Keep private crash context and controller input logs for local reproduction. Logs are never uploaded automatically."
 save_compatibility = "shared"
 

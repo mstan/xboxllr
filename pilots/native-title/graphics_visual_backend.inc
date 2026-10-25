@@ -38,14 +38,14 @@ unsigned pilot_d3d_anisotropy(void){return pilot_visual.anisotropy;}
 void pilot_d3d_target_size(unsigned usage,unsigned width,unsigned height,unsigned *out_width,unsigned *out_height)
 {
     *out_width=width;*out_height=height;
+    if((usage&2) && pilot_depth_allocation_size) {
+        *out_width=pilot_depth_allocation_size[0];*out_height=pilot_depth_allocation_size[1];return;
+    }
     if(!(usage&3) || (!pilot_visual.internal_height && pilot_visual.supersample==1))return;
     uint32_t size[2];
-    /* Standalone depth surfaces can be square or padded while their color target is
-     * screen-shaped (JSRF boost uses a borrowed 512x512 depth surface).
-     * Depth pixels must use the scene grid independently of the allocation's
-     * aspect. Texture lookup allocations retain their native-size policy. */
-    int valid=((usage&2) && pilot_depth_surface_raster)?pilot_visual_mods_size(&pilot_visual,pilot_guest_width,pilot_guest_height,width,height,16384,size):
-        pilot_visual_mods_target_size(&pilot_visual,pilot_guest_width,pilot_guest_height,width,height,16384,size);
+    /* Ordinary sampled lookup allocations retain their native-size policy.
+     * Standalone depth follows its bound color target in pilot_gfx_targets. */
+    int valid=pilot_visual_mods_target_size(&pilot_visual,pilot_guest_width,pilot_guest_height,width,height,16384,size);
     if(!valid)
         pilot_d3d_backend_stop("visual mod target dimensions exceed native capability");
     *out_width=size[0];*out_height=size[1];

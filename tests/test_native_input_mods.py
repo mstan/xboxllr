@@ -21,6 +21,9 @@ class CameraMods(unittest.TestCase):
                        dict(title=dict(name='Blinx: The Time Sweeper', xbe_sha256='a'*64)),
                        dict(title=dict(identity, game_id='5345000A')),
                        dict(title=dict(identity, xbe_sha256='a'*64)), {}]
+        unsupported += [dict(title=dict(game_id='5345000A',xbe_sha256=sha)) for sha in (
+            'f4441696fdd007c31a712815cdde967836fbc3ab97fcb2f58e1db56974644219',
+            'fd19055756719893c466302809b433b785ecf5732df0441286f3f605f0f3ef9c')]
         with tempfile.TemporaryDirectory() as d:
             state = Path(d)/'selection.json'
             atomic_json(state, dict(version=1, features={

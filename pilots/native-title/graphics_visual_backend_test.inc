@@ -141,9 +141,10 @@ static int test_visual_square_depth(void)
         CHECK(pilot_gfx_render_size(physical));CHECK(!pilot_gfx_texture_create_usage(320,240,1,0x12,1,&color));
         pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);pilot_gfx_set_state(D3DRS_LIGHTING,0);
         pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_DISABLE);
-        // JSRF boost combines a screen-shaped half-size color target with
-        // caller-owned square depth storage. Exercise real Z and stencil.
+        // A standalone square depth surface must follow both an enhanced
+        // scene target and JSRF boost's native 512x512 offscreen target.
         uint32_t square=0;CHECK(!pilot_gfx_depth_surface_create(512,512,&square));
+        uint32_t lookup=0;CHECK(!pilot_gfx_texture_create_usage(512,512,1,0x12,1,&lookup));
         CHECK(!pilot_gfx_targets(color,square));
         CHECK(!visual_target_shape(physical[0]/2,physical[1]/2));
         uint32_t half_viewport[]={0,0,320,240,0,0x3f800000u};CHECK(!pilot_gfx_viewport(half_viewport));
@@ -162,11 +163,26 @@ static int test_visual_square_depth(void)
         CHECK(!pilot_gfx_texture_readback(color,0,check,320*240*4));CHECK(check[50*320+50]==0xff00ff00);
         CHECK(!pilot_gfx_texture_readback(square,0,check,512*512*4));
         CHECK((check[50*512+50]&255)==7 && abs((int)(check[50*512+50]>>8)-0x400000)<4);
+        // Reuse the same surface across native -> enhanced -> native grids.
+        // No depth/stencil clear: far fragments must still fail after each
+        // transition and readback must preserve the earlier near/stencil write.
+        for(unsigned transition=0;transition<3;++transition) {
+            unsigned native=transition!=1;
+            CHECK(!pilot_gfx_targets(native?lookup:color,square));
+            CHECK(!visual_target_shape(native?512:physical[0]/2,native?512:physical[1]/2));
+            uint32_t target_viewport[]={0,0,native?512:320,native?512:240,0,0x3f800000u};
+            CHECK(!pilot_gfx_viewport(target_viewport));CHECK(!pilot_gfx_clear(1,0xff000000,1,0));
+            CHECK(!pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,patch,sizeof(patch[0]),0x44));
+            CHECK(!pilot_gfx_texture_readback(native?lookup:color,0,check,(native?512*512:320*240)*4));
+            CHECK(check[50*(native?512:320)+50]==0xff000000);
+            CHECK(!pilot_gfx_texture_readback(square,0,check,512*512*4));
+            CHECK((check[50*512+50]&255)==7 && abs((int)(check[50*512+50]>>8)-0x400000)<4);
+        }
         free(check);pilot_gfx_set_state(D3DRS_STENCILENABLE,0);pilot_gfx_set_state(D3DRS_ZENABLE,0);
         CHECK(!pilot_gfx_targets(0,UINT32_MAX));CHECK(!pilot_gfx_viewport(viewport));pilot_gfx_texture_destroy(square);
-        pilot_gfx_texture_destroy(color);pilot_gfx_close();
+        pilot_gfx_texture_destroy(lookup);pilot_gfx_texture_destroy(color);pilot_gfx_close();
     }
-    fprintf(stderr,"PASS: square depth shares enhanced raster grid; real Z occlusion and stencil survive 1080p/2160p/SSAA\n");return 0;
+    fprintf(stderr,"PASS: square depth follows native and enhanced color grids; real Z/stencil survive repeated transitions at 1080p/2160p/SSAA\n");return 0;
 }
 static int test_visual_mod_resources(void)
 {

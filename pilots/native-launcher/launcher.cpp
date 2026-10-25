@@ -24,7 +24,7 @@
 XboxllrConsoleSetup *xboxllr_console_setup=nullptr;
 struct Choice {std::string value,label;};
 struct Option {std::string id,label,value,initial;std::vector<Choice> choices;};
-struct Feature {std::string package,id,name,description;int enabled=0;std::vector<Option> options;};
+struct Feature {std::string package,id,name,description,group="Other";int enabled=0;std::vector<Option> options;};
 struct Package {std::string id,name,version,description;};
 struct Catalog {
     std::string title,region,error;std::vector<std::string> identities;std::vector<Package> packages;std::vector<Feature> features;
@@ -112,9 +112,12 @@ static Catalog read_catalog(const char *path) {
             Package p={x(1),x(2),x(3),x(4)};
             if(std::any_of(c.packages.begin(),c.packages.end(),[&](const Package &old){return old.id==p.id;}))throw std::runtime_error("Duplicate package");
             c.packages.push_back(p);
-        } else if(t[0]=="feature"&&t.size()==6&&c.features.size()<32) {
+        } else if(t[0]=="feature"&&(t.size()==6||t.size()==7)&&c.features.size()<32) {
             Feature f;f.package=x(1);f.id=x(2);f.name=x(3);f.description=x(4);
             if(t[5]!="0"&&t[5]!="1")throw std::runtime_error("Invalid feature state");f.enabled=t[5]=="1";
+            if(t.size()==7)f.group=x(6);
+            if(f.group!="Other"&&f.group!="Controls"&&f.group!="Visual enhancements"&&f.group!="Gameplay"&&f.group!="Diagnostics"&&f.group!="Presentation")
+                throw std::runtime_error("Invalid feature category");
             if(feature(c,f.package.c_str(),f.id.c_str())||std::none_of(c.packages.begin(),c.packages.end(),[&](const Package &p){return p.id==f.package;}))throw std::runtime_error("Invalid feature package");
             c.features.push_back(f);
         } else if(t[0]=="option"&&t.size()==7) {
@@ -142,7 +145,7 @@ static int feature_get(void *p,int index,RecompLauncherCModFeature *out) {
     auto &c=*(Catalog*)p;if(!out||index<0||size_t(index)>=c.features.size())return 0;
     *out={};auto &f=c.features[index];copy(out->id,f.id);copy(out->package_id,f.package);copy(out->name,f.name);copy(out->description,f.description);
     for(auto &v:c.packages)if(v.id==f.package){copy(out->package_version,v.version);copy(out->package_name,v.name);}
-    copy(out->group,f.package=="xboxlle.enhancement.camera"?"Controls":"Visual enhancements");out->enabled=f.enabled;out->option_count=int(f.options.size());return 1;
+    copy(out->group,f.group);out->enabled=f.enabled;out->option_count=int(f.options.size());return 1;
 }
 static int option_get(void *p,const char *pid,const char *fid,int index,RecompLauncherCModOption *out) {
     auto *f=feature(*(Catalog*)p,pid,fid);if(!f||!out||index<0||size_t(index)>=f->options.size())return 0;
@@ -265,6 +268,10 @@ int main(int argc,char **argv) {
         if(c.console){c.console_ui.persist=persist_console;c.console_ui.persist_boot=persist_boot;c.console_ui.context=&c;xboxllr_console_setup=&c.console_ui;}
         if(argc==5&&std::string(argv[4])=="--validate") {
             if(!commit(&c,argv[3]))throw std::runtime_error(c.error);
+            for(int i=0;i<feature_count(&c);++i) {
+                RecompLauncherCModFeature f={};feature_get(&c,i,&f);
+                std::printf("[LAUNCHER MOD] %s\t%s\t%s\n",f.package_id,f.id,f.group);
+            }
             save(c,argv[2],0,argv[3]);return 0;
         }
         if(argc==5&&std::string(argv[4])!="--validate-xbe")throw std::runtime_error("Unknown launcher check");

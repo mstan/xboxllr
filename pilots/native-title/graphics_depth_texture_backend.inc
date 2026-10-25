@@ -35,6 +35,8 @@ static void pilot_depth_texture_destroy(struct PilotNativeTexture *texture)
     if(texture->argb_srv)ID3D11ShaderResourceView_Release(texture->argb_srv);
     if(texture->stencil_srv)ID3D11ShaderResourceView_Release(texture->stencil_srv);
     if(texture->argb_image)ID3D11Texture2D_Release(texture->argb_image);
+    texture->argb_uav=NULL;texture->argb_srv=NULL;texture->stencil_srv=NULL;texture->argb_image=NULL;
+    texture->argb_initialized=0;
 }
 static void pilot_depth_texture_close(void)
 {

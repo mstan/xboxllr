@@ -70,7 +70,7 @@ static PilotPresentation pilot_presentation={0,0,0x11,1,0};
 int pilot_d3d_has_auto_depth(void){return pilot_presentation.depth!=0;}
 /* Optional raster policy is owned by the resolved static mod registry. */
 __declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);
-static int pilot_depth_surface_raster;
+static const uint32_t *pilot_depth_allocation_size;
 #include "graphics_visual_backend.inc"
 static uint32_t pilot_window_aspect[2],pilot_window_height,pilot_frame_aspect[2];
 static int pilot_aspect_valid(uint32_t n,uint32_t d)
@@ -151,7 +151,7 @@ struct PilotNativeTexture {
     ID3D11UnorderedAccessView *argb_uav;
     uint64_t argb_serial;
     unsigned argb_initialized;
-    unsigned blend_depth_shape,blend_color_shape;
+    unsigned blend_depth_shape,blend_color_shape,standalone_depth;
 };
 static struct PilotNativeTexture *pilot_textures;
 static unsigned pilot_texture_capacity;
@@ -943,6 +943,7 @@ uint64_t pilot_gfx_texture_cpu_snapshot_revision(uint32_t handle)
        (pilot_textures[handle-1].uploaded&((1u<<levels)-1))!=((1u<<levels)-1))return 0;
     return pilot_textures[handle-1].use->write_serial;
 }
+static HRESULT pilot_depth_match_color(uint32_t handle,ID3D11Texture2D *color,unsigned width,unsigned height);
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
     pilot_gfx_batch_flush();
@@ -961,7 +962,13 @@ int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
     ID3D11DepthStencilView *dsv=depth==UINT32_MAX?pilot_default_depth:NULL;
     unsigned width=pilot_gfx_width(),height=pilot_gfx_height();
     if(color){D3D8Texture *t=pilot_texture(color);rtv=pilot_textures[color-1].rtv;if(!rtv)return E_INVALIDARG;width=t->width;height=t->height;}
-    if(depth && depth!=UINT32_MAX){D3D8Texture *t=pilot_texture(depth);dsv=pilot_textures[depth-1].dsv;if(!dsv || t->width<width || t->height<height)return E_INVALIDARG;}
+    if(depth && depth!=UINT32_MAX) {
+        D3D8Texture *t=pilot_texture(depth);
+        if(!pilot_textures[depth-1].dsv || t->width<width || t->height<height)return E_INVALIDARG;
+        HRESULT hr=pilot_depth_match_color(depth,color?pilot_donor_texture(pilot_texture(color)):pilot_surfaces[0],width,height);
+        if(FAILED(hr))return hr;
+        dsv=pilot_textures[depth-1].dsv;
+    }
     if(depth==UINT32_MAX && (width>pilot_gfx_width() || height>pilot_gfx_height()))return E_INVALIDARG;
 #ifdef PILOT_D3D_PHOBOS
     /* Remove old outputs before restoring their sampled views. Overlapping
@@ -976,7 +983,7 @@ int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 }
 int32_t pilot_gfx_texture_create(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t *handle)
 {return pilot_gfx_texture_create_usage(width,height,levels,format,0,handle);}
-static int32_t pilot_texture_create_policy(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,int depth_surface,uint32_t *handle)
+static int32_t pilot_texture_create_policy(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,const uint32_t *depth_size,uint32_t *handle)
 {
     if(!pilot_device || !handle) return E_INVALIDARG;
     int yuv=format==0x24 || format==0x25;
@@ -1003,9 +1010,9 @@ static int32_t pilot_texture_create_policy(uint32_t width,uint32_t height,uint32
      * Keep guest layout/format in the bridge; use ordinary BGRA storage on
      * either donor and expand only changed CPU uploads. This is not V8U8.
      * Reference: xemu GL/Vulkan SZ_G8B8 swizzles, Cxbx G8B8 conversion. */
-    pilot_depth_surface_raster=depth_surface;
+    pilot_depth_allocation_size=depth_size;
     HRESULT hr=d3d8_CreateTextureImpl(width,height,levels,usage,(D3DFORMAT)(format==0x28?6:format),&object);
-    pilot_depth_surface_raster=0;
+    pilot_depth_allocation_size=NULL;
     if(FAILED(hr)) return hr;
     ID3D11RenderTargetView *rtv=NULL;
     ID3D11DepthStencilView *dsv=NULL;
@@ -1029,6 +1036,7 @@ static int32_t pilot_texture_create_policy(uint32_t width,uint32_t height,uint32
     pilot_textures[slot].dsv=dsv;
     pilot_textures[slot].object=object; pilot_textures[slot].uploaded=0;
     pilot_textures[slot].guest_format=format;
+    pilot_textures[slot].standalone_depth=depth_size!=NULL;
     pilot_textures[slot].blend_depth_shape=pilot_blend_depth_shape(pilot_donor_texture((D3D8Texture*)object),1);
     pilot_textures[slot].blend_color_shape=pilot_blend_color_shape(pilot_donor_texture((D3D8Texture*)object));
     *handle=slot+1;
@@ -1037,7 +1045,8 @@ static int32_t pilot_texture_create_policy(uint32_t width,uint32_t height,uint32
 int32_t pilot_gfx_texture_create_usage(uint32_t width,uint32_t height,uint32_t levels,uint32_t format,uint32_t usage,uint32_t *handle)
 {return pilot_texture_create_policy(width,height,levels,format,usage,0,handle);}
 int32_t pilot_gfx_depth_surface_create(uint32_t width,uint32_t height,uint32_t *handle)
-{return pilot_texture_create_policy(width,height,1,0x2e,2,1,handle);}
+{uint32_t size[]={width,height};return pilot_texture_create_policy(width,height,1,0x2e,2,size,handle);}
+#include "graphics_depth_grid_backend.inc"
 void pilot_gfx_texture_destroy(uint32_t handle)
 {
     D3D8Texture *texture=pilot_texture(handle);

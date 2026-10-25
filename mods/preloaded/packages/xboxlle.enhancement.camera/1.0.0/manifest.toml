@@ -2,20 +2,13 @@ format_version = 1
 id = "xboxlle.enhancement.camera"
 version = "1.0.0"
 name = "Camera controls"
+category = "Controls"
 description = "Reverse either camera axis independently for Player 1. Applies to the right stick when the game starts."
 save_compatibility = "shared"
 
 [[target]]
 game_id = "4D530013"
 xbe_sha256 = "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249"
-
-[[target]]
-game_id = "5345000A"
-xbe_sha256 = "f4441696fdd007c31a712815cdde967836fbc3ab97fcb2f58e1db56974644219"
-
-[[target]]
-game_id = "5345000A"
-xbe_sha256 = "fd19055756719893c466302809b433b785ecf5732df0441286f3f605f0f3ef9c"
 
 [[feature]]
 id = "invert-horizontal"

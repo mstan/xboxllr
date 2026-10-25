@@ -17,6 +17,34 @@ PID = 'xboxlle.enhancement.visuals'
 
 
 class LauncherPolicy(unittest.TestCase):
+    def test_authored_categories_reach_native_ui_provider(self):
+        packages={'xboxlle.enhancement.camera':'Controls','xboxlle.enhancement.visuals':'Visual enhancements',
+                  'xboxllr.diagnostics':'Diagnostics','xboxllr.enhancement.startup':'Presentation'}
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            paths=[ROOT/f'mods/preloaded/packages/{pid}/1.0.0/manifest.toml' for pid in packages]
+            for category,pid in [('Gameplay','fixture.test-runs'),(None,'fixture.unclassified')]:
+                path=root/(pid+'.toml')
+                path.write_text('format_version=1\nversion="1.0.0"\nid="'+pid+'"\nname="Fixture"\ndescription="Fixture"\n'+
+                    (f'category="{category}"\n' if category else '')+
+                    '[[feature]]\nid="fixture"\nname="Fixture"\ndefault_enabled=false\n')
+                paths.append(path);packages[pid]=category or 'Other'
+            catalog=ui.Catalog(paths,root/'selection.json')
+            self.assertTrue(catalog.features)
+            for feature in catalog.features:self.assertEqual(feature['group'],packages[feature['package']])
+            output=root/'catalog';catalog.write(output,'Category fixture','Test','a'*64)
+            if os.environ.get('XLLE_TEST_LAUNCHER'):
+                command=[os.environ['XLLE_TEST_LAUNCHER'],str(output),str(root/'result'),'owned.xbe','--validate']
+                result=subprocess.run(command,capture_output=True,text=True,check=True)
+                actual={line.split('\t')[0].removeprefix('[LAUNCHER MOD] '):line.split('\t')[2]
+                        for line in result.stdout.splitlines() if line.startswith('[LAUNCHER MOD] ')}
+                self.assertEqual(actual,packages)
+                # Old catalogs remain readable and receive a neutral category.
+                rows=output.read_text().splitlines()
+                output.write_text('\n'.join(' '.join(row.split()[:6]) if row.startswith('feature ') else row for row in rows)+'\n')
+                legacy=subprocess.run(command,capture_output=True,text=True,check=True)
+                self.assertTrue(all(line.endswith('\tOther') for line in legacy.stdout.splitlines() if line.startswith('[LAUNCHER MOD] ')))
+
     @unittest.skipUnless(os.environ.get('XLLE_TEST_LAUNCHER'), 'Native launcher is an optional separate target')
     def test_compiled_xbe_gate_hashes_the_whole_file_and_rejects_spoofed_identity(self):
         import hashlib

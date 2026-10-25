@@ -90,7 +90,10 @@ class Catalog:
                 # Explicit title defaults are used only for new selections.
                 # Saved owner choices, including disabled features, win.
                 saved = persisted.get('features', {}).get(key, defaults.get(key, {}))
-                feature = dict(package=pid, id=fid, name=entry['name'], description=entry.get('description', manifest['description']),
+                category=manifest.get('category', 'Other')
+                if category not in ('Controls','Visual enhancements','Gameplay','Diagnostics','Presentation','Other'):
+                    raise ValueError('Unsupported bundled mod category')
+                feature = dict(package=pid, id=fid, name=entry['name'], group=category, description=entry.get('description', manifest['description']),
                                enabled=saved.get('enabled') is True, options=[])
                 authored_options = [item for item in manifest.get('option', []) if item['feature'] == fid]
                 for item in authored_options:
@@ -152,7 +155,7 @@ class Catalog:
             lines.append('package ' + ' '.join(encoded(p[k]) for k in ('id', 'name', 'version', 'description')))
         for f in self.features:
             ids = encoded(f['package']) + ' ' + encoded(f['id'])
-            lines.append(f'feature {ids} {encoded(f["name"])} {encoded(f["description"])} {int(f["enabled"])}')
+            lines.append(f'feature {ids} {encoded(f["name"])} {encoded(f["description"])} {int(f["enabled"])} {encoded(f.get("group", "Other"))}')
             for o in f['options']:
                 prefix = ids + ' ' + encoded(o['id'])
                 lines.append('option ' + prefix + ' ' + ' '.join(encoded(o[k]) for k in ('label', 'value', 'default')))
