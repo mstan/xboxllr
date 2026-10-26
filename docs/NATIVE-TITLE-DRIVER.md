@@ -155,3 +155,23 @@ notice files in an existing build, so release packaging should use a clean stage
 If the child exits before the deadline, the command propagates its exit status.
 A planned deadline stop is recorded explicitly; it establishes only that the
 bounded observation finished, not that the title passed a gameplay check.
+
+## Source-bound title calls and resident media
+
+Title mod ABI3 supports statically bound guest function entry/exit callbacks.
+The title profile selects IDs with exact XBE body extents and SHA-256 proofs;
+`static-title-functions-v1` retains each original body and generates a trusted
+lookup table. Calls preserve the complete native CPU context and borrowed
+stack frame. A supplied result must satisfy the source-proved stack cleanup.
+Only registered originals can be invoked; packages contain data rather than
+executable replacement code. `pilot_title_functions` and the binding tests
+exercise cleanup, nested context preservation and invalid profile rejection.
+
+The optional resident media service preloads bounded immutable disc files while
+keeping actual read handles and file identity. Guest share restrictions, file
+cursors, asynchronous completion and nonbuffered fallback remain enforced.
+Memory/budget/preparation failures keep original media I/O. This removes disc
+access cost only: it does not establish decoded-resource readiness or an instant
+area transition. Title-specific resource HLE needs separate source proofs and
+actual wall-time, GPU/audio and gameplay-state validation. Loading presentation
+must remain while real resource work is pending.

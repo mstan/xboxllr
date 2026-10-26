@@ -95,6 +95,19 @@ static uint32_t fsc_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *buffer
                          struct MediaReadProfile *profile)
 {
     if(profile)memset(profile,0,sizeof(*profile));
+#ifdef PILOT_RESIDENT_MEDIA
+    if(file->resident && length) {
+        LARGE_INTEGER position;LARGE_INTEGER *selected=offset;uint32_t status=0;
+        if(!selected || selected->QuadPart==-2) {
+            IO_STATUS_BLOCK position_io={0};
+            status=(uint32_t)media_nt_query(file->host,&position_io,&position,sizeof(position),14);
+            if(status)return status;selected=&position;
+        }
+        if(media_resident_read(file,io,buffer,length,selected,&status)) {
+            if(profile)profile->cache_hit=1;return status;
+        }
+    }
+#endif
     int eligible=file->cacheable && length;
     LARGE_INTEGER start;
     if (eligible) {

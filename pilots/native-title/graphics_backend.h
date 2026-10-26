@@ -15,6 +15,7 @@ int pilot_gfx_interpolation_ready(void);
 int32_t pilot_gfx_interpolate(uint64_t now); /* 100ns QPC units; 0: sample clock */
 void pilot_gfx_interpolation_stats(struct PilotInterpolationStats *out);
 #include <stdint.h>
+int pilot_gfx_radial_blur(float strength);
 #include "graphics_presentation.h"
 #include "graphics_initializer.h"
 #include "graphics_lighting.h"

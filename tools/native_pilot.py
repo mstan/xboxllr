@@ -255,6 +255,9 @@ def prepare(args):
     if args.audio_symbols:
         from native_audio_binding import bind
         bind(args.xbe, out, args.audio_symbols, profile=profile)
+    if getattr(args, 'title_symbols', None):
+        from native_title_binding import bind
+        bind(args.xbe, out, args.title_symbols, profile=profile)
     if getattr(args, 'startup_symbols', None):
         from native_startup_binding import bind
         bind(args.xbe, out, args.startup_symbols, profile=profile)
@@ -303,6 +306,7 @@ if __name__ == "__main__":
     parser.add_argument("--cpu-symbols", type=Path, help="Bind the reviewed CPU capability probe")
     parser.add_argument("--input-symbols", type=Path, help="Bind the reviewed whole XAPI input family")
     parser.add_argument("--audio-symbols", type=Path, help="Bind the reviewed whole DirectSound API")
+    parser.add_argument("--title-symbols", type=Path, help="Bind source-hashed static title function hooks")
     parser.add_argument("--startup-symbols", type=Path, help="Bind reviewed native kernel startup compatibility")
     parser.add_argument("--network-symbols", type=Path, help="Bind a reviewed offline network-service boundary and unsupported-entry guards")
     prepare(parser.parse_args())

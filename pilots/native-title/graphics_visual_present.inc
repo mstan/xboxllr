@@ -74,8 +74,10 @@ static struct {
     unsigned width,height;
 } pilot_visual_aa;
 static void pilot_visual_blend_close(void);
+static void pilot_radial_close(void);
 static void pilot_visual_close(void)
 {
+    pilot_radial_close();
     pilot_visual_blend_close();
     if(!pilot_visual_aa.image && !pilot_visual_aa.vertex)return;
     rhi_view_destroy(pilot_visual_aa.sample);rhi_view_destroy(pilot_visual_aa.target);rhi_image_destroy(pilot_visual_aa.image);
@@ -184,6 +186,7 @@ HRESULT pilot_d3d_visual_resolve(RhiView *scene,unsigned width,unsigned height,R
 #undef PILOT_GAMMA_CONSTANTS
 #undef PILOT_GAMMA_PIXEL
 #else
+int pilot_gfx_radial_blur(float strength){(void)strength;return 0;}
 static void pilot_visual_gamma_reset(void){}
 int32_t pilot_gfx_gamma(const uint8_t ramp[768])
 {

@@ -1,20 +1,27 @@
 /* Opt-in private draw-state observations, including indexed/immediate draws.
  * This is deliberately not a vertex/pixel replay: it never reads vertex data,
  * samples GPU images, adopts resources or changes the original caches. One
- * swap interval is bounded to 256 records. Disabled captures perform no I/O. */
+ * swap interval is bounded to 2048 records (under 10 MiB). This includes late
+ * transparent effects after a detailed world scene. Disabled captures do no I/O. */
 static void graphics_draw_state_capture(const uint32_t args[3],uint32_t shader,
                                        uint32_t native,unsigned index_count)
 {
     static int configured;
     static const char *directory,*trigger;
-    static unsigned sequence,captured_swap,armed,armed_swap;
+    static unsigned sequence,captured_swap,armed,armed_swap,polled,polled_swap,trigger_ready;
     if(!configured) {
         directory=getenv("XLLE_PILOT_DRAW_STATE_CAPTURE");
         trigger=getenv("XLLE_PILOT_DRAW_STATE_TRIGGER");configured=1;
     }
-    if(!directory || !*directory || sequence>=256)return;
+    if(!directory || !*directory || sequence>=2048)return;
     if(sequence && captured_swap!=graphics_swap_submitted)return;
-    if(trigger && *trigger && GetFileAttributesA(trigger)==INVALID_FILE_ATTRIBUTES)return;
+    /* An unarmed playtest can run for hours. Poll at most once per guest
+     * swap, rather than performing a filesystem query for every draw. */
+    if(!armed && (!polled || polled_swap!=graphics_swap_submitted)) {
+        polled=1;polled_swap=graphics_swap_submitted;
+        trigger_ready=!trigger || !*trigger || GetFileAttributesA(trigger)!=INVALID_FILE_ATTRIBUTES;
+    }
+    if(!armed && !trigger_ready)return;
     if(!armed) {armed=1;armed_swap=graphics_swap_submitted;return;}
     if(!sequence && armed_swap==graphics_swap_submitted)return;
     if(!sequence)captured_swap=graphics_swap_submitted;

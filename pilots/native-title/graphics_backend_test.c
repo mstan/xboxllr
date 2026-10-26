@@ -28,6 +28,7 @@
 #include "graphics_pixel_bump_backend_test.inc"
 #include "graphics_fan_backend_test.inc"
 #include "graphics_visual_backend_test.inc"
+#include "graphics_radial_blur_test.inc"
 #include "graphics_gamma_backend_test.inc"
 #include "graphics_presentation_backend_test.inc"
 #include "graphics_initializer_backend_test.inc"
@@ -151,6 +152,7 @@ int main(int argc,char **argv)
     if(argc==2 && !strcmp(argv[1],"--edge-antialias"))return test_edge_antialias();
     if(argc==2 && !strcmp(argv[1],"--initializer-states"))return test_initializer_states();
     if(argc==2 && !strcmp(argv[1],"--guest-presentation"))return test_guest_presentation();
+    if(argc==2 && !strcmp(argv[1],"--radial-blur"))return test_radial_blur();
     if(argc==2 && !strcmp(argv[1],"--visual"))return test_visual_mod_resources();
     if(argc==2 && !strcmp(argv[1],"--visual-depth-mismatch"))return test_visual_depth_mismatch();
 #endif

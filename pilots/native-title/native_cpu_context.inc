@@ -1,10 +1,16 @@
 /* Shared native callback/CPU-service context. Portable C storage includes the
  * host floating environment as well as the generated x86 register files. */
 #include <fenv.h>
+#if defined(_M_X64) || defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 struct NativeCpuContext {
     uint32_t regs[13];
     RecompXmm xmm[8];RecompMmx mm[8];double fp[8];
     int fp_top,fp_cmp,df;uint16_t cw,cc;fenv_t environment;
+#if defined(_M_X64) || defined(__x86_64__)
+    unsigned mxcsr;
+#endif
 };
 static void native_cpu_save(struct NativeCpuContext *c)
 {
@@ -15,6 +21,9 @@ static void native_cpu_save(struct NativeCpuContext *c)
     memcpy(c->fp,g_fp_stack,sizeof(c->fp));c->fp_top=g_fp_top;c->fp_cmp=g_fp_cmp;c->df=g_df;
     c->cw=g_fp_control_word;c->cc=g_fp_cc;
     if(fegetenv(&c->environment))stop("native CPU environment capture failed",0);
+#if defined(_M_X64) || defined(__x86_64__)
+    c->mxcsr=_mm_getcsr();
+#endif
 }
 static void native_cpu_restore(const struct NativeCpuContext *c)
 {
@@ -25,6 +34,9 @@ static void native_cpu_restore(const struct NativeCpuContext *c)
     g_mm0=c->mm[0];g_mm1=c->mm[1];g_mm2=c->mm[2];g_mm3=c->mm[3];g_mm4=c->mm[4];g_mm5=c->mm[5];g_mm6=c->mm[6];g_mm7=c->mm[7];
     memcpy(g_fp_stack,c->fp,sizeof(c->fp));g_fp_top=c->fp_top;g_fp_cmp=c->fp_cmp;g_df=c->df;g_fp_control_word=c->cw;g_fp_cc=c->cc;
     if(fesetenv(&c->environment))stop("native CPU environment restore failed",0);
+#if defined(_M_X64) || defined(__x86_64__)
+    _mm_setcsr(c->mxcsr);
+#endif
 }
 static uint32_t native_cpu_pure_call(uint32_t entry,uint32_t object,
                                      unsigned count,const uint32_t *arguments)

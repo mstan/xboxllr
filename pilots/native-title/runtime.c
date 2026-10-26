@@ -1470,6 +1470,7 @@ int main(int argc,char **argv)
 #ifdef PILOT_MEDIA_HOST
     uint32_t content_status=media_verify(PILOT_XBE_SHA256);
     if(content_status)stop("native title content identity/mount failed",content_status);
+    media_resident_prepare();
     if(!strcmp(PILOT_TITLE_DRIVE_OWNER,"HOST")) {
         content_status=namespace_create("\\??\\" PILOT_TITLE_DRIVE,PILOT_TITLE_DEVICE);
         if(content_status)stop("native title content drive mount failed",content_status);

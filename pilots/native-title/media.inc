@@ -11,7 +11,8 @@ static const char *media_content_path;
 static HANDLE media_root,media_identity,storage_roots[6],storage_parent;
 static WCHAR storage_path[32768];
 static SRWLOCK media_lock=SRWLOCK_INIT;
-struct MediaFile { HANDLE host,async_idle,async_signal; uint32_t id,access; unsigned partition,cacheable,asynchronous,pending; SRWLOCK io_lock; };
+struct ResidentFile;
+struct MediaFile { HANDLE host,async_idle,async_signal; uint32_t id,access,share; unsigned partition,cacheable,asynchronous,pending,nonbuffered; SRWLOCK io_lock; const struct ResidentFile *resident; };
 static struct MediaFile media_files[256];
 static uint32_t media_next_id=0x50000001u;
 
@@ -84,6 +85,8 @@ static MediaCreate media_nt_create;
 static MediaFlush media_nt_flush;
 static MediaDirectory media_nt_directory;
 static INIT_ONCE media_once=INIT_ONCE_STATIC_INIT;
+#define PILOT_RESIDENT_MEDIA 1
+#include "resident_media.inc"
 #include "file_cache.inc"
 
 static BOOL CALLBACK media_start(PINIT_ONCE once,void *parameter,void **context)
@@ -340,11 +343,33 @@ static uint32_t media_open(uint32_t *args,int create)
         LARGE_INTEGER allocation; if (args[4]) allocation.QuadPart=(int64_t)MEM64(args[4]);
         status=storage_create_host(parent,path,host_access,share,host_options,args[7],args[5],args[4]?&allocation:NULL,&handle,&io);
     } else if (!status) status=media_open_host(parent,path,host_access,share,host_options,&handle,&io);
+    if(status==0xc0000043u && !partition && resident_ready &&
+       (access&(FILE_READ_DATA|GENERIC_READ)) && !(share&FILE_SHARE_READ)) {
+        /* A private read pin guarantees that resident bytes cannot change.
+         * Reopen a separate host file object with read sharing, and enforce
+         * the title's requested sharing within its mounted namespace below.
+         * Never retry an ordinary/nonresident sharing failure as success. */
+        uint32_t retry=create?storage_create_host(parent,path,host_access,share|FILE_SHARE_READ,
+            host_options,args[7],args[5],NULL,&handle,&io):
+            media_open_host(parent,path,host_access,share|FILE_SHARE_READ,host_options,&handle,&io);
+        if(!retry) {
+            if(media_resident_find(handle))status=0;
+            else {CloseHandle(handle);handle=NULL;}
+        }
+    }
     uint32_t granted_access=0;
     if(!status) {
         IO_STATUS_BLOCK access_io={0};
         status=(uint32_t)media_nt_query(handle,&access_io,&granted_access,sizeof(granted_access),8);
         if(status)CloseHandle(handle);
+    }
+    const struct ResidentFile *resident=NULL;
+    if(!status && !partition && (granted_access&FILE_READ_DATA)) {
+        resident=media_resident_find(handle);
+        for(unsigned i=0;resident && i<256;++i)if(media_files[i].host && media_files[i].resident==resident &&
+            (!(share&FILE_SHARE_READ) || !(media_files[i].share&FILE_SHARE_READ))) {
+            CloseHandle(handle);handle=NULL;status=0xc0000043u;break;
+        }
     }
     if (!status) {
         media_files[slot].async_idle=media_files[slot].async_signal=NULL;media_files[slot].pending=0;
@@ -359,7 +384,11 @@ static uint32_t media_open(uint32_t *args,int create)
             }
         }
         media_files[slot].host=handle; media_files[slot].id=media_next_id++;media_files[slot].access=granted_access;
+        media_files[slot].share=share;media_files[slot].nonbuffered=!!(options&8);
         media_files[slot].partition=partition;
+        /* The resident pin already denies writes/deletion. A read handle's
+         * permissive share mask cannot make those pinned bytes mutable. */
+        media_files[slot].resident=resident;
         media_files[slot].asynchronous=!(options&0x30);
         media_files[slot].cacheable=!media_files[slot].asynchronous && !(share&FILE_SHARE_WRITE) && !(options&8) &&
             !!(access&(FILE_READ_DATA|GENERIC_READ|GENERIC_ALL));

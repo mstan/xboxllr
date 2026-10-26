@@ -9,6 +9,7 @@ static void test_media_name(const char *name,uint32_t root)
 #include "directory_contract_test.inc"
 #include "file_async_contract_test.inc"
 #include "media_capacity_contract_test.inc"
+#include "resident_media_contract_test.inc"
 static void test_media(void)
 {
     char temp[MAX_PATH],directory[MAX_PATH],path[MAX_PATH];
@@ -134,6 +135,7 @@ static void test_media(void)
     call_kernel(187,&child,1);CHECK(!g_eax);create[8]=0x60;
     test_media_async(content,sizeof(content));
     test_media_capacity();
+    test_media_resident(directory,content,sizeof(content));
     test_media_name("Q:\\asset.bin",0xfffffffdu);MEM32(out)=0xfeed1234;
     call_kernel(190,create,9);CHECK(g_eax==0xc000003au && MEM32(out)==0xfeed1234);
     test_media_name("D:\\..\\asset.bin",0xfffffffdu);

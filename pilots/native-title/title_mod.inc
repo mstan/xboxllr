@@ -1,4 +1,8 @@
 #include "title_mod.h"
+#include <fenv.h>
+#if defined(_M_X64) || defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 #ifdef PILOT_TITLE_MODS
 static const struct PilotTitleMod *title_mod;
 static int title_mod_access(uint32_t address,void *data,uint32_t bytes,int write)
@@ -22,10 +26,12 @@ static int title_mod_read(uint32_t address,void *data,uint32_t bytes)
 {return title_mod_access(address,data,bytes,0);}
 static int title_mod_write(uint32_t address,const void *data,uint32_t bytes)
 {return title_mod_access(address,(void*)data,bytes,1);}
+#include "title_functions.inc"
 static void title_mod_initialize(void)
 {
     static const struct PilotTitleModHost host={PILOT_TITLE_MOD_ABI,PILOT_XBE_SHA256,
-        title_mod_read,title_mod_write,pilot_gfx_presentation,pilot_gfx_client_size,pilot_gfx_frame_shape,pilot_gfx_visual_mods,pilot_gfx_frame_scope};
+        title_mod_read,title_mod_write,pilot_gfx_presentation,pilot_gfx_client_size,pilot_gfx_frame_shape,pilot_gfx_visual_mods,pilot_gfx_frame_scope,
+        title_mod_invoke,pilot_gfx_radial_blur,media_resident_configure,media_resident_ready,dispatch_monotonic};
     title_mod=pilot_title_mod_open(&host);
     if(title_mod && title_mod->abi!=PILOT_TITLE_MOD_ABI)stop("title mod ABI mismatch",0);
 }

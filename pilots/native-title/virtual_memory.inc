@@ -81,7 +81,14 @@ static struct PilotRegion *vm_find(uint32_t base,uint32_t size)
     }
     return NULL;
 }
-static uint64_t vm_committed(uint32_t base,uint64_t size)
+/* Native service arenas have exclusive owners with page-accurate ledgers.
+ * Device/original-kernel backends can publish other mappings in these ranges
+ * and must keep the full host query. All callers serialize with vm_lock. */
+#if !defined(PILOT_IO_DEVICE_LLE) && !defined(PILOT_MEMORY_LLE) && !defined(PILOT_USB_LLE)
+#define PILOT_NATIVE_SERVICE_ACCOUNTING 1
+static uint64_t vm_native_services_committed(void);
+#endif
+static uint64_t vm_committed_host(uint32_t base,uint64_t size)
 {
     uint64_t count=0,end=(uint64_t)base+size;
     for (uint64_t at=base;at<end;) {
@@ -107,6 +114,21 @@ static uint64_t vm_committed(uint32_t base,uint64_t size)
         at=next;
     }
     return count;
+}
+static uint64_t vm_committed(uint32_t base,uint64_t size)
+{
+#ifdef PILOT_NATIVE_SERVICE_ACCOUNTING
+    if(!base && size==UINT64_C(0x100000000)) {
+        /* Pool D0000000-D3FFFFFF and contiguous 80000000-83FFFFFF are
+         * inaccessible to guest NtAllocateVirtualMemory (VM_END<80000000).
+         * Avoid a syscall for each fragmented service page on every new GPU
+         * resource. Query every other address exactly as before. */
+        return vm_native_services_committed()+vm_committed_host(0,UINT64_C(0x80000000))+
+            vm_committed_host(0x84000000u,UINT64_C(0x4c000000))+
+            vm_committed_host(0xd4000000u,UINT64_C(0x2c000000));
+    }
+#endif
+    return vm_committed_host(base,size);
 }
 static int vm_range(uint32_t base,uint32_t size,uint32_t alignment,uint32_t *low,uint32_t *bytes)
 {

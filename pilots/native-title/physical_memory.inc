@@ -67,11 +67,13 @@ static uint32_t physical_allocate(uint32_t length,uint32_t low,uint32_t high,uin
     for(;;) {
         if(at+bytes>limit)goto done;
         int conflict=0;
-        for(unsigned i=0;i<physical_allocation_capacity;++i) {
-            struct PhysicalAllocation *a=&physical_allocations[i];
-            uint32_t start=a->base&0x0fffffffu;
-            if(a->bytes && at+bytes>start && at<(uint64_t)start+a->bytes) {
-                at=((uint64_t)start+a->bytes+alignment-1)&~((uint64_t)alignment-1);
+        /* The authoritative per-page protection ledger is also occupancy:
+         * owned pages always have RO/RW access, and free clears them to zero.
+         * Walk pages rather than restarting an allocation-record scan for
+         * every prior resource. Original device allocation stays above. */
+        for(unsigned page=(unsigned)(at/4096);page<(at+bytes)/4096;++page) {
+            if(physical_protection[page]) {
+                at=((uint64_t)(page+1)*4096+alignment-1)&~((uint64_t)alignment-1);
                 conflict=1;break;
             }
         }

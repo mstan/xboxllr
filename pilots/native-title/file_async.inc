@@ -105,7 +105,12 @@ static uint32_t media_async_transfer(struct MediaFile *owner,const uint32_t *a,i
     if((event && event_nt_reset(event,NULL)<0) || !ResetEvent(owner->async_idle) || !ResetEvent(owner->async_signal))stop("file IO event reset failed",owner->id);
     ++owner->pending;
     if(write)fprintf(stderr,"[ASYNC FILE WRITE] handle=%08x event=%08x bytes=%u offset=%lld\n",owner->id,a[1],a[6],offset.QuadPart);
-    status=offset.QuadPart<0?MEDIA_INVALID:
+    unsigned resident=0;
+#ifdef PILOT_RESIDENT_MEDIA
+    if(!write)resident=media_resident_read(owner,&r->io,
+        r->session_buffer?r->session_buffer:memory+a[5],a[6],&offset,&status);
+#endif
+    if(!resident)status=offset.QuadPart<0?MEDIA_INVALID:
         (uint32_t)(write?media_nt_write:media_nt_read)(owner->host,r->done,NULL,NULL,&r->io,
             r->session_buffer?r->session_buffer:memory+a[5],a[6],&offset,NULL);
     if(g_pilot_session_enabled) {

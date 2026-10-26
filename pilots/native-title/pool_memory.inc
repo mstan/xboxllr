@@ -13,6 +13,21 @@
 #define POOL_BYTES (64u*1024*1024)
 static struct { uint32_t base,span,payload,usable,tag; } pool_blocks[4096];
 static uint16_t pool_page_refs[POOL_BYTES/4096];
+#ifndef PILOT_USB_LLE
+/* Address order avoids restarting a 4096-record conflict search after every
+ * occupied block. Stable ownership records and first-fit placement remain. */
+static uint16_t pool_order[4096];
+static unsigned pool_order_count;
+#endif
+#ifdef PILOT_NATIVE_SERVICE_ACCOUNTING
+static uint64_t vm_native_services_committed(void)
+{
+    uint64_t bytes=0;
+    for(unsigned page=0;page<POOL_BYTES/4096;++page)if(pool_page_refs[page])bytes+=4096;
+    for(unsigned i=0;i<physical_allocation_capacity;++i)bytes+=physical_allocations[i].bytes;
+    return bytes;
+}
+#endif
 static unsigned pool_find(uint32_t pointer)
 {
     for(unsigned i=0;i<4096;++i)if(pool_blocks[i].span && pool_blocks[i].payload==pointer)return i;
@@ -62,18 +77,17 @@ static uint32_t pool_allocate(uint32_t bytes,uint32_t tag)
     AcquireSRWLockExclusive(&vm_lock);
     unsigned slot;
     for(slot=0;slot<4096 && pool_blocks[slot].span;++slot){}
-    uint32_t result=0,at=0;
+    uint32_t result=0,at=0;unsigned position=0;
     if(slot==4096)goto done;
-    for(;;) {
+    for(;position<pool_order_count;++position) {
         if(!large && (at&4095)+span>4096)at=(at+4095)&~4095u;
-        if((uint64_t)at+span>POOL_BYTES)goto done;
-        int conflict=0;
-        for(unsigned i=0;i<4096;++i)if(pool_blocks[i].span) {
-            uint32_t low=pool_blocks[i].base-POOL_BASE,high=low+pool_blocks[i].span;
-            if(at<high && at+span>low) {at=(high+alignment-1)&~(alignment-1);conflict=1;break;}
-        }
-        if(!conflict)break;
+        unsigned i=pool_order[position];uint32_t low=pool_blocks[i].base-POOL_BASE;
+        if((uint64_t)at+span<=low)break;
+        uint32_t high=low+pool_blocks[i].span;
+        if(at<high)at=(high+alignment-1)&~(alignment-1);
     }
+    if(!large && (at&4095)+span>4096)at=(at+4095)&~4095u;
+    if((uint64_t)at+span>POOL_BYTES)goto done;
     unsigned first=at/4096,last=(at+span+4095)/4096;uint32_t additional=0;
     for(unsigned page=first;page<last;++page)if(!pool_page_refs[page])additional+=4096;
     if(vm_committed(0,0x100000000ull)+vm_service_bytes+additional>POOL_BYTES)goto done;
@@ -82,6 +96,8 @@ static uint32_t pool_allocate(uint32_t bytes,uint32_t tag)
     result=POOL_BASE+at+(large?0:8);
     pool_blocks[slot].base=POOL_BASE+at;pool_blocks[slot].span=span;
     pool_blocks[slot].payload=result;pool_blocks[slot].usable=span-(large?0:8);pool_blocks[slot].tag=tag;
+    memmove(pool_order+position+1,pool_order+position,(pool_order_count-position)*sizeof(pool_order[0]));
+    pool_order[position]=(uint16_t)slot;++pool_order_count;
     fprintf(stderr,"[POOL CREATE] address=%08x requested=%u usable=%u tag=%08x\n",result,bytes,pool_blocks[slot].usable,tag);
 done:
     ReleaseSRWLockExclusive(&vm_lock);return result;
@@ -104,6 +120,10 @@ static void pool_free(uint32_t pointer)
         if(!--pool_page_refs[page] && !VirtualFree(memory+POOL_BASE+page*4096,4096,MEM_DECOMMIT))
             stop("pool page release failed",pointer);
     }
+    unsigned position=0;while(position<pool_order_count && pool_order[position]!=slot)++position;
+    if(position==pool_order_count)stop("pool order ownership missing",pointer);
+    memmove(pool_order+position,pool_order+position+1,(pool_order_count-position-1)*sizeof(pool_order[0]));
+    --pool_order_count;
 #endif
     memset(&pool_blocks[slot],0,sizeof(pool_blocks[slot]));
     ReleaseSRWLockExclusive(&vm_lock);

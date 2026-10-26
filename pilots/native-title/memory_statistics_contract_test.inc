@@ -30,6 +30,8 @@ static void test_memory_statistics(void)
     test_memory_snapshot(after);CHECK(after[2]==before[2]-2);
     for(unsigned i=3;i<9;++i)CHECK(after[i]==before[i]);
     physical_free(physical);test_memory_snapshot(after);CHECK(!memcmp(before,after,36));
+
+
     for(unsigned i=0;i<32;++i) {
         uint32_t pool=pool_allocate(180,0x74736554);CHECK(pool);
         memset(memory+pool,0x5a,180);pool_free(pool);
@@ -104,6 +106,22 @@ static void test_memory_statistics(void)
     for(unsigned i=3;i<9;++i)CHECK(after[i]==before[i]);
     physical_free(physical);test_memory_snapshot(after);CHECK(!memcmp(before,after,36));
 
+#ifdef PILOT_NATIVE_SERVICE_ACCOUNTING
+    /* Service arenas stay exact under fragmentation, shared pool pages and
+     * interleaved releases. Compare to the independent host page oracle. */
+    uint32_t pool_sample[32],physical_sample[32];
+    for(unsigned i=0;i<32;++i) {
+        pool_sample[i]=pool_allocate(i%3?33+i*17:5000+i,0x74736554);CHECK(pool_sample[i]);
+        physical_sample[i]=physical_allocate(1+i*129,0,0xffffffffu,4096,PAGE_READWRITE);CHECK(physical_sample[i]);
+        CHECK(vm_committed(0,UINT64_C(0x100000000))==vm_committed_host(0,UINT64_C(0x100000000)));
+        CHECK(vm_committed(pool_sample[i]&~4095u,4096)==vm_committed_host(pool_sample[i]&~4095u,4096));
+    }
+    for(unsigned parity=0;parity<2;++parity)for(unsigned i=parity;i<32;i+=2) {
+        pool_free(pool_sample[i]);physical_free(physical_sample[i]);
+        CHECK(vm_committed(0,UINT64_C(0x100000000))==vm_committed_host(0,UINT64_C(0x100000000)));
+    }
+    test_memory_snapshot(after);CHECK(!memcmp(before,after,36));
+#endif
     CHECK(!fsc_resize(3));test_memory_snapshot(after);
     CHECK(after[2]==before[2]-3 && after[5]==3 && after[3]==before[3]);
     CHECK(!fsc_resize(1));test_memory_snapshot(after);CHECK(after[2]==before[2]-1 && after[5]==1);

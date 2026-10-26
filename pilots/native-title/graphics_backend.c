@@ -13,6 +13,7 @@ static int pilot_visibility_active(void);
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <math.h>
 #include "event_trace.h"
 static IDirect3D8 *pilot_factory;
 static IDirect3DDevice8 *pilot_device;
@@ -134,6 +135,9 @@ static ID3D11Texture2D *pilot_surfaces[4];
 static unsigned pilot_surface_refs[4];
 static ID3D11DepthStencilView *pilot_default_depth;
 static uint32_t pilot_color_target,pilot_depth_target;
+#ifdef PILOT_D3D_PHOBOS
+#include "graphics_radial_blur.inc"
+#endif
 static struct PilotInitializerState pilot_initializer;
 static uint32_t pilot_default_color_format;
 static int pilot_initializer_target_format(void);
