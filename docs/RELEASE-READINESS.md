@@ -71,10 +71,13 @@ Our source license and notice do not grant Microsoft/Sega permission.
 
 ## Deferred, without blocking this Windows preview
 
-Direct ISO import, native Linux host, general firmware admission, complete fresh
+Native Linux host, general firmware admission, complete fresh
 virtual-profile and per-title image-backed save matrices, populated imported
 Xbox Live cache (`.1.188`), Dashboard Gaussian upscaling (`.1.189`) and supporting
 startup hardware/audio precision (`.1.195`). Native startup presentation is
 available; full firmware boot is separate. Xbox Live is unavailable. Cheat-assisted coverage is not
 exhaustive natural-mechanics qualification. Legacy full-system binaries are not
 included. The toolkit is source/Python tooling, not a standalone compiler EXE.
+
+Native ISO/XISO selection and a reusable extracted cache are implemented; see
+[disc import](DISC-IMPORT.md) and `beads-xbox.1.187.10` for qualification.

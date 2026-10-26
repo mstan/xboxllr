@@ -17,7 +17,8 @@ from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('native_release_runtime', 'native_revisions', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_session_diagnostics', 'replay_native_session', 'native_session_mods', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
-           'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage', 'xbe_identity')
+           'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage', 'xbe_identity',
+           'native_disc', 'native_disc_progress')
 # Narrow native VP build closure. No machine/CPU executable, original input,
 # generated title body or private fixture is part of the startup source kit.
 BOOT_SHARED_SOURCES = (
@@ -251,8 +252,10 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         'Choose Skip for a new local console and automatic private save storage.\n'
         'That choice is remembered. Original saves may need their original console files;\n'
         'new local saves are not guaranteed to work on a real Xbox. Xbox Live is unavailable.\n\n'
-        'Choose your game files on the main screen: select the supported extracted .xbe.\n'
-        'Keep the whole game asset folder. Direct ISO import is not implemented yet.\n'
+        'Choose your game files on the main screen: select an Xbox .iso/.xiso or supported extracted .xbe.\n'
+        'Disc images are imported once with progress and Cancel, then the prepared game files are reused.\n'
+        'Keep data/discs across upgrades to avoid another import. Imports need extra space beside this build.\n'
+        'Extracted .xbe files still need their complete game asset folder.\n'
         'Game files and original console files are supplied separately by you.\n\n'
         'Optional Kernel dump, EEPROM (console identity), HDD image and Save folder are under Settings.\n'
         'An existing raw/QCOW2 HDD image takes priority. Without an image, a chosen folder\n'

@@ -17,6 +17,33 @@ from test_xbe_identity import fixture as identity_fixture
 
 
 class FirstRunTests(unittest.TestCase):
+    def test_iso_selection_keeps_source_choice_and_launches_the_imported_xbe(self):
+        from test_native_disc import make_disc, SilentProgress
+        source=self.root/'selected.iso';make_disc(source,xbe=self.image.read_bytes())
+        runtime.writable_environment(self.root)
+        data=dict(self.data,title=dict(self.data['title'],name='Authored title'),
+                  capabilities=dict(visual_mods=False),launcher_executable='launcher.exe')
+        runtime.prepare_profile(self.root,data,self.image)
+        with patch.object(Catalog,'run',return_value=(0,str(source))), \
+             patch('native_disc_progress.Progress',return_value=SilentProgress()), \
+             patch.object(runtime,'launch_game',return_value=0) as launch:
+            self.assertEqual(runtime.interactive(self.root,data,self.root/'data',False),0)
+        prepared=launch.call_args.args[2]
+        self.assertEqual(prepared.name,'default.xbe')
+        self.assertEqual(prepared.read_bytes(),self.image.read_bytes())
+        self.assertEqual(json.loads((self.root/'data/setup.json').read_text())['image'],str(source))
+
+    def test_canceled_import_returns_to_the_launcher_without_an_error_dialog(self):
+        source=self.root/'selected.iso';source.write_bytes(b'fixture selection')
+        runtime.writable_environment(self.root)
+        data=dict(self.data,title=dict(self.data['title'],name='Authored title'),
+                  capabilities=dict(visual_mods=False),launcher_executable='launcher.exe')
+        with patch.object(Catalog,'run',side_effect=[(0,str(source)),(1,str(source))]) as ui, \
+             patch.object(runtime,'prepare_game',side_effect=runtime.ImportCancelled()), \
+             patch.object(runtime,'message',side_effect=AssertionError('Cancel is not an error')):
+            self.assertEqual(runtime.interactive(self.root,data,self.root/'data',False),0)
+        self.assertEqual(ui.call_count,2)
+
     def test_packaged_session_mod_uses_title_default_and_keeps_owner_choice(self):
         from native_session_mods import enabled
         data = dict(title=dict(game_id='5345000A', xbe_sha256=

@@ -57,9 +57,13 @@ def unsupported_image_message(path, title):
         identity = read_identity(path)
     except (OSError, ValueError) as error:
         return f'This Xbox executable is not a supported original revision. Cannot read its title identity: {error}.'
+    return unsupported_identity_message(identity, title)
+
+
+def unsupported_identity_message(identity, title):
     label = title_id_label(identity['title_id'])
     selected = f'{identity["title_name"] or "Unnamed title"} ({label})'
     expected = title.get('game_id', '')
     if expected and identity['title_id'] != int(expected, 16):
         return f'Wrong game: selected {selected}. Expected {title.get("name", "title")} ({title_id_label(int(expected, 16))}).'
-    return f'This Xbox executable is not a supported original revision. Selected {selected}; choose a supported extracted XBE.'
+    return f'This Xbox executable is not a supported original revision. Selected {selected}; choose a supported original revision.'

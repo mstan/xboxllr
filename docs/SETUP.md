@@ -1,15 +1,15 @@
 # Setup: games, console profiles and the original Dashboard
 
-Status: October 22, 2026. Current previews run on Windows x64. Private owner-use
-packages now have a shared first-run interface; ISO-only import and publication
-remain unfinished. Linux releases are deferred. Tracking: `beads-xbox.1.187.7`, release
+Status: October 26, 2026. Current previews run on Windows x64. Private owner-use
+packages have a shared first-run interface and reusable ISO/XISO imports.
+Linux releases are deferred. Tracking: `beads-xbox.1.187.10`, release
 `beads-xbox.1.187`, console/storage provisioning `beads-xbox.1.22`.
 
 ## Choose what you want to run
 
 | Experience | What you supply today | Intended release setup |
 | --- | --- | --- |
-| Blinx or JSRF, direct native launch | Matching extracted game files; the private package can create a new local console without other dumps. Original console inputs are optional. Real virtual-profile save/restart/load qualification remains. | Select your own supported game ISO; setup extracts/verifies it and creates a virtual console and writable storage. Direct ISO import is not implemented yet. |
+| Blinx or JSRF, direct native launch | A supported Xbox ISO/XISO or matching extracted game files; the package can create a new local console without other dumps. Original console inputs are optional. | Select the image or extracted XBE. Images are imported once with progress and Cancel, then reuse the existing native file path. See [disc imports](DISC-IMPORT.md). |
 | Original Microsoft Dashboard, native launch | Matching Dashboard 5960 executable **and its assets**; the package uses the same optional console setup as games | Import your own matching Dashboard files. Use the shared native console services; a full original firmware boot is optional. |
 | Original-software full-system/reference route | Compatible owned flash, decrypted 2BL, a readable raw FATX HDD image and an EEPROM; encrypted bootloader extraction additionally needs matching MCPX/key material | An explicit advanced option with its own compatible input set; it is separate from direct native launch. |
 | Open-source default dashboard | No implementation has been selected for xboxllr | Optional redistributable shell/dashboard with its own qualified services and asset licenses; never a prerequisite for launching a game. |

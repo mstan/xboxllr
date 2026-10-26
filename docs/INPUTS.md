@@ -215,7 +215,7 @@ consumed by the current stock-dashboard replay command:
 | MCPX 1BL ROM dump | Secret MCPX boot ROM, typically 512 bytes | Needed for authentic cold boot/hardware validation work, not current replay. |
 | Pristine retail flash BIOS | Unmodified retail flash image from the owner console | Later P2 authentic secure-boot profile. |
 | `hardware.json` | Hand-written machine metadata: board revision, RAM size, video encoder, SMC, AV pack, HDD/DVD identity, dump methods | Evidence/provenance. Current executable does not consume it. |
-| Game disc image (`.iso`/`.xiso`) | Owner-supplied game disc image | Arc 2 only. |
+| Game disc image (`.iso`/`.xiso`) | Owner-supplied Xbox XDVDFS disc image | Arc 2 input or [native launcher import](DISC-IMPORT.md); exact supported embedded XBE still required. |
 
 ## Hardware oracle capability
 

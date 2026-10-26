@@ -2,7 +2,7 @@
 
 Fresh local saves need no original console dumps. Original signing imports and
 optional existing HDD images retain explicit admission and identity ownership.
-Direct ISO import and arbitrary original-save compatibility are separate work.
+ISO/XISO imports are private reusable game files, independent of console saves.
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from native_save_keys import prepare_virtual
 from native_console_settings import prepare as prepare_settings
 from create_eeprom import generate_eeprom, read_eeprom_file, validate_eeprom
 from native_revisions import hashes as revision_hashes, select as select_revision, profile_relative
+from native_disc import prepare_game, image_digest, ImportCancelled
 
 
 def sha(path):
@@ -76,7 +77,7 @@ def checked_image(data, image):
 
 def prepare_profile(root, data, image, kernel=None, imported_eeprom=None, *, virtual_root=None):
     """Publish only a complete new profile. Existing saves/identity are untouched."""
-    image = checked_image(data, image)
+    image = checked_image(data, prepare_game(root, data, image))
     data = select_revision(data.get('_catalog', data), sha(image))
     destination = inside(root, profile_relative(data) + '/console')
     if destination.exists() or destination.is_symlink():
@@ -450,7 +451,7 @@ def interactive(root, data, writable, minimized):
         data = catalog_data
         if config.get('image'):
             try:
-                data = select_revision(catalog_data, sha(Path(config['image'])))
+                data = select_revision(catalog_data, image_digest(config['image']))
             except (ValueError, OSError):
                 pass  # Keep the launcher available to choose another supported XBE.
         ready = inside(root, profile_relative(data) + '/console').exists()
@@ -484,6 +485,7 @@ def interactive(root, data, writable, minimized):
         if result != 0:
             return 0
         try:
+            image = prepare_game(root, catalog_data, image)
             checked_image(data, image)
             data = select_revision(catalog_data, sha(Path(image)))
             ready = inside(root, profile_relative(data) + '/console').exists()
@@ -516,6 +518,8 @@ def interactive(root, data, writable, minimized):
                 if storage and not hdd and sha(Path(storage) / '.xboxllr-console/eeprom.bin') != sha(profile / 'eeprom.bin'):
                     raise ValueError('Shared storage belongs to another console. Its existing saves were preserved.')
                 return launch_game(root, data, image, profile, catalog, storage=storage or None,hdd=hdd)
+        except ImportCancelled:
+            continue
         except (ValueError, OSError, KeyError) as error:
             message(data['title']['name'] + ' setup', str(error), 0x10)
 

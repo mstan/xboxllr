@@ -99,6 +99,18 @@ int main(int argc, char **argv) {
                         continue
                     self.assertEqual(lines[:4], ['1', str(expected['title_id']), expected['title_name'], title_id_label(expected['title_id'])])
                     self.assertEqual(lines[4], 'Unsupported XBE revision' if expected['title_id'] == 0x4d530004 else 'Wrong game selected')
+            # The same native certificate reader sees only the embedded XBE
+            # in compact and full-size images, including a sparse >4 GiB ISO.
+            from test_native_disc import make_disc, sparse
+            for base in (0, 0x18300000, 0x0fd90000, 0x02080000):
+                path=root/'fixture.XISO';make_disc(path,base=base,xbe=fixture('Disc title'))
+                if base==0x18300000:
+                    with path.open('r+b') as file:
+                        sparse(file);file.truncate(5*1024**3)
+                lines=subprocess.check_output([str(binary),str(path),'4d530004'],encoding='utf-8',timeout=10).splitlines()
+                self.assertEqual(lines[:3],['1',str(0x4d530004),'Disc title'])
+            make_disc(path,mutate=lambda f,b:(f.seek(b+40*2048+2),f.write(b'\x01\x00')))
+            self.assertEqual(subprocess.check_output([str(binary),str(path)],encoding='utf-8',timeout=10).splitlines()[0],'0')
 
 
 if __name__ == '__main__':

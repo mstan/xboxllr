@@ -63,6 +63,9 @@ def prepare(source, output, git='git'):
     if code.count('"pad_xbox.tga"') != 1:
         raise ValueError('Unreviewed Xbox controller artwork path')
     code = code.replace('"pad_xbox.tga"', '"pad_xbox.jpg"')
+    code = code.replace('{ "*.xbe" }', '{ "*.xbe", "*.iso", "*.xiso" }')
+    code = code.replace('{ kXboxExecutablePatterns, 1, "Xbox executable (.xbe)" }',
+                        '{ kXboxExecutablePatterns, 3, "Xbox game (.xbe, .iso, .xiso)" }')
     data = code.encode('utf-8')
     if not profile.exists() or profile.read_bytes() != data:
         profile.write_bytes(data)
@@ -154,7 +157,7 @@ def prepare(source, output, git='git'):
         'ImGui::Button("Browse BIOS##setup", ImVec2(px(120), px(32)))':
             'ImGui::Button("Browse kernel##setup", ImVec2(px(140), px(32)))',
         ': "Select your game ROM file.";':
-            ': "Select the supported .xbe inside its complete extracted asset folder.";',
+            ': "Select an Xbox ISO/XISO or the .xbe in its extracted game folder.";',
         'ImGui::Button(browse_lbl, ImVec2(px(128), px(32)))':
             'ImGui::Button(browse_lbl, ImVec2(px(200), px(32)))',
     }
@@ -194,6 +197,27 @@ def prepare(source, output, git='git'):
     if code.count(old) != 1:
         raise ValueError('Unreviewed XBE whole-file fingerprint boundary')
     code = code.replace(old, 'size_t hdr = 0; /* XBE hashes include every header byte. */')
+    # The Xbox host fingerprints only the embedded executable. The generic
+    # cartridge loader uses long/whole-file allocation, unsuitable for DVDs.
+    start = code.index("    m->rom_size[0] = '\\0';", code.index('void launcher_model_set_rom('))
+    end = code.index('    /* Keep the roster selection', start)
+    code = code[:start] + '''    m->rom_size[0] = '\\0';
+    m->crc_match = false;m->sha_match = false;m->sha1_match = false;
+    if (m->rom_present) {
+        unsigned char *body = NULL;size_t bytes = 0;uint64_t source_size = 0;
+        if (xboxllr_read_game_image(m->rom_full, &body, &bytes, &source_size)) {
+            snprintf(m->rom_size, sizeof(m->rom_size), "%.2f MB", (double)source_size / (1024.0 * 1024.0));
+            uint8_t digest[32];recompui_sha256_compute(body, bytes, digest);
+            uint32_t crc = recompui_crc32_compute(body, bytes);
+            m->crc_match = m->has_expected_crc && crc == m->expected_crc;
+            for (size_t k=0;k<m->num_known_sha256;++k)
+                if (!memcmp(digest,m->known_sha256[k],32)) {m->sha_match=true;break;}
+            free(body);
+        }
+    }
+    if (!m->rom_size[0]) safe_copy(m->rom_size, sizeof(m->rom_size), "--");
+
+''' + code[end:]
     data = code.encode('utf-8')
     if not model.exists() or model.read_bytes() != data:
         model.write_bytes(data)
@@ -223,7 +247,7 @@ def prepare(source, output, git='git'):
         raise ValueError('Changed controller photograph')
     inventory = {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'xboxlle-ui.json'}
-    manifest = dict(version=1, adapter_version=10, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
+    manifest = dict(version=1, adapter_version=11, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
                     adapter='Xbox native host: mod provider, console storage and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
     (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
@@ -233,7 +257,7 @@ def prepare(source, output, git='git'):
 def verify(output):
     output = Path(output).resolve()
     manifest = json.loads((output / 'xboxlle-ui.json').read_text(encoding='utf-8'))
-    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 10:
+    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 11:
         raise ValueError('Unreviewed prepared UI profile')
     if manifest.get('controller_photo') != dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256):
         raise ValueError('Unreviewed controller photograph provenance')

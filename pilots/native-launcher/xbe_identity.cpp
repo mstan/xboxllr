@@ -1,5 +1,7 @@
 /* Public certificate fields only. This never approves an executable hash. */
 #include "xbe_identity.h"
+#include "disc_image.h"
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -33,22 +35,18 @@ static void append(std::string &name, unsigned cp) {
 XboxllrXbeIdentity xboxllr_read_xbe_identity(const char *path) {
     XboxllrXbeIdentity result = {};
     try {
-        std::ifstream file(std::filesystem::u8path(path ? path : ""), std::ios::binary | std::ios::ate);
-        if (!file) throw std::runtime_error("Cannot read XBE title identity");
-        const auto length = file.tellg();
-        unsigned char header[0x178];file.seekg(0);
-        if (!file.read((char*)header, sizeof(header)) || std::memcmp(header, "XBEH", 4))
+        const auto bytes=xboxllr_disc::image(path);
+        const auto length=bytes.size();const auto *header=bytes.data();
+        if (length<0x178 || std::memcmp(header, "XBEH", 4))
             throw std::runtime_error("Not an XBE image");
         const uint32_t base = word(header + 0x104), headers = word(header + 0x108), va = word(header + 0x118);
         const uint64_t cert = uint64_t(va) - base;
-        if (length < 0 || headers < sizeof(header) || uint64_t(headers) > uint64_t(length) ||
-            va < base || cert < sizeof(header) || cert + 0x5c > headers)
+        if (headers < 0x178 || uint64_t(headers) > uint64_t(length) ||
+            va < base || cert < 0x178 || cert + 0x5c > headers)
             throw std::runtime_error("XBE certificate identity is outside headers");
-        unsigned char public_fields[0x5c];file.seekg(std::streamoff(cert));
-        if (!file.read((char*)public_fields, sizeof(public_fields)))
-            throw std::runtime_error("XBE certificate identity is truncated");
+        const auto *public_fields=bytes.data()+cert;
         const uint32_t size = word(public_fields);
-        if (size < sizeof(public_fields) || cert + size > headers)
+        if (size < 0x5c || cert + size > headers)
             throw std::runtime_error("XBE certificate extent is invalid");
         result.title_id = word(public_fields + 8);
         std::string name;
@@ -77,6 +75,16 @@ XboxllrXbeIdentity xboxllr_read_xbe_identity(const char *path) {
     return result;
 }
 void xboxllr_xbe_select(const char *path) { xboxllr_xbe_identity = xboxllr_read_xbe_identity(path); }
+int xboxllr_read_game_image(const char *path,unsigned char **data,size_t *size,uint64_t *source_size) {
+    if(!data || !size || !source_size)return 0;
+    *data=nullptr;*size=0;*source_size=0;
+    try {
+        const auto bytes=xboxllr_disc::image(path,source_size);
+        auto *copy=static_cast<unsigned char*>(std::malloc(bytes.size()));
+        if(!copy)return 0;
+        std::memcpy(copy,bytes.data(),bytes.size());*data=copy;*size=bytes.size();return 1;
+    } catch(const std::exception&){return 0;}
+}
 const char *xboxllr_xbe_rejection(void) {
     if (!xboxllr_xbe_identity.valid) return xboxllr_xbe_identity.error;
     if (xboxllr_has_expected_title_id && xboxllr_xbe_identity.title_id != xboxllr_expected_title_id)
