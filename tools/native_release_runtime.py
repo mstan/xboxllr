@@ -425,7 +425,7 @@ def main():
             parser.error('--prepare-only requires --image')
         with session_lock(writable):
             prepare_profile(root, data, args.image, args.kernel, args.eeprom)
-            verify_profile(root, select_revision(data, sha(args.image)))
+            verify_profile(root, select_revision(data, image_digest(args.image)))
         return 0
     with session_lock(writable):
         return interactive(root, data, writable, args.start_minimized)

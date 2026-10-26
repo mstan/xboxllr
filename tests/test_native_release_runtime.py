@@ -17,6 +17,16 @@ from test_xbe_identity import fixture as identity_fixture
 
 
 class FirstRunTests(unittest.TestCase):
+    def test_prepare_only_accepts_an_iso_and_verifies_its_embedded_revision(self):
+        from test_native_disc import make_disc, SilentProgress
+        source=self.root/'selected.iso';make_disc(source,xbe=self.image.read_bytes())
+        with patch.object(sys,'argv',['runtime','--root',str(self.root),
+                '--prepare-only','--image',str(source)]), \
+             patch.object(runtime,'descriptor',return_value=self.data), \
+             patch('native_disc_progress.Progress',return_value=SilentProgress()):
+            self.assertEqual(runtime.main(),0)
+        self.assertTrue((self.root/'data/console/profile.json').is_file())
+
     def test_iso_selection_keeps_source_choice_and_launches_the_imported_xbe(self):
         from test_native_disc import make_disc, SilentProgress
         source=self.root/'selected.iso';make_disc(source,xbe=self.image.read_bytes())
