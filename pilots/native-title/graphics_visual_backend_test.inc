@@ -29,7 +29,10 @@ static int test_visual_depth_mismatch(void)
     struct PilotVisualMods options;pilot_visual_mods_default(&options);options.internal_height=1080;
     CHECK(pilot_gfx_visual_mods(&options));
     uint32_t pp[17]={640,480,D3DFMT_X8R8G8B8,1,0x11,1,0,0,1,D3DFMT_D24S8,0,60,1};CHECK(!pilot_gfx_create(pp));
-    uint32_t lookup;CHECK(!pilot_gfx_texture_create_usage(2,2,1,0x12,1,&lookup));CHECK(!pilot_gfx_targets(lookup,UINT32_MAX));
+    uint32_t lookup,depth;CHECK(!pilot_gfx_texture_create_usage(2,2,1,0x12,1,&lookup));
+    /* Sampleable depth has an authored allocation grid; unlike standalone
+     * storage it must not be silently reshaped to a different target. */
+    CHECK(!pilot_gfx_texture_create_usage(640,480,1,0x2e,2,&depth));CHECK(!pilot_gfx_targets(lookup,depth));
     uint32_t viewport[]={0,0,2,2,0,0x3f800000u};CHECK(!pilot_gfx_viewport(viewport));
     pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);pilot_gfx_set_state(D3DRS_ZENABLE,0);
     struct {float x,y,z,w;uint32_t color;} triangle[]={{0,0,.5f,1,0xffffffff},{2,0,.5f,1,0xffffffff},{0,2,.5f,1,0xffffffff}};
@@ -184,6 +187,7 @@ static int test_visual_square_depth(void)
     }
     fprintf(stderr,"PASS: square depth follows native and enhanced color grids; real Z/stencil survive repeated transitions at 1080p/2160p/SSAA\n");return 0;
 }
+#include "graphics_default_depth_backend_test.inc"
 static int test_visual_mod_resources(void)
 {
     uint32_t pp[17]={640,480,D3DFMT_X8R8G8B8,1,0x11,1,0,0,1,D3DFMT_D24S8,0,60,1};
@@ -246,6 +250,6 @@ static int test_visual_mod_resources(void)
     CHECK(!visual_reset_preserves_window(pp));
     pilot_gfx_close();
     fprintf(stderr,"PASS: actual 1080p/2160p/SSAA raster, original guest sizes/readback, scaled color/depth CPU roundtrip, aliases/reset and original restoration\n");
-    CHECK(!test_visual_square_depth());CHECK(!test_visual_aa());return test_visual_interpolation();
+    CHECK(!test_visual_square_depth());CHECK(!test_visual_default_depth());CHECK(!test_visual_aa());return test_visual_interpolation();
 }
 #endif

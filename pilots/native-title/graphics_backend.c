@@ -198,6 +198,7 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_point_backend.inc"
 #include "graphics_edge_backend.inc"
 #include "graphics_depth_texture_backend.inc"
+#include "graphics_default_depth_backend.inc"
 
 void pilot_gfx_pixel_fixed(void)
 {
@@ -289,6 +290,7 @@ void pilot_gfx_close(void)
     pilot_point_close();
     pilot_edge_close();
     pilot_depth_texture_close();
+    pilot_default_depth_close();
     pilot_visual_close();
     pilot_logic_copy=pilot_requested_blend=0;
     pilot_gfx_shaders_close();
@@ -475,6 +477,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     if(old_depth)ID3D11DepthStencilView_Release(old_depth);
     if(FAILED(result))goto stage_failed;
     pilot_visual_close();
+    pilot_default_depth_close();
     for(unsigned i=0;i<3;++i) {
         while(pilot_surface_refs[i]){ID3D11Texture2D_Release(pilot_surfaces[i]);--pilot_surface_refs[i];}
         if(pilot_surfaces[i])ID3D11Texture2D_Release(pilot_surfaces[i]);pilot_surfaces[i]=NULL;
@@ -831,7 +834,7 @@ static uint32_t pilot_feedback_validate(void)
     if(pilot_visual_scaled() && pilot_depth_target &&
        (d3d8_GetRenderStates()[D3DRS_ZENABLE] || d3d8_GetRenderStates()[D3DRS_STENCILENABLE])) {
         ID3D11Texture2D *color=pilot_color_target?pilot_donor_texture(pilot_texture(pilot_color_target)):pilot_surfaces[0];
-        ID3D11Texture2D *depth=pilot_depth_target==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(pilot_depth_target));
+        ID3D11Texture2D *depth=pilot_depth_target==UINT32_MAX?pilot_default_depth_storage():pilot_donor_texture(pilot_texture(pilot_depth_target));
         D3D11_TEXTURE2D_DESC c,d;ID3D11Texture2D_GetDesc(color,&c);ID3D11Texture2D_GetDesc(depth,&d);
         uint64_t cw=pilot_color_target?pilot_texture(pilot_color_target)->width:pilot_gfx_width();
         uint64_t ch=pilot_color_target?pilot_texture(pilot_color_target)->height:pilot_gfx_height();
@@ -970,12 +973,16 @@ int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
         dsv=pilot_textures[depth-1].dsv;
     }
     if(depth==UINT32_MAX && (width>pilot_gfx_width() || height>pilot_gfx_height()))return E_INVALIDARG;
+    if(depth==UINT32_MAX) {
+        HRESULT hr=pilot_default_depth_match_color(color?pilot_donor_texture(pilot_texture(color)):pilot_surfaces[0],width,height,&dsv);
+        if(FAILED(hr))return hr;
+    }
 #ifdef PILOT_D3D_PHOBOS
     /* Remove old outputs before restoring their sampled views. Overlapping
      * stages keep their real guest/donor bindings; a draw uses the snapshot. */
     ID3D11DeviceContext_OMSetRenderTargets(d3d8_GetD3D11Context(),0,NULL,NULL);
     pilot_donor_output_images(color?pilot_texture(color)->image:d3d8_GetSceneImage(),
-        depth==UINT32_MAX?pilot_donor_default_depth():(depth?pilot_texture(depth)->image:NULL),1);
+        depth==UINT32_MAX?pilot_default_depth_image():(depth?pilot_texture(depth)->image:NULL),1);
 #endif
     ID3D11DeviceContext_OMSetRenderTargets(d3d8_GetD3D11Context(),1,&rtv,dsv);
     pilot_gpu_call_end("targets",started);
