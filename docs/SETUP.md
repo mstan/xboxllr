@@ -272,6 +272,25 @@ Its QCOW2 download is **not** directly accepted by xboxllr's raw-image path;
 format conversion and compatibility need separate handling. A blank/generated
 disk still needs your own Dashboard assets if you want the Microsoft Dashboard.
 
+## Native game controls and presentation
+
+Press Play with a controller to use that device as Player 1. A new automatic
+selection uses an available controller, with keyboard input available when no
+controller is connected. Explicit device selections wait for that device to
+reconnect. The Xbox launcher remembers friendly controller names and displays
+a short ID suffix, including while a remembered controller is disconnected.
+
+Alt+Enter toggles borderless desktop fullscreen without changing the display
+mode. The native game remembers its normal rectangle, maximized state and
+borderless state in `data/window-state.txt`. Keep the package's data folder
+when upgrading. Automated checks use separate settings and remain hidden.
+
+Titles using the sharp-presentation policy default to original, sharp frames.
+The first upgrade resets the older default of automatically enabled temporal
+blending. Other enhancements and saves stay intact. Blended frames remain an
+explicit option in Mods; enabling them again is remembered. Blending adds
+motion blur, double edges and one source frame of latency.
+
 ## 5. Preserve saves and resolve setup failures
 
 Back up the entire console profile: persistent state/HDD, EEPROM, any imported

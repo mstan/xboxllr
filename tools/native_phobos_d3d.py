@@ -215,6 +215,7 @@ def prepare(donor, output, reference):
             if path.name=='rhi_d3d11.c':
                 code+='\nID3D11Device *d3d8_GetD3D11Device(void) { return g_dev; }\n'
                 code+='ID3D11DeviceContext *d3d8_GetD3D11Context(void) { return g_ctx; }\n'
+                code+='IDXGISwapChain *d3d8_GetSwapChain(void) { return g_swap; }\n'
             code=prepare_visual(code,path.name)
             code=('/* Private pilot adaptation of https://github.com/phobos665/xboxrecomp\n'
                   ' * revision '+PIN+', '+relative.as_posix()+'.\n'

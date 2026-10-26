@@ -12,16 +12,16 @@ native_title_mod_abi = 2
 
 [[feature]]
 id = "frame-rate"
-name = "Higher frame rate"
-description = "Blended interpolation keeps the original game updates, adds one frame of delay and can show double edges. Actual mode changes the update rate and requires game-specific timing support."
+name = "Frame presentation"
+description = "Original frames stay sharp. Optional blended frames add motion blur, double edges and one frame of delay. Actual mode requires game-specific timing support."
 default_enabled = false
 [[option]]
 feature = "frame-rate"
 id = "mode"
 type = "choice"
-default = "interpolated"
+default = "original"
 values = ["original", "interpolated", "actual"]
-labels = ["Original", "Blended interpolation", "Actual game updates"]
+labels = ["Original (sharp)", "Blended frames (adds motion blur)", "Actual game updates"]
 [[option]]
 feature = "frame-rate"
 id = "rate"

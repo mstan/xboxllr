@@ -339,6 +339,7 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
                XLLE_PILOT_VISIBLE='1', XLLE_PILOT_AUDIO_OUTPUT_MUTE='0', RECOMP_VOLUME=str(catalog.volume))
     if data['title'].get('name'):
         env['XLLE_PILOT_WINDOW_TITLE'] = data['title']['name']
+    env['XLLE_PILOT_WINDOW_STATE'] = str(root / 'data' / 'window-state.txt')
     if hdd:
         env.update(XLLE_PILOT_HDD_IMAGE=hdd['path'], XLLE_PILOT_HDD_IDENTITY=hdd['identity'])
     for name in ('SDL_AUDIODRIVER', 'SDL_AUDIO_DRIVER'):
@@ -348,6 +349,8 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
         env['XLLE_PILOT_INPUT'] = player['source']
     elif player['source'] == 'gamepad':
         env.update(XLLE_PILOT_INPUT='sdl', XLLE_PILOT_INPUT_GUID=player['guid'])
+    else:
+        env['XLLE_PILOT_INPUT'] = 'auto'
     options = catalog_options(catalog, data)
     from native_input_mods import environment as input_mod_environment
     env.update(input_mod_environment(catalog))
@@ -358,6 +361,7 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
         resolve(root / 'release.json', data, plan, **options, registry_available=True)
         env['XLLE_PILOT_MOD_PLAN'] = str(plan)
     if automated_seconds is not None:
+        env.pop('XLLE_PILOT_WINDOW_STATE', None)
         env.update(XLLE_PILOT_VISIBLE='0', XLLE_PILOT_AUDIO_OUTPUT_MUTE='1', RECOMP_VOLUME='0', SDL_AUDIODRIVER='dummy')
     command = [str(inside(root, data['executable'])), str(image),
                str(profile / 'eeprom.bin'), str(image.parent), str(state)]
@@ -381,7 +385,12 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
                         handoff=startup if automated_seconds is None else None, title_image=image)
             env.update(startup.environment)
             try:
+                process_startup = None
+                if os.name == 'nt':
+                    process_startup = subprocess.STARTUPINFO()
+                    process_startup.dwFlags |= 0x80  # STARTF_FORCEOFFFEEDBACK
                 child = subprocess.Popen(command, cwd=state, env=env, stdout=log, stderr=log,
+                    startupinfo=process_startup,
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             except OSError:
                 session.finish(None, reason='launch-failed')
@@ -466,6 +475,7 @@ def interactive(root, data, writable, minimized):
             writable / 'mod-selection.json', visibility=[root / 'mods/ui-visibility.json'],
             frame_modes=data.get('launcher', {}).get('frame_modes', []),
             defaults=data.get('launcher', {}).get('defaults', {}),
+            sharp_presentation=data.get('launcher', {}).get('sharp_presentation', False),
             boot=startup_ui(root, data, fallback_kernel=choice['kernel']),
             setup=dict(required=False, kernel=choice['kernel'], acknowledged=choice['acknowledged'],
                        eeprom=choice['eeprom'], storage=choice['storage'], hdd=choice.get('hdd',''), locked=ready, choice_path=str(choice_path)))

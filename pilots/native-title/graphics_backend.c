@@ -34,6 +34,8 @@ int pilot_gfx_deferred_revisions(uint64_t revisions[5])
 #endif
 }
 static HWND pilot_window;
+#include "window_host.h"
+static struct PilotWindowHost pilot_window_host;
 static WCHAR pilot_window_title[256]=L"Xbox native reference";
 int32_t pilot_gfx_title(const char *utf8)
 {
@@ -262,6 +264,8 @@ HRESULT pilot_d3d_require(HRESULT result,const char *file,unsigned line)
 }
 static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
 {
+    LRESULT handled;
+    if(pilot_window_host_message(&pilot_window_host,message,wparam,lparam,&handled))return handled;
     if(message==WM_PAINT && !pilot_device && pilot_saved_display) {
         PAINTSTRUCT paint;HDC dc=BeginPaint(window,&paint);RECT client;GetClientRect(window,&client);
         BITMAPINFO info={0};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
@@ -345,15 +349,17 @@ int32_t pilot_gfx_parameters(const uint32_t p[17])
 static int32_t pilot_window_open(unsigned width,unsigned height)
 {
     WNDCLASSW window_class={0};window_class.lpfnWndProc=pilot_window_proc;
+    window_class.hCursor=LoadCursor(NULL,IDC_ARROW);
     window_class.hInstance=GetModuleHandleW(NULL);window_class.lpszClassName=L"xlle-native-reference";
     if(!RegisterClassW(&window_class) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)
         return HRESULT_FROM_WIN32(GetLastError());
     RECT client=pilot_client_rectangle(width,height);
-    if(!pilot_window)pilot_window=CreateWindowW(window_class.lpszClassName,pilot_window_title,WS_OVERLAPPEDWINDOW,
+    if(pilot_window)return S_OK;
+    memset(&pilot_window_host,0,sizeof(pilot_window_host));
+    pilot_window=CreateWindowW(window_class.lpszClassName,pilot_window_title,WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,CW_USEDEFAULT,client.right-client.left,client.bottom-client.top,NULL,NULL,window_class.hInstance,NULL);
     if(!pilot_window)return HRESULT_FROM_WIN32(GetLastError());
-    if(!SetWindowPos(pilot_window,NULL,0,0,client.right-client.left,client.bottom-client.top,
-                    SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))return HRESULT_FROM_WIN32(GetLastError());
+    pilot_window_host_init(&pilot_window_host,pilot_window);
     return S_OK;
 }
 int32_t pilot_gfx_create(const uint32_t p[17])
@@ -382,6 +388,14 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     pp.AutoDepthStencilFormat=(D3DFORMAT)p[9]; pp.Flags=p[10];
     pp.FullScreen_RefreshRateInHz=p[11]; pp.FullScreen_PresentationInterval=p[12];
     HRESULT result=pilot_factory->lpVtbl->CreateDevice(pilot_factory,0,1,pilot_window,0,&pp,&pilot_device);
+    if(SUCCEEDED(result)) {
+        IDXGIFactory *factory=NULL;
+        result=IDXGISwapChain_GetParent(d3d8_GetSwapChain(),&IID_IDXGIFactory,(void**)&factory);
+        if(SUCCEEDED(result)) {
+            result=IDXGIFactory_MakeWindowAssociation(factory,pilot_window,DXGI_MWA_NO_WINDOW_CHANGES|DXGI_MWA_NO_ALT_ENTER);
+            IDXGIFactory_Release(factory);
+        }
+    }
     if (SUCCEEDED(result) && p[8]) {
         ID3D11DeviceContext_OMGetRenderTargets(d3d8_GetD3D11Context(),0,NULL,&pilot_default_depth);
         if(!pilot_default_depth)pilot_d3d_backend_stop("native default depth surface is absent");
@@ -625,7 +639,7 @@ int32_t pilot_gfx_present(void)
     const char *visible=getenv("XLLE_PILOT_VISIBLE");
     int boot_handoff=pilot_boot_handoff();
     if(!boot_handoff && !pilot_visible && visible && !strcmp(visible,"1")) {
-        ShowWindow(pilot_window,SW_SHOWNOACTIVATE);UpdateWindow(pilot_window);pilot_visible=1;
+        pilot_window_host_show(&pilot_window_host);pilot_visible=1;
     }
     uint64_t started=pilot_gpu_call_begin();
 #ifdef PILOT_D3D_PHOBOS
@@ -650,7 +664,7 @@ int32_t pilot_gfx_present(void)
         /* Show the prepared title window without stealing focus from the
          * retained boot window. An occluded swap may show it, but cannot retire
          * the boot helper; only an actual S_OK presentation acknowledges it. */
-        ShowWindow(pilot_window,SW_SHOWNOACTIVATE);UpdateWindow(pilot_window);pilot_visible=1;
+        pilot_window_host_show(&pilot_window_host);pilot_visible=1;
     }
     if(boot_handoff && result==S_OK && pilot_visible) {
         if(!SetEvent(pilot_boot_present_event))

@@ -40,6 +40,7 @@ static void pilot_startup_window(void)
      * the inactive thunk forwards all input/messages to the title procedure. */
     if(result==XBOXLLR_BOOT_WINDOW_CLOSED)ExitProcess(0); /* Owner closed this app. */
     pilot_visible=IsWindowVisible(pilot_window)!=0;
+    if(pilot_visible)pilot_window_host_show(&pilot_window_host);
     fprintf(stderr,"[STARTUP] Same title window %p returned %d\n",(void*)pilot_window,result);
     fflush(stderr);
     return;

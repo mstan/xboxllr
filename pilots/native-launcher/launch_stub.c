@@ -26,7 +26,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE previous,LPWSTR arguments,int s
                      program,root,arguments?arguments:L"");
     if(written<0 || (size_t)written>=capacity){HeapFree(GetProcessHeap(),0,command);goto failed;}
     STARTUPINFOW startup={0};startup.cb=sizeof(startup);
-    startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
+    startup.dwFlags=STARTF_USESHOWWINDOW|STARTF_FORCEOFFFEEDBACK;startup.wShowWindow=SW_HIDE;
     PROCESS_INFORMATION child={0};
     BOOL created=CreateProcessW(program,command,NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,root,&startup,&child);
     HeapFree(GetProcessHeap(),0,command);

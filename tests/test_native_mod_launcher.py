@@ -17,6 +17,23 @@ PID = 'xboxlle.enhancement.visuals'
 
 
 class LauncherPolicy(unittest.TestCase):
+    def test_sharp_policy_migrates_old_default_once_and_keeps_new_opt_in(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)/'settings.json'
+            frame='xboxlle.enhancement.frame-rate/frame-rate';quality=PID+'/resolution'
+            ui.atomic_json(state,dict(version=1,volume=72,player1=dict(source='keyboard',guid=''),features={
+                frame:dict(enabled=True,options=dict(mode='interpolated',rate='60')),
+                quality:dict(enabled=True,options=dict(height='1440'))}))
+            catalog=ui.Catalog(MANIFESTS,state,frame_modes=['interpolated'],sharp_presentation=True)
+            self.assertNotIn(('xboxlle.enhancement.frame-rate','frame-rate','mode'),catalog.values())
+            self.assertEqual(catalog.volume,72)
+            self.assertEqual(catalog.values()[(PID,'resolution','height')],'1440')
+            self.assertEqual(catalog.player,dict(source='keyboard',guid=''))
+            next(f for f in catalog.features if f['id']=='frame-rate')['enabled']=True
+            ui.atomic_json(state,catalog.selection())
+            reloaded=ui.Catalog(MANIFESTS,state,frame_modes=['interpolated'],sharp_presentation=True)
+            self.assertEqual(reloaded.values()[('xboxlle.enhancement.frame-rate','frame-rate','mode')],'interpolated')
+
     def test_authored_categories_reach_native_ui_provider(self):
         packages={'xboxlle.enhancement.camera':'Controls','xboxlle.enhancement.visuals':'Visual enhancements',
                   'xboxllr.diagnostics':'Diagnostics','xboxllr.enhancement.startup':'Presentation'}

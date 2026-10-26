@@ -23,7 +23,7 @@
  * Real OS keys are read only while this process owns the foreground window. */
 static INIT_ONCE input_host_once=INIT_ONCE_STATIC_INIT;
 static int input_host_keyboard;
-static int input_host_sdl,input_host_none,input_host_tcp;
+static int input_host_sdl,input_host_none,input_host_tcp,input_host_auto;
 static unsigned input_host_invert_x,input_host_invert_y;
 static unsigned input_host_camera_flag(const char *name)
 {
@@ -64,8 +64,10 @@ static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID
     if(input_host_tcp && !pilot_debug_active()) {
         fprintf(stderr,"[PILOT INPUT STOP] TCP controller requires an active listener\n");ExitProcess(2);
     }
-    if(!strcmp(value,"sdl")) {
-        uint32_t error=pilot_input_sdl_start(getenv("XLLE_PILOT_INPUT_GUID"));
+    if(!strcmp(value,"sdl") || !strcmp(value,"auto")) {
+        input_host_auto=!strcmp(value,"auto");
+        uint32_t error=pilot_input_sdl_start(input_host_auto?"auto":getenv("XLLE_PILOT_INPUT_GUID"));
+        if(error==ERROR_NOT_SUPPORTED && input_host_auto){input_host_auto=0;return TRUE;}
         if(error){fprintf(stderr,"[PILOT INPUT STOP] invalid SDL controller configuration error=%u\n",error);ExitProcess(2);}
         input_host_sdl=1;
     }
@@ -128,7 +130,10 @@ static uint32_t input_host_state_raw(unsigned port,uint8_t gamepad[18])
     if(!port && pilot_debug_input(gamepad))return ERROR_SUCCESS;
     if(input_host_tcp){memset(gamepad,0,18);return port?ERROR_DEVICE_NOT_CONNECTED:ERROR_SUCCESS;}
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
-    if(input_host_sdl)return pilot_input_sdl_state(port,gamepad);
+    if(input_host_sdl) {
+        uint32_t status=pilot_input_sdl_state(port,gamepad);
+        if(!input_host_auto || status!=ERROR_DEVICE_NOT_CONNECTED)return status;
+    }
     if(input_control_view) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         return input_control_sample(input_control_view,GetTickCount64(),gamepad);
@@ -137,7 +142,7 @@ static uint32_t input_host_state_raw(unsigned port,uint8_t gamepad[18])
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         return input_replay_poll(input_host_replay_time(),gamepad);
     }
-    if(input_host_keyboard) {
+    if(input_host_keyboard || input_host_auto) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         uint8_t keys[256]={0};DWORD process=0;
         HWND foreground=GetForegroundWindow();
@@ -157,8 +162,11 @@ static uint32_t input_host_caps_raw(unsigned port,uint8_t gamepad[18],uint8_t ru
 {
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
-    if(input_host_sdl)return pilot_input_sdl_caps(port,gamepad,rumble);
-    if(input_host_is_keyboard() || input_replay_count || input_control_view || input_host_tcp) {
+    if(input_host_sdl) {
+        uint32_t status=pilot_input_sdl_caps(port,gamepad,rumble);
+        if(!input_host_auto || status!=ERROR_DEVICE_NOT_CONNECTED)return status;
+    }
+    if(input_host_is_keyboard() || input_host_auto || input_replay_count || input_control_view || input_host_tcp) {
         if(port)return ERROR_DEVICE_NOT_CONNECTED;
         if(input_replay_count) {
             uint8_t state[18];uint32_t status=input_host_state_raw(port,state);
@@ -188,8 +196,11 @@ static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right
 {
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
-    if(input_host_sdl)return pilot_input_sdl_rumble(port,left,right);
-    if(input_host_is_keyboard() || input_replay_count || input_control_view || input_host_tcp) {
+    if(input_host_sdl) {
+        uint32_t status=pilot_input_sdl_rumble(port,left,right);
+        if(!input_host_auto || status!=ERROR_DEVICE_NOT_CONNECTED)return status;
+    }
+    if(input_host_is_keyboard() || input_host_auto || input_replay_count || input_control_view || input_host_tcp) {
         uint8_t state[18];uint32_t status=input_host_state_raw(port,state);
         return status?status:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
     }

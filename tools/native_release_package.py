@@ -302,6 +302,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         framework_dirty=bool(subprocess.check_output(['C:/Program Files/Git/cmd/git.exe', '-C', str(ROOT),
             'status', '--porcelain'], text=True).strip()),
         distribution='windows-prerelease; original content supplied by user')
+    if source.get('launcher', {}).get('sharp_presentation'):
+        record['launcher']['sharp_presentation'] = True
     (output / 'release.json').write_text(json.dumps(record, indent=2)+'\n', encoding='utf-8')
     return record
 

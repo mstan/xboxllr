@@ -74,7 +74,7 @@ def prepare(source, output, git='git'):
         code = files.read('src/common/backends/imgui/launcher_imgui.cpp').decode('utf-8')
     adapter = Path(__file__).resolve().parents[1] / 'pilots/native-launcher'
     for source, name in [('console_setup.h','xboxllr_console_setup.h'), ('console_setup_ui.inc','xboxllr_console_setup_ui.inc'),
-                         ('xbe_identity.h', 'xboxllr_xbe_identity.h')]:
+                         ('xbe_identity.h', 'xboxllr_xbe_identity.h'), ('controller_handoff.h','xboxllr_controller_handoff.h')]:
         data = (adapter / source).read_bytes()
         target = output / 'src/common' / name
         if not target.exists() or target.read_bytes() != data:
@@ -83,6 +83,30 @@ def prepare(source, output, git='git'):
     if code.count(boundary) != 1:
         raise ValueError('Unreviewed native console-settings boundary')
     code = code.replace('#include "launcher_debug.h"', '#include "launcher_debug.h"\n#include "xboxllr_console_setup.h"\n#include "xboxllr_xbe_identity.h"')
+    code = code.replace('#include "xboxllr_xbe_identity.h"', '#include "xboxllr_xbe_identity.h"\n#include "xboxllr_controller_handoff.h"')
+    handoff = {
+        '    if (ImGui::Selectable(ui_text("None"), m->s.player_src[p] == 0)) {':
+            '    if (ImGui::Selectable(ui_text("None"), m->s.player_src[p] == 0)) {\n        xboxllr_controller_no_source();',
+        '            if (try_capture(m, ev)) continue;':
+            '            xboxllr_controller_event(&ev);\n            if (try_capture(m, ev)) continue;',
+        '            // PSX: keep Input source labels on concrete pad names (live SDL name':
+            '            xboxllr_controller_sync(m, g_pads, g_pad_count);\n\n            // PSX: keep Input source labels on concrete pad names (live SDL name',
+        '    launcher_boot_timing_mark("rui:action_requested");':
+            '    xboxllr_controller_finish(m, g_pads, g_pad_count);\n    launcher_boot_timing_mark("rui:action_requested");',
+        '    for (int i = 0; i < g_pad_count; ++i)\n        push_opt(g_pads[i].guid, g_pads[i].name, g_pads[i].id, true);':
+            '''    const bool xbox = src_prof && src_prof->id && !strcmp(src_prof->id,"xbox");
+    if(xbox && m->s.player_src[p]==2 && m->s.player_gamepad_guid[p][0]) {
+        bool live=false;
+        for(int i=0;i<g_pad_count;++i)if(!strcmp(g_pads[i].guid,m->s.player_gamepad_guid[p]))live=true;
+        if(!live)push_opt(m->s.player_gamepad_guid[p],m->player_pad_name[p],0,false);
+    }
+    for (int i = 0; i < g_pad_count; ++i)
+        push_opt(g_pads[i].guid, xbox?xboxllr_controller_label(g_pads[i].guid,g_pads[i].name):g_pads[i].name, g_pads[i].id, true);''',
+    }
+    for old, new in handoff.items():
+        if code.count(old) != 1:
+            raise ValueError('Unreviewed controller handoff boundary: '+old)
+        code=code.replace(old,new)
     replacements = {
         '        float reserve = px(198.0f);':
             '        float reserve = px(198.0f);\n        if (xboxllr_xbe_identity.valid) reserve += px(56.0f);',
@@ -247,7 +271,7 @@ def prepare(source, output, git='git'):
         raise ValueError('Changed controller photograph')
     inventory = {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'xboxlle-ui.json'}
-    manifest = dict(version=1, adapter_version=11, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
+    manifest = dict(version=1, adapter_version=12, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
                     adapter='Xbox native host: mod provider, console storage and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
     (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
@@ -257,7 +281,7 @@ def prepare(source, output, git='git'):
 def verify(output):
     output = Path(output).resolve()
     manifest = json.loads((output / 'xboxlle-ui.json').read_text(encoding='utf-8'))
-    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 11:
+    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 12:
         raise ValueError('Unreviewed prepared UI profile')
     if manifest.get('controller_photo') != dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256):
         raise ValueError('Unreviewed controller photograph provenance')

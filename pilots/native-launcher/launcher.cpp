@@ -7,6 +7,7 @@
 #include "visual_mods.h"
 #include "console_setup.h"
 #include "xbe_identity.h"
+#include "controller_handoff.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cctype>
@@ -249,7 +250,7 @@ static void save(const Catalog &c,const char *path,int result,const char *image)
     std::ofstream out(path,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("Cannot save launcher result");
     out<<"xlle-launcher-result 1\nresult "<<result<<"\nimage "<<hex(image)<<"\nvolume "<<(c.settings.enable_audio?c.settings.volume:0)<<"\nskip "<<(c.settings.skip_launcher?1:0)<<"\n";
     const int source=c.settings.player_src[0];
-    const std::string kind=c.player_source=="auto"&&source==0?"auto":source==2?"gamepad":source==1?"keyboard":"none";
+    const std::string kind=xboxllr_controller_automatic()&&source==0?"auto":source==2?"gamepad":source==1?"keyboard":"none";
     out<<"player "<<kind<<" "<<hex(source==2?c.settings.player_gamepad_guid[0]:"")<<"\n";
     if(c.setup)out<<"kernel "<<hex(c.console?c.console_ui.kernel:c.settings.bios_path)<<"\n";
     if(c.console)out<<"console "<<c.console_ui.acknowledged<<" "<<hex(c.console_ui.eeprom)<<" "<<hex(c.console_ui.storage)<<" "<<hex(c.console_ui.hdd)<<"\n";
@@ -264,6 +265,7 @@ int main(int argc,char **argv) {
     try {
         if(argc!=4&&argc!=5)throw std::runtime_error("Usage: xlle_launcher catalog result owned.xbe [--validate|--validate-xbe]");
         Catalog c=read_catalog(argv[1]);
+        xboxllr_controller_begin(argv[1],c.player_source=="auto");
         xboxllr_expected_title_id=c.game_id;xboxllr_has_expected_title_id=c.has_game_id;
         if(c.console){c.console_ui.persist=persist_console;c.console_ui.persist_boot=persist_boot;c.console_ui.context=&c;xboxllr_console_setup=&c.console_ui;}
         if(argc==5&&std::string(argv[4])=="--validate") {
@@ -275,19 +277,6 @@ int main(int argc,char **argv) {
             save(c,argv[2],0,argv[3]);return 0;
         }
         if(argc==5&&std::string(argv[4])!="--validate-xbe")throw std::runtime_error("Unknown launcher check");
-        /* Only first use chooses a default. Saved/disconnected pads retain
-         * their GUID and the shared UI's normal hot-plug/offline behavior. */
-        if(c.player_source=="auto"&&argc!=5) {
-            c.settings.player_src[0]=1;
-            if(SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER)==0) {
-                for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i)) {
-                    SDL_JoystickGUID guid=SDL_JoystickGetDeviceGUID(i);
-                    SDL_JoystickGetGUIDString(guid,c.settings.player_gamepad_guid[0],sizeof(c.settings.player_gamepad_guid[0]));
-                    c.settings.player_src[0]=2;break;
-                }
-            }
-            c.player_source=c.settings.player_src[0]==2?"gamepad":"keyboard";
-        }
         RecompLauncherCModProvider mods={};mods.ctx=&c;mods.package_count=package_count;mods.package_get=package_get;mods.set_enabled=package_enable;
         mods.feature_count=feature_count;mods.feature_get=feature_get;mods.feature_option_get=option_get;mods.feature_choice_get=choice_get;
         mods.feature_enable=feature_enable;mods.feature_set_option=set_option;mods.commit=commit;mods.last_error=last_error;

@@ -7,6 +7,7 @@ void pilot_d3d_program_fog_mode(unsigned program);
  * added to the pinned private preparation; the guest never sees RHI/COM. */
 ID3D11Device *d3d8_GetD3D11Device(void);
 ID3D11DeviceContext *d3d8_GetD3D11Context(void);
+IDXGISwapChain *d3d8_GetSwapChain(void);
 void d3d8_shaders_prepare_pixel(void);
 RhiImage *pilot_donor_default_depth(void);
 void pilot_donor_output_images(RhiImage *color,RhiImage *depth,int force);

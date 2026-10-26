@@ -31,7 +31,7 @@ def decoded(value):
 
 
 class Catalog:
-    def __init__(self, manifests, state, *, visibility=(), frame_modes=(), setup=None, defaults=None, boot=None):
+    def __init__(self, manifests, state, *, visibility=(), frame_modes=(), setup=None, defaults=None, boot=None, sharp_presentation=False):
         self.state_path = Path(state)
         defaults = {} if defaults is None else defaults
         if not isinstance(defaults, dict) or any(not isinstance(key, str) or not isinstance(value, dict) or
@@ -67,6 +67,11 @@ class Catalog:
             for key, values in policy['hidden_choices'].items():
                 hidden_choices.setdefault(key, set()).update(values)
         persisted = json.loads(self.state_path.read_text(encoding='utf-8')) if self.state_path.is_file() else {}
+        # Earlier title previews enabled temporal blending without a user
+        # choice. Reset that presentation once; subsequent explicit opt-ins
+        # remain intact. Resolution, input, saves and other mods are untouched.
+        migrate_blending = sharp_presentation and persisted.get('presentation_policy') != 'sharp-v1'
+        self.presentation_policy = 'sharp-v1' if sharp_presentation else persisted.get('presentation_policy')
         if persisted and persisted.get('version') != 1:
             raise ValueError('Unsupported mod selection version')
         self.volume = persisted.get('volume', 100)
@@ -130,6 +135,11 @@ class Catalog:
                     self.features.append(feature)
             if any(f['package'] == pid for f in self.features):
                 self.packages.append(dict(id=pid, name=manifest['name'], version=manifest['version'], description=manifest['description']))
+        if migrate_blending:
+            for feature in self.features:
+                if feature['package'] == 'xboxlle.enhancement.frame-rate' and any(
+                        o['id'] == 'mode' and o['value'] == 'interpolated' for o in feature['options']):
+                    feature['enabled'] = False
 
     def write(self, path, title, region, sha, *, game_id=None):
         identities = [sha] if isinstance(sha, str) else list(sha)
@@ -251,8 +261,11 @@ class Catalog:
             raise ValueError('Invalid Player 1 controller identity')
 
     def selection(self):
-        return dict(version=1, volume=self.volume, skip_launcher=self.skip_launcher, player1=dict(self.player), features={f['package'] + '/' + f['id']:
+        result = dict(version=1, volume=self.volume, skip_launcher=self.skip_launcher, player1=dict(self.player), features={f['package'] + '/' + f['id']:
                     dict(enabled=f['enabled'], options={o['id']: o['value'] for o in f['options']}) for f in self.features})
+        if self.presentation_policy is not None:
+            result['presentation_policy'] = self.presentation_policy
+        return result
 
     def values(self):
         return {(f['package'], f['id'], o['id']): o['value'] for f in self.features if f['enabled'] for o in f['options']}
@@ -264,7 +277,14 @@ class Catalog:
         command = [str(binary), str(source.resolve()), str(target.resolve()), str(image)]
         if validate:
             command.append('--validate')
-        subprocess.run(command, cwd=Path(binary).parent, env=env, check=True,
+        child_env = dict(os.environ if env is None else env)
+        child_env['XLLE_LAUNCHER_CONTROLLER_NAMES'] = str(self.state_path.parent / 'controller-names.txt')
+        startup = None
+        if os.name == 'nt':
+            startup = subprocess.STARTUPINFO()
+            startup.dwFlags |= 0x80  # STARTF_FORCEOFFFEEDBACK
+        subprocess.run(command, cwd=Path(binary).parent, env=child_env, check=True,
+                       startupinfo=startup,
                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         result, selected_image = self.ingest(target)
         if result in (0, 1):

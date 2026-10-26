@@ -13,6 +13,7 @@ static SRWLOCK s_lock=SRWLOCK_INIT,s_command=SRWLOCK_INIT;
 static HANDLE s_thread,s_wake,s_ready,s_done;
 static volatile LONG s_quit;
 static char s_guid[33];
+static int s_automatic;
 static uint8_t s_report[18];
 static uint32_t s_status=ERROR_DEVICE_NOT_CONNECTED,s_start_status;
 static int s_has_rumble;
@@ -74,7 +75,7 @@ static DWORD WINAPI sdl_worker(void *unused)
             scan_at=now+250;
             for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i)) {
                 char guid[33];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(i),guid,sizeof(guid));
-                if(!strcmp(guid,s_guid)) {
+                if(s_automatic || !strcmp(guid,s_guid)) {
                     pad=SDL_GameControllerOpen(i);
                     if(pad)fprintf(stderr,"[INPUT SDL] connected name=\"%s\" guid=%s\n",SDL_GameControllerName(pad),guid);
                     break;
@@ -111,9 +112,10 @@ void pilot_input_sdl_shutdown(void)
 }
 uint32_t pilot_input_sdl_start(const char *guid)
 {
-    if(!guid||strlen(guid)!=32||strspn(guid,"0123456789abcdef")!=32)return ERROR_INVALID_PARAMETER;
+    int automatic=guid && !strcmp(guid,"auto");
+    if(!automatic && (!guid||strlen(guid)!=32||strspn(guid,"0123456789abcdef")!=32))return ERROR_INVALID_PARAMETER;
     if(s_thread)return ERROR_ALREADY_INITIALIZED;
-    memcpy(s_guid,guid,33);InterlockedExchange(&s_quit,0);s_start_status=0;
+    snprintf(s_guid,sizeof(s_guid),"%s",guid);s_automatic=automatic;InterlockedExchange(&s_quit,0);s_start_status=0;
     s_wake=CreateEventA(NULL,FALSE,FALSE,NULL);s_ready=CreateEventA(NULL,FALSE,FALSE,NULL);s_done=CreateEventA(NULL,FALSE,FALSE,NULL);
     if(!s_wake||!s_ready||!s_done) {
         if(s_wake)CloseHandle(s_wake);if(s_ready)CloseHandle(s_ready);if(s_done)CloseHandle(s_done);
