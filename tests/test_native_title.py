@@ -132,6 +132,22 @@ class NativeTitleTests(unittest.TestCase):
             n.launch(self.data, self.paths, self.output, self.build, source=self.source)
         child.assert_not_called()
 
+    def test_ipo_build_policy_invalidates_binary_without_changing_generated_input(self):
+        original = n.identity(self.source, self.data, self.output)
+        preparation = n.preparation_identity(self.source, self.data, self.output)
+        command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Ninja', 4)
+        self.assertIn('-DPILOT_NATIVE_IPO=OFF', command)
+        self.data['build']['PILOT_NATIVE_IPO'] = False
+        self.assertEqual(original, n.identity(self.source, self.data, self.output))
+        self.data['build']['PILOT_NATIVE_IPO'] = True
+        self.assertNotEqual(original, n.identity(self.source, self.data, self.output))
+        self.assertEqual(preparation, n.preparation_identity(self.source, self.data, self.output))
+        command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Visual Studio 17 2022', 4)
+        self.assertIn('-DPILOT_NATIVE_IPO=ON', command)
+        with patch('native_title.subprocess.Popen') as child, self.assertRaises(ValueError):
+            n.launch(self.data, self.paths, self.output, self.build, source=self.source)
+        child.assert_not_called()
+
     def test_section_mod_identity_and_configuration_reset(self):
         source=self.root/'sections.aot-private.c'
         source.write_text('/* authored static registry */')

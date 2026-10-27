@@ -1,5 +1,24 @@
 cmake_minimum_required(VERSION 3.20)
 project(xlle_native_title_pilot C CXX)
+# Qualified titles may request whole-program optimization without making another
+# host/compiler a build requirement. Keep the normal portable build available;
+# diagnostic/iterative builds retain their existing compilation policy.
+option(PILOT_NATIVE_IPO "Use qualified MSVC whole-program optimization in Release" OFF)
+set(pilot_native_ipo_release OFF)
+if(PILOT_NATIVE_IPO AND WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC"
+   AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_SIZEOF_VOID_P EQUAL 8
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$"
+   AND NOT PILOT_NATIVE_LINK_PROFILE STREQUAL "ITERATIVE"
+   AND (NOT DEFINED PILOT_NATIVE_OPTIMIZATION OR PILOT_NATIVE_OPTIMIZATION STREQUAL "OPTIMIZED"))
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT pilot_native_ipo_supported OUTPUT pilot_native_ipo_reason LANGUAGES C CXX)
+  if(pilot_native_ipo_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    set(pilot_native_ipo_release ON)
+  else()
+    message(STATUS "Native IPO unavailable; using normal compilation: ${pilot_native_ipo_reason}")
+  endif()
+endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 include(session_zlib.cmake)
 add_library(pilot_session_replay STATIC session_replay.cpp)
@@ -1242,6 +1261,8 @@ else()
 endif()
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-link-profile-$<CONFIG>.aot-private.json"
   CONTENT "{\n  \"link_profile\": \"${PILOT_NATIVE_LINK_PROFILE}\",\n  \"cpu_optimization\": \"${PILOT_NATIVE_OPTIMIZATION}\",\n  \"configuration\": \"$<CONFIG>\"\n}\n")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-ipo-profile-$<CONFIG>.aot-private.json"
+  CONTENT "{\n  \"requested\": \"${PILOT_NATIVE_IPO}\",\n  \"qualified_release_ipo\": \"${pilot_native_ipo_release}\",\n  \"cmake_ipo\": \"${CMAKE_INTERPROCEDURAL_OPTIMIZATION}\",\n  \"cmake_release_ipo\": \"${CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE}\",\n  \"configuration\": \"$<CONFIG>\"\n}\n")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-build-profile-$<CONFIG>.aot-private.json"
   CONTENT "{\n  \"optimization\": \"${PILOT_NATIVE_OPTIMIZATION}\",\n  \"native_poll_wait\": \"${PILOT_NATIVE_POLL_WAIT}\",\n  \"configuration\": \"$<CONFIG>\",\n  \"compiler\": \"${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}\",\n  \"register_model_sha256\": \"${pilot_register_model_sha256}\",\n  \"scheduling\": \"${PILOT_SCHEDULING}\",\n  \"calendar\": \"${PILOT_CALENDAR}\",\n  \"io_device\": \"${PILOT_IO_DEVICE}\",\n  \"files\": \"${PILOT_FILES}\",\n  \"renderer\": \"${PILOT_RENDERER}\",\n  \"audio\": \"${PILOT_AUDIO}\"\n}\n")
 if(MSVC)

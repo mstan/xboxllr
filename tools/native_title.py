@@ -214,6 +214,7 @@ def prepare_command(source, data, paths, output):
 def configure_command(data, paths, output, build, cmake, generator, jobs, source=None):
     options = dict(data["build"])
     options.setdefault("PILOT_NATIVE_LINK_PROFILE", "FINAL")
+    options.setdefault("PILOT_NATIVE_IPO", False)
     options.update(XBOXLLR_BUILD_MODE="NATIVE_TITLE", PILOT_GENERATED=str(Path(output) / "gen"),
                    PILOT_EXECUTABLE_NAME=data["title"]["executable"], PILOT_COMPILE_JOBS=str(jobs),
                    PILOT_SECTION_MOD_SOURCE="", PILOT_TITLE_MOD_SOURCE="", PILOT_ADPCM_SOURCE="")
@@ -256,6 +257,7 @@ def identity(source, data, output, paths=None):
             "generated": str(Path(output).resolve())}
     build_policy = dict(data["build"])
     build_policy.setdefault("PILOT_NATIVE_LINK_PROFILE", "FINAL")
+    build_policy.setdefault("PILOT_NATIVE_IPO", False)
     result["build_policy_sha256"] = hashlib.sha256(
         json.dumps(build_policy, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if paths and paths.get("section_mod_source"):
