@@ -1,6 +1,15 @@
 /* Feed typed original declarations into the same fixed-function VS core used
  * by the renderer. The wrapper changes input decoding, not transform/lighting
  * equations. No CPU vertex expansion or interpreter is involved. */
+static unsigned native_fixed_window_pending;
+static float native_fixed_window_scale[4],native_fixed_window_offset[4];
+int32_t pilot_gfx_fixed_window(const float scale[4],const float offset[4])
+{
+    if(!scale || !offset || !(scale[0]>0) || !(scale[1]<0) || scale[3]!=1)return E_INVALIDARG;
+    for(unsigned i=0;i<4;++i)if(!isfinite(scale[i]) || !isfinite(offset[i]))return E_INVALIDARG;
+    memcpy(native_fixed_window_scale,scale,16);memcpy(native_fixed_window_offset,offset,16);
+    native_fixed_window_pending=1;return S_OK;
+}
 int32_t pilot_gfx_shader_create_fixed(const struct PilotVertexElement elements[16],uint32_t *handle)
 {
 #ifdef PILOT_D3D_PHOBOS
@@ -28,8 +37,12 @@ int32_t pilot_gfx_shader_create_fixed(const struct PilotVertexElement elements[1
     const char *core=pilot_d3d_fixed_vertex_source();if(!core)return E_FAIL;
     struct ShaderText text={0};text.capacity=strlen(core)+32768;text.data=malloc(text.capacity);
     if(!text.data)return E_OUTOFMEMORY;
-    shader_text(&text,"#define main xlle_fixed_main\n%s\n#undef main\n%s\n"
-        "cbuffer CurrentInputs:register(b3){float4 CurrentInput[16];};\nstruct RAW_IN {\n",core,native_lighting_source);
+    shader_text(&text,"#define XLLE_FVF_TEX_DIMENSIONS uint4(%u,%u,%u,%u)\n"
+        "#define main xlle_fixed_main\n%s\n#undef main\n%s\n"
+        "cbuffer CurrentInputs:register(b3){float4 CurrentInput[16];};\nstruct RAW_IN {\n",
+        elements[9].type?elements[9].type>>4:4,elements[10].type?elements[10].type>>4:4,
+        elements[11].type?elements[11].type>>4:4,elements[12].type?elements[12].type>>4:4,
+        core,native_lighting_source);
     for(unsigned i=0;i<16;++i)if(used&(1u<<i))
         shader_text(&text,"%s v%u:ATTR%u;\n",shader_format(elements[i].type)->hlsl,i,i);
     shader_text(&text,"};\nVS_OUT raster_main(RAW_IN r) { VS_IN v=(VS_IN)0;\n"
@@ -65,7 +78,11 @@ int32_t pilot_gfx_shader_prepare_fixed(uint32_t handle)
         HRESULT current=native_current_flush();if(FAILED(current))return current;
     }
     void pilot_d3d_fvf_prepare(UINT,const float[4],const float[4]);
-    const float scale[4]={1,1,1,0},offset[4]={0};
+    float scale[4]={1,1,1,0},offset[4]={0};
+    if(native_fixed_window_pending) {
+        memcpy(scale,native_fixed_window_scale,16);memcpy(offset,native_fixed_window_offset,16);
+        native_fixed_window_pending=0;
+    }
     pilot_gfx_shader_fixed_binding();pilot_d3d_program_fog_mode(0);
     pilot_d3d_fvf_prepare(shader->fixed_fvf,scale,offset);
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();

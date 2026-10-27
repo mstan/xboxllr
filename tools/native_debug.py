@@ -61,12 +61,15 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     commands.add_parser("clear_input")
+    connect=commands.add_parser('connect_input',help='Connect opt-in virtual controllers; bit0 is Player1')
+    connect.add_argument('mask',type=lambda value:int(value,0))
     resize = commands.add_parser('resize')
     resize.add_argument('width', type=int)
     resize.add_argument('height', type=int)
     press = commands.add_parser("press")
     press.add_argument("buttons", help="Comma-separated Xbox names, e.g. a,down")
     press.add_argument("--ms", type=int, default=150)
+    press.add_argument('--player',type=int,choices=range(1,5),default=1)
     for name in ("lx", "ly", "rx", "ry"):
         press.add_argument("--"+name, type=int, default=0)
     shot = commands.add_parser("screenshot")
@@ -76,7 +79,9 @@ def main():
         if not 1 <= args.ms <= 5000:
             parser.error("--ms must be in 1..5000")
         pad = gamepad(args.buttons, args.lx, args.ly, args.rx, args.ry)
-        result = request(args.port, f"set_input {pad.hex()} {args.ms}")
+        result = request(args.port, f"set_input {pad.hex()} {args.ms}" if args.player==1 else f"set_input_port {args.player-1} {pad.hex()} {args.ms}")
+    elif args.command=='connect_input':
+        result=request(args.port,'connect_input '+str(args.mask))
     elif args.command == 'resize':
         result = request(args.port, f'resize {args.width} {args.height}')
     else:

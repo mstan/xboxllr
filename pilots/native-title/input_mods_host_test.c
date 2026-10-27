@@ -3,6 +3,8 @@
 #include "input_host.c"
 int pilot_debug_active(void){return 0;}
 int pilot_debug_input(uint8_t pad[18]){(void)pad;return 0;}
+int pilot_debug_input_port(unsigned port,uint8_t pad[18]){(void)port;(void)pad;return 0;}
+int pilot_debug_connected(unsigned port){(void)port;return 0;}
 uint32_t pilot_input_sdl_start(const char *guid){(void)guid;return ERROR_NOT_SUPPORTED;}
 uint32_t pilot_input_sdl_state(unsigned port,uint8_t pad[18]){(void)port;(void)pad;return ERROR_NOT_SUPPORTED;}
 uint32_t pilot_input_sdl_caps(unsigned port,uint8_t pad[18],uint8_t rumble[4])

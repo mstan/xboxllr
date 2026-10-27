@@ -149,6 +149,9 @@ int32_t pilot_gfx_shader_create(const uint32_t *code,unsigned count,const struct
  * shader. Typed stream decoding remains on the GPU, including packed normals. */
 int32_t pilot_gfx_shader_create_fixed(const struct PilotVertexElement elements[16],uint32_t *handle);
 int32_t pilot_gfx_shader_prepare_fixed(uint32_t handle);
+/* One next fixed preparation consumes the original sample-space viewport,
+ * including its screen bias. offset.zw is the unbiased viewport center. */
+int32_t pilot_gfx_fixed_window(const float scale[4],const float offset[4]);
 /* Source-decoded XYZ FVF reuses the typed fixed-function core and cache. */
 int32_t pilot_gfx_fvf_prepare_fixed(uint32_t fvf);
 void pilot_gfx_shader_destroy(uint32_t handle);

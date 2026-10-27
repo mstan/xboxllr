@@ -56,6 +56,7 @@ static uint32_t media_path(uint32_t attributes,WCHAR path[1024],HANDLE *parent,u
         if (!*parent) return MEDIA_NO_MEDIA;
     }
     const char *component=part;
+    unsigned output=0;
     for (unsigned i=0;;++i) {
         unsigned char c=(unsigned char)part[i];
         if (c>=128) stop("non-ASCII guest media path needs Xbox character mapping",202);
@@ -63,10 +64,15 @@ static uint32_t media_path(uint32_t attributes,WCHAR path[1024],HANDLE *parent,u
         if (!c || c=='\\') {
             size_t n=part+i-component;
             if ((n==1 && component[0]=='.') || (n==2 && component[0]=='.' && component[1]=='.') ||
-                (!n && c) || (n && (component[n-1]=='.' || component[n-1]==' '))) return 0xc0000033u;
+                (!i && c=='\\') || (n && (component[n-1]=='.' || component[n-1]==' '))) return 0xc0000033u;
             component=part+i+1;
+            /* Guest XAPI save paths end in '\\'; games may append another
+             * separator with the filename. Collapse only redundant internal
+             * separators. Leading rooted names and unsafe components above
+             * remain rejected before the handle-relative native open. */
+            if (!n && c) continue;
         }
-        path[i]=c;
+        path[output++]=c;
         if (!c) break;
     }
     return 0;

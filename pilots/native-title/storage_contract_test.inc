@@ -11,6 +11,7 @@ static void test_storage(void)
     CHECK(GetTempPathA(MAX_PATH,temp) && GetTempFileNameA(temp,"xls",0,directory));
     CHECK(DeleteFileA(directory) && CreateDirectoryA(directory,NULL));
     storage_mount(directory);
+    test_storage_joined_path(directory);
     test_storage_async(directory);
     test_storage_metadata(directory);
     const uint32_t out=0x1b000,iosb=0x1b010,info=0x1b020,offset=0x1b060,buffer=0x1b100;

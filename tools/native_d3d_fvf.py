@@ -33,10 +33,34 @@ def prepare_fvf(code: str, *, phobos: bool = False) -> str:
                 '            /* A color stage with no texture that reads D3DTA_TEXTURE does not take\n')
     else:
         replace('return field == 0 ? 2 : field;', 'return ((field + 1) & 3) + 1;')
+    # Original fixed-function texture matrices operate on a homogeneous vector
+    # with 1 immediately after the declared components. In particular FLOAT2
+    # consumes the third matrix row for atlas translations. IA's generic
+    # FLOAT2 padding (u,v,0,1) cannot implement that operation. Typed wrappers
+    # declare their dimensions; generic donor and pretransformed paths retain
+    # their existing four-component contract.
+    replace('    "float4 gen_tex(uint stage, VS_IN input, float3 posCam, float3 nrmCam) {\\n"',
+            '    "#ifndef XLLE_FVF_TEX_DIMENSIONS\\n#define XLLE_FVF_TEX_DIMENSIONS uint4(4,4,4,4)\\n#endif\\n"\n'
+            '    "float4 gen_tex(uint stage, VS_IN input, float3 posCam, float3 nrmCam) {\\n"')
+    replace('    "    if (!TextureTransformFlags[stage]) return uv;\\n"',
+            '    "    if (!TextureTransformFlags[stage]) return uv;\\n"\n'
+            '    "    if (mode == 0u) {\\n"\n'
+            '    "        uint dimensions = XLLE_FVF_TEX_DIMENSIONS[min(src,3u)];\\n"\n'
+            '    "        if (dimensions == 1u) uv=float4(uv.x,1,0,0);\\n"\n'
+            '    "        else if (dimensions == 2u) uv=float4(uv.xy,1,0);\\n"\n'
+            '    "        else if (dimensions == 3u) uv.w=1;\\n"\n'
+            '    "    }\\n"')
     replace('    "    uint4    TexCoordIndex;\\n"',
             '    "    float4 NativePositionScale;\\n"\n'
             '    "    float4 NativePositionOffset;\\n"\n'
             '    "    uint4    TexCoordIndex;\\n"')
+    replace('    "    o.pos = mul(float4(input.pos.xyz, 1.0), WorldViewProj);\\n"',
+            '    "    o.pos = mul(float4(input.pos.xyz, 1.0), WorldViewProj);\\n"\n'
+            '    "    if ((Flags & 0x20u) && NativePositionScale.w != 0 && o.pos.w != 0) {\\n"\n'
+            '    "        precise float2 window=o.pos.xy/o.pos.w*NativePositionScale.xy+NativePositionOffset.xy;\\n"\n'
+            '    "        window=trunc(window*16.0)*0.0625;\\n"\n'
+            '    "        o.pos.xy=(window-NativePositionOffset.zw)/NativePositionScale.xy*o.pos.w;\\n"\n'
+            '    "    }\\n"')
     replace('    UINT  texcoord_index[4];',
             '    float native_position_scale[4],native_position_offset[4];\n    UINT  texcoord_index[4];')
     replace('static void ff_vs_prepare_draw(DWORD fvf)',

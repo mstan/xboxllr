@@ -34,6 +34,7 @@ static void xboxllr_console_path(LauncherModel *m,const char *label,const char *
     ImGui::EndDisabled();
     ImGui::PopID();
 }
+#include "xboxllr_image_import_ui.inc"
 static void draw_xboxllr_console_controls(LauncherModel *m,const LauncherTheme &th) {
     auto *s=xboxllr_console_setup;if(!s)return;
     eyebrow("CONSOLE SETUP (OPTIONAL)");

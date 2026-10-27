@@ -9,6 +9,8 @@ extern "C" {
 int pilot_debug_start(const char *port);
 int pilot_debug_active(void);
 int pilot_debug_input(uint8_t pad[18]);
+int pilot_debug_input_port(unsigned port,uint8_t pad[18]);
+int pilot_debug_connected(unsigned port);
 /* Consume a bounded requested client size on the window/graphics owner.
  * The TCP thread never touches a native window or the graphics context. */
 int pilot_debug_take_client_size(uint32_t size[2]);

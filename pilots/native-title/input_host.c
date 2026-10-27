@@ -124,10 +124,9 @@ static void input_host_convert(const XINPUT_GAMEPAD *source, uint8_t dest[18])
     memcpy(dest+14,&source->sThumbRX,2); memcpy(dest+16,&source->sThumbRY,2);
 }
 
-static uint32_t input_host_state_raw(unsigned port,uint8_t gamepad[18])
+static uint32_t input_host_state_selected(unsigned port,uint8_t gamepad[18])
 {
     input_host_is_keyboard();
-    if(!port && pilot_debug_input(gamepad))return ERROR_SUCCESS;
     if(input_host_tcp){memset(gamepad,0,18);return port?ERROR_DEVICE_NOT_CONNECTED:ERROR_SUCCESS;}
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
     if(input_host_sdl) {
@@ -158,7 +157,25 @@ static uint32_t input_host_state_raw(unsigned port,uint8_t gamepad[18])
     return status;
 }
 
-static uint32_t input_host_caps_raw(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
+/* The opt-in QA listener owns a virtual Player 1 connection as well as its
+ * bounded button leases. Losing the physical device must not make XInputOpen
+ * or GetCapabilities fail between automated commands. Keep physical input when
+ * available, return neutral after a lease expires, and leave explicit absence
+ * fixtures, unsupported peripherals and ports 2-4 untouched. */
+static int input_host_debug_presence(unsigned port,uint32_t status)
+{
+    return !input_host_none && status==ERROR_DEVICE_NOT_CONNECTED && pilot_debug_connected(port);
+}
+static uint32_t input_host_state_raw(unsigned port,uint8_t gamepad[18])
+{
+    input_host_is_keyboard();
+    if(pilot_debug_input_port(port,gamepad))return ERROR_SUCCESS;
+    uint32_t status=input_host_state_selected(port,gamepad);
+    if(input_host_debug_presence(port,status)){memset(gamepad,0,18);return ERROR_SUCCESS;}
+    return status;
+}
+
+static uint32_t input_host_caps_selected(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
 {
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
@@ -192,7 +209,17 @@ static uint32_t input_host_caps_raw(unsigned port,uint8_t gamepad[18],uint8_t ru
     return ERROR_SUCCESS;
 }
 
-static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right)
+static uint32_t input_host_caps_raw(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
+{
+    uint32_t status=input_host_caps_selected(port,gamepad,rumble);
+    if(input_host_debug_presence(port,status)) {
+        memset(gamepad,255,18);gamepad[1]=0;memset(rumble,0,4);
+        return ERROR_SUCCESS;
+    }
+    return status;
+}
+
+static uint32_t input_host_rumble_selected(unsigned port,uint16_t left,uint16_t right)
 {
     input_host_is_keyboard();
     if(input_host_none)return ERROR_DEVICE_NOT_CONNECTED;
@@ -206,6 +233,14 @@ static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right
     }
     XINPUT_VIBRATION vibration={left,right};
     return XInputSetState(port,&vibration);
+}
+
+static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right)
+{
+    uint32_t status=input_host_rumble_selected(port,left,right);
+    if(input_host_debug_presence(port,status))
+        return (left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
+    return status;
 }
 
 /* Map successful Player 1 samples once, before diagnostic capture. Capability

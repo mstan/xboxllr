@@ -69,11 +69,56 @@ def prepare(source, output, git='git'):
     data = code.encode('utf-8')
     if not profile.exists() or profile.read_bytes() != data:
         profile.write_bytes(data)
+    gl_header = output / 'src/common/launcher_gl.h'
+    gl_header.write_text(gl_header.read_text(encoding='utf-8').replace(
+        'void launcher_texture_free(LauncherTexture* t);',
+        'unsigned char* launcher_image_load_bounded_rgba(const char*,int*,int*);\n'
+        'LauncherTexture launcher_texture_rgba(const unsigned char*,int,int);\n'
+        'void launcher_texture_free(LauncherTexture* t);'), encoding='utf-8')
+    gl_source = output / 'src/common/launcher_gl.c'
+    gl_source.write_text(gl_source.read_text(encoding='utf-8') + r"""
+// Authored bounded content-import adapter. Decode before allocating GPU memory.
+#ifdef _WIN32
+#include <windows.h>
+#endif
+unsigned char* launcher_image_load_bounded_rgba(const char* path,int* w,int* h) {
+    FILE* file=NULL;
+#ifdef _WIN32
+    wchar_t wide[4096];
+    if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,path,-1,wide,4096))return NULL;
+    file=_wfopen(wide,L"rb");
+#else
+    file=fopen(path,"rb");
+#endif
+    if(!file)return NULL;
+    if(fseek(file,0,SEEK_END)){fclose(file);return NULL;}
+    long length=ftell(file);rewind(file);
+    if(length<=0 || length>67108864){fclose(file);return NULL;}
+    unsigned char* input=(unsigned char*)malloc((size_t)length);
+    if(!input){fclose(file);return NULL;}
+    int ok=fread(input,1,(size_t)length,file)==(size_t)length;fclose(file);
+    int channels=0,iw=0,ih=0;unsigned char* pixels=NULL;
+    if(ok && stbi_info_from_memory(input,(int)length,&iw,&ih,&channels) && iw>0 && ih>0 &&
+       iw<=8192 && ih<=8192 && (unsigned long long)iw*ih<=16777216)
+        pixels=stbi_load_from_memory(input,(int)length,&iw,&ih,&channels,4);
+    free(input);if(pixels){*w=iw;*h=ih;}return pixels;
+}
+LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
+    LauncherTexture t={0,w,h};GLuint texture=0;glGenTextures(1,&texture);
+    glBindTexture(GL_TEXTURE_2D,texture);glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+    glBindTexture(GL_TEXTURE_2D,0);t.id=texture;return t;
+}
+""", encoding='utf-8')
     view = output / 'src/common/backends/imgui/launcher_imgui.cpp'
     with zipfile.ZipFile(io.BytesIO(archive)) as files:
         code = files.read('src/common/backends/imgui/launcher_imgui.cpp').decode('utf-8')
     adapter = Path(__file__).resolve().parents[1] / 'pilots/native-launcher'
-    for source, name in [('console_setup.h','xboxllr_console_setup.h'), ('console_setup_ui.inc','xboxllr_console_setup_ui.inc'),
+    for source, name in [('console_setup.h','xboxllr_console_setup.h'), ('image_import_ui.inc','xboxllr_image_import_ui.inc'), ('console_setup_ui.inc','xboxllr_console_setup_ui.inc'),
                          ('xbe_identity.h', 'xboxllr_xbe_identity.h'), ('controller_handoff.h','xboxllr_controller_handoff.h')]:
         data = (adapter / source).read_bytes()
         target = output / 'src/common' / name
@@ -146,6 +191,43 @@ def prepare(source, output, git='git'):
         }
         return;
     }''')
+    request_boundary = '    /* Render inline inside the setup wizard rather than as its own modal. */'
+    if code.count(request_boundary) != 1: raise ValueError('Unreviewed in-app picker request boundary')
+    code = code.replace(request_boundary, '    bool in_app_only = false;\n' + request_boundary)
+    picker_boundary = '    if (!prefer_builtin_file_picker() &&\n        launcher_native_file_picker_available()) {'
+    if code.count(picker_boundary) != 1: raise ValueError('Unreviewed in-app picker dispatch boundary')
+    code = code.replace(picker_boundary, '    if (!req.in_app_only && !prefer_builtin_file_picker() &&\n        launcher_native_file_picker_available()) {')
+    # The title declares an always-available management action in the Mods
+    # provider. It uses the same feature list/detail layout without a switch.
+    old_tool = '                    bool enabled = feature.enabled != 0;'
+    end_tool = '                    if (feature.has_error) {'
+    if code.count(old_tool) != 1 or code.count(end_tool) != 1:
+        raise ValueError('Unreviewed management tool list boundary')
+    start = code.index(old_tool); end = code.index(end_tool, start)
+    original = code[start:end]
+    tool_spacing = '''                    } else {
+                        ImGui::Dummy(ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()));
+                        ImGui::SameLine();
+                    }
+'''
+    code = code[:start] + '                    if(!xboxllr_is_image_tool(feature)) {\n' + original + tool_spacing + code[end:]
+    selected = '                        m->mod_selected = item.index;'
+    if code.count(selected) != 1: raise ValueError('Unreviewed management selection boundary')
+    code = code.replace(selected, selected + '\n                        if(xboxllr_is_image_tool(feature))xboxllr_console_setup->refresh_capacity=true;')
+    detail = '            // The list-row checkbox is the single enable/disable control.'
+    if code.count(detail) != 1: raise ValueError('Unreviewed management detail boundary')
+    code = code.replace(detail, '            if(xboxllr_is_image_tool(feature))draw_xboxllr_image_import(m,th);\n\n' + detail)
+    # Keep the in-app browser's paths UTF-8 on Windows as well as other hosts.
+    code = code.replace('const std::string filename = lower_ascii(path.filename().string());', 'const std::string filename = lower_ascii(path.filename().u8string());')
+    start = code.index('static std::filesystem::path builtin_picker_initial_path(')
+    end = code.index('// Context flag the dashboard composer', start)
+    picker = code[start:end].replace('.string()', '.u8string()')
+    picker = picker.replace('std::filesystem::path hinted(hint);','auto hinted=std::filesystem::u8path(hint);')
+    picker = picker.replace('std::filesystem::path current(m->rom_full);','auto current=std::filesystem::u8path(m->rom_full);')
+    picker = picker.replace('const fs::path directory(g_picker.directory);','const auto directory=fs::u8path(g_picker.directory);')
+    picker = picker.replace('fs::path(g_picker.directory)','fs::u8path(g_picker.directory)').replace('fs::path(g_picker.selected)','fs::u8path(g_picker.selected)')
+    picker = picker.replace('fs::path selected(g_picker.selected);','auto selected=fs::u8path(g_picker.selected);')
+    code = code[:start] + picker + code[end:]
     old = '    if (ImGui::Button(install_label)) {'
     if code.count(old) != 2:
         raise ValueError('Unreviewed bundled-only provider toolbar')
@@ -258,6 +340,11 @@ def prepare(source, output, git='git'):
     data = code.encode('utf-8')
     if not platform.exists() or platform.read_bytes() != data:
         platform.write_bytes(data)
+    debug_source = output / 'src/common/launcher_debug.c'
+    debug_code = debug_source.read_text(encoding='utf-8')
+    boundary = '        else if (strcmp(v, "settings")   == 0) launcher_model_set_view(m, LNG_VIEW_SETTINGS);'
+    if debug_code.count(boundary) != 1: raise ValueError('Unreviewed Mods automation boundary')
+    debug_source.write_text(debug_code.replace(boundary, boundary + '\n        else if (strcmp(v, "mods") == 0) launcher_model_set_view(m, LNG_VIEW_MODS);'), encoding='utf-8', newline='\n')
     photo = output / 'assets/consoles/xbox/img/pad_xbox.jpg'
     if not photo.is_file():
         request = urllib.request.Request(CONTROLLER_PHOTO_URL, headers={'User-Agent': 'xboxlle-launcher-artwork/1.0'})
@@ -271,7 +358,7 @@ def prepare(source, output, git='git'):
         raise ValueError('Changed controller photograph')
     inventory = {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'xboxlle-ui.json'}
-    manifest = dict(version=1, adapter_version=12, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
+    manifest = dict(version=1, adapter_version=17, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
                     adapter='Xbox native host: mod provider, console storage and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
     (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
@@ -281,7 +368,7 @@ def prepare(source, output, git='git'):
 def verify(output):
     output = Path(output).resolve()
     manifest = json.loads((output / 'xboxlle-ui.json').read_text(encoding='utf-8'))
-    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 12:
+    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 17:
         raise ValueError('Unreviewed prepared UI profile')
     if manifest.get('controller_photo') != dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256):
         raise ValueError('Unreviewed controller photograph provenance')

@@ -2,6 +2,7 @@
 // PSX workflow reference: press/set_input/clear_input and presented screenshots.
 #include "native_debug.h"
 #include "obs/debug_server.hpp"
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
@@ -20,8 +21,10 @@ std::atomic<uint64_t> frames{0},wanted{0};
 std::atomic<uint64_t> requested_size{0};
 std::mutex state_mutex;
 std::condition_variable captured;
-std::array<uint8_t,18> input{};
-Clock::time_point input_until{};
+std::array<std::array<uint8_t,18>,4> input{};
+std::array<Clock::time_point,4> input_until{};
+std::array<uint64_t,4> input_sequence{},input_delivered{};
+std::atomic<unsigned> connected_mask{1};
 uint64_t sequence=0,delivered=0,capture_sequence=0,completed=0,capture_frame=0;
 unsigned image_width=0,image_height=0;
 int image_status=0;
@@ -38,9 +41,10 @@ std::string status(const std::string& args) {
     std::lock_guard<std::mutex> lock(state_mutex);
     return "{\"ok\":true,\"protocol\":\"xboxllr.native-debug.v1\",\"frames\":"+std::to_string(frames.load())+
         ",\"input_sequence\":"+std::to_string(sequence)+",\"delivered_sequence\":"+std::to_string(delivered)+
-        ",\"input_active\":"+(Clock::now()<input_until?"true":"false")+"}\n";
+        ",\"connected_mask\":"+std::to_string(connected_mask.load())+
+        ",\"input_active\":"+(std::any_of(input_until.begin(),input_until.end(),[](auto t){return Clock::now()<t;})?"true":"false")+"}\n";
 }
-std::string set_input(const std::string& args) {
+std::string set_port_input(const std::string& args,unsigned port) {
     std::istringstream stream(args);std::string pad,lease,extra;stream>>pad>>lease;
     unsigned milliseconds=0;
     if(stream>>extra || pad.size()!=36 || !number(lease,milliseconds) || !milliseconds || milliseconds>5000)
@@ -52,13 +56,26 @@ std::string set_input(const std::string& args) {
         next[i]=static_cast<uint8_t>((high<<4)|low);
     }
     if(next[1])return failure("reserved digital button bits");
-    std::lock_guard<std::mutex> lock(state_mutex);input=next;
-    input_until=Clock::now()+std::chrono::milliseconds(milliseconds);++sequence;
+    std::lock_guard<std::mutex> lock(state_mutex);input[port]=next;
+    input_until[port]=Clock::now()+std::chrono::milliseconds(milliseconds);input_sequence[port]=++sequence;
+    connected_mask.fetch_or(1u<<port);
     return "{\"ok\":true,\"sequence\":"+std::to_string(sequence)+"}\n";
+}
+std::string set_input(const std::string& args) {return set_port_input(args,0);}
+std::string set_input_port(const std::string& args) {
+    auto space=args.find(' ');unsigned port=0;
+    if(space==std::string::npos || !number(args.substr(0,space),port) || port>3)return failure("set_input_port needs port 0..3, gamepad hex and lease_ms");
+    return set_port_input(args.substr(space+1),port);
+}
+std::string connect_input(const std::string& args) {
+    unsigned mask=0;if(!number(args,mask) || mask>15 || !(mask&1))return failure("connect_input needs port mask 1..15 including Player 1");
+    std::lock_guard<std::mutex> lock(state_mutex);
+    for(unsigned port=0;port<4;port++)if(!(mask&(1u<<port))) {input[port].fill(0);input_until[port]={};}
+    connected_mask.store(mask);return "{\"ok\":true}\n";
 }
 std::string clear_input(const std::string& args) {
     if(!args.empty())return failure("clear_input takes no arguments");
-    std::lock_guard<std::mutex> lock(state_mutex);input.fill(0);input_until={};
+    std::lock_guard<std::mutex> lock(state_mutex);for(auto &pad:input)pad.fill(0);input_until={};
     return "{\"ok\":true}\n";
 }
 std::string resize(const std::string& args) {
@@ -102,6 +119,7 @@ extern "C" int pilot_debug_start(const char *port_text) {
     unsigned port=0;if(!number(port_text,port) || !port || port>65535 || active.load())return 1;
     server=std::make_unique<xlle::DebugServer>();
     server->register_command("status",status);server->register_command("set_input",set_input);
+    server->register_command("set_input_port",set_input_port);server->register_command("connect_input",connect_input);
     server->register_command("clear_input",clear_input);server->register_command("screenshot",screenshot);
     server->register_command("resize",resize);
     if(!server->start(static_cast<uint16_t>(port))) {
@@ -111,20 +129,23 @@ extern "C" int pilot_debug_start(const char *port_text) {
     return 0;
 }
 extern "C" int pilot_debug_active(void) {return active.load();}
+extern "C" int pilot_debug_connected(unsigned port) {return active.load() && port<4 && (connected_mask.load()&(1u<<port));}
 extern "C" int pilot_debug_take_client_size(uint32_t size[2]) {
     if(!size || !active.load())return 0;
     const auto requested=requested_size.exchange(0);
     if(!requested)return 0;
     size[0]=uint32_t(requested>>32);size[1]=uint32_t(requested);return 1;
 }
-extern "C" int pilot_debug_input(uint8_t pad[18]) {
-    if(!active.load() || !pad)return 0;
+extern "C" int pilot_debug_input(uint8_t pad[18]) {return pilot_debug_input_port(0,pad);}
+extern "C" int pilot_debug_input_port(unsigned port,uint8_t pad[18]) {
+    if(!pilot_debug_connected(port) || !pad)return 0;
     std::lock_guard<std::mutex> lock(state_mutex);
-    if(Clock::now()>=input_until)return 0;
-    std::memcpy(pad,input.data(),input.size());
-    if(delivered!=sequence) {
-        delivered=sequence;std::fprintf(stderr,"[NATIVE TCP INPUT] delivered=%llu pad=",static_cast<unsigned long long>(delivered));
-        for(auto byte:input)std::fprintf(stderr,"%02x",byte);std::fputc('\n',stderr);
+    if(Clock::now()>=input_until[port])return 0;
+    std::memcpy(pad,input[port].data(),input[port].size());
+    if(input_delivered[port]!=input_sequence[port]) {
+        input_delivered[port]=input_sequence[port];delivered=std::max(delivered,input_sequence[port]);
+        std::fprintf(stderr,"[NATIVE TCP INPUT] delivered=%llu port=%u pad=",static_cast<unsigned long long>(input_delivered[port]),port);
+        for(auto byte:input[port])std::fprintf(stderr,"%02x",byte);std::fputc('\n',stderr);
     }
     return 1;
 }

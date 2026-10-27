@@ -44,7 +44,9 @@ def main():
                 assert json.loads(response.readline())["ok"]
         for command in ("set_input 00 100", "set_input " + "00"*18 + " 5001",
                         "set_input " + "0001" + "00"*16 + " 100", "screenshot extra",
-                        'resize 0 720', 'resize 8192 8192', 'resize 1680 -1', 'resize 1680 720 extra'):
+                        'resize 0 720', 'resize 8192 8192', 'resize 1680 -1', 'resize 1680 720 extra',
+                        'connect_input 0','connect_input 2','connect_input 16','connect_input -1',
+                        'set_input_port 4 '+'00'*18+' 100','set_input_port -1 '+'00'*18+' 100'):
             try:
                 request(port, command)
                 raise AssertionError("invalid command accepted")
@@ -60,6 +62,17 @@ def main():
             time.sleep(.005)
         time.sleep(.27)
         assert not request(port, "status")["input_active"]
+        assert request(port,'status')['connected_mask']==1
+        request(port,'connect_input 3')
+        assert request(port,'status')['connected_mask']==3
+        request(port,'set_input_port 1 '+gamepad('b').hex()+' 200')
+        deadline=time.monotonic()+1
+        while request(port,'status')['delivered_sequence']!=2:
+            assert time.monotonic()<deadline
+            time.sleep(.005)
+        request(port,'connect_input 1')
+        assert request(port,'status')['connected_mask']==1
+        assert not request(port,'status')['input_active']
         shot = request(port, "screenshot")
         pixels = base64.b64decode(shot["data"], validate=True)
         assert shot["width"] == 640 and shot["height"] == 480 and len(pixels) == 640*480*4

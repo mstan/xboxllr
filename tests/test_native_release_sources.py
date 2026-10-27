@@ -31,7 +31,7 @@ class DependencySourceTests(unittest.TestCase):
 
         renderer_hash=put(self.renderer,'src/renderer.c')
         for name in ('LICENSE','LICENSE.upstream-MIT','NOTICE','MODIFICATIONS.md',
-                     'LICENSES/example.txt','pilot_d3d_checks.h'):
+                     'LICENSES/example.txt','nv2a-reference/LICENSE','pilot_d3d_checks.h'):
             put(self.renderer,name)
         (self.renderer/'donor.json').write_text(json.dumps(dict(donor='renderer-pin',
             files={'src/renderer.c':dict(prepared=renderer_hash)},
@@ -53,6 +53,7 @@ class DependencySourceTests(unittest.TestCase):
         self.run_package()
         with zipfile.ZipFile(self.output) as archive:
             self.assertEqual(archive.read('dsp/crates/core.rs'),b'pub fn guarded() {}\n')
+            self.assertEqual(archive.read('renderer/nv2a-reference/LICENSE'),b'authored fixture\n')
             self.assertFalse(any(name.endswith('.rom') for name in archive.namelist()))
             receipt=json.loads(archive.read('DEPENDENCY-SOURCES.json'))
             for name,expected in receipt['files'].items():

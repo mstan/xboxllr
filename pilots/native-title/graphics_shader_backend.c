@@ -199,6 +199,7 @@ void pilot_gfx_shader_destroy(uint32_t handle)
 void pilot_gfx_shaders_close(void)
 {
     pilot_gfx_batch_flush();
+    native_fixed_window_pending=0;
     native_pretransformed_fog_close();native_lighting_close();
     native_current_close();
     for(unsigned i=0;i<256;++i)if(native_shaders[i].object)pilot_gfx_shader_destroy(i+1);

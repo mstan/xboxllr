@@ -27,6 +27,7 @@ struct Choice {std::string value,label;};
 struct Option {std::string id,label,value,initial;std::vector<Choice> choices;};
 struct Feature {std::string package,id,name,description,group="Other";int enabled=0;std::vector<Option> options;};
 struct Package {std::string id,name,version,description;};
+struct SavedImage {XboxllrGraffitiDesign info;std::vector<unsigned char> rgba;};
 struct Catalog {
     std::string title,region,error;std::vector<std::string> identities;std::vector<Package> packages;std::vector<Feature> features;
     std::string player_source="auto",player_guid;
@@ -35,10 +36,13 @@ struct Catalog {
     bool console=false;
     bool has_game_id=false;
     uint32_t game_id=0;
-    std::string choice_path;
+    std::string choice_path,import_path;
     bool boot=false;
     std::string boot_choice_path;
     XboxllrConsoleSetup console_ui;
+    std::vector<SavedImage> saved_images;
+    std::vector<unsigned char> preview_pixels;
+    int preview_width=0,preview_height=0;
 };
 static std::string unhex(const std::string &s) {
     if(s=="-")return {};
@@ -109,6 +113,8 @@ static Catalog read_catalog(const char *path) {
         } else if(t[0]=="boot"&&t.size()==5&&c.console&&!c.boot&&(t[1]=="0"||t[1]=="1")) {
             c.boot=true;c.console_ui.boot_available=true;c.console_ui.boot_enabled=t[1]=="1";
             copy(c.console_ui.boot_kernel,x(2));copy(c.console_ui.boot_status,x(3));c.boot_choice_path=x(4);
+        } else if(t[0]=="image-import" && t.size()==2 && c.console && c.import_path.empty()) {
+            c.import_path=x(1);c.console_ui.image_import=true;
         } else if(t[0]=="package"&&t.size()==5&&c.packages.size()<32) {
             Package p={x(1),x(2),x(3),x(4)};
             if(std::any_of(c.packages.begin(),c.packages.end(),[&](const Package &old){return old.id==p.id;}))throw std::runtime_error("Duplicate package");
@@ -135,7 +141,7 @@ static Catalog read_catalog(const char *path) {
     for(auto &f:c.features)for(auto &o:f.options)if(o.choices.empty()||std::none_of(o.choices.begin(),o.choices.end(),[&](const Choice &v){return v.value==o.value;}))throw std::runtime_error("Unsupported persisted option");
     return c;
 }
-static int feature_count(void *p){return int(((Catalog*)p)->features.size());}
+static int feature_count(void *p){auto &c=*(Catalog*)p;return int(c.features.size())+(c.console_ui.image_import?1:0);}
 static int package_count(void *p){return int(((Catalog*)p)->packages.size());}
 static int package_get(void *p,int index,RecompLauncherCModPackage *out) {
     auto &c=*(Catalog*)p;if(!out||index<0||size_t(index)>=c.packages.size())return 0;
@@ -143,7 +149,17 @@ static int package_get(void *p,int index,RecompLauncherCModPackage *out) {
     copy(out->status,"Bundled");for(auto &f:c.features)if(f.package==v.id&&f.enabled)out->enabled=1;return 1;
 }
 static int feature_get(void *p,int index,RecompLauncherCModFeature *out) {
-    auto &c=*(Catalog*)p;if(!out||index<0||size_t(index)>=c.features.size())return 0;
+    auto &c=*(Catalog*)p;if(!out||index<0)return 0;
+    if(c.console_ui.image_import) {
+        if(index==0) {
+            *out={};copy(out->id,"manage");copy(out->package_id,"xboxllr.tools.graffiti");
+            copy(out->name,"Manage Graffiti");copy(out->package_name,"Graffiti tools");copy(out->group,"Gameplay");
+            copy(out->description,"Browse, view and delete saved graffiti, or add PNG, JPEG or TGA artwork as a new design. Larger images and sharper detail are supported. In game: Roboy > Graffiti > Pick > Edit icon > HDD slots.");
+            out->enabled=1;return 1;
+        }
+        --index;
+    }
+    if(size_t(index)>=c.features.size())return 0;
     *out={};auto &f=c.features[index];copy(out->id,f.id);copy(out->package_id,f.package);copy(out->name,f.name);copy(out->description,f.description);
     for(auto &v:c.packages)if(v.id==f.package){copy(out->package_version,v.version);copy(out->package_name,v.name);}
     copy(out->group,f.group);out->enabled=f.enabled;out->option_count=int(f.options.size());return 1;
@@ -153,11 +169,126 @@ static int option_get(void *p,const char *pid,const char *fid,int index,RecompLa
     auto &o=f->options[index];*out={};copy(out->id,o.id);copy(out->label,o.label);copy(out->value,o.value);copy(out->default_value,o.initial);
     out->type=RECOMP_MOD_OPTION_CHOICE;out->choice_count=int(o.choices.size());return 1;
 }
+static int submit_image(void *opaque,const char *game,const char *source,int size,int fit,int density,
+                        const unsigned char *pixels,int width,int height) {
+    auto &c=*(Catalog*)opaque;auto &ui=c.console_ui;
+    try {
+        if(!game || !*game)throw std::runtime_error("Choose your game before importing graffiti");
+        if(ui.import_pending || (pixels && (width<=0 || height<=0 || width>8192 || height>8192 ||
+           (uint64_t)width*height>16777216 || size<0 || size>4 || fit<0 || fit>2)))
+            throw std::runtime_error("Invalid or pending graffiti import");
+        auto folder=std::filesystem::u8path(c.import_path);
+        if(pixels){std::ofstream out(folder/"pixels.rgba",std::ios::binary|std::ios::trunc);
+        out.write((const char*)pixels,(std::streamsize)width*height*4);out.close();
+        if(!out)throw std::runtime_error("Cannot stage the selected image");}
+        std::ofstream request(folder/"request.tmp",std::ios::binary|std::ios::trunc);
+        request<<"xboxllr-image-import 1\naction "<<(pixels?"install":"inspect")<<"\ngame "<<hex(game)<<"\n";
+        if(pixels)request<<"source "<<hex(source)
+               <<"\nsize "<<size<<"\nfit "<<fit<<"\ndensity "<<density<<"\nwidth "<<width<<"\nheight "<<height<<"\n";
+        request<<"end\n";
+        request.close();if(!request)throw std::runtime_error("Cannot stage image request");
+        std::filesystem::rename(folder/"request.tmp",folder/"request");
+        ui.import_pending=true;copy(ui.import_status,pixels?"Installing graffiti... Please wait.":"Checking available save space...");return 1;
+    } catch(const std::exception &error){copy(ui.import_status,error.what());return 0;}
+}
+static int manage_image(void *opaque,const char *game,const char *action,int slot,const char *sha) {
+    auto &c=*(Catalog*)opaque;
+    try {
+        if(c.console_ui.import_pending || !game || !*game || !sha || std::strlen(sha)!=64 ||
+           std::strspn(sha,"0123456789abcdef")!=64 || slot<0 || slot>=28 ||
+           (std::strcmp(action,"load") && std::strcmp(action,"delete")))throw std::runtime_error("Invalid saved design selection");
+        auto folder=std::filesystem::u8path(c.import_path);
+        std::ofstream out(folder/"request.tmp",std::ios::binary|std::ios::trunc);
+        out<<"xboxllr-image-import 1\naction "<<action<<"\ngame "<<hex(game)<<"\nslot "<<slot<<"\nsha "<<sha<<"\nend\n";
+        out.close();if(!out)throw std::runtime_error("Cannot stage saved design request");
+        std::filesystem::rename(folder/"request.tmp",folder/"request");
+        c.console_ui.import_pending=true;copy(c.console_ui.import_status,!std::strcmp(action,"load")?"Loading full-size artwork...":"Deleting selected design...");return 1;
+    } catch(const std::exception &error){copy(c.console_ui.import_status,error.what());return 0;}
+}
+static std::vector<unsigned char> image_data(const std::filesystem::path &path,size_t limit) {
+    auto n=std::filesystem::file_size(path);if(n>limit)throw std::runtime_error("Oversized saved artwork");
+    std::vector<unsigned char> data((size_t)n);std::ifstream in(path,std::ios::binary);
+    if(!in.read((char*)data.data(),data.size()))throw std::runtime_error("Incomplete saved artwork");return data;
+}
+static unsigned image_u32(const std::vector<unsigned char> &data,size_t at) {
+    if(at+4>data.size())throw std::runtime_error("Incomplete saved artwork");
+    return data[at]|(unsigned)data[at+1]<<8|(unsigned)data[at+2]<<16|(unsigned)data[at+3]<<24;
+}
+static std::string image_sha(const std::vector<unsigned char> &data,size_t at) {
+    if(at+32>data.size())throw std::runtime_error("Incomplete saved artwork");
+    std::string raw((const char*)data.data()+at,32);return hex(raw);
+}
+static void read_gallery(Catalog &c) {
+    auto data=image_data(std::filesystem::u8path(c.import_path)/"gallery.bin",2*1024*1024);
+    if(data.size()<12 || std::memcmp(data.data(),"XLLEGA1\0",8))throw std::runtime_error("Invalid saved design gallery");
+    unsigned count=image_u32(data,8),seen=0;if(count>28)throw std::runtime_error("Invalid saved design count");
+    std::vector<SavedImage> images;size_t at=12;
+    for(unsigned i=0;i<count;i++) {
+        SavedImage image;auto &d=image.info;
+        d.slot=image_u32(data,at);d.size=image_u32(data,at+4);d.density=image_u32(data,at+8);
+        d.width=image_u32(data,at+12);d.height=image_u32(data,at+16);d.thumb_width=image_u32(data,at+20);d.thumb_height=image_u32(data,at+24);
+        unsigned flags=image_u32(data,at+28);copy(d.sha,image_sha(data,at+32));at+=64;
+        if(d.slot<0 || d.slot>=28 || (seen&(1u<<d.slot)) || d.size<0 || d.size>4 ||
+           (d.density!=1 && d.density!=2 && d.density!=4) || d.width<0 || d.width>4096 || d.height<0 || d.height>1024 ||
+           d.thumb_width<0 || d.thumb_width>64 || d.thumb_height<0 || d.thumb_height>64 || flags>1 ||
+           (!d.thumb_width!=!d.thumb_height))throw std::runtime_error("Invalid saved design metadata");
+        seen|=1u<<d.slot;d.deletable=flags!=0;size_t bytes=(size_t)d.thumb_width*d.thumb_height*4;
+        if(at+bytes>data.size())throw std::runtime_error("Incomplete saved design thumbnail");
+        image.rgba.assign(data.begin()+at,data.begin()+at+bytes);at+=bytes;images.push_back(std::move(image));
+    }
+    if(at!=data.size())throw std::runtime_error("Invalid saved design gallery length");
+    c.saved_images=std::move(images);c.console_ui.saved_count=(int)c.saved_images.size();
+    c.console_ui.gallery_ready=true;++c.console_ui.gallery_version;
+    c.preview_pixels.clear();c.console_ui.preview_slot=-1;++c.console_ui.preview_version;
+}
+static void read_preview(Catalog &c,int slot) {
+    auto data=image_data(std::filesystem::u8path(c.import_path)/"preview.bin",52+16*1024*1024);
+    if(data.size()<52 || std::memcmp(data.data(),"XLLEGP1\0",8) || image_u32(data,8)!=(unsigned)slot)throw std::runtime_error("Invalid saved artwork preview");
+    unsigned w=image_u32(data,12),h=image_u32(data,16);auto sha=image_sha(data,20);
+    auto selected=std::find_if(c.saved_images.begin(),c.saved_images.end(),[&](const SavedImage &image){return image.info.slot==slot && sha==image.info.sha;});
+    if(selected==c.saved_images.end() || w<1 || w>4096 || h<1 || h>1024 || data.size()!=52+(size_t)w*h*4)throw std::runtime_error("Saved artwork changed. Refresh the gallery.");
+    c.preview_pixels.assign(data.begin()+52,data.end());c.preview_width=w;c.preview_height=h;
+    c.console_ui.preview_slot=slot;++c.console_ui.preview_version;
+}
+static int saved_image(void *opaque,int index,XboxllrGraffitiDesign *out) {
+    auto &c=*(Catalog*)opaque;if(!out || index<0 || (size_t)index>=c.saved_images.size())return 0;
+    auto &image=c.saved_images[index];*out=image.info;out->pixels=image.rgba.empty()?nullptr:image.rgba.data();return 1;
+}
+static const unsigned char *preview_image(void *opaque,int *w,int *h) {
+    auto &c=*(Catalog*)opaque;*w=c.preview_width;*h=c.preview_height;return c.preview_pixels.empty()?nullptr:c.preview_pixels.data();
+}
+static void poll_image(void *opaque) {
+    auto &c=*(Catalog*)opaque;if(!c.console_ui.import_pending)return;
+    try {
+        auto response=std::filesystem::u8path(c.import_path)/"response";
+        if(!std::filesystem::exists(response))return;
+        if(std::filesystem::file_size(response)>8192)throw std::runtime_error("Invalid image-import response");
+        std::ifstream in(response,std::ios::binary);std::string line;std::getline(in,line);
+        if(line!="xboxllr-image-result 1")throw std::runtime_error("Invalid image-import response");
+        bool gallery=false;int preview=-1;
+        while(std::getline(in,line) && line!="end") {
+            auto t=fields(line);if(t.size()!=2)throw std::runtime_error("Invalid image result field");
+            if(t[0]=="status")copy(c.console_ui.import_status,unhex(t[1]));
+            else if(t[0]=="capacity")copy(c.console_ui.import_capacity,unhex(t[1]));
+            else if(t[0]=="slots") {int n=std::stoi(t[1]);if(n< -1 || n>28)throw std::runtime_error("Invalid slot count");c.console_ui.free_slots=n;}
+            else if(t[0]=="locked" && t[1]=="1")c.console_ui.locked=1;
+            else if(t[0]=="gallery")gallery=t[1]=="1";
+            else if(t[0]=="preview") {preview=std::stoi(t[1]);if(preview< -1 || preview>=28)throw std::runtime_error("Invalid preview slot");}
+        }
+        in.close();
+        std::filesystem::remove(response);c.console_ui.import_pending=false;
+        if(gallery)read_gallery(c);
+        if(preview>=0)read_preview(c,preview);
+    } catch(const std::exception &error){copy(c.console_ui.import_status,error.what());c.console_ui.import_pending=false;}
+}
 static int choice_get(void *p,const char *pid,const char *fid,const char *oid,int index,RecompLauncherCModChoice *out) {
     auto *o=option(feature(*(Catalog*)p,pid,fid),oid);if(!o||!out||index<0||size_t(index)>=o->choices.size())return 0;
     *out={};copy(out->value,o->choices[index].value);copy(out->label,o->choices[index].label);return 1;
 }
 static int feature_enable(void *p,const char *pid,const char *fid,int enabled) {
+    // Management is an action tool, never a saved switch. Disable all cannot
+    // disable it, and no runtime mod setting is generated for this entry.
+    if(((Catalog*)p)->console_ui.image_import && !strcmp(pid,"xboxllr.tools.graffiti") && !strcmp(fid,"manage"))return 1;
     auto *f=feature(*(Catalog*)p,pid,fid);if(!f)return 0;f->enabled=enabled!=0;return 1;
 }
 static int package_enable(void *p,const char *pid,int enabled) {
@@ -267,7 +398,7 @@ int main(int argc,char **argv) {
         Catalog c=read_catalog(argv[1]);
         xboxllr_controller_begin(argv[1],c.player_source=="auto");
         xboxllr_expected_title_id=c.game_id;xboxllr_has_expected_title_id=c.has_game_id;
-        if(c.console){c.console_ui.persist=persist_console;c.console_ui.persist_boot=persist_boot;c.console_ui.context=&c;xboxllr_console_setup=&c.console_ui;}
+        if(c.console){c.console_ui.persist=persist_console;c.console_ui.persist_boot=persist_boot;c.console_ui.context=&c;c.console_ui.submit_image=submit_image;c.console_ui.manage_image=manage_image;c.console_ui.saved_image=saved_image;c.console_ui.preview_image=preview_image;c.console_ui.poll_image=poll_image;xboxllr_console_setup=&c.console_ui;}
         if(argc==5&&std::string(argv[4])=="--validate") {
             if(!commit(&c,argv[3]))throw std::runtime_error(c.error);
             for(int i=0;i<feature_count(&c);++i) {

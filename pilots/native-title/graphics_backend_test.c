@@ -16,6 +16,8 @@
 #include "graphics_pixel_backend_test.inc"
 #include "graphics_movie_backend_test.inc"
 #include "graphics_visibility_backend_test.inc"
+#include "graphics_clear_backend_test.inc"
+#include "graphics_replacements_backend_test.inc"
 #include "graphics_feedback_backend_test.inc"
 #include "graphics_depth_texture_backend_test.inc"
 #include "graphics_depth_texture_selector_test.inc"
@@ -37,6 +39,7 @@
 #include "graphics_immediate_backend_test.inc"
 #include "graphics_texture_ops_backend_test.inc"
 #include "graphics_fixed_backend_test.inc"
+#include "graphics_fixed_window_backend_test.inc"
 #include "graphics_null_texture_backend_test.inc"
 #include "graphics_index_backend_test.inc"
 #include "graphics_edge_backend_test.inc"
@@ -146,6 +149,7 @@ int main(int argc,char **argv)
 #ifdef PILOT_D3D_PHOBOS
     if(argc==2 && !strcmp(argv[1],"--gamma"))return test_gamma_presentation();
     if(argc==2 && !strcmp(argv[1],"--fixed-declarations"))return test_fixed_declarations();
+    if(argc==2 && !strcmp(argv[1],"--fixed-window"))return test_fixed_window_grid();
     if(argc==2 && !strcmp(argv[1],"--points"))return test_scaled_point_pixels();
     if(argc==2 && !strcmp(argv[1],"--null-texture-alpha"))return test_null_texture_alpha();
     if(argc==2 && !strcmp(argv[1],"--indexed"))return test_indexed_pipeline();
@@ -161,6 +165,9 @@ int main(int argc,char **argv)
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
+        if(argc==2 && !strcmp(argv[1],"--viewport-clear")) {
+            CHECK(!test_viewport_clear());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--l8")) {
             CHECK(!test_l8_texture());pilot_gfx_close();continue;
         }
@@ -224,6 +231,9 @@ int main(int argc,char **argv)
             CHECK(!test_depth_argb_selector());pilot_gfx_close();continue;
         }
 #endif
+        if(argc==2 && !strcmp(argv[1],"--hires")) {
+            CHECK(!test_texture_replacement());pilot_gfx_close();continue;
+        }
         struct PilotGpuProgress progress;pilot_gfx_completion_stats(&progress);
         CHECK(!progress.submitted && !progress.completed && !progress.pending_queries && !progress.created_queries);
         CHECK(pilot_gfx_width()==64 && pilot_gfx_height()==64);

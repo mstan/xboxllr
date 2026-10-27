@@ -16,7 +16,7 @@ import zipfile
 from windows_dependencies import inventory
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('native_release_runtime', 'native_revisions', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'replay_native_diagnostic', 'native_session_diagnostics', 'replay_native_session', 'native_session_mods', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
+MODULES = ('native_content_import', 'native_texture_replacements', 'native_release_runtime', 'native_revisions', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'native_crash_report', 'replay_native_diagnostic', 'native_session_diagnostics', 'replay_native_session', 'native_session_mods', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage', 'xbe_identity',
            'native_disc', 'native_disc_progress')
 # Narrow native VP build closure. No machine/CPU executable, original input,
@@ -65,6 +65,40 @@ def copy_tree(source, destination):
             target = destination / path.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
+
+
+def copy_release_extras(definition, source, output):
+    """Copy only explicitly declared authored extras, never a user's art folder."""
+    names = source.get('release', {}).get('extras', [])
+    if (not isinstance(names, list) or len(names) > 32 or not all(isinstance(name, str) for name in names)
+            or len(set(names)) != len(names)):
+        raise ValueError('Invalid release extras list')
+    base = Path(definition).resolve().parent
+    total = 0
+    checked = []
+    for name in names:
+        if not isinstance(name, str) or '\\' in name or ':' in name or '\0' in name:
+            raise ValueError('Invalid release extra path')
+        relative = Path(name)
+        if (relative.is_absolute() or len(relative.parts) < 2 or relative.parts[0] != 'extras'
+                or '..' in relative.parts or relative.suffix.lower() not in ('.png', '.md', '.txt')):
+            raise ValueError('Release extras must be authored images/notices under extras/')
+        path = base
+        for part in relative.parts:
+            path = path / part
+            if path.is_symlink() or getattr(path, 'is_junction', lambda: False)():
+                raise ValueError('Release extras must be ordinary files')
+        if not path.is_file() or not path.resolve().is_relative_to(base):
+            raise ValueError('Missing release extra')
+        total += path.stat().st_size
+        if total > 16 * 1024 * 1024:
+            raise ValueError('Release extras exceed the 16 MiB budget')
+        checked.append((path, relative))
+    for path, relative in checked:
+        target = Path(output) / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+    return names
 
 
 def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, boot_intro, revisions=()):
@@ -271,6 +305,10 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         'Launcher keyboard bindings are stored beside Launcher.exe.\n'
         'Keep that data folder, selected save storage and any <image>.xboxllr profile across upgrades.\n'
         'Do not copy either into a release archive.\n\n'
+        'If the game stops unexpectedly, the crash report window explains the recorded failure.\n'
+        'Add an optional description and choose Copy diagnostic ZIP to copy a shareable file.\n'
+        'Use Open report folder if your chat does not accept pasted files. The ZIP excludes\n'
+        'console keys and saved games; private reproduction material stays local.\n\n'
         'Project software is GPL-3.0-or-later; third-party terms remain applicable.\n'
         'Original software, artwork and trademarks remain the property of their\n'
         'respective rights holders. See notices/RIGHTS-NOTICE.md and notices/LICENSE.\n'
@@ -288,6 +326,14 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
             'A short save-signing dump is not enough. Missing/unsupported startup data launches\n'
             'the title directly. No boot assets are included, and console identity/saves stay unchanged.\n'
             'This is a native animation reconstruction, not full firmware execution.\n')
+    content_import = source.get('launcher', {}).get('image_import')
+    if content_import is not None:
+        if content_import != {'codec': 'tools/graffiti_native.py'} or title.get('game_id') != '5345000A':
+            raise ValueError('Unreviewed title image-import declaration')
+        codec = definition.parent / 'tools/graffiti_native.py'
+        if codec.is_symlink() or not codec.is_file(): raise ValueError('Missing authored title image importer')
+        shutil.copy2(codec, output / 'tools/title_image_import.py')
+    copy_release_extras(definition, source, output)
     files = {p.relative_to(output).as_posix(): sha(p) for p in output.rglob('*') if p.is_file()}
     record = dict(schema='xboxllr.native-preview.v1', title=title, revisions=revision_records,
         executable='native/' + runtime.name, launcher_executable='native/Launcher.exe',
@@ -302,6 +348,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         framework_dirty=bool(subprocess.check_output(['C:/Program Files/Git/cmd/git.exe', '-C', str(ROOT),
             'status', '--porcelain'], text=True).strip()),
         distribution='windows-prerelease; original content supplied by user')
+    if content_import is not None:
+        record['launcher']['image_import'] = {'codec': 'tools/title_image_import.py'}
     if source.get('launcher', {}).get('sharp_presentation'):
         record['launcher']['sharp_presentation'] = True
     (output / 'release.json').write_text(json.dumps(record, indent=2)+'\n', encoding='utf-8')

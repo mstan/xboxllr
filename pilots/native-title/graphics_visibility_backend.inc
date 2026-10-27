@@ -1,7 +1,9 @@
 /* Native implementation of the bounded NV097/XDK visibility contract.
  * Real D3D11 samples and GPU timestamps. Independent of the CPU reference;
  * production selects one renderer and never executes both. See pilot README. */
-struct PilotVisibilityCounter { ID3D11Query *query; unsigned refs; int ended,ready; uint32_t value; };
+struct PilotVisibilityExclusion {ID3D11Query *query;struct PilotVisibilityExclusion *next;};
+struct PilotVisibilityCounter { ID3D11Query *query; unsigned refs; int ended,ready; uint32_t value;
+    struct PilotVisibilityExclusion *excluded;unsigned exclusions; };
 struct PilotVisibilityReport {
     uint32_t index;struct PilotVisibilityCounter *counter;
     ID3D11Query *begin_stamp,*end_stamp,*clock;
@@ -15,7 +17,10 @@ static struct PilotVisibilityReport *pilot_visibility_reports;
 static unsigned pilot_visibility_counter_count,pilot_visibility_report_count;
 static void pilot_visibility_unref(struct PilotVisibilityCounter *c)
 {
-    if(c && !--c->refs){ID3D11Query_Release(c->query);free(c);--pilot_visibility_counter_count;}
+    if(c && !--c->refs){
+        while(c->excluded){struct PilotVisibilityExclusion *e=c->excluded;c->excluded=e->next;ID3D11Query_Release(e->query);free(e);}
+        ID3D11Query_Release(c->query);free(c);--pilot_visibility_counter_count;
+    }
 }
 static void pilot_visibility_drop(struct PilotVisibilityReport *r)
 {
@@ -26,6 +31,21 @@ static void pilot_visibility_drop(struct PilotVisibilityReport *r)
 }
 static HRESULT pilot_visibility_query(D3D11_QUERY type,ID3D11Query **out)
 {D3D11_QUERY_DESC d={type,0};return ID3D11Device_CreateQuery(d3d8_GetD3D11Device(),&d,out);}
+/* Internal rectangle clears use a raster pass on baseline D3D11. Measure and
+ * subtract their actual samples so guest visibility queries still count only
+ * guest draws; neither geometry estimates nor synchronous CPU waits are used. */
+static ID3D11Query *pilot_visibility_internal_begin(void)
+{
+    if(!pilot_visibility_active())return NULL;
+    if(pilot_visibility_current->exclusions>=4096)pilot_d3d_backend_stop("internal visibility query budget");
+    struct PilotVisibilityExclusion *e=calloc(1,sizeof(*e));
+    if(!e)pilot_d3d_backend_stop("internal visibility allocation");
+    pilot_d3d_require(pilot_visibility_query(D3D11_QUERY_OCCLUSION,&e->query),__FILE__,__LINE__);
+    e->next=pilot_visibility_current->excluded;pilot_visibility_current->excluded=e;++pilot_visibility_current->exclusions;
+    ID3D11DeviceContext_Begin(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)e->query);return e->query;
+}
+static void pilot_visibility_internal_end(ID3D11Query *query)
+{if(query)ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)query);}
 int32_t pilot_gfx_visibility_begin(void)
 {
     pilot_gfx_batch_flush();
@@ -76,6 +96,13 @@ int32_t pilot_gfx_visibility_result(uint32_t index,uint32_t *count,uint64_t *sta
         UINT64 samples;
         hr=ID3D11DeviceContext_GetData(ctx,(ID3D11Asynchronous*)r->counter->query,&samples,sizeof(samples),D3D11_ASYNC_GETDATA_DONOTFLUSH);
         if(hr!=S_OK)return hr==S_FALSE?(int32_t)0x88760828u:hr;
+        for(struct PilotVisibilityExclusion *e=r->counter->excluded;e;e=e->next) {
+            UINT64 excluded=0;
+            hr=ID3D11DeviceContext_GetData(ctx,(ID3D11Asynchronous*)e->query,&excluded,sizeof(excluded),D3D11_ASYNC_GETDATA_DONOTFLUSH);
+            if(hr!=S_OK)return hr==S_FALSE?(int32_t)0x88760828u:hr;
+            if(excluded>samples)return E_FAIL;
+            samples-=excluded;
+        }
         r->counter->value=(uint32_t)samples;r->counter->ready=1;
     }
     if(!r->ready){

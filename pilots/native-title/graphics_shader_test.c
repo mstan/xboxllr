@@ -113,6 +113,7 @@ static int check_capture(const char *path)
     return check_program(code,header[2],elements,path);
 }
 #include "graphics_draw_reference_test.inc"
+#include "graphics_submitted_program_test.inc"
 #include "graphics_fvf_reference_test.inc"
 #include "graphics_arl_reference_test.inc"
 static int check_vertex_fetch_reference(const char *path)
@@ -286,6 +287,9 @@ int main(int argc,char **argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     uint32_t pp[17]={64,64,6,1,0x11,1,0,0,1,0x2a,0,0,1};CHECK(pilot_gfx_create(pp)==0);
+    if(argc==5 && !strcmp(argv[1],"--submitted-program")) {
+        CHECK(!observe_submitted_program(argv[2],argv[3],argv[4]));pilot_gfx_close();return 0;
+    }
     if(argc==2 && !strcmp(argv[1],"--clip-depth-reference"))return check_clip_depth_reference();
     if(argc==2 && !strcmp(argv[1],"--window-snap-reference"))return check_shader_window_snap();
     if(argc==4 && !strcmp(argv[1],"--scene-reference-observe")) {

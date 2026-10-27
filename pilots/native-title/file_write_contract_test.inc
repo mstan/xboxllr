@@ -1,3 +1,51 @@
+/* XAPI returns a save directory with a trailing separator. JSRF appends
+ * "\\save.dat" to it. Redundant internal separators must reach the same
+ * confined file as the ordinary path, including relative-handle operations. */
+static void test_storage_joined_path(const char *directory)
+{
+    const uint32_t out=0x1d000,iosb=0x1d010,offset=0x1d020,buffer=0x1e000;
+    char path[MAX_PATH];sprintf(path,"%s\\Partition1\\joined-save",directory);
+    CHECK(CreateDirectoryA(path,NULL));
+    CHECK(!namespace_create("\\??\\U:","\\Device\\Harddisk0\\Partition1"));
+    uint32_t create[]={out,GENERIC_READ|GENERIC_WRITE|SYNCHRONIZE,0x1a000,iosb,0,0,3,5,0x60};
+    test_media_name("U:\\joined-save\\\\\\save.dat",0xfffffffdu);
+    call_kernel(190,create,9);CHECK(!g_eax);uint32_t file=MEM32(out);
+    const unsigned char expected[]={0x4a,0x53,0x52,0x46,0,0xff,0x11};
+    memcpy(memory+buffer,expected,sizeof(expected));MEM64(offset)=0;
+    uint32_t transfer[]={file,0,0,0,iosb,buffer,sizeof(expected),offset};
+    call_kernel(236,transfer,8);CHECK(!g_eax && MEM32(iosb+4)==sizeof(expected));
+    call_kernel(187,&file,1);CHECK(!g_eax);
+    strcat(path,"\\save.dat");FILE *saved=fopen(path,"rb");unsigned char actual[sizeof(expected)];
+    CHECK(saved && fread(actual,1,sizeof(actual),saved)==sizeof(actual) && fgetc(saved)==EOF);fclose(saved);
+    CHECK(!memcmp(actual,expected,sizeof(actual)));
+    uint32_t open[]={out,GENERIC_READ|SYNCHRONIZE,0x1a000,iosb,3,0x60};
+    test_media_name("U:\\joined-save\\save.dat",0xfffffffdu);
+    call_kernel(202,open,6);CHECK(!g_eax);file=MEM32(out);transfer[0]=file;
+    memset(memory+buffer,0xcc,sizeof(expected));call_kernel(219,transfer,8);
+    CHECK(!g_eax && MEM32(iosb+4)==sizeof(expected) && !memcmp(memory+buffer,expected,sizeof(expected)));
+    call_kernel(187,&file,1);CHECK(!g_eax);
+    const char *invalid[]={"U:\\joined-save\\\\..\\save.dat","U:\\joined-save\\\\.\\save.dat",
+        "U:\\joined-save\\\\save.dat:stream","U:\\joined-save\\\\save.dat.","U:\\joined-save\\\\save.dat "};
+    for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);++i) {
+        test_media_name(invalid[i],0xfffffffdu);MEM32(out)=0xfeed1234;MEM32(iosb)=0xdeadbeef;
+        call_kernel(202,open,6);CHECK(g_eax==0xc0000033u && MEM32(out)==0xfeed1234 && MEM32(iosb)==0xdeadbeef);
+    }
+    open[1]=FILE_LIST_DIRECTORY|SYNCHRONIZE;open[5]=0x21;
+    test_media_name("U:\\",0xfffffffdu);call_kernel(202,open,6);CHECK(!g_eax);uint32_t root=MEM32(out);
+    test_media_name("joined-save\\\\save.dat",root);open[1]=DELETE;open[5]=0x4040;
+    call_kernel(202,open,6);CHECK(!g_eax);file=MEM32(out);
+    uint32_t set[]={file,iosb,buffer,1,13};MEM8(buffer)=1;
+    call_kernel(226,set,5);CHECK(!g_eax);call_kernel(187,&file,1);CHECK(!g_eax);
+    CHECK(GetFileAttributesA(path)==INVALID_FILE_ATTRIBUTES && GetLastError()==ERROR_FILE_NOT_FOUND);
+    test_media_name("\\joined-save\\save.dat",root);MEM32(out)=0xfeed1234;
+    call_kernel(202,open,6);CHECK(g_eax==0xc0000033u && MEM32(out)==0xfeed1234);
+    call_kernel(187,&root,1);CHECK(!g_eax);
+    test_string(0x1c000,0x1c100,"\\??\\U:");uint32_t link=0x1c000;
+    call_kernel(69,&link,1);CHECK(!g_eax);
+    sprintf(path,"%s\\Partition1\\joined-save",directory);CHECK(RemoveDirectoryA(path));
+    puts("joined save paths: real write/read/delete, DOS and handle-relative paths, traversal and host-path rejection passed");
+}
+
 /* Save updates set directory timestamps, including a 4-byte-aligned guest
  * FILE_BASIC_INFORMATION. Verify the host effect independently of NtSet. */
 static void test_storage_metadata(const char *directory)

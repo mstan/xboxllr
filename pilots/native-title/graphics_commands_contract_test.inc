@@ -39,6 +39,10 @@ static void test_graphics_command_null_textures(uint32_t base,const char *failur
 }
 static void test_graphics_commands(const char *failure)
 {
+    /* This full resource-lifetime fixture invokes the public allocation ABI.
+     * Profiles such as JSRF use their original inline allocator instead and
+     * do not admit this wrapper; don't dispatch a nonexistent guest boundary. */
+    GRAPHICS_TEST_REQUIRE("graphics command resource fixture",PILOT_D3D_D3DDevice_CreateTexture2);
     vm_ensure();dispatch_ensure();
     uint32_t low=PILOT_D3D_DEVICE_OBJECT<PILOT_D3D_TEXTURE_STATES?PILOT_D3D_DEVICE_OBJECT:PILOT_D3D_TEXTURE_STATES;
     uint32_t high=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_DEVICE_BYTES;

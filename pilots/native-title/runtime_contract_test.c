@@ -251,6 +251,7 @@ static int test_write_faults(uint32_t va)
 #include "usb_irq_contract_test.inc"
 #endif
 #include "physical_memory_contract_test.inc"
+#include "system_memory_contract_test.inc"
 #ifdef PILOT_GPU_LLE
 #include "gpu_lle_contract_test.inc"
 #include "gpu_thread_cpu_contract_test.inc"
@@ -840,6 +841,8 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"graphics-deferred-cache")) { test_graphics(17); return 0; }
         if (!strcmp(argv[1],"graphics-write-watch")) { test_graphics(18); return 0; }
         if (!strcmp(argv[1],"graphics-interpolation-service")) { test_graphics(19); return 0; }
+        if (!strcmp(argv[1],"graphics-standalone-free-bound")) { test_graphics(20); return 1; }
+        if (!strcmp(argv[1],"graphics-standalone-free-referenced")) { test_graphics(21); return 1; }
         if (!strcmp(argv[1],"graphics-deferred-lighting")) { test_graphics(5); return 1; }
         if (!strcmp(argv[1],"graphics-deferred-point")) { test_graphics(6); return 1; }
         if (!strcmp(argv[1],"graphics-deferred-invalid-lighting")) { test_graphics(7); return 1; }
@@ -864,6 +867,7 @@ int main(int argc,char **argv)
 #endif
         if (!strcmp(argv[1],"media")) { test_media(); return 0; }
         if (!strcmp(argv[1],"storage")) { test_storage(); return 0; }
+        if (!strcmp(argv[1],"system-memory")) { test_system_memory(); return 0; }
         if (!strcmp(argv[1],"cache")) { test_cache(); return 0; }
         if (!strcmp(argv[1],"file-cache")) { test_file_cache(); return 0; }
         if (!strcmp(argv[1],"sections")) { test_sections(); return 0; }

@@ -145,7 +145,8 @@ static void test_graphics(int focused_fixture)
             else if(focused_fixture==11 || focused_fixture==12)test_graphics_immediate_vertices(focused_fixture==12);
             else if(focused_fixture==13 || focused_fixture==14)test_graphics_fvf_beta_declaration(focused_fixture==14);
             else if(focused_fixture==15)test_graphics_vertex_header_storage();
-            else if(focused_fixture==16)test_graphics_borrowed_depth_surface();
+            else if(focused_fixture==16 || focused_fixture==20 || focused_fixture==21)
+                test_graphics_borrowed_depth_surface(focused_fixture==16?0:focused_fixture-19);
             else if(focused_fixture==17)test_graphics_states();
             else if(focused_fixture==18)test_graphics_texture_write_watch();
             else if(focused_fixture==19)test_graphics_interpolation_service();

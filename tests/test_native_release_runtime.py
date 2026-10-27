@@ -17,6 +17,43 @@ from test_xbe_identity import fixture as identity_fixture
 
 
 class FirstRunTests(unittest.TestCase):
+    def test_cancel_keeps_prefilled_game_and_other_setup_fields(self):
+        runtime.writable_environment(self.root)
+        runtime.prepare_profile(self.root,self.data,self.image)
+        data=dict(self.data,title=dict(self.data['title'],name='Authored title'),
+            capabilities=dict(visual_mods=False),launcher_executable='launcher.exe')
+        config=self.root/'data/setup.json'
+        config.write_text(json.dumps(dict(image=str(self.image),future_setting='preserve')))
+        with patch.object(Catalog,'run',return_value=(1,'')) as run:
+            self.assertEqual(runtime.interactive(self.root,data,self.root/'data',False),0)
+        self.assertEqual(run.call_args.kwargs['image'],str(self.image))
+        self.assertEqual(json.loads(config.read_text()),dict(image=str(self.image),future_setting='preserve'))
+
+    def test_crash_dialog_follows_finished_report_only_for_interactive_failure(self):
+        # Windows platform discovery may itself use subprocess. Complete that
+        # unrelated discovery before substituting the game child transport.
+        import platform
+        platform.uname()
+        runtime.writable_environment(self.root)
+        profile=runtime.prepare_profile(self.root,self.data,self.image)
+        (self.root/'game.exe').write_bytes(b'authored game fixture')
+        data=dict(self.data,executable='game.exe',runtime={},capabilities=dict(visual_mods=False))
+        catalog=Catalog([],self.root/'selection.json')
+        for code,seconds in ((2,None),(0,None),(2,5)):
+            child=unittest.mock.Mock(pid=1,returncode=code)
+            child.wait.return_value=code
+            with patch('native_boot_launcher.run',return_value=None), \
+                 patch.object(runtime.subprocess,'Popen',return_value=child), \
+                 patch('native_crash_report.show') as show:
+                self.assertEqual(runtime.launch_game(self.root,data,self.image,profile,catalog,automated_seconds=seconds),code)
+            if code and seconds is None:
+                show.assert_called_once()
+                session=show.call_args.args[0]
+                self.assertEqual(json.loads((session.path/'report.json').read_text())['exit_code'],code)
+                self.assertEqual(session.report['state'],'finished')
+            else:
+                show.assert_not_called()
+
     def test_prepare_only_accepts_an_iso_and_verifies_its_embedded_revision(self):
         from test_native_disc import make_disc, SilentProgress
         source=self.root/'selected.iso';make_disc(source,xbe=self.image.read_bytes())

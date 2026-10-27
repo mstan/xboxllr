@@ -61,5 +61,16 @@ class TitleFunctions(unittest.TestCase):
             self.bind()
         self.assertFalse((self.context.generated/'pilot_title_binding.c').exists())
 
+    def test_source_bound_caller_filter_and_rejection(self):
+        c=self.context
+        blob=bytearray(c.blob);blob[8:13]=b'\xe8'+(-13).to_bytes(4,'little',signed=True);c.blob=bytes(blob)
+        row=self.proof['functions'][0];row['callers']=[0x100d]
+        self.bind()
+        wrapper=(c.generated/'pilot_title_hook_1_binding.c').read_text()
+        self.assertIn('if(MEM32(g_esp)!=0x0000100du){pilot_title_original_1();return;}',wrapper)
+        for invalid in ([0x100c],[0x1010],[],[True],[0x100d,0x100d]):
+            row['callers']=invalid
+            with self.subTest(callers=invalid),self.assertRaises(ValueError):self.bind()
+
 if __name__ == '__main__':
     unittest.main()

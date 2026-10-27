@@ -334,6 +334,11 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
     # Developer probe/replay/state overrides must not leak into an owner run.
     env = {key: value for key, value in os.environ.items() if not key.startswith('XLLE_PILOT_')}
     env.update(data['runtime'])
+    try:replacement_index=prepare_image_textures(root,data,profile,state,hdd)
+    except (OSError,ValueError) as error:
+        print('[HD TEXTURES] Native artwork fallback: '+str(error),flush=True)
+        replacement_index=None
+    if replacement_index:env['XLLE_PILOT_TEXTURE_REPLACEMENTS']=str(replacement_index)
     env.update(XLLE_PILOT_SAVE_KEYS_FILE=str(profile / 'save-keys.bin'),
                XLLE_PILOT_CONSOLE_SETTINGS_FILE=str(profile / 'console-settings.bin'),
                XLLE_PILOT_VISIBLE='1', XLLE_PILOT_AUDIO_OUTPUT_MUTE='0', RECOMP_VOLUME=str(catalog.volume))
@@ -410,7 +415,12 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
             from native_boot_launcher import finish_in_title
             finish_in_title(root, log)
             session.finish(code)
-            return code
+    # Close the log and all startup windows before showing crash feedback.
+    # Unattended runs must never block on a dialog or alter the clipboard.
+    if code and automated_seconds is None:
+        from native_crash_report import show
+        show(session)
+    return code
 
 
 def main():
@@ -449,6 +459,114 @@ def launcher_manifests(root, data):
     return paths + session_manifests(data) + startup_manifests(data)
 
 
+@contextmanager
+def game_storage(root,data,image,choice_path):
+    """One admission/writer lease path for gameplay and native content tools."""
+    ready=inside(root,profile_relative(data)+'/console').exists()
+    choice=read_console_choice(choice_path)
+    binding=inside(root,profile_relative(data)+'/console/storage.json')
+    selected=json.loads(binding.read_text()) if ready and binding.exists() else dict(path=choice['storage'],hdd=choice.get('hdd',''))
+    storage,hdd_path=selected['path'],selected.get('hdd','')
+    with ExitStack() as locks:
+        hdd=None
+        if hdd_path:
+            hdd=disk_identity(root,hdd_path,choice['kernel'] or None,choice['eeprom'] or None,
+                prepared=inside(root,profile_relative(data)+'/console') if ready else None)
+            locks.enter_context(session_lock(hdd['owner']));storage=str(hdd['owner']/'state')
+        elif storage:
+            storage=str(Path(storage).resolve(strict=True));locks.enter_context(session_lock(Path(storage)))
+        if not ready:
+            kernel,eeprom,seed=choice['kernel'] or None,choice['eeprom'] or None,None
+            if hdd:kernel,eeprom=hdd['kernel'],hdd['eeprom']
+            elif storage:kernel,eeprom,seed=shared_identity(storage,image,kernel,eeprom)
+            profile=prepare_profile(root,data,image,kernel,eeprom,virtual_root=seed)
+            atomic_json(profile/'storage.json',dict(path=storage or '',hdd=hdd['path'] if hdd else ''))
+        profile=verify_profile(root,data)
+        if storage and not hdd and sha(Path(storage)/'.xboxllr-console/eeprom.bin')!=sha(profile/'eeprom.bin'):
+            raise ValueError('Shared storage belongs to another console. Its existing saves were preserved.')
+        yield profile,storage or None,hdd
+
+
+def image_import_handler(root,catalog_data,choice_path):
+    declaration=catalog_data.get('launcher',{}).get('image_import')
+    if declaration is None:return None
+    if declaration!={'codec':'tools/title_image_import.py'}:raise ValueError('Unsupported title image importer')
+    def install(request,pixels):
+        from native_content_import import FolderSaves,gallery,preview
+        import importlib.util
+        module_path=inside(root,declaration['codec'])
+        if sha(module_path)!=catalog_data['files'].get(declaration['codec']):raise ValueError('Title importer changed; reinstall this build')
+        spec=importlib.util.spec_from_file_location('xboxllr_title_image_import',module_path)
+        codec=importlib.util.module_from_spec(spec);spec.loader.exec_module(codec)
+        image=prepare_game(root,catalog_data,request['game'])
+        data=select_revision(catalog_data,sha(Path(image)));checked_image(data,image)
+        with game_storage(root,data,image,choice_path) as (profile,storage,hdd):
+            if hdd:
+                from native_storage import StorageSaves
+                store=StorageSaves(inside(root,'native/xboxllr_storage.dll'),hdd['path'],data['title']['game_id'])
+            else:store=FolderSaves(storage or inside(root,profile_relative(data)+'/state'),data['title']['game_id'])
+            try:
+                used=codec.occupied_slots(store)
+                available=store.available_bytes()
+                key=(profile/'save-keys.bin').read_bytes()[88:104]
+                capacity=lambda count,space:f'{count} of 28 graffiti slots free. {space/(1024**2):,.1f} MiB free in '+('HDD save partition.' if hdd else 'save storage.')
+                def result(status,**extra):
+                    current=codec.occupied_slots(store)
+                    if request.get('_bridge'):gallery(request['_bridge'],codec,store,key,current)
+                    return dict(status=status,capacity=capacity(28-len(current),store.available_bytes()),slots=28-len(current),locked=True,gallery=bool(request.get('_bridge')),**extra)
+                if request['action']=='inspect':
+                    return result('Ready to manage saved designs or add a new one.')
+                if request['action'] in ('load','delete'):
+                    design=codec.saved_design(store,request['slot'],key,full=request['action']=='load')
+                    if design is None or design['sha']!=request['sha']:raise ValueError('The saved design changed. Refresh the gallery and select it again.')
+                    if request['action']=='load':
+                        preview(request['_bridge'],design)
+                        return dict(status=f'GRAFFITI{request["slot"]+1:03}',capacity=capacity(28-len(used),available),slots=28-len(used),locked=True,preview=request['slot'])
+                    if not design['deletable']:raise ValueError('This folder could not be identified as the selected graffiti design. Nothing was deleted.')
+                    store.delete(codec.directory(request['slot']),request['sha'])
+                    return result(f'Deleted GRAFFITI{request["slot"]+1:03}.')
+                slot=next((slot for slot in range(28) if slot not in used),None)
+                if slot is None:raise ValueError('All 28 HDD graffiti slots are in use. Delete an unwanted design in Saved designs first.')
+                rgba=codec.fit(pixels,request['width'],request['height'],request['size'],('contain','crop','stretch')[request['fit']])
+                asset=Path(image).parent/codec.thumbnail_path(request['size'])
+                if not asset.is_file() or asset.stat().st_size!=4096:raise ValueError('Original game graffiti thumbnails are missing')
+                files=codec.files(rgba,request['size'],slot,key,asset.read_bytes())
+                density=request.get('density',1)
+                if density!=1:
+                    files['xboxllr-hd.bin']=codec.high_resolution(pixels,request['width'],request['height'],request['size'],
+                        ('contain','crop','stretch')[request['fit']],density,files['save.dat'])
+                # Allow allocation slack for the three files and a directory.
+                if available < sum(len(value) for value in files.values())+65536:
+                    raise ValueError('Not enough free save space for this design. Nothing was replaced.')
+                store.publish(files,codec.directory(slot))
+                return result(f'Installed GRAFFITI{slot+1:03} ({codec.dimensions(request["size"])[0]}). Talk to Roboy, then choose Graffiti > Pick or Edit.')
+            finally:
+                if hdd:store.close()
+    return install
+
+
+def prepare_image_textures(root,data,profile,state,hdd):
+    declaration=data.get('launcher',{}).get('image_import')
+    if declaration is None:return None
+    # Same reviewed, package-hashed codec used by the import tool.
+    if declaration!={'codec':'tools/title_image_import.py'}:raise ValueError('Unsupported title image importer')
+    import importlib.util
+    path=inside(root,declaration['codec'])
+    if sha(path)!=data['files'].get(declaration['codec']):raise ValueError('Title importer changed; reinstall this build')
+    spec=importlib.util.spec_from_file_location('xboxllr_title_texture_import',path)
+    codec=importlib.util.module_from_spec(spec);spec.loader.exec_module(codec)
+    if not hasattr(codec,'texture_replacements'):return None
+    from native_content_import import FolderSaves
+    from native_texture_replacements import prepare
+    if hdd:
+        from native_storage import StorageSaves
+        store=StorageSaves(inside(root,'native/xboxllr_storage.dll'),hdd['path'],data['title']['game_id'])
+    else:store=FolderSaves(state,data['title']['game_id'])
+    try:return prepare(profile.parent/'presentation-textures',codec.texture_replacements(store))
+    finally:
+        if hdd:store.close()
+
+
 def interactive(root, data, writable, minimized):
     config_path = writable / 'setup.json'
     config = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
@@ -482,8 +600,12 @@ def interactive(root, data, writable, minimized):
         run = writable / 'launcher' / uuid.uuid4().hex
         result, image = catalog.run(inside(root, data['launcher_executable']), run,
             title=data['title']['name'], region=data['title'].get('region', ''),
-            sha=revision_hashes(catalog_data), image=config.get('image', ''), game_id=data['title'].get('game_id'))
-        config = dict(image=image)
+            sha=revision_hashes(catalog_data), image=config.get('image', ''), game_id=data['title'].get('game_id'),
+            content_handler=image_import_handler(root,catalog_data,choice_path))
+        # Closing/canceling the frontend can return no image. Retain the last
+        # selected game so reopening does not require browsing for it again.
+        image = image or config.get('image', '')
+        config = dict(config, image=image)
         atomic_json(config_path, config)
         if catalog.boot is not None and result in (0, 1):
             from native_boot_launcher import write_choice as write_startup_choice
@@ -498,35 +620,7 @@ def interactive(root, data, writable, minimized):
             image = prepare_game(root, catalog_data, image)
             checked_image(data, image)
             data = select_revision(catalog_data, sha(Path(image)))
-            ready = inside(root, profile_relative(data) + '/console').exists()
-            choice = read_console_choice(choice_path)
-            binding = inside(root, profile_relative(data) + '/console/storage.json')
-            selected = json.loads(binding.read_text()) if ready and binding.exists() else dict(path=choice['storage'],hdd=choice.get('hdd',''))
-            storage, hdd_path = selected['path'], selected.get('hdd','')
-            with ExitStack() as locks:
-                hdd = None
-                if hdd_path:
-                    # Image priority is explicit. Never use the folder after
-                    # an image admission failure or a busy-image error.
-                    hdd = disk_identity(root,hdd_path,choice['kernel'] or None,choice['eeprom'] or None,
-                        prepared=inside(root, profile_relative(data) + '/console') if ready else None)
-                    locks.enter_context(session_lock(hdd['owner']))
-                    storage = str(hdd['owner']/'state')
-                elif storage:
-                    # The shared writer lease covers setup and the whole game.
-                    storage = str(Path(storage).resolve(strict=True))
-                    locks.enter_context(session_lock(Path(storage)))
-                if not ready:
-                    kernel, eeprom, seed = choice['kernel'] or None, choice['eeprom'] or None, None
-                    if hdd:
-                        kernel,eeprom = hdd['kernel'],hdd['eeprom']
-                    elif storage:
-                        kernel, eeprom, seed = shared_identity(storage, image, kernel, eeprom)
-                    profile = prepare_profile(root, data, image, kernel, eeprom, virtual_root=seed)
-                    atomic_json(profile / 'storage.json', dict(path=storage or '',hdd=hdd['path'] if hdd else ''))
-                profile = verify_profile(root, data)
-                if storage and not hdd and sha(Path(storage) / '.xboxllr-console/eeprom.bin') != sha(profile / 'eeprom.bin'):
-                    raise ValueError('Shared storage belongs to another console. Its existing saves were preserved.')
+            with game_storage(root,data,image,choice_path) as (profile,storage,hdd):
                 return launch_game(root, data, image, profile, catalog, storage=storage or None,hdd=hdd)
         except ImportCancelled:
             continue

@@ -47,6 +47,7 @@ class Catalog:
                  any(not isinstance(setup[k], str) for k in ('eeprom','storage','choice_path')))) or
                 ('hdd' in setup and not isinstance(setup['hdd'], str))):
             raise ValueError('Invalid native setup state')
+        self.image_import_bridge = None
         self.setup = dict(setup) if setup is not None else None
         if boot is not None and (self.setup is None or 'acknowledged' not in self.setup or
                 set(boot) != {'enabled', 'kernel', 'status', 'choice_path'} or
@@ -161,6 +162,8 @@ class Catalog:
         if self.boot is not None:
             b = self.boot
             lines.append(f'boot {int(b["enabled"])} {encoded(b["kernel"])} {encoded(b["status"])} {encoded(b["choice_path"])}')
+        if self.image_import_bridge:
+            lines.append('image-import ' + encoded(self.image_import_bridge))
         for p in self.packages:
             lines.append('package ' + ' '.join(encoded(p[k]) for k in ('id', 'name', 'version', 'description')))
         for f in self.features:
@@ -270,9 +273,12 @@ class Catalog:
     def values(self):
         return {(f['package'], f['id'], o['id']): o['value'] for f in self.features if f['enabled'] for o in f['options']}
 
-    def run(self, binary, output, *, title, region, sha, image, validate=False, env=None, game_id=None):
+    def run(self, binary, output, *, title, region, sha, image, validate=False, env=None, game_id=None, content_handler=None):
         output = Path(output);output.mkdir(parents=True, exist_ok=True)
         source, target = output / 'launcher.catalog', output / 'launcher.result'
+        if content_handler is not None:
+            self.image_import_bridge = str((output / 'image-import').resolve())
+            Path(self.image_import_bridge).mkdir()
         self.write(source, title, region, sha, game_id=game_id)
         command = [str(binary), str(source.resolve()), str(target.resolve()), str(image)]
         if validate:
@@ -283,9 +289,29 @@ class Catalog:
         if os.name == 'nt':
             startup = subprocess.STARTUPINFO()
             startup.dwFlags |= 0x80  # STARTF_FORCEOFFFEEDBACK
-        subprocess.run(command, cwd=Path(binary).parent, env=child_env, check=True,
-                       startupinfo=startup,
-                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if content_handler is None:
+            subprocess.run(command, cwd=Path(binary).parent, env=child_env, check=True,
+                           startupinfo=startup,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        else:
+            from native_content_import import service
+            try:
+                with subprocess.Popen(command, cwd=Path(binary).parent, env=child_env, startupinfo=startup,
+                                      creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as child:
+                    while child.poll() is None:
+                        service(Path(self.image_import_bridge), content_handler)
+                        try: child.wait(timeout=.1)
+                        except subprocess.TimeoutExpired: pass
+                    # Finish an explicitly submitted import even if the window closed.
+                    service(Path(self.image_import_bridge), content_handler)
+                    if child.returncode: raise subprocess.CalledProcessError(child.returncode, command)
+            finally:
+                # Decoded gallery/full-size pixels are transient UI handoffs,
+                # not a second accumulating copy of the console's artwork.
+                for name in ('gallery.bin','gallery.bin.tmp','preview.bin','preview.bin.tmp','pixels.rgba','request.tmp'):
+                    path=Path(self.image_import_bridge)/name
+                    try:path.unlink(missing_ok=True)
+                    except OSError:print('Could not remove temporary graffiti handoff: '+str(path))
         result, selected_image = self.ingest(target)
         if result in (0, 1):
             atomic_json(self.state_path, self.selection())

@@ -17,6 +17,9 @@ static unsigned physical_allocation_capacity=256;
 static uint16_t physical_protection[64*1024*1024/4096];
 static uint8_t physical_persistent[64*1024*1024/4096];
 static uint32_t av_saved_data;
+#if defined(PILOT_D3D_NATIVE) && !defined(PILOT_SCHEDULING_LLE)
+static void graphics_contiguous_release(uint32_t base);
+#endif
 #ifdef PILOT_USB_LLE
 static const char *physical_original_call(unsigned ordinal,const uint32_t *args,uint32_t *result)
 {
@@ -199,5 +202,10 @@ static void physical_kernel(unsigned ordinal)
         g_esp+=24;
     } else if(ordinal==165) {
         g_eax=physical_allocate(first,0,0xffffffffu,0,PAGE_READWRITE);g_esp+=8;
-    } else { physical_free(first);g_esp+=8; }
+    } else {
+#if defined(PILOT_D3D_NATIVE) && !defined(PILOT_SCHEDULING_LLE)
+        graphics_contiguous_release(first);
+#endif
+        physical_free(first);g_esp+=8;
+    }
 }

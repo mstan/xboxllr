@@ -61,7 +61,8 @@ def package(renderer, ui, dsp, output):
     for name, expected in r['nv2a_reference']['files'].items():
         add(renderer, 'renderer', 'nv2a-reference/'+name, expected)
     extras(renderer, 'renderer', ['LICENSE','LICENSE.upstream-MIT','NOTICE',
-                                 'MODIFICATIONS.md','LICENSES','pilot_d3d_checks.h','donor.json'])
+                                 'MODIFICATIONS.md','LICENSES','nv2a-reference/LICENSE',
+                                 'pilot_d3d_checks.h','donor.json'])
 
     u = json.loads((ui/'xboxlle-ui.json').read_text(encoding='utf-8'))
     for name, expected in u['files'].items():

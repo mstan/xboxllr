@@ -250,6 +250,53 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
 
 #include "graphics_reset.inc"
 #include "graphics_commands.inc"
+#ifndef PILOT_SCHEDULING_LLE
+/* Standalone surfaces have caller-owned headers, not CreateTexture parents.
+ * A caller can remove its tile mapping and free the physical image directly,
+ * retaining the header for reuse. Drop only our unbound cached GPU image at
+ * that explicit allocation-lifetime boundary. Ordinary registered resources
+ * still require their normal release/unregister path. */
+static void graphics_contiguous_release(uint32_t base)
+{
+    AcquireSRWLockExclusive(&graphics_lock);
+    if(graphics_active) {
+        pilot_gfx_batch_flush();
+#ifdef PILOT_D3D_COMMANDS_VERSION
+        graphics_commands_flush();
+#endif
+        AcquireSRWLockShared(&vm_lock);
+        struct PhysicalAllocation *allocation=physical_find(base,1);
+        uint32_t bytes=allocation && allocation->base==base?allocation->bytes:0;
+        ReleaseSRWLockShared(&vm_lock);
+        for(unsigned i=0;bytes && i<graphics_texture_capacity;++i) {
+            struct GraphicsTextureObject *s=&graphics_textures[i];
+            if(!s->header || !s->standalone_surface || !s->cpu_borrowed ||
+               s->data<base || (uint64_t)s->data+s->bytes>(uint64_t)base+bytes)continue;
+            graphics_texture_refresh_alias(i);
+            if(s->header==graphics_depth || s->header==graphics_target || s->bindings || s->waiters ||
+               s->retire_original || s->refs!=1 || (MEM32(s->header)&0x78ffffu)!=1)
+                stop("physical release of referenced standalone surface",s->header);
+#ifdef PILOT_D3D_TILE_CACHE_VERSION
+            for(unsigned tile=0;tile<PILOT_D3D_TILE_COUNT;++tile) {
+                uint32_t at=PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_TILE_OFFSET+tile*PILOT_D3D_TILE_STRIDE;
+                uint32_t data=MEM32(at+4),extent=MEM32(at+8);
+                if(data && ((data&0x03ffffffu)|0x80000000u)<(uint64_t)base+bytes &&
+                   (uint64_t)((data&0x03ffffffu)|0x80000000u)+extent>base)
+                    stop("physical release of tiled standalone surface",s->header);
+            }
+#endif
+            ++s->waiters;
+            graphics_completion_wait(pilot_gfx_resource_serial(PILOT_GFX_TEXTURE,s->native));
+            /* Completion can yield; the ownership table may have grown. */
+            s=&graphics_textures[i];--s->waiters;
+            pilot_gfx_texture_destroy(s->native);graphics_texture_borrow_release(s);
+            fprintf(stderr,"[STANDALONE SURFACE RETIRED] header=%08x data=%08x\n",s->header,s->data);
+            memset(s,0,sizeof(*s));
+        }
+    }
+    ReleaseSRWLockExclusive(&graphics_lock);
+}
+#endif
 static void graphics_dispatch_impl(unsigned entry)
 {
     if(g_pilot_session_enabled)session_watched_graphics_lock=&graphics_lock;

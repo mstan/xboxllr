@@ -309,6 +309,15 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
         for(unsigned i=0;i<10;++i)
             if(pilot_gfx_transform(i,(const float*)(memory+TRANSFORM_STATE(TRANSFORMS)+i*64))<0)
                 stop("native fixed-function transform synchronization failed",i);
+        /* Both fixed and programmable geometry must land on the original
+         * sample-space grid. A desktop-only fixed projection disagrees by a
+         * half pixel with original programs, making coplanar decals flicker. */
+        float window_scale[4],window_offset[4];graphics_viewport_offset_scale(window_offset,window_scale);
+        uint32_t viewport=TRANSFORM_STATE(VIEWPORT);
+        window_offset[2]=MEM32(viewport)*graphics_float(TRANSFORM_FIELD(PIXEL_SCALE))+window_scale[0];
+        window_offset[3]=MEM32(viewport+4)*graphics_float(TRANSFORM_FIELD(PIXEL_SCALE)+4)-window_scale[1];
+        window_scale[2]=0;window_scale[3]=1;
+        if(pilot_gfx_fixed_window(window_scale,window_offset)<0)stop("invalid fixed-function window grid",shader);
         int32_t result=beta_fvf?pilot_gfx_fvf_prepare_unblended(shader):
             fixed_fvf?pilot_gfx_fvf_prepare_fixed(shader):pilot_gfx_shader_prepare_fixed(declaration->native);
         if(result<0)stop("native fixed-function preparation failed",shader);
@@ -346,7 +355,8 @@ static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,
     if(!memory_vertices && !indices)scene_reference=graphics_draw_capture(args);
     }
     graphics_draw_profile_step(&profile,4);
-    graphics_draw_state_capture(args,shader,declaration?declaration->native:0,index_count);
+    graphics_draw_state_capture(args,shader,declaration?declaration->native:0,index_count,
+        up_data,up_stride,indices,base,host_vertices);
     graphics_frame_capture_draw(shader,args,up_data,up_stride,indices,index_count,base,mod_x_scale,mod_x_anchor,1);
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     if(!indices && !host_vertices)graphics_frame_inputs_draw(args,up_data,up_stride,streams,extents);

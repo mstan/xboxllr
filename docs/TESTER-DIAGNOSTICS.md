@@ -8,6 +8,16 @@ game revision, framework, mods, controller settings and terminal stop.
 
 ## Recording a problem
 
+An unexpected game exit opens a crash report window with the recorded failure
+reason and an optional description field. **Copy diagnostic ZIP** prepares a
+verified ZIP and copies the actual file to the Windows clipboard. Paste into
+a chat that accepts files, or use **Open report folder** to attach it. This
+export includes the public failure report, selected diagnostic markers and
+validated input records. It excludes console identities, signing keys, native
+saves, raw logs and private replay environments. There is no automatic upload.
+It is a diagnostic attachment, not a complete replay snapshot. Normal game
+closure and unattended automated tests do not open this window.
+
 Blinx and both supported JSRF revisions enable **Crash and input logs** in the
 Mods menu by default. Its saved setting applies on the next launch. Play
 normally and reproduce the problem. Each launch retains its game log, exit
@@ -45,6 +55,28 @@ Input playback repeats controls; scheduling, clocks and device timing are not
 restored, so it cannot claim deterministic simulation or the same crash outcome.
 The report explicitly records that limitation. The bundled `python/python.exe`
 can run either helper in place of system Python.
+
+For interactive investigation, use an opt-in `XLLE_PILOT_DEBUG_PORT` launch
+with the lightweight input recorder enabled. The TCP controller operates as
+Player 1 and keeps a neutral virtual connection when the selected physical
+controller disconnects, including battery loss. Physical input resumes on
+reconnection; leased TCP commands take priority while active. `clear_input`
+releases automated buttons without disconnecting Player 1. Other ports and
+explicit `XLLE_PILOT_INPUT=none` absence fixtures retain their original behavior.
+For multiplayer QA, `connect_input 3` explicitly connects virtual Players1/2;
+`set_input_port 1 <36 hex digits> <lease_ms>` drives Player2. The Python helper
+accepts `press a --player 2`. Masks include Player1 and are limited to four
+ports; other virtual ports remain absent until requested. `connect_input 1`
+disconnects the additional virtual ports. Leases remain bounded to five seconds
+and the interface still requires an explicit localhost debug-port launch.
+
+Treat a recording as a navigation route: observe screenshots at checkpoints,
+correct drift with TCP input, and resume from the useful checkpoint. Do not
+require a complete deterministic replay before investigating a menu. JSRF's
+`tools/qa_roboy.py` retains screenshots and actions for its endgame-save route,
+including an explicit position-only shortcut to Roboy. Diagnostic replay mode
+itself consumes recorded API results and does not accept live steering; use
+the live input source/TCP route for takeover.
 
 ## Full session replay development mode
 
@@ -97,6 +129,24 @@ The bundled `python/python.exe` can run the helper in place of system `python`.
 Full-session development captures use their separate schema and helper.
 
 ## Focused renderer captures
+
+The draw-state observer accepts indexed draws without invoking the
+full frame-input serializer. `XLLE_PILOT_DRAW_STATE_TEXTURES=1` optionally adds
+bounded GPU texture snapshots (32 unique headers, 8 MiB total) and raster state
+per observed draw. It does not adopt or modify guest texture bytes. This was
+used to distinguish a complete source atlas from destination regions erased by
+whole-view clears. It is diagnostic evidence, not a complete scene replay.
+
+Touching `XLLE_PILOT_DRAW_STATE_TRIGGER` captures the next complete swap;
+updating its timestamp captures another, retaining distinct record numbers.
+All swaps share a 2048-record limit. Optional fixed inputs default to 16 vertices
+per draw. `XLLE_PILOT_DRAW_STATE_MAX_VERTICES` accepts 1 through 1024 for small
+world/decal meshes; submitted input data across all captures is capped at 32 MiB.
+Programmable inputs use separate `program-N.bin` records containing the actual
+NV2A code, streams and indices. Their constants remain in the paired
+`draw-state-N.bin`. The developer `pilot_shader_test --submitted-program`
+observer accepts those two files and an output path to retain raw GPU vertex
+results. This does not make a complete scene replay or an expected-image oracle.
 
 Developer runs using the existing `XLLE_PILOT_DRAW_CAPTURE` directory can set
 `XLLE_PILOT_DRAW_CAPTURE_AFTER_SWAP=1` to start their draw budget at the next
