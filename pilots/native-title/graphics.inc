@@ -317,7 +317,9 @@ static void graphics_dispatch_impl(unsigned entry)
     }
 #endif
     if(entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank) {
-        AcquireSRWLockExclusive(&graphics_lock);pilot_gfx_batch_flush();ReleaseSRWLockExclusive(&graphics_lock);
+        /* This original API waits for a display event, independent of FIFO
+         * execution or renderer ownership. GPU observations and native-input
+         * mutations retain their own ordered batch flushes. */
         graphics_wait_vblank();
         g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
     }
