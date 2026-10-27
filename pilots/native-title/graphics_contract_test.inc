@@ -195,6 +195,12 @@ static void test_graphics(int focused_fixture)
         memcpy(memory+0x19200,viewport,sizeof(viewport)); arg=0x19200;
         CHECK(call_graphics(PILOT_D3D_D3DDevice_SetViewport,&arg)==0);
         CHECK(pilot_gfx_get_viewport(observed)==0 && !memcmp(viewport,observed,sizeof(viewport)));
+        /* Clear/swap/persist below assert complete images. Restore their full
+         * viewport after the separate ABI check; partial clears have a GPU
+         * oracle and must not be treated as whole-target clears here. */
+        uint32_t full_viewport[]={0,0,64,64,0,0x3f800000};
+        memcpy(memory+0x19200,full_viewport,sizeof(full_viewport));
+        CHECK(call_graphics(PILOT_D3D_D3DDevice_SetViewport,&arg)==0);
         uint32_t clear[]={0,0,0xf3,0xffff0000,0x3f800000,0};
         CHECK(call_graphics(PILOT_D3D_D3DDevice_Clear,clear)==0);
         CHECK(pilot_gfx_readback(pixels,sizeof(pixels))>=0);
