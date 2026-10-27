@@ -90,8 +90,8 @@ attribution; corrected samples retain resolved native/driver identities.
 | Game | Required workloads | New package result |
 | --- | --- | --- |
 | Blinx NTSC-U | Draw-heavy 2-1, representative gameplay/time control, loading and native save/fresh load; retain owner adaptive aspect and enhancements | Positive matched v5 CPU result below; v4/IPO all five time-control activation/stock/recovery pass. IPO reaches original Stage4 Results/save/selector after HP/position assistance and original Hurry-to-goal A acknowledgement, then fresh-loads those new native bytes into Stage0 gameplay. Owner check remains. REC clone playback is not established by this smoke. |
-| JSRF original supported NTSC-U revision | Populated gameplay, area/loading transition and native save/fresh load | v4 boots, reaches gameplay and loads the newly written native save in a fresh process; ordinary movement changes player position. Final A/B, transition and owner check remain. |
-| JSRF USA standalone | Matching representative gameplay plus revision-specific startup/save smoke | v4 writes a real native save through original System/Save UI, shows Done saving, and fresh-loads it into Garage gameplay. Final A/B, transition and owner check remain. |
+| JSRF original supported NTSC-U revision | Populated gameplay, area/loading transition and native save/fresh load | v4/IPO boot and fresh-load the newly written native save into actual Garage gameplay. Matched IPO A/B is neutral/inconclusive; no reproducible regression. Shared resource transition checked in USA. Owner check remains. |
+| JSRF USA standalone | Matching representative gameplay plus revision-specific startup/save smoke | v4 writes a real native save through original System/Save UI and shows Done saving; v4/IPO fresh-load it into Garage gameplay. Matched IPO A/B is neutral/inconclusive. IPO assisted Shibuya loading, normal movement and Garage return pass; organic exit/story completion is not claimed. Owner check remains. |
 
 Initial baseline profiles 001-003 were excluded: a short network-startup deadline
 and wrong-stage navigation did not produce the intended workload. Profile 004
@@ -153,7 +153,34 @@ JSRF's initial NAS baseline setups were excluded after screenshot requests
 during Load Game received no presented frame, including a bounded30-second
 retry. No JSRF performance result is accepted from those attempts. Retained
 candidate navigation is being inspected before another timed comparison;
-the local host remains busy, so its timing slot is deferred at30-minute checks.
+the local host was busy, so its timing slot was deferred at30-minute checks.
+
+The local JSRF window ID1105 actually ran from13:24 UTC on October27. Its initial
+USA reference A/A variation is0.57%, within the unchanged3% gate. All10 matched
+samples reach the actual native-save Garage, retain real audio/DSP and owner
+graphics, and count source swaps separately from simulation updates or scanout.
+USA reference CPU costs are16.681/16.777/16.473/16.058ms per source swap and IPO
+costs14.845/16.526; original-revision references are15.556/15.954 and IPO costs
+15.677/14.828. Both revisions are classified **neutral/inconclusive**, not proven
+wins: paired effects are mixed within observed drift/background variation.
+No individual reproducible regression is offset by Blinx's gain. Retain all
+rows/settings and executable/DLL identities in `jsrf-local-window-1105-results.json`,
+CSV and the per-run receipts. Source-swap cadence stays near60/s in this Garage
+workload; this is not a claim about simulation rate elsewhere in the game.
+
+`jsrf-usa-ipo-transition-001/transition-checks.json` records an explicitly
+assisted handover from Garage to Shibuya10014 and back to10000, actual original
+loading, screenshots and normal movement at both destinations. Prerequisites are
+bypassed; no organic exit or story-completion claim is made. Native save/fresh
+load is independently established through original menus in both revisions.
+
+All19 opportunities now have a disposition. Retain G01/G02/G05/G08 and the
+unconditional C03 correction; qualified play-title Release profiles may request
+C04. Blinx's final supported-driver build requests the capability-checked IPO
+policy and passes real Stage4 entry; its release-style launcher model verifies
+the prefilled known game. Both titles' final pins/packages and the owner handoff
+remain isolated until the owner accepts the games. Shared baseline defects and
+unverified REC-clone/organic-transition breadth remain separate limitations.
 
 At handoff retain passing builds and useful evidence, remove disposable scratch,
 prefill the verified game files, and open normal windows with normal audio. Owner
