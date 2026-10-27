@@ -32,6 +32,11 @@ static int test_scaled_point_pixels(void)
             else if(variant==2)states[5]=0x41000000; /* B=8, distance=2 -> 8 pixels */
             else states[6]=0x40800000; /* C=4, distance=2 -> 8 pixels */
             CHECK(!pilot_gfx_points(states,0));
+            /* Clear obeys the current viewport. Initialize the complete image
+             * before shrinking it so pixels from the prior fog variant cannot
+             * survive outside the viewport whose point size is being tested. */
+            uint32_t full_viewport[6]={0,0,64,64,0,0x3f800000};
+            CHECK(!pilot_gfx_viewport(full_viewport) && !pilot_gfx_clear(1,0xff111111,1,0));
             uint32_t viewport[6]={0,0,variant==7?32:64,variant==7?32:64,0,0x3f800000};
             CHECK(!pilot_gfx_viewport(viewport));pilot_gfx_set_state(D3DRS_FOGENABLE,variant==6);
             CHECK(!pilot_gfx_clear(1,0xff111111,1,0) && !pilot_gfx_fvf_prepare_fixed(0x42));
