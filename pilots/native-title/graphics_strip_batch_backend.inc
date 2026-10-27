@@ -86,6 +86,8 @@ void pilot_gfx_batch_allow(int eligible)
 
 void pilot_gfx_batch_stats(struct PilotDrawBatchStats *stats)
 {*stats=pilot_strip_batch.stats;}
+int pilot_gfx_batch_prepared(void)
+{return pilot_strip_batch.allowed && pilot_strip_batch.count && pilot_strip_batch.prepared;}
 
 static int pilot_strip_batch_room(unsigned first,unsigned count)
 {

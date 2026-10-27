@@ -251,7 +251,15 @@ int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4])
         ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource*)native_raster_buffer,0,NULL,values,0,0);
         memcpy(native_raster_values,values,sizeof(values));
     }
-    ID3D11DeviceContext_VSSetConstantBuffers(context,0,1,&native_raster_buffer);
+    /* A prepared strip group already owns this exact VS0 binding. Keep all
+     * byte/fog validation and constant/current-input flushes above/below; only
+     * the redundant COM rebind is reused. Fixed/foreign shader binding clears
+     * native_raster_bound, and all native input mutations retire the group.
+     * Presentation touches PS7 and restores shaders; it does not replace VS0. */
+    static int reuse=-1;
+    if(reuse<0) {const char *value=getenv("XLLE_PILOT_RASTER_BINDING_REUSE");reuse=!(value && !strcmp(value,"0"));}
+    if(!reuse || !native_raster_bound || !pilot_gfx_batch_prepared())
+        ID3D11DeviceContext_VSSetConstantBuffers(context,0,1,&native_raster_buffer);
     native_raster_bound=1;
     return pilot_gfx_shader_flush();
 }

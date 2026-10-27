@@ -68,6 +68,9 @@ struct PilotDrawBatchStats {
 };
 void pilot_gfx_batch_allow(int eligible);
 void pilot_gfx_batch_flush(void);
+/* True only while an admitted queued group retains native input ownership.
+ * Any changed resource/state or observation ends this lifetime. */
+int pilot_gfx_batch_prepared(void);
 void pilot_gfx_batch_stats(struct PilotDrawBatchStats *stats);
 void pilot_gfx_set_state(uint32_t state,uint32_t value);
 int pilot_gfx_logic_op(uint32_t value);
