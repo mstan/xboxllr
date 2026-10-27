@@ -5,6 +5,18 @@
 struct GraphicsVertexObject { uint32_t header,data,bytes,refs,native,external,bindings; uint64_t original_reference; unsigned borrowed,waiters,retire_original; };
 static struct GraphicsVertexObject *graphics_vertices;
 static unsigned graphics_vertex_capacity;
+/* Reuse the texture owner's validated index hint. This never owns a resource
+ * or retains a pointer across realloc, release, header reuse or device close. */
+static unsigned graphics_vertex_lookup[256];
+static int graphics_vertex_lookup_cache(void)
+{
+    static int enabled=-1;
+    if(enabled<0) {
+        const char *value=getenv("XLLE_PILOT_VERTEX_LOOKUP_CACHE");
+        enabled=!(value && !strcmp(value,"0"));
+    }
+    return enabled;
+}
 /* Handles and wait leases retain indices, never pointers into this table.
  * Grow only while the graphics owner lock is held, before obtaining a slot. */
 static unsigned graphics_vertex_unused(void)
@@ -23,6 +35,7 @@ static void graphics_vertices_close(void)
     for(unsigned i=0;i<graphics_vertex_capacity;++i)
         if(graphics_vertices[i].header)stop("device close with outstanding vertex ownership",graphics_vertices[i].header);
     free(graphics_vertices);graphics_vertices=NULL;graphics_vertex_capacity=0;
+    memset(graphics_vertex_lookup,0,sizeof(graphics_vertex_lookup));
 }
 static unsigned graphics_vertex_adopt(uint32_t header);
 static int graphics_vertex_defer_upload(void)
@@ -36,8 +49,16 @@ static int graphics_vertex_defer_upload(void)
 }
 static int graphics_vertex_find(uint32_t header)
 {
+    unsigned key=((header>>4)^(header>>12))&255;
+    int cache=graphics_vertex_lookup_cache();
+    unsigned hint=graphics_vertex_lookup[key];
+    if(cache && header && hint && hint<=graphics_vertex_capacity &&
+       graphics_vertices[hint-1].header==header)return (int)(hint-1);
     for(unsigned i=0;i<graphics_vertex_capacity;++i)
-        if(header && graphics_vertices[i].header==header) return (int)i;
+        if(header && graphics_vertices[i].header==header) {
+            if(cache)graphics_vertex_lookup[key]=i+1;
+            return (int)i;
+        }
     return -1;
 }
 static struct GraphicsVertexObject *graphics_vertex(uint32_t header)
