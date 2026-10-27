@@ -45,16 +45,16 @@ them, rather than treating this table as an exhaustive list of hypothetical work
 | G06 | Deferred guest-state synchronization | Current mapping is already a direct table/identity lookup. Native revision plus actual 44 render and 4x22 texture words detect named and inline mutations. Remaining diagnostic phase is about 73.7 ms/30 updates, including timing overhead. Removing the snapshots has no valid writer proof; preserve the existing cache and reopen only with one. | Evaluated; retain current synchronization |
 | G07 | Submission/index-buffer strategy | Existing backend strip merging is baseline. Append/ring index upload passed pixels but measured 39.73 vs 39.70 CPU ms/update and 23.25 vs 23.00 updates/s, establishing no benefit. Reopen only if a current upload hotspot remains after group work. | Previously evaluated; append experiment rejected |
 | G08 | Raster preparation and redundant shader-stage binding | Reuse only the unchanged VS0 binding while an admitted prepared strip group retains ownership. Raster/fog bytes and current/constants validation still run; fixed/foreign bindings clear validity and actual mutations end the group. Presentation uses PS7 and restores its state. Startup diagnostic control retains the original rebind. | Candidate; combined GPU and game A/B pending |
-| P01 | Interpolation/source capture/presentation ownership | Cooperative presentation already restored about 60 presentations/s in the bounded 2-2 entrance while original updates stayed about 30/s. Measure remaining capture/composition cost and preserve enabled owner features. | Open; cadence correction is baseline |
-| P02 | Shader/resource creation and first-use stalls | Existing shader disk cache and resource preparation are baseline. Separate cold loading, shader compilation, actual driver calls and renderer-lock waits; use actual entry evidence rather than steady-state FPS. | Open |
+| P01 | Interpolation/source capture/presentation ownership | Cooperative presentation already restored about 60 presentations/s in the bounded 2-2 entrance while original updates stayed about 30/s. Current diagnostic source capture totals 23.1 ms/30 original updates (about 0.77 ms/update, including instrumentation), far below the combined draw preparation/submission cost. Composition is already native GPU work; disabling it would remove owner features. Reopen on inclusive capture/composition CPU or GPU evidence after the retained draw/compiler changes. | Evaluated; retain current presentation, deeper rewrite deferred |
+| P02 | Shader/resource creation and first-use stalls | Programmable shaders already use the shared disk bytecode cache before D3DCompile; G02 retains identical shader inputs and adds only immutable declaration metadata. Repeated actual stage entries establish no recurring first-use blocker; the selected steady-state workload remains draw-heavy. Fixed helper shaders still compile at device initialization, but no material measured startup stall selects their replacement. Reopen on a reproducible cold-entry stall with compilation/driver/lock attribution. | Evaluated; existing cache retained, speculative prewarming deferred |
 | C01 | Native entry/checkpoint and guest-register bookkeeping | Prior address-cache/huge-body experiments failed to establish useful gains. Uninstrumented main-thread leaf samples repeatedly identify graphics work and native waits, not a recurring entry-hook hotspot; service timers themselves had elevated clock-query samples. No new whole-routine state/exception contract or hot entry fast path was established. Reopen with inclusive CPU evidence before another generation rewrite. | Evaluated; further CPU rewrite deferred |
 | C02 | Whole-routine math/game logic HLE and CPU lowering | Prior matrix HLE removed 30.9% of counted native guest instructions without establishing substantial wall-time gain. No drop-in replacement was found for measured player/geometry routines. Reopen only on a measured hot routine with a defined caller/state/exception contract. | Previously evaluated; broad rewrite not justified |
 | C03 | Host-idle polls and scheduler wakeups | Frame-poll idle remains inherited baseline. Found a real display-only wait acquiring the renderer lock: corrected in `beads-xbox.1.202`. Existing independent-owner test now reaches 18 waits in about 299.5 ms and real callback replacement/removal checks pass. Other movie polls have no demonstrated current material CPU cost or complete publication proof. | Candidate unconditional wait correction; other polls deferred |
 | C04 | Compiler whole-program optimization of native CPU/runtime units | Current MSVC build has `/O2` but no `/GL`/IPO. Standard CMake IPO trial builds successfully with the same generated code and precise floating-point flags; 12,508 functions participate in the initial link. This reuses compiler analysis before manually changing entry/checkpoint semantics. Normal compilation remains the fallback. | Separate experiment; gameplay and matched A/B pending |
-| A01 | Audio mixing, ADPCM/resampling, spatial work and DSP advancement | Native XAudio2/real DSP path is already selected. Attribute audio thread CPU, sample/refill continuity and movie decoding before choosing a larger native job or proven component reuse. Keep audio emulation enabled during muted QA. | Open |
+| A01 | Audio mixing, ADPCM/resampling, spatial work and DSP advancement | Native XAudio2 and the donor's real DSP JIT are already active. Uninstrumented thread attribution assigns XAudio2 about 0.563 CPU seconds across eight seconds, versus 5.766 on the main title thread and 0.906 in the GPU driver. This does not isolate all audio work or prove an audio gain; it rejects the assumed interpreter-removal shortcut and selects graphics/compiler work first. Reopen on an inclusive hot DSP/mixer component and sample/refill equivalence evidence. Real audio/DSP remains enabled in every timed comparison. | Evaluated; native/JIT path retained, larger audio replacement deferred |
 | M01 | VM/pool/contiguous allocation and resource loading | Existing task `beads-xbox.1.200` replaced full-VM scans with authoritative allocation ledgers and query fallbacks; JSRF loading improved in its retained before/after samples. Already landed in `866c434`, included in both current delivered native baselines. Preserve and qualify current loading; do not re-credit it. | Previously evaluated and landed; inherited baseline |
-| I01 | File cache, media-lock serialization and asynchronous publication | Historical 25-second Blinx stall is not reproduced by later bounded 0.76-3.93-second entries. Sparse file waits have near-zero caller CPU; raw I/O/lock/refill correlation is needed. No speculative pacing or buffer change. | Open; historical defect remains separate |
-| I02 | Synchronous informational logs inside allocation/I/O owners | Pool/contiguous creation and file-transfer paths still write text while handling real work; profile 004 contains 2,415 pool-create records including navigation/loading. Correlate their CPU/wait cost before replacing them with bounded buffered observation. Required diagnostics and session capture must remain. | Open |
+| I01 | File cache, media-lock serialization and asynchronous publication | Historical 25-second Blinx stall is not reproduced by later bounded 0.76-3.93-second entries. The delivered baseline already contains resident-media services and allocation-ledger loading improvements. Current sparse file waits have near-zero caller CPU; no reproducible current media-lock bottleneck selects another buffering/publication scheme. Reopen with a retained slow entry plus raw I/O/lock/refill correlation. | Evaluated; retain existing services, historical stall tracked separately |
+| I02 | Synchronous informational logs inside allocation/I/O owners | Profile 004 contains 2,415 pool-create records including navigation/loading; this is a count, not a demonstrated CPU bottleneck. Uninstrumented leaf/thread attribution does not establish recurring formatted logging as the owner of the steady-state cost. Buffering under these owners would add shutdown/order/loss contracts without a selected benefit. Reopen on inclusive formatting/write/lock CPU or a reproducible logging-related entry stall; required diagnostics and session capture stay intact. | Evaluated; buffered-log rewrite deferred |
 | X01 | Renderer/dependency replacement or substantial donor reuse | Both titles already use static native CPU and Phobos D3D11/HLE. Reuse the actual admitted native group, immutable declaration plan and existing ownership-hint design. Another renderer would retain the guest/frontend preparation costs while reopening the resource/shader/completion contract; no qualified drop-in component removing the measured work was found. | Evaluated; reuse selected, wholesale replacement rejected |
 
 Remote refresh found framework `a3afc799` and title heads JSRF `1c56e91` /
@@ -89,9 +89,9 @@ attribution; corrected samples retain resolved native/driver identities.
 
 | Game | Required workloads | New package result |
 | --- | --- | --- |
-| Blinx NTSC-U | Draw-heavy 2-1, representative gameplay/time control, loading and native save/fresh load; retain owner adaptive aspect and enhancements | Untested |
-| JSRF original supported NTSC-U revision | Populated gameplay, area/loading transition and native save/fresh load | Untested |
-| JSRF USA standalone | Matching representative gameplay plus revision-specific startup/save smoke | Untested |
+| Blinx NTSC-U | Draw-heavy 2-1, representative gameplay/time control, loading and native save/fresh load; retain owner adaptive aspect and enhancements | v4 and IPO activate/consume/recover all five time controls through original inputs. Real stage-4 A/B data retained; strict final performance qualification, transition/save and owner check remain. REC clone playback is not established by this smoke. |
+| JSRF original supported NTSC-U revision | Populated gameplay, area/loading transition and native save/fresh load | v4 boots, reaches gameplay and loads the newly written native save in a fresh process; ordinary movement changes player position. Final A/B, transition and owner check remain. |
+| JSRF USA standalone | Matching representative gameplay plus revision-specific startup/save smoke | v4 writes a real native save through original System/Save UI, shows Done saving, and fresh-loads it into Garage gameplay. Final A/B, transition and owner check remain. |
 
 Initial baseline profiles 001-003 were excluded: a short network-startup deadline
 and wrong-stage navigation did not produce the intended workload. Profile 004
@@ -100,12 +100,24 @@ about 594,000 draws per 30 updates, but host contention and instrumentation prev
 using its elapsed times as an optimization result. The existing independent JSRF
 process, owner profiles and native saves were left untouched.
 
-The initial G01/G02 GPU strip fixture passes exact pixels, real visibility
-samples, mutations and 64-draw capacity flushes, including 63 prepared reuses in
-65 compatible draws. The float-blend fixture also passes. Broad backend and
-fixed-declaration fixtures exceeded their wall-time deadlines while restricted
-to one below-normal-priority CPU on a busy host; retain those failures and rerun
-candidate/control in a suitable window before judging correctness or promotion.
+Current combined GPU gates pass exact pixels, real visibility samples, mutations
+and 64-draw capacity flushes, including 63 prepared reuses in 65 compatible draws.
+Backend, float-blend, fixed-declaration and strip gates pass with all reuse
+controls both enabled and disabled. Initial timeout results on a single restricted
+CPU remain excluded host/setup evidence. Point/full-image fixtures needed viewport
+isolation fixes that preserve their pixel assertions. The legacy Blinx full ABI
+then reaches its unsupported fake original-allocator destructor in both modes;
+that control comparison establishes a shared current-framework limitation, not
+equivalence with the older delivered native binary. Dedicated vertex lifetime
+and GPU-byte gates pass both paths. The modern JSRF ABI fixture explicitly skips
+its unsupported fixed-address layout; it is not counted as a pass.
+
+NAS window 1015 is exploratory only: v4 costs 57.344/58.228 CPU ms per original
+update and IPO costs 52.176/52.902, with approximately 896 original updates per
+sample. This roughly nine-percent lead warrants qualification but is not an
+accepted performance claim: preceding windows failed the unchanged three-percent
+A/A variation gate. Every timed run retains real audio/DSP and owner graphics
+features. The next strict window includes the delivered binary as well as v4/IPO.
 
 At handoff retain passing builds and useful evidence, remove disposable scratch,
 prefill the verified game files, and open normal windows with normal audio. Owner
