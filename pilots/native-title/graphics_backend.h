@@ -63,7 +63,7 @@ int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity);
 /* Draw-service batching is internal HLE ownership, never an original handle.
  * Flush before any non-draw service, observation, or native input mutation. */
 struct PilotDrawBatchStats {
-    uint64_t queued_draws,native_draws,vertex_updates,vertex_bytes;
+    uint64_t queued_draws,native_draws,vertex_updates,vertex_bytes,prepared_reuses;
     unsigned largest_batch;
 };
 void pilot_gfx_batch_allow(int eligible);

@@ -21,6 +21,8 @@ struct NativeShader {
     char *source;
     struct PilotVertexElement elements[16];
     unsigned used,current;
+    unsigned stream_mask;
+    uint32_t stream_extents[16];
     unsigned blend_recipe;
     uint32_t fixed_fvf,source_fvf,immediate_fvf,fog_fvf,fog_immediate;
 };
@@ -85,7 +87,11 @@ unsigned pilot_gfx_shader_uploads(void) {return native_constants_uploads;}
 unsigned pilot_gfx_shader_current_inputs(uint32_t handle){return native_shader(handle)->current;}
 unsigned pilot_gfx_shader_streams(uint32_t extents[16])
 {
-    struct NativeShader *shader=native_shader(native_shader_bound);unsigned mask=0;memset(extents,0,16*4);
+    struct NativeShader *shader=native_shader(native_shader_bound);
+    static int plans=-1;
+    if(plans<0) {const char *value=getenv("XLLE_PILOT_SHADER_STREAM_PLAN");plans=!(value && !strcmp(value,"0"));}
+    if(plans) {memcpy(extents,shader->stream_extents,sizeof(shader->stream_extents));return shader->stream_mask;}
+    unsigned mask=0;memset(extents,0,16*4);
     for(unsigned i=0;i<16;++i)if((shader->used&(1u<<i)) && shader->elements[i].type) {
         struct PilotVertexElement *element=&shader->elements[i];unsigned stream=element->stream;
         uint32_t end=element->offset+shader_format(element->type)->bytes;
@@ -156,6 +162,16 @@ static int32_t native_shader_compile(struct NativeShader *candidate,char *source
     if(FAILED(result)) {
         if(shader.object)ID3D11VertexShader_Release(shader.object);
         ID3D10Blob_Release(shader.code);free(source);return result;
+    }
+    /* Declaration and used-input mask are immutable for this shader's entire
+     * lifetime. Build the native stream job once for both programmed and fixed
+     * declarations, retaining the original per-draw calculation for diagnostics. */
+    memset(shader.stream_extents,0,sizeof(shader.stream_extents));shader.stream_mask=0;
+    for(unsigned i=0;i<16;++i)if((shader.used&(1u<<i)) && elements[i].type) {
+        unsigned stream=elements[i].stream;
+        uint32_t end=elements[i].offset+shader_format(elements[i].type)->bytes;
+        if(end>shader.stream_extents[stream])shader.stream_extents[stream]=end;
+        shader.stream_mask|=1u<<stream;
     }
     memcpy(shader.elements,elements,sizeof(shader.elements));*candidate=shader;
     return S_OK;

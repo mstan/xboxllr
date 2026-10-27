@@ -146,7 +146,11 @@ static int test_strip_batch(void)
         for(unsigned i=0;i<65;++i)CHECK(!pilot_gfx_draw_vertices(6,0,4));
         CHECK(!pilot_gfx_visibility_end(merged));CHECK(!batch_test_report(merged,samples+merged));
         pilot_gfx_batch_stats(&after);
-        if(merged)CHECK(after.queued_draws-before.queued_draws==65 && after.native_draws-before.native_draws==2 && after.largest_batch==64);
+        if(merged) {
+            CHECK(after.queued_draws-before.queued_draws==65 && after.native_draws-before.native_draws==2 && after.largest_batch==64);
+            const char *reuse=getenv("XLLE_PILOT_DRAW_GROUP_REUSE");
+            CHECK(after.prepared_reuses-before.prepared_reuses==(reuse && !strcmp(reuse,"0")?0u:63u));
+        }
     }
     CHECK(samples[0]>0 && samples[0]==samples[1]);
     pilot_gfx_batch_allow(0);pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(buffer);pilot_gfx_shader_destroy(shader);

@@ -173,7 +173,11 @@ static uint32_t pilot_bound_strides[16];
 static unsigned pilot_blend_default_shape,pilot_blend_transient,pilot_blend_transient_proof,pilot_blend_draws;
 static unsigned pilot_blend_noise;
 static unsigned pilot_blend_default_depth_shape;
-void pilot_gfx_noise_state(unsigned enabled) {pilot_blend_noise=enabled;}
+void pilot_gfx_noise_state(unsigned enabled)
+{
+    if(pilot_blend_noise!=enabled)pilot_gfx_batch_flush();
+    pilot_blend_noise=enabled;
+}
 static int pilot_blend_depth_shape(ID3D11Texture2D *image,unsigned sampled)
 {
     D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(image,&desc);
@@ -1482,6 +1486,22 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
 #endif
     if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
     if(pilot_initializer.dither && !pilot_initializer_target_format())return E_NOTIMPL;
+    /* Every changed native input flushes the pending strip group before its
+     * mutation. Reuse the group's validated feedback/raster/admission work
+     * only while that actual queue still owns prepared work. Resource uploads,
+     * shader/raster constants, queries, observations and capacity flushes all
+     * end this lifetime. Never reuse a geometry-dependent blend admission. */
+    if(pilot_strip_group_reuse() && pilot_strip_batch.prepared &&
+       pilot_strip_batch.allowed && pilot_strip_batch.count && !indices && primitive==6 &&
+       !pilot_edge_requested && !pilot_logic_copy && pilot_strip_batch_room(first,count) &&
+       pilot_strip_batch.count) {
+        pilot_strip_batch_queue(first,count);
+        ++pilot_strip_batch.stats.prepared_reuses;
+        pilot_mark_draw();
+        if(pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
+        if(pilot_depth_target && pilot_depth_target!=UINT32_MAX){pilot_textures[pilot_depth_target-1].uploaded=1;pilot_textures[pilot_depth_target-1].gpu_written=1;}
+        return S_OK;
+    }
     uint32_t feedback=pilot_feedback_validate();
     if(pilot_edge_requested && feedback)return E_NOTIMPL;
     const DWORD *batch_states=d3d8_GetRenderStates();
@@ -1572,7 +1592,14 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
         ID3D11DeviceContext_DrawIndexed(context,index_words,0,base);
         ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);
         if(previous)ID3D11Buffer_Release(previous);
-    } else if(batchable)pilot_strip_batch_queue(first,count);
+    } else if(batchable) {
+        pilot_strip_batch_queue(first,count);
+#ifdef PILOT_D3D_PHOBOS
+        /* A later strip can qualify as a blend rectangle even if the first
+         * did not. Such profiles keep per-draw geometry qualification. */
+        pilot_strip_batch.prepared=!pilot_blend_profile();
+#endif
+    }
     else if(primitive==7)pilot_fan_draw(first,count);
     else if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);
     else ID3D11DeviceContext_Draw(context,count,first);

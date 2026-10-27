@@ -6,16 +6,28 @@
 enum {PILOT_STRIP_BATCH_DRAWS=64,PILOT_STRIP_BATCH_INDICES=4096};
 static struct {
     struct {uint32_t first,count;} ranges[PILOT_STRIP_BATCH_DRAWS];
-    unsigned count,indices,allowed;
+    unsigned count,indices,allowed,prepared;
     ID3D11Buffer *buffer;
     struct PilotDrawBatchStats stats;
 } pilot_strip_batch;
 /* Diagnostic override is resolved from matching build symbols for same-process A/B. */
 int pilot_draw_batch_enabled=-1;
+/* Resolve once, before the first group. The checked path remains available
+ * for matched diagnostic runs; this never changes execution ownership. */
+static int pilot_draw_group_reuse=-1;
+static int pilot_strip_group_reuse(void)
+{
+    if(pilot_draw_group_reuse<0) {
+        const char *value=getenv("XLLE_PILOT_DRAW_GROUP_REUSE");
+        pilot_draw_group_reuse=!(value && !strcmp(value,"0"));
+    }
+    return pilot_draw_group_reuse;
+}
 
 void pilot_gfx_batch_flush(void)
 {
     unsigned count=pilot_strip_batch.count;
+    pilot_strip_batch.prepared=0;
     if(!count)return;
     pilot_strip_batch.count=0;pilot_strip_batch.indices=0;
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
@@ -101,9 +113,10 @@ static void pilot_strip_batch_profile(void)
     static int enabled=-1;static unsigned frames;
     if(enabled<0){const char *value=getenv("XLLE_PILOT_BATCH_PROFILE");enabled=value && !strcmp(value,"1");}
     if(enabled && ++frames%30==0)
-        fprintf(stderr,"[DRAW BATCH] queued=%llu native=%llu largest=%u vertex_updates=%llu vertex_bytes=%llu\n",
+        fprintf(stderr,"[DRAW BATCH] queued=%llu native=%llu largest=%u vertex_updates=%llu vertex_bytes=%llu prepared_reuses=%llu\n",
             (unsigned long long)pilot_strip_batch.stats.queued_draws,
             (unsigned long long)pilot_strip_batch.stats.native_draws,pilot_strip_batch.stats.largest_batch,
             (unsigned long long)pilot_strip_batch.stats.vertex_updates,
-            (unsigned long long)pilot_strip_batch.stats.vertex_bytes);
+            (unsigned long long)pilot_strip_batch.stats.vertex_bytes,
+            (unsigned long long)pilot_strip_batch.stats.prepared_reuses);
 }
