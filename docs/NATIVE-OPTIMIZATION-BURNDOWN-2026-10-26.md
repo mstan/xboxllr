@@ -37,14 +37,14 @@ them, rather than treating this table as an exhaustive list of hypothetical work
 
 | ID | Opportunity and boundary | Current evidence / next decision | Status |
 | --- | --- | --- | --- |
-| G01 | Reuse native draw validation/preparation within an ordered strip group | Blinx 2-1 emits about 20,000 draws/update; existing batching still validates raster/feedback/admission per draw. Reuse only while a prepared queue survives all mutation and observation flushes; geometry-dependent blend profiles retain per-draw qualification. | Candidate; GPU and game A/B pending |
-| G02 | Build immutable shader stream jobs at shader creation | `pilot_gfx_shader_streams` rescans 16 declarations and resolves formats on every draw. Cache mask/extents for the owned immutable shader, including fixed/current-input declarations. | Candidate; GPU and game A/B pending |
+| G01 | Reuse native draw validation/preparation within an ordered strip group | Blinx 2-1 emits about 20,000 draws/update; existing batching still validates raster/feedback/admission per draw. Reuse only while a prepared queue survives all mutation and observation flushes; geometry-dependent blend profiles retain per-draw qualification. | Candidate; local GPU gates pass, Blinx positive, JSRF qualification pending |
+| G02 | Build immutable shader stream jobs at shader creation | `pilot_gfx_shader_streams` rescans 16 declarations and resolves formats on every draw. Cache mask/extents for the owned immutable shader, including fixed/current-input declarations. | Candidate; local GPU gates pass, Blinx positive, JSRF qualification pending |
 | G03 | Group frontend preparation above individual guest draw calls | Remaining vertex/texture/deferred/raster jobs read actual bytes that inline guest writes can change. No broader certified write/packet boundary was found. Current ordered queue supplies the proved reuse boundary; skipping guest snapshots would weaken that contract. Reopen with a measured packet owner and complete writer proof. | Evaluated; broader grouping deferred |
 | G04 | Dependency-aware callback overlap | Prior timestamp-only prototype lacked dependency proof and a reliable gain. Current diagnostic callback insertion totals about 50.7 ms per 30 updates, including real waits and observation overhead. No complete consumer/dependency proof was found. Reopen on a measured dependency owner; no callbacks or real completion may be omitted. | Evaluated; unsafe overlap prototype rejected |
 | G05 | Resource versions, alias invalidation and vertex preparation | Reuse existing texture index-hint design for the still-linear vertex ownership lookup. Every hit checks index bounds and actual header, with retirement/borrowed-storage checks retained; no cached pointer or extra owner. Direct lifetime/GPU-byte test passes enabled/disabled. Existing consumed-range comparison and page-prefetch upload already preserve inline writes; wider page guarding needs a measured benefit that offsets write/rearm faults. | Candidate index hints; wider tracking deferred |
 | G06 | Deferred guest-state synchronization | Current mapping is already a direct table/identity lookup. Native revision plus actual 44 render and 4x22 texture words detect named and inline mutations. Remaining diagnostic phase is about 73.7 ms/30 updates, including timing overhead. Removing the snapshots has no valid writer proof; preserve the existing cache and reopen only with one. | Evaluated; retain current synchronization |
 | G07 | Submission/index-buffer strategy | Existing backend strip merging is baseline. Append/ring index upload passed pixels but measured 39.73 vs 39.70 CPU ms/update and 23.25 vs 23.00 updates/s, establishing no benefit. Reopen only if a current upload hotspot remains after group work. | Previously evaluated; append experiment rejected |
-| G08 | Raster preparation and redundant shader-stage binding | Reuse only the unchanged VS0 binding while an admitted prepared strip group retains ownership. Raster/fog bytes and current/constants validation still run; fixed/foreign bindings clear validity and actual mutations end the group. Presentation uses PS7 and restores its state. Startup diagnostic control retains the original rebind. | Candidate; combined GPU and game A/B pending |
+| G08 | Raster preparation and redundant shader-stage binding | Reuse only the unchanged VS0 binding while an admitted prepared strip group retains ownership. Raster/fog bytes and current/constants validation still run; fixed/foreign bindings clear validity and actual mutations end the group. Presentation uses PS7 and restores its state. Startup diagnostic control retains the original rebind. | Candidate; local GPU gates pass, Blinx positive, JSRF qualification pending |
 | P01 | Interpolation/source capture/presentation ownership | Cooperative presentation already restored about 60 presentations/s in the bounded 2-2 entrance while original updates stayed about 30/s. Current diagnostic source capture totals 23.1 ms/30 original updates (about 0.77 ms/update, including instrumentation), far below the combined draw preparation/submission cost. Composition is already native GPU work; disabling it would remove owner features. Reopen on inclusive capture/composition CPU or GPU evidence after the retained draw/compiler changes. | Evaluated; retain current presentation, deeper rewrite deferred |
 | P02 | Shader/resource creation and first-use stalls | Programmable shaders already use the shared disk bytecode cache before D3DCompile; G02 retains identical shader inputs and adds only immutable declaration metadata. Repeated actual stage entries establish no recurring first-use blocker; the selected steady-state workload remains draw-heavy. Fixed helper shaders still compile at device initialization, but no material measured startup stall selects their replacement. Reopen on a reproducible cold-entry stall with compilation/driver/lock attribution. | Evaluated; existing cache retained, speculative prewarming deferred |
 | C01 | Native entry/checkpoint and guest-register bookkeeping | Prior address-cache/huge-body experiments failed to establish useful gains. Uninstrumented main-thread leaf samples repeatedly identify graphics work and native waits, not a recurring entry-hook hotspot; service timers themselves had elevated clock-query samples. No new whole-routine state/exception contract or hot entry fast path was established. Reopen with inclusive CPU evidence before another generation rewrite. | Evaluated; further CPU rewrite deferred |
@@ -89,7 +89,7 @@ attribution; corrected samples retain resolved native/driver identities.
 
 | Game | Required workloads | New package result |
 | --- | --- | --- |
-| Blinx NTSC-U | Draw-heavy 2-1, representative gameplay/time control, loading and native save/fresh load; retain owner adaptive aspect and enhancements | v4 and IPO activate/consume/recover all five time controls through original inputs. Real stage-4 A/B data retained; strict final performance qualification, transition/save and owner check remain. REC clone playback is not established by this smoke. |
+| Blinx NTSC-U | Draw-heavy 2-1, representative gameplay/time control, loading and native save/fresh load; retain owner adaptive aspect and enhancements | Positive matched v5 CPU result below; v4/IPO all five time-control activation/stock/recovery pass. IPO reaches original Stage4 Results/save/selector after HP/position assistance and original Hurry-to-goal A acknowledgement, then fresh-loads those new native bytes into Stage0 gameplay. Owner check remains. REC clone playback is not established by this smoke. |
 | JSRF original supported NTSC-U revision | Populated gameplay, area/loading transition and native save/fresh load | v4 boots, reaches gameplay and loads the newly written native save in a fresh process; ordinary movement changes player position. Final A/B, transition and owner check remain. |
 | JSRF USA standalone | Matching representative gameplay plus revision-specific startup/save smoke | v4 writes a real native save through original System/Save UI, shows Done saving, and fresh-loads it into Garage gameplay. Final A/B, transition and owner check remain. |
 
@@ -118,6 +118,42 @@ sample. This roughly nine-percent lead warrants qualification but is not an
 accepted performance claim: preceding windows failed the unchanged three-percent
 A/A variation gate. Every timed run retains real audio/DSP and owner graphics
 features. The next strict window includes the delivered binary as well as v4/IPO.
+
+Strict NAS window ID1030 actually ran from 11:02 to 11:18 UTC on October27.
+Its initial v4 reference A/A variation is 2.38%, within the unchanged 3% gate.
+Mean CPU cost per original update is 62.126ms delivered, 59.286ms v4, and
+54.975ms v5/IPO. This supports about 11% lower CPU cost for the full candidate
+and about 7% for the compiler increment over v4 in this workload/host. Original
+update throughput is 15.324/s delivered and 16.607/s v5 (about 8% higher on this
+CPU-bound host); the simulation target remains unchanged. Later background load
+rose and delivered endpoints drifted about 3%; every v5 sample still costs less
+CPU than every reference sample. Keep approximate workload-specific claims,
+including the different delivered866/currenta3 native bases. Raw JSON/CSV,
+per-run executable/DLL hashes and graphics plans are retained in
+`nas-window-1030-results.json`, `nas-window-1030-samples.csv`,
+`nas-evidence-1118` and `retained-graphics-plans.json`.
+
+The new Blinx native save is6000bytes, SHA256
+`9a92904eb1308d8e2d6121078bb105b1895331e521f35a257f7b5a0fe010ad2f`;
+`blinx-nas-save-reload-gate.json` proves the actual Results/save and independent
+fresh-load gameplay using those exact bytes. The initial two setup failures are
+retained: screen9 also includes the original Hurry-to-goal modal, which the first
+harness failed to acknowledge. Neither failed setup is counted as a product pass
+or a performance sample.
+
+NAS GPU baseline finding `beads-xbox.1.203` remains separate. Frozen pre-campaign
+a3, normal v4 and IPO reproduce the same first FVF perspective/depth sample and
+homogeneous texture-coordinate assertions there. Float-blend and strip-batch
+checks pass in every combination; the failed checks are not counted as passes.
+On the local host, IPO passes all four modes with reuse disabled and enabled
+(8/8), alongside the previously passing normal compilation. Actual failed pixel
+values and cross-host parity remain unverified; no oracle was relaxed.
+
+JSRF's initial NAS baseline setups were excluded after screenshot requests
+during Load Game received no presented frame, including a bounded30-second
+retry. No JSRF performance result is accepted from those attempts. Retained
+candidate navigation is being inspected before another timed comparison;
+the local host remains busy, so its timing slot is deferred at30-minute checks.
 
 At handoff retain passing builds and useful evidence, remove disposable scratch,
 prefill the verified game files, and open normal windows with normal audio. Owner
