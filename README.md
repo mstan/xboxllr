@@ -93,10 +93,10 @@ xboxllr is intended to publish the **recompiler toolkit** and a separate
 reuse build/release tooling from a pinned xboxllr version. Windows x64 ZIPs are
 the current target; native Linux releases are deferred. Shared packaging now
 produces self-contained local candidates with a bundled launcher and Python.
-The current [toolkit release](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-26.3)
+The current [toolkit release](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026.10.27.1)
 provides framework source/tools and prepared dependency-source downloads, with
 graffiti-management, crash-reporting and renderer corrections described in the
-[release notes](docs/RELEASE-NOTES-2026-10-26.3.md). The precompiled Windows
+[release notes](docs/RELEASE-NOTES-2026.10.27.1.md). The precompiled Windows
 [Dashboard preview](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-23.2)
 remains available separately. The toolkit
 is Python/source tooling rather than a standalone compiler EXE. Users supply
