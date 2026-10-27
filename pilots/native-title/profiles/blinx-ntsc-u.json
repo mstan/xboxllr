@@ -243,6 +243,9 @@
     },
     "display": {
       "include": "../../../tools/native_profiles/blinx-ntsc-u-display.json"
+    },
+    "title": {
+      "include": "../../../tools/native_profiles/blinx-ntsc-u-title.json"
     }
   }
 }

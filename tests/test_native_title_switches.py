@@ -42,6 +42,44 @@ default_enabled=false
         self.assertEqual(manifests(self.source,dict(mods={})),[])
         self.assertEqual(environment(Catalog([],self.state),dict(mods={})),{})
 
+    def add_choice(self,values='["more","endless"]',labels='["More","Endless"]',default='"more"'):
+        path=self.root/self.switch['manifest']
+        path.write_text(path.read_text()+f'''[[option]]
+feature="early-unlock"
+id="mode"
+type="choice"
+default={default}
+values={values}
+labels={labels}
+''')
+
+    def test_choice_selects_one_mutually_exclusive_value(self):
+        self.add_choice()
+        defaults={'fixture.enhancement.unlock/early-unlock':dict(enabled=True,options=dict(mode='endless'))}
+        catalog=Catalog(manifests(self.source,self.data),self.state,defaults=defaults)
+        self.assertEqual(environment(catalog,self.data),dict(XLLE_PILOT_TITLE_MOD_EARLY_UNLOCK='endless'))
+        catalog.features[0]['options'][0]['value']='more'
+        self.assertEqual(environment(catalog,self.data),dict(XLLE_PILOT_TITLE_MOD_EARLY_UNLOCK='more'))
+        catalog.features[0]['enabled']=False
+        self.assertEqual(environment(catalog,self.data),dict(XLLE_PILOT_TITLE_MOD_EARLY_UNLOCK='0'))
+        catalog.features[0]['enabled']=True;catalog.features[0]['options'][0]['value']='1'
+        with self.assertRaisesRegex(ValueError,'choice'):environment(catalog,self.data)
+
+    def test_invalid_choices_are_rejected(self):
+        for values,labels,default in (('["0","more"]','["Off","More"]','"more"'),('["more"]','["More"]','"more"'),
+                                      ('["more","x;y"]','["More","Bad"]','"more"'),('["more","less"]','["More"]','"more"'),
+                                      ('["more","less"]','["More","Less"]','"other"')):
+            self.setUp();self.add_choice(values,labels,default)
+            with self.assertRaisesRegex(ValueError,'Unsupported bundled'):manifests(self.source,self.data)
+        self.setUp();self.add_choice();self.add_choice()
+        with self.assertRaisesRegex(ValueError,'Unsupported bundled'):manifests(self.source,self.data)
+
+    def test_legacy_game_metadata_selects_the_same_target(self):
+        legacy=dict(game=dict(title_id='12345678',xbe_sha256='a'*64),mods=self.data['mods'])
+        self.assertEqual(manifests(self.source,legacy),manifests(self.source,self.data))
+        legacy['game']['xbe_sha256']='b'*64
+        with self.assertRaisesRegex(ValueError,'Unsupported bundled'):manifests(self.source,legacy)
+
     def test_bad_keys_paths_duplicates_and_missing_selection_are_rejected(self):
         self.switch['key']='PATH'
         self.assertEqual(declarations(self.data)[0]['key'],'PATH') # Always receives the fixed prefix.

@@ -100,13 +100,17 @@ muted, and cannot detach. Only that created process is stopped at its deadline.
 The authored tests mock process creation: they do not validate dashboard boot,
 rendering, input, audio output, or native performance.
 
-Trusted title registries can expose checkbox-only gameplay mods through
-`[mods].switches`. Each declaration names a bundled manifest, package/feature
-pair and an uppercase `key`; the launcher passes its selected boolean as
-`XLLE_PILOT_TITLE_MOD_<key>=0|1`. The compiled title registry implements the
-behavior through the existing mod interface. Packages do not load executable
-code. Manifests must target the exact title ID and XBE hash and use
-`mods/preloaded/packages/<package>/1.0.0/manifest.toml`.
+Trusted title registries can expose gameplay mods through `[mods].switches`.
+Each declaration names a bundled manifest, package/feature pair and an
+uppercase `key`; the launcher passes `XLLE_PILOT_TITLE_MOD_<key>=0|1`. A switch
+feature may author one `choice` option (2-8 lowercase values, never `0`/`1`)
+for mutually exclusive alternatives; the title then receives `0` when the
+feature is off and the selected value otherwise. The compiled title registry
+implements the behavior through the existing mod interface and must reject
+unknown values. Packages do not load executable code. Manifests must target the
+exact title ID and XBE hash and use
+`mods/preloaded/packages/<package>/1.0.0/manifest.toml`. Blinx's legacy
+`[game]` profile selects the same target as native-title `[title]` metadata.
 
 Use `[launcher.defaults."<package>/<feature>"] enabled = true` for a title
 default; a saved explicit OFF always wins. Keep the manifest's generic default

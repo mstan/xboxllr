@@ -1,0 +1,13 @@
+{
+  "adapter": "static-title-functions-v1",
+  "functions": [
+    {"id": 1, "address": 681792, "bytes": 10160, "sha256": "e14618cbb7383c32770a746a92604dc24b4eabe14229650515eaf05a933f1803", "stack_bytes": 0},
+    {"id": 2, "address": 796384, "bytes": 820, "sha256": "52f547683b48b8ec5164ae5120e45913c877522d94b5cbb38c40afc1572d0ce0", "stack_bytes": 0},
+    {"id": 3, "address": 797216, "bytes": 288, "sha256": "e18f84d86696ff8ef34c3af415145d8f0c33f46aeabed85423bdb9d315a9411d", "stack_bytes": 0},
+    {"id": 4, "address": 661696, "bytes": 1934, "sha256": "1d06dee53a0bbbe7f5824374eb1694f485e6176a081508196f538aeb02c57865", "stack_bytes": 0},
+    {"id": 5, "address": 678576, "bytes": 2876, "sha256": "8ef4ceef0c6b1fa988c176c33798da57685031b55d0085ff9aa5e8f2fa0bf33c", "stack_bytes": 0},
+    {"id": 6, "address": 808736, "bytes": 1711, "sha256": "5438d351035d43f9a1bcd688c319681a6fd6496b3f5740ae703d5f6b2731d6d9", "stack_bytes": 0},
+    {"id": 7, "address": 795792, "bytes": 98, "sha256": "46efdb88c983f98f646271190226ef5a9d54e03d8b0127b08b4e326f3fcb4272", "stack_bytes": 0},
+    {"id": 8, "address": 172208, "bytes": 10, "sha256": "4bb64538658d1d144650d74f3a7c7117e5c17f927b44574604bda677b1588997", "stack_bytes": 0, "callers": [662120]}
+  ]
+}
