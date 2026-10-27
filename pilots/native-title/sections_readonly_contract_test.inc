@@ -67,6 +67,20 @@ static void test_sections_readonly(const char *comparison)
     };
     for(unsigned i=0;i<sizeof(pages)/sizeof(pages[0]);++i)
         section_readonly_test_policy(pages[i].address,pages[i].protection);
+    /* Reviewed title constant override (Blinx A78A1 fail limit): one page of
+     * a preloaded read-only section, protection restored afterwards. */
+    float limit,open=3.0e38f;memcpy(&limit,memory+0x1c960c,4);CHECK(limit==17989.0f);
+#ifdef PILOT_MEMORY_LLE
+    CHECK(!title_mod_write_image(0x1c960c,&open,4));
+#else
+    CHECK(title_mod_write_image(0x1c960c,&open,4) && !memcmp(memory+0x1c960c,&open,4));
+    section_readonly_test_policy(0x1c9000,PAGE_READONLY);
+    CHECK(title_mod_write_image(0x1c960c,&limit,4) && !memcmp(memory+0x1c960c,&limit,4));
+    section_readonly_test_policy(0x1c9000,PAGE_READONLY);
+#endif
+    CHECK(!title_mod_write_image(0x18affe,&open,4));   /* crosses a page */
+    CHECK(!title_mod_write_image(0x1d0670,&open,4));   /* writable .data */
+    CHECK(!title_mod_write_image(0xaaff40,&open,4));   /* deferred MDLPL */
 
     /* Statistics uses a separately owned original/native allocation, never
      * low .text scratch which is now correctly readonly. No authored threads

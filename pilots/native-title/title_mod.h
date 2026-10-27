@@ -30,7 +30,9 @@ struct PilotTitleModHost {
     int (*resident_media)(uint32_t budget_mib,const char *const *stream_extensions,uint32_t count);
     int (*resident_ready)(void);
     uint64_t (*monotonic)(void); /* 100ns wall clock */
-
+    /* Reviewed override of bytes inside one page of a preloaded read-only XBE
+     * section (title constants). Protection is restored; 0 when unsupported. */
+    int (*write_image)(uint32_t address,const void *data,uint32_t bytes);
 };
 struct PilotTitleModDraw {
     uint32_t caller,shader,primitive,count,default_target;

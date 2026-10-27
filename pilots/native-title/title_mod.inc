@@ -3,6 +3,35 @@
 #if defined(_M_X64) || defined(__x86_64__)
 #include <xmmintrin.h>
 #endif
+static int title_mod_write_image(uint32_t address,const void *data,uint32_t bytes)
+{
+    /* Original read-only sections keep Xbox page protection. A trusted title
+     * registry may override bytes in one page of a preloaded, non-writable
+     * section after finalization; the original protection is then restored.
+     * Deferred sections reload from the image and are therefore refused. */
+#ifdef PILOT_MEMORY_LLE
+    (void)address;(void)data;(void)bytes;return 0;
+#else
+    if(!data || !bytes || address>=0x04000000u || (address&4095u)+bytes>4096u || !sections)return 0;
+    int ok=0,owned=0;
+    AcquireSRWLockExclusive(&section_lock);AcquireSRWLockExclusive(&vm_lock);
+    for(unsigned i=0;i<section_count && !owned;++i)
+        owned=(sections[i].flags&3)==2 && address>=sections[i].address &&
+              (uint64_t)address+bytes<=(uint64_t)sections[i].address+sections[i].size;
+    if(owned && section_preloads_finalized) {
+        PVOID host=memory+address;SIZE_T span=bytes;ULONG previous,restored;
+        if(!vm_native_protect(GetCurrentProcess(),&host,&span,PAGE_READWRITE,&previous)) {
+            memcpy(memory+address,data,bytes);
+            host=memory+address;span=bytes;
+            if(vm_native_protect(GetCurrentProcess(),&host,&span,previous,&restored))
+                stop("title image override protection restore failed",address);
+            ok=!memcmp(memory+address,data,bytes);
+        }
+    }
+    ReleaseSRWLockExclusive(&vm_lock);ReleaseSRWLockExclusive(&section_lock);
+    return ok;
+#endif
+}
 #ifdef PILOT_TITLE_MODS
 static const struct PilotTitleMod *title_mod;
 static int title_mod_access(uint32_t address,void *data,uint32_t bytes,int write)
@@ -31,7 +60,8 @@ static void title_mod_initialize(void)
 {
     static const struct PilotTitleModHost host={PILOT_TITLE_MOD_ABI,PILOT_XBE_SHA256,
         title_mod_read,title_mod_write,pilot_gfx_presentation,pilot_gfx_client_size,pilot_gfx_frame_shape,pilot_gfx_visual_mods,pilot_gfx_frame_scope,
-        title_mod_invoke,pilot_gfx_radial_blur,media_resident_configure,media_resident_ready,dispatch_monotonic};
+        title_mod_invoke,pilot_gfx_radial_blur,media_resident_configure,media_resident_ready,dispatch_monotonic,
+        title_mod_write_image};
     title_mod=pilot_title_mod_open(&host);
     if(title_mod && title_mod->abi!=PILOT_TITLE_MOD_ABI)stop("title mod ABI mismatch",0);
 }
