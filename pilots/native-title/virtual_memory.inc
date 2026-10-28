@@ -53,6 +53,20 @@ static LONG NTAPI vm_owner_free(HANDLE process,PVOID *address,PSIZE_T bytes,ULON
     if(status>=0)pilot_commit_owner_release(*address?*address:before,*bytes?*bytes:requested,(type&MEM_RELEASE)!=0);
     return status;
 }
+static LONG NTAPI vm_owner_protect(HANDLE process,PVOID *address,PSIZE_T bytes,ULONG protect,PULONG previous)
+{
+    void *before=*address;SIZE_T requested=*bytes;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    if(!pilot_write_watch_native_begin(before,requested))
+        stop("cannot relinquish write watch for protection",(uint32_t)((unsigned char*)before-memory));
+#endif
+    LONG status=vm_native_protect(process,address,bytes,protect,previous);
+    if(status>=0)pilot_commit_owner_publish(*address,*bytes,1);
+#ifdef PILOT_MEMORY_WRITE_WATCH
+    pilot_write_watch_native_end(before,requested);
+#endif
+    return status;
+}
 
 static void vm_fixed_region(uint32_t base,uint32_t size)
 {
@@ -323,13 +337,7 @@ static uint32_t vm_protect(uint32_t *base,uint32_t *size,uint32_t protect,uint32
         if(!result){*base=outputs[0];*size=outputs[1];*old=outputs[2];}
 #else
         PVOID host=memory+low; SIZE_T span=bytes; ULONG previous;
-#ifdef PILOT_MEMORY_WRITE_WATCH
-        if(!pilot_write_watch_native_begin(host,bytes))stop("cannot relinquish write watch for protection",low);
-#endif
-        result=(uint32_t)vm_native_protect(GetCurrentProcess(),&host,&span,protect,&previous);
-#ifdef PILOT_MEMORY_WRITE_WATCH
-        pilot_write_watch_native_end(memory+low,bytes);
-#endif
+        result=(uint32_t)vm_owner_protect(GetCurrentProcess(),&host,&span,protect,&previous);
         if (!result) { *base=low; *size=bytes; *old=previous; }
 #endif
     }

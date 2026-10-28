@@ -38,7 +38,7 @@ static void section_readonly(const struct PilotSection *s)
         stop("original section protection changed owned range",start);
 #else
     PVOID host=memory+start;SIZE_T span=end-start;ULONG previous;
-    status=(uint32_t)vm_native_protect(GetCurrentProcess(),&host,&span,PAGE_READONLY,&previous);
+    status=(uint32_t)vm_owner_protect(GetCurrentProcess(),&host,&span,PAGE_READONLY,&previous);
     if(!status && (host!=memory+low || span!=bytes))
         stop("native section protection changed owned range",start);
 #endif
@@ -79,7 +79,7 @@ static uint32_t section_commit(uint32_t base,uint32_t bytes)
     if(outputs[0]!=base || outputs[1]!=bytes)stop("original section commit changed owned range",base);
 #else
     ULONG previous;
-    status=(uint32_t)vm_native_protect(GetCurrentProcess(),&host,&span,PAGE_READWRITE,&previous);
+    status=(uint32_t)vm_owner_protect(GetCurrentProcess(),&host,&span,PAGE_READWRITE,&previous);
     if(status)stop("native section recommit protection failed",status);
     if(host!=memory+base || span!=bytes)stop("native section recommit changed owned range",base);
 #endif

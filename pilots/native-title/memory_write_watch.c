@@ -205,6 +205,7 @@ BOOL WINAPI pilot_write_watch_virtual_protect(LPVOID address,SIZE_T bytes,DWORD 
         DWORD error=GetLastError();pilot_write_watch_native_end(address,bytes);SetLastError(error);return FALSE;
     }
     BOOL result=VirtualProtect(address,bytes,protect,previous);DWORD error=GetLastError();
+    if(result)pilot_commit_owner_publish(address,bytes,1);
     pilot_write_watch_native_end(previous,sizeof(*previous));
     pilot_write_watch_native_end(address,bytes);SetLastError(error);return result;
 }
@@ -266,7 +267,11 @@ uint64_t pilot_write_watch_faults(void){return 0;}
 #if defined(_WIN32)
 #include "memory_write_watch_win32.h"
 BOOL WINAPI pilot_write_watch_virtual_protect(LPVOID address,SIZE_T bytes,DWORD protect,PDWORD previous)
-{return VirtualProtect(address,bytes,protect,previous);}
+{
+    BOOL result=VirtualProtect(address,bytes,protect,previous);DWORD error=GetLastError();
+    if(result)pilot_commit_owner_publish(address,bytes,1);
+    SetLastError(error);return result;
+}
 LPVOID WINAPI pilot_write_watch_virtual_alloc(LPVOID address,SIZE_T bytes,DWORD type,DWORD protect)
 {
     LPVOID result=VirtualAlloc(address,bytes,type,protect);DWORD error=GetLastError();

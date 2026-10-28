@@ -13,6 +13,14 @@ void pilot_commit_owner_finish(void);
 void pilot_commit_owner_publish(const void *data,size_t bytes,int committed);
 void pilot_commit_owner_release(const void *data,size_t bytes,int reservation);
 int pilot_commit_owner_query(uint32_t base,uint64_t bytes,uint64_t *committed);
+enum PilotMemoryPermission {
+    PILOT_MEMORY_READ=1,PILOT_MEMORY_WRITE=2,PILOT_MEMORY_DATA_WRITE=4
+};
+/* Intersection across the whole span. False means the caller must use its
+ * existing host-query path; an output of zero is a proved inaccessible span.
+ * DATA_WRITE retains the title registry's stricter non-executable write rule.
+ * One-shot PAGE_GUARD ranges deliberately require the host-query fallback. */
+int pilot_commit_owner_permissions(uint32_t base,uint64_t bytes,unsigned *permissions);
 #ifdef __cplusplus
 }
 #endif

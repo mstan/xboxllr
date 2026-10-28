@@ -97,6 +97,9 @@ static uint32_t wait_publish(struct PilotWaitHandle *e,uint32_t output)
 static int wait_range(uint32_t address,unsigned bytes,int writable)
 {
     if(!address || (uint64_t)address+bytes>UINT64_C(0x100000000))return 0;
+    unsigned permissions;
+    if(pilot_commit_owner_permissions(address,bytes,&permissions))
+        return (permissions&(writable?PILOT_MEMORY_WRITE:PILOT_MEMORY_READ))!=0;
     uintptr_t at=(uintptr_t)(memory+address),end=at+bytes;
     if(end<at)return 0;
     while(at<end) {

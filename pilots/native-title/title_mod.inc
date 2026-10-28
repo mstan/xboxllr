@@ -20,10 +20,10 @@ static int title_mod_write_image(uint32_t address,const void *data,uint32_t byte
               (uint64_t)address+bytes<=(uint64_t)sections[i].address+sections[i].size;
     if(owned && section_preloads_finalized) {
         PVOID host=memory+address;SIZE_T span=bytes;ULONG previous,restored;
-        if(!vm_native_protect(GetCurrentProcess(),&host,&span,PAGE_READWRITE,&previous)) {
+        if(!vm_owner_protect(GetCurrentProcess(),&host,&span,PAGE_READWRITE,&previous)) {
             memcpy(memory+address,data,bytes);
             host=memory+address;span=bytes;
-            if(vm_native_protect(GetCurrentProcess(),&host,&span,previous,&restored))
+            if(vm_owner_protect(GetCurrentProcess(),&host,&span,previous,&restored))
                 stop("title image override protection restore failed",address);
             ok=!memcmp(memory+address,data,bytes);
         }
@@ -37,6 +37,12 @@ static const struct PilotTitleMod *title_mod;
 static int title_mod_access(uint32_t address,void *data,uint32_t bytes,int write)
 {
     if(!data || !bytes || bytes>65536 || address>=0x04000000u || bytes>0x04000000u-address)return 0;
+    unsigned permissions;
+    if(pilot_commit_owner_permissions(address,bytes,&permissions)) {
+        if(!(permissions&(write?PILOT_MEMORY_DATA_WRITE:PILOT_MEMORY_READ)))return 0;
+        if(write)memcpy(memory+address,data,bytes);else memcpy(data,memory+address,bytes);
+        return 1;
+    }
     uintptr_t current=(uintptr_t)(memory+address),end=current+bytes;
     while(current<end) {
         MEMORY_BASIC_INFORMATION info;
