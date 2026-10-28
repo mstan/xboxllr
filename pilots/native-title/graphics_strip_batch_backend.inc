@@ -1,7 +1,7 @@
 /* Ordered HLE lowering: compatible buffered strips become one indexed strip.
  * UINT32_MAX is the D3D11 strip-cut index, so winding/parity restarts exactly
  * at each original strip. No vertex, primitive or original completion serial
- * is omitted. Callers flush at non-draw service and observation boundaries;
+ * is omitted. Operations flush at actual observation and mutation boundaries;
  * draw preparation flushes before changing a native input/state/resource. */
 enum {PILOT_STRIP_BATCH_DRAWS=64,PILOT_STRIP_BATCH_INDICES=4096};
 static struct {
@@ -15,6 +15,19 @@ int pilot_draw_batch_enabled=-1;
 /* Resolve once, before the first group. The checked path remains available
  * for matched diagnostic runs; this never changes execution ownership. */
 static int pilot_draw_group_reuse=-1;
+int pilot_gfx_native_operation_owner(void)
+{
+#ifdef PILOT_D3D_PHOBOS
+    static int enabled=-1;
+    if(enabled<0) {
+        const char *value=getenv("XLLE_PILOT_NATIVE_OPERATION_OWNER");
+        enabled=!(value && !strcmp(value,"0"));
+    }
+    return enabled;
+#else
+    return 0;
+#endif
+}
 static int pilot_strip_group_reuse(void)
 {
     if(pilot_draw_group_reuse<0) {
@@ -24,10 +37,9 @@ static int pilot_strip_group_reuse(void)
     return pilot_draw_group_reuse;
 }
 
-void pilot_gfx_batch_flush(void)
+static void pilot_strip_batch_drain(void)
 {
     unsigned count=pilot_strip_batch.count;
-    pilot_strip_batch.prepared=0;
     if(!count)return;
     pilot_strip_batch.count=0;pilot_strip_batch.indices=0;
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
@@ -70,6 +82,12 @@ void pilot_gfx_batch_flush(void)
     if(count>pilot_strip_batch.stats.largest_batch)pilot_strip_batch.stats.largest_batch=count;
 }
 
+void pilot_gfx_batch_flush(void)
+{
+    pilot_strip_batch.prepared=0;
+    pilot_strip_batch_drain();
+}
+
 void pilot_gfx_batch_allow(int eligible)
 {
     if(pilot_draw_batch_enabled<0) {
@@ -87,14 +105,19 @@ void pilot_gfx_batch_allow(int eligible)
 void pilot_gfx_batch_stats(struct PilotDrawBatchStats *stats)
 {*stats=pilot_strip_batch.stats;}
 int pilot_gfx_batch_prepared(void)
-{return pilot_strip_batch.allowed && pilot_strip_batch.count && pilot_strip_batch.prepared;}
+{return pilot_strip_batch.allowed && pilot_strip_batch.prepared &&
+    (pilot_strip_batch.count || pilot_gfx_native_operation_owner());}
 
 static int pilot_strip_batch_room(unsigned first,unsigned count)
 {
     if(count<3 || count>1024 || (uint64_t)first+count>UINT32_MAX)return 0;
     if(pilot_strip_batch.count==PILOT_STRIP_BATCH_DRAWS ||
-       pilot_strip_batch.indices+count+(pilot_strip_batch.count!=0)>PILOT_STRIP_BATCH_INDICES)
-        pilot_gfx_batch_flush();
+       pilot_strip_batch.indices+count+(pilot_strip_batch.count!=0)>PILOT_STRIP_BATCH_INDICES) {
+        /* The temporary index binding is restored by drain. Capacity does
+         * not mutate a prepared shader, raster, resource or state input. */
+        if(pilot_gfx_native_operation_owner())pilot_strip_batch_drain();
+        else pilot_gfx_batch_flush();
+    }
     return 1;
 }
 static void pilot_strip_batch_queue(unsigned first,unsigned count)

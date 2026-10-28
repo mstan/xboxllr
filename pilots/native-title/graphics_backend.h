@@ -60,16 +60,20 @@ int32_t pilot_gfx_draw_up(uint32_t primitive,uint32_t count,const void *data,uin
 /* FVF placement/constants are prepared first by the common draw owner. */
 int32_t pilot_gfx_immediate_fvf(uint32_t fvf);
 int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity);
-/* Draw-service batching is internal HLE ownership, never an original handle.
- * Flush before any non-draw service, observation, or native input mutation. */
+/* Native operations own ordering independently of guest API call boundaries.
+ * A changed native input, resource write or observation must flush before its
+ * effect. Pure queries and unchanged bindings do not end that ownership. */
 struct PilotDrawBatchStats {
     uint64_t queued_draws,native_draws,vertex_updates,vertex_bytes,prepared_reuses;
     unsigned largest_batch;
 };
 void pilot_gfx_batch_allow(int eligible);
 void pilot_gfx_batch_flush(void);
-/* True only while an admitted queued group retains native input ownership.
- * Any changed resource/state or observation ends this lifetime. */
+/* Only the audited backend can replace the old per-API flush policy. Resolved
+ * once before native work; the other backend retains its existing behavior. */
+int pilot_gfx_native_operation_owner(void);
+/* Prepared inputs survive a capacity-only submission. Changed resource/state
+ * and observation boundaries still invalidate them through batch_flush. */
 int pilot_gfx_batch_prepared(void);
 void pilot_gfx_batch_stats(struct PilotDrawBatchStats *stats);
 void pilot_gfx_set_state(uint32_t state,uint32_t value);

@@ -763,9 +763,11 @@ void pilot_gfx_vertex_destroy(uint32_t handle)
 }
 void pilot_gfx_vertex_bind(unsigned stream,uint32_t handle,uint32_t stride)
 {
-    pilot_gfx_batch_flush();
     if(!pilot_device || stream>=16 || stride>2048)pilot_d3d_backend_stop("invalid native vertex binding");
     ID3D11Buffer *buffer=handle?pilot_donor_vertex(pilot_vertex(handle)):NULL;UINT offset=0;
+    if(pilot_gfx_native_operation_owner() && pilot_bound_vertices[stream]==handle &&
+       pilot_bound_strides[stream]==(handle?stride:0))return;
+    pilot_gfx_batch_flush();
     ID3D11DeviceContext_IASetVertexBuffers(d3d8_GetD3D11Context(),stream,1,&buffer,&stride,&offset);
     pilot_bound_vertices[stream]=handle;
     pilot_bound_strides[stream]=handle?stride:0;
@@ -911,9 +913,14 @@ static uint32_t pilot_feedback_validate(void)
 }
 void pilot_gfx_texture_bind(unsigned stage,uint32_t handle)
 {
-    pilot_gfx_batch_flush();
     if(!pilot_device || stage>=4)pilot_d3d_backend_stop("invalid native texture binding");
     D3D8Texture *texture=handle?pilot_texture(handle):NULL;
+    /* Binding resets a sampling reinterpretation, even when the allocation
+     * identity is unchanged. Preserve that effect before eliding a no-op. */
+    uint32_t format=texture?pilot_textures[handle-1].guest_format:0;
+    if(pilot_gfx_native_operation_owner() && pilot_bound_textures[stage]==handle &&
+       pilot_sampling_formats[stage]==format)return;
+    pilot_gfx_batch_flush();
     if(handle && (pilot_donor_texture(texture)==(pilot_color_target?pilot_donor_texture(pilot_texture(pilot_color_target)):pilot_surfaces[0]) ||
         (pilot_depth_target && pilot_donor_texture(texture)==(pilot_depth_target==UINT32_MAX?pilot_surfaces[2]:pilot_donor_texture(pilot_texture(pilot_depth_target)))))) {
         if(getenv("XLLE_PILOT_FEEDBACK_TRACE"))fprintf(stderr,"[GPU OVERLAP] stage=%u texture=%u color=%u depth=%u format=%x levels=%u size=%ux%u\n",
@@ -1486,15 +1493,14 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
 #endif
     if(!pilot_device || !count || (uint64_t)first+count>UINT32_MAX)return E_INVALIDARG;
     if(pilot_initializer.dither && !pilot_initializer_target_format())return E_NOTIMPL;
-    /* Every changed native input flushes the pending strip group before its
-     * mutation. Reuse the group's validated feedback/raster/admission work
-     * only while that actual queue still owns prepared work. Resource uploads,
-     * shader/raster constants, queries, observations and capacity flushes all
-     * end this lifetime. Never reuse a geometry-dependent blend admission. */
+    /* Every changed native input flushes before mutation. Prepared native
+     * inputs survive only a capacity drain, whose temporary index binding is
+     * restored. Queries/observations and resource/state changes invalidate
+     * preparation. Never reuse a geometry-dependent blend admission. */
     if(pilot_strip_group_reuse() && pilot_strip_batch.prepared &&
-       pilot_strip_batch.allowed && pilot_strip_batch.count && !indices && primitive==6 &&
+       pilot_strip_batch.allowed && (pilot_strip_batch.count || pilot_gfx_native_operation_owner()) && !indices && primitive==6 &&
        !pilot_edge_requested && !pilot_logic_copy && pilot_strip_batch_room(first,count) &&
-       pilot_strip_batch.count) {
+       (pilot_strip_batch.count || pilot_gfx_native_operation_owner())) {
         pilot_strip_batch_queue(first,count);
         ++pilot_strip_batch.stats.prepared_reuses;
         pilot_mark_draw();

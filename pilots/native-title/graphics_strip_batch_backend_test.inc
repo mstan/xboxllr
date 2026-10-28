@@ -149,7 +149,33 @@ static int test_strip_batch(void)
         if(merged) {
             CHECK(after.queued_draws-before.queued_draws==65 && after.native_draws-before.native_draws==2 && after.largest_batch==64);
             const char *reuse=getenv("XLLE_PILOT_DRAW_GROUP_REUSE");
-            CHECK(after.prepared_reuses-before.prepared_reuses==(reuse && !strcmp(reuse,"0")?0u:63u));
+            CHECK(after.prepared_reuses-before.prepared_reuses==(reuse && !strcmp(reuse,"0")?0u:
+                pilot_gfx_native_operation_owner()?64u:63u));
+        }
+    }
+    CHECK(samples[0]>0 && samples[0]==samples[1]);
+    /* Unchanged shader/stream/texture bindings and ordinary state setters
+     * share native input ownership. More than two queue capacities still
+     * execute every primitive and produce identical visibility results. */
+    for(unsigned merged=0;merged<2;++merged) {
+        CHECK(!pilot_gfx_clear(1,0xff000000,1,0));
+        CHECK(!pilot_gfx_visibility_begin());pilot_gfx_batch_allow(merged);
+        struct PilotDrawBatchStats before,after;pilot_gfx_batch_stats(&before);
+        for(unsigned i=0;i<130;++i) {
+            pilot_gfx_vertex_bind(0,buffer,sizeof(vertices[0]));
+            pilot_gfx_texture_bind(0,0);
+            CHECK(!pilot_gfx_shader_bind(shader));
+            pilot_gfx_set_state(D3DRS_CULLMODE,1);
+            pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_DISABLE);
+            CHECK(!pilot_gfx_shader_raster(scale,offset));
+            CHECK(!pilot_gfx_draw_vertices(6,0,4));
+        }
+        CHECK(!pilot_gfx_visibility_end(merged+2));
+        CHECK(!batch_test_report(merged+2,samples+merged));
+        pilot_gfx_batch_stats(&after);
+        if(merged) {
+            CHECK(after.queued_draws-before.queued_draws==130);
+            CHECK(after.native_draws-before.native_draws==(pilot_gfx_native_operation_owner()?3u:130u));
         }
     }
     CHECK(samples[0]>0 && samples[0]==samples[1]);

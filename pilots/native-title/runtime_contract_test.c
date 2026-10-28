@@ -839,6 +839,7 @@ int main(int argc,char **argv)
         if (!strcmp(argv[1],"graphics-present")) { test_graphics(3); return 0; }
         if (!strcmp(argv[1],"graphics-deferred-relevance")) { test_graphics(4); return 0; }
         if (!strcmp(argv[1],"graphics-deferred-cache")) { test_graphics(17); return 0; }
+        if (!strcmp(argv[1],"graphics-operation-owner")) { test_graphics(22); return 0; }
         if (!strcmp(argv[1],"graphics-write-watch")) { test_graphics(18); return 0; }
         if (!strcmp(argv[1],"graphics-interpolation-service")) { test_graphics(19); return 0; }
         if (!strcmp(argv[1],"graphics-standalone-free-bound")) { test_graphics(20); return 1; }

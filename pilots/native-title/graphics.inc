@@ -326,7 +326,13 @@ static void graphics_dispatch_impl(unsigned entry)
     uint64_t entered=graphics_service_profile_enabled()?dispatch_monotonic():0;
     AcquireSRWLockExclusive(&graphics_lock);
     uint64_t acquired=entered?dispatch_monotonic():0;
-    if(entry!=PILOT_D3D_D3DDevice_DrawVertices)pilot_gfx_batch_flush();
+    /* The native operation owner flushes at actual input/resource mutations
+     * and GPU observations, including inline packets. An ABI transition is
+     * not itself a GPU dependency. Keep the old policy for other backends and
+     * matched startup-selected controls. Guest cache/ABI effects still occur
+     * synchronously below, and the real callback barrier remains intact. */
+    if(entry!=PILOT_D3D_D3DDevice_DrawVertices && !pilot_gfx_native_operation_owner())
+        pilot_gfx_batch_flush();
     if(entry==graphics_resource_wait_entry() && !graphics_active) {
         ReleaseSRWLockExclusive(&graphics_lock);g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
     }

@@ -41,9 +41,12 @@ static struct NativeShader *native_shader(uint32_t handle)
 #include "graphics_blend_admission_backend.inc"
 int32_t pilot_gfx_shader_bind(uint32_t handle)
 {
+    struct NativeShader *shader=native_shader(handle);
+    if(pilot_gfx_native_operation_owner() && native_shader_active &&
+       native_constants_bound && native_shader_bound==handle && !shader->fixed_fvf)
+        return shader->current?native_current_flush():S_OK;
     pilot_gfx_batch_flush();
     native_shader_active=0;
-    struct NativeShader *shader=native_shader(handle);
     if(shader->fixed_fvf) {
         pilot_gfx_shader_fixed_binding();native_shader_bound=handle;return S_OK;
     }
