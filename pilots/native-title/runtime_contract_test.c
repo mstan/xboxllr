@@ -627,6 +627,7 @@ int main(int argc,char **argv)
 #endif
     memory=VirtualAlloc(NULL,(SIZE_T)0x100000000ull,MEM_RESERVE,PAGE_NOACCESS);
     CHECK(memory!=NULL);
+    native_commit_owner_initialize();
     g_xbox_mem_offset=(ptrdiff_t)memory;
     commit(0x10000,0x10000);
     g_esp=0x18000; MEM32(g_esp)=0x12340;

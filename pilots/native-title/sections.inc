@@ -58,7 +58,7 @@ static void sections_finalize_preloads(void)
 static uint32_t section_commit(uint32_t base,uint32_t bytes)
 {
     PVOID host=memory+base;SIZE_T span=bytes;
-    uint32_t status=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,PAGE_READWRITE);
+    uint32_t status=(uint32_t)vm_owner_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,PAGE_READWRITE);
     if(status)return status;
     if(host!=memory+base || span!=bytes)stop("section commitment changed owned range",base);
     /* Original cold COMMIT/EXECUTE_READWRITE also changes already committed
@@ -163,7 +163,7 @@ static uint32_t section_change(uint32_t descriptor,int load)
                 const char *error=pilot_io_device_image_release(section_page_base+start*4096,(uint32_t)span);
                 if(error)stop(error,section_page_base+start*4096);
 #endif
-                status=(uint32_t)vm_native_free(GetCurrentProcess(),&host,&span,MEM_DECOMMIT);
+                status=(uint32_t)vm_owner_free(GetCurrentProcess(),&host,&span,MEM_DECOMMIT);
                 if (status) stop("host failed section decommit",status);
             }
             for (uint32_t page=first;page<end;++page) --section_pages[page];

@@ -38,6 +38,21 @@ typedef LONG (NTAPI *PilotNtProtect)(HANDLE,PVOID*,PSIZE_T,ULONG,PULONG);
 static PilotNtAllocate vm_native_allocate;
 static PilotNtFree vm_native_free;
 static PilotNtProtect vm_native_protect;
+/* Direct NT and Win32 operations publish to the same mapping authority. */
+static LONG NTAPI vm_owner_allocate(HANDLE process,PVOID *address,ULONG_PTR zero_bits,
+                                    PSIZE_T bytes,ULONG type,ULONG protect)
+{
+    LONG status=vm_native_allocate(process,address,zero_bits,bytes,type,protect);
+    if(status>=0 && (type&MEM_COMMIT))pilot_commit_owner_publish(*address,*bytes,1);
+    return status;
+}
+static LONG NTAPI vm_owner_free(HANDLE process,PVOID *address,PSIZE_T bytes,ULONG type)
+{
+    void *before=*address;SIZE_T requested=*bytes;
+    LONG status=vm_native_free(process,address,bytes,type);
+    if(status>=0)pilot_commit_owner_release(*address?*address:before,*bytes?*bytes:requested,(type&MEM_RELEASE)!=0);
+    return status;
+}
 
 static void vm_fixed_region(uint32_t base,uint32_t size)
 {
@@ -117,6 +132,8 @@ static uint64_t vm_committed_host(uint32_t base,uint64_t size)
 }
 static uint64_t vm_committed(uint32_t base,uint64_t size)
 {
+    uint64_t owned;
+    if(pilot_commit_owner_query(base,size,&owned))return owned;
 #ifdef PILOT_NATIVE_SERVICE_ACCOUNTING
     if(!base && size==UINT64_C(0x100000000)) {
         /* Pool D0000000-D3FFFFFF and contiguous 80000000-83FFFFFF are
@@ -222,7 +239,7 @@ static uint32_t vm_allocate(uint32_t *base,uint32_t zero_bits,uint32_t *size,uin
 #ifdef PILOT_MEMORY_WRITE_WATCH
         if(!pilot_write_watch_native_begin(host,bytes))stop("cannot relinquish write watch for commit",low);
 #endif
-        result=(uint32_t)vm_native_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,protect);
+        result=(uint32_t)vm_owner_allocate(GetCurrentProcess(),&host,0,&span,MEM_COMMIT,protect);
 #ifdef PILOT_MEMORY_WRITE_WATCH
         pilot_write_watch_native_end(memory+low,bytes);
 #endif
@@ -271,7 +288,7 @@ static uint32_t vm_free(uint32_t *base,uint32_t *size,uint32_t type)
 #ifdef PILOT_MEMORY_WRITE_WATCH
     if(!pilot_write_watch_native_begin(host,bytes))stop("cannot relinquish write watch for decommit",low);
 #endif
-    result=(uint32_t)vm_native_free(GetCurrentProcess(),&host,&span,MEM_DECOMMIT);
+    result=(uint32_t)vm_owner_free(GetCurrentProcess(),&host,&span,MEM_DECOMMIT);
 #ifdef PILOT_MEMORY_WRITE_WATCH
     pilot_write_watch_native_end(memory+low,bytes);
 #endif

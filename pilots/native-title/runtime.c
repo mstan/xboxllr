@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "memory_write_watch_runtime.h"
+#include "memory_commit_owner.h"
 #include "event_trace.h"
 #include "native_debug.h"
 #include "session_replay.h"
@@ -244,6 +245,15 @@ static uint32_t file32(size_t offset)
     return value;
 }
 
+static void native_commit_owner_initialize(void)
+{
+#if defined(PILOT_MEMORY_WRITE_WATCH) && !defined(PILOT_IO_DEVICE_LLE) && !defined(PILOT_MEMORY_LLE) && !defined(PILOT_USB_LLE) && !defined(PILOT_FILES_LLE) && !defined(PILOT_SCHEDULING_LLE)
+    const char *enabled=getenv("XLLE_PILOT_NATIVE_MEMORY_ACCOUNTING");
+    if(!enabled || strcmp(enabled,"0"))
+        fprintf(stderr,"[MEMORY OWNER] authoritative commitment available=%d\n",
+            pilot_commit_owner_initialize(memory,(SIZE_T)UINT64_C(0x100000000)));
+#endif
+}
 static void commit(uint32_t address, uint32_t size)
 {
     if (!size || (uint64_t)address + size > 0x100000000ull)
@@ -1259,6 +1269,7 @@ static void load_image(const char *path)
     image_mod_initialize(hex);
     memory = VirtualAlloc(NULL, (SIZE_T)0x100000000ull, MEM_RESERVE, PAGE_NOACCESS);
     if (!memory) stop("cannot reserve guest address space", 0);
+    native_commit_owner_initialize();
 #if defined(PILOT_MEMORY_WRITE_WATCH) && !defined(PILOT_IO_DEVICE_LLE)
     const char *write_watch=getenv("XLLE_PILOT_RESOURCE_WRITE_WATCH");
     if(!write_watch || strcmp(write_watch,"0"))

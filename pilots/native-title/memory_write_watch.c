@@ -1,4 +1,5 @@
 #include "memory_write_watch.h"
+#include "memory_commit_owner.h"
 #include <string.h>
 
 #if defined(_WIN32) && !defined(PILOT_WRITE_WATCH_PORTABLE)
@@ -211,6 +212,7 @@ LPVOID WINAPI pilot_write_watch_virtual_alloc(LPVOID address,SIZE_T bytes,DWORD 
 {
     if(address && !pilot_write_watch_native_begin(address,bytes))return NULL;
     LPVOID result=VirtualAlloc(address,bytes,type,protect);DWORD error=GetLastError();
+    if(result && (type&MEM_COMMIT))pilot_commit_owner_publish(address?address:result,bytes,1);
     if(address)pilot_write_watch_native_end(address,bytes);SetLastError(error);return result;
 }
 BOOL WINAPI pilot_write_watch_virtual_free(LPVOID address,SIZE_T bytes,DWORD type)
@@ -223,6 +225,7 @@ BOOL WINAPI pilot_write_watch_virtual_free(LPVOID address,SIZE_T bytes,DWORD typ
     }
     if(!pilot_write_watch_native_begin(range,length))return FALSE;
     BOOL result=VirtualFree(address,bytes,type);DWORD error=GetLastError();
+    if(result && (type&(MEM_DECOMMIT|MEM_RELEASE)))pilot_commit_owner_release(address,bytes,(type&MEM_RELEASE)!=0);
     pilot_write_watch_native_end(range,length);SetLastError(error);return result;
 }
 SIZE_T WINAPI pilot_write_watch_virtual_query(LPCVOID address,PMEMORY_BASIC_INFORMATION info,SIZE_T bytes)
@@ -265,9 +268,17 @@ uint64_t pilot_write_watch_faults(void){return 0;}
 BOOL WINAPI pilot_write_watch_virtual_protect(LPVOID address,SIZE_T bytes,DWORD protect,PDWORD previous)
 {return VirtualProtect(address,bytes,protect,previous);}
 LPVOID WINAPI pilot_write_watch_virtual_alloc(LPVOID address,SIZE_T bytes,DWORD type,DWORD protect)
-{return VirtualAlloc(address,bytes,type,protect);}
+{
+    LPVOID result=VirtualAlloc(address,bytes,type,protect);DWORD error=GetLastError();
+    if(result && (type&MEM_COMMIT))pilot_commit_owner_publish(address?address:result,bytes,1);
+    SetLastError(error);return result;
+}
 BOOL WINAPI pilot_write_watch_virtual_free(LPVOID address,SIZE_T bytes,DWORD type)
-{return VirtualFree(address,bytes,type);}
+{
+    BOOL result=VirtualFree(address,bytes,type);DWORD error=GetLastError();
+    if(result && (type&(MEM_DECOMMIT|MEM_RELEASE)))pilot_commit_owner_release(address,bytes,(type&MEM_RELEASE)!=0);
+    SetLastError(error);return result;
+}
 SIZE_T WINAPI pilot_write_watch_virtual_query(LPCVOID address,PMEMORY_BASIC_INFORMATION info,SIZE_T bytes)
 {return VirtualQuery(address,info,bytes);}
 #endif
