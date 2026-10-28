@@ -20,6 +20,7 @@ from native_d3d_combiner_bump import prepare_combiner_bump
 from native_d3d_feedback import prepare_feedback
 from native_d3d_explicit_blend import prepare_blend_combiners
 from native_d3d_visual import prepare_visual
+from native_d3d_pipeline import prepare_pipeline
 from native_d3d_texture import prepare_texture_views, prepare_projected_mips, prepare_xrgb_border
 
 PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
@@ -145,6 +146,7 @@ def prepare(donor, output, reference):
                 code=code.replace('    if (mapped) {','    if (!mapped) pilot_d3d_backend_stop("combiner constants upload failed");\n    if (mapped) {')
                 code=prepare_blend_combiners(code)
             if path.name=='d3d8_states.c':
+                code=prepare_pipeline(code)
                 code=prepare_texture_views(code)
                 code,count=re.subn(r'    if \(min_linear && mag_linear && mip_linear\).*?    return RHI_FILTER_POINT;',
                     '    return (min_linear ? 0x10u : 0u) | (mag_linear ? 4u : 0u) | (mip_linear ? 1u : 0u);',code,flags=re.S)
@@ -281,7 +283,9 @@ def prepare(donor, output, reference):
         'signed-byte B/G and the destination stage matrix uploaded through the\n'
         'existing constant buffer. Matrix changes do not select shader variants.\n'
         'Signed texture storage and luminance mode remain guarded.\n'
-        'Original and prepared hashes are in donor.json.\n')
+        'Blend/depth/raster objects use bounded immutable descriptor ownership\n'
+        'across material changes, with original uncached diagnostic selection\n'
+        'and device-lifetime cleanup. Original and prepared hashes are in donor.json.\n')
     result=dict(repository='https://github.com/phobos665/xboxrecomp',donor=PIN,backend='PHOBOS',
                 license='GPL-3.0 fork; retained MIT upstream and per-file notices',
                 license_files=[str(p.relative_to(donor)).replace('\\','/') for p in paths if p.relative_to(donor).parts[0].startswith('LICENSE') or p.name=='NOTICE'],
