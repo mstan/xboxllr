@@ -2,6 +2,9 @@
  * texture storage. Original XDK routines and XbD3D8Types supply layout facts.
  * Addresses are guest allocations; no native pointer enters a resource header.
  */
+#ifdef PILOT_MEMORY_WRITE_WATCH
+#include "resource_mirror.h"
+#endif
 struct GraphicsTextureObject {
     uint32_t header,data,bytes,width,height,levels,format,refs,native,usage,cpu_exposed;
     unsigned parent,level; /* parent is slot+1 for a view, zero for a storage owner */
@@ -14,8 +17,7 @@ struct GraphicsTextureObject {
     unsigned family_exposed;
     unsigned waiters,retire_original;
 #ifdef PILOT_MEMORY_WRITE_WATCH
-    PilotWriteSnapshot cpu_snapshot;
-    uint64_t cpu_snapshot_revision;
+    PilotResourceWhole cpu_owner;
 #endif
 };
 static struct GraphicsTextureObject *graphics_textures;
@@ -386,10 +388,18 @@ static void graphics_texture_sample_prepare(unsigned slot)
     if(texture->guest_owned && !texture->cpu_borrowed)return; /* live GPU alias */
 #ifdef PILOT_MEMORY_WRITE_WATCH
     int watched=graphics_texture_write_watch() && !texture->usage && !texture->parent && texture->bytes>=4096;
-    uint64_t revision=watched?pilot_gfx_texture_cpu_snapshot_revision(texture->native):0;
-    if(revision && revision==texture->cpu_snapshot_revision &&
-       pilot_write_watch_reusable(&texture->cpu_snapshot))return;
-    int capturing=watched && pilot_write_watch_begin(memory+texture->data,texture->bytes,&texture->cpu_snapshot);
+    int owner=pilot_gfx_resource_mirror_owner();
+    PILOT_RESOURCE_COUNT(texture_sample_calls,1);
+    uint64_t generation=0;
+    uint64_t revision=watched?pilot_gfx_texture_cpu_snapshot_identity(texture->native,&generation):0;
+    PilotResourceIdentity identity={generation,2,0,texture->format,texture->width,texture->height,texture->levels};
+    int reusable=owner?pilot_resource_whole_reusable(&texture->cpu_owner,&identity,
+        memory+texture->data,texture->bytes,revision):
+        (revision && revision==texture->cpu_owner.gpu_revision && pilot_write_watch_reusable(&texture->cpu_owner.snapshot));
+    if(watched && reusable){PILOT_RESOURCE_COUNT(texture_snapshot_hits,1);return;}
+    PILOT_RESOURCE_COUNT(texture_snapshot_misses,1);
+    int capturing=watched && (owner?pilot_resource_whole_begin(&texture->cpu_owner,&identity,memory+texture->data,texture->bytes):
+        pilot_write_watch_begin(memory+texture->data,texture->bytes,&texture->cpu_owner.snapshot));
 #endif
     int scan=!graphics_texture_exposure_cache() || (texture->usage && texture->family_exposed);
     /* Ordinary CPU-owned textures retain actual-byte validation whenever a
@@ -408,8 +418,13 @@ static void graphics_texture_sample_prepare(unsigned slot)
     }
 #ifdef PILOT_MEMORY_WRITE_WATCH
     if(capturing) {
-        pilot_write_watch_end(&texture->cpu_snapshot);
-        texture->cpu_snapshot_revision=pilot_gfx_texture_cpu_snapshot_revision(texture->native);
+        uint64_t after_generation=0;
+        uint64_t after=pilot_gfx_texture_cpu_snapshot_identity(texture->native,&after_generation);
+        if(owner)pilot_resource_whole_end(&texture->cpu_owner,after_generation==generation?after:0);
+        else {
+            pilot_write_watch_end(&texture->cpu_owner.snapshot);
+            texture->cpu_owner.gpu_revision=after;
+        }
     }
 #endif
     if(texture->usage && scan) {

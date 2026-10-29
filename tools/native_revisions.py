@@ -9,7 +9,7 @@ def entries(data):
     data = data.get('_catalog', data)
     if len(data.get('revisions', [])) > 31:
         raise ValueError('Too many native revisions')
-    result = [dict(id='', title=data['title'], executable=data.get('executable'))]
+    result = [dict(id='', title=data['title'], executable=data.get('executable'), runtime=data.get('runtime', {}))]
     seen = {data['title']['xbe_sha256']}
     ids = set()
     for revision in data.get('revisions', []):
@@ -19,7 +19,8 @@ def entries(data):
         if (not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', key) or key in ids or
                 not re.fullmatch(r'[0-9a-f]{64}', digest) or digest in seen or
                 title.get('game_id') != data['title'].get('game_id') or
-                not isinstance(revision.get('executable'), str)):
+                not isinstance(revision.get('executable'), str) or
+                ('runtime' in revision and not isinstance(revision['runtime'], dict))):
             raise ValueError('Invalid native revision catalog')
         seen.add(digest)
         ids.add(key)
@@ -39,6 +40,9 @@ def select(data, digest, *, image=None):
             selected['title'] = deepcopy(entry['title'])
             if entry['executable'] is not None:
                 selected['executable'] = entry['executable']
+            # Revision policies replace each other, so flags cannot leak from
+            # a prior UI selection. Legacy catalogs share the original policy.
+            selected['runtime'] = deepcopy(entry.get('runtime', data.get('runtime', {})))
             selected['_revision'] = entry['id']
             # Preserve the original catalog when selecting again after a UI switch.
             selected['_catalog'] = data.get('_catalog', data)

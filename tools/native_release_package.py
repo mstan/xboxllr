@@ -156,7 +156,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
                 revision.get('launcher') != source.get('launcher')):
             raise ValueError('Native revision build differs from the qualified package policy')
         extra_runtimes.append(extra_runtime)
-        revision_records.append(dict(id=key, title=revision['title'], executable='native/' + extra_runtime.name))
+        revision_records.append(dict(id=key, title=revision['title'], executable='native/' + extra_runtime.name,
+                                     runtime=revision.get('runtime', {})))
     from native_revisions import entries
     entries(dict(title=title, revisions=revision_records))
     boot_intro = Path(boot_intro)

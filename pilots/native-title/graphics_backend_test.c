@@ -1,5 +1,6 @@
 #include "graphics_donor.h"
 #include "graphics_backend.h"
+#include "resource_mirror.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -44,6 +45,7 @@
 #include "graphics_index_backend_test.inc"
 #include "graphics_edge_backend_test.inc"
 #include "graphics_strip_batch_backend_test.inc"
+#include "graphics_resource_mirror_backend_test.inc"
 static int test_transform_pipeline(void)
 {
     static const D3DTRANSFORMSTATETYPE states[]={D3DTS_VIEW,D3DTS_PROJECTION,D3DTS_TEXTURE0,D3DTS_TEXTURE1,
@@ -165,6 +167,9 @@ int main(int argc,char **argv)
     unsigned char pixels[64*64*4];
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
+        if(argc==2 && !strcmp(argv[1],"--resource-mirror")) {
+            CHECK(!test_resource_mirror());pilot_gfx_close();continue;
+        }
         if(argc==2 && !strcmp(argv[1],"--viewport-clear")) {
             CHECK(!test_viewport_clear());pilot_gfx_close();continue;
         }

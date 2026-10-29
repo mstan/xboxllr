@@ -9,14 +9,14 @@ static void test_graphics_texture_write_watch(void)
     uint32_t *source=(uint32_t*)(memory+texture->data),pixels[32*32],other[32*32];
     for(unsigned i=0;i<32*32;++i)source[i]=0xffc02040u;
     graphics_texture_sample_prepare(slot);
-    CHECK(texture->cpu_snapshot.valid && pilot_write_watch_reusable(&texture->cpu_snapshot));
-    uint64_t revision=texture->cpu_snapshot_revision;
-    graphics_texture_sample_prepare(slot);CHECK(texture->cpu_snapshot_revision==revision);
+    CHECK(texture->cpu_owner.snapshot.valid && pilot_write_watch_reusable(&texture->cpu_owner.snapshot));
+    uint64_t revision=texture->cpu_owner.gpu_revision;
+    graphics_texture_sample_prepare(slot);CHECK(texture->cpu_owner.gpu_revision==revision);
     CHECK(!pilot_gfx_texture_readback(texture->native,0,pixels,sizeof(pixels)));
     for(unsigned i=0;i<32*32;++i)CHECK(pixels[i]==0xffc02040u);
     uint64_t faults=pilot_write_watch_faults();
     for(unsigned i=0;i<32*32;++i)source[i]=0xff10a060u;
-    CHECK(pilot_write_watch_faults()>faults && !pilot_write_watch_reusable(&texture->cpu_snapshot));
+    CHECK(pilot_write_watch_faults()>faults && !pilot_write_watch_reusable(&texture->cpu_owner.snapshot));
     graphics_texture_sample_prepare(slot);
     CHECK(!pilot_gfx_texture_readback(texture->native,0,pixels,sizeof(pixels)));
     for(unsigned i=0;i<32*32;++i)CHECK(pixels[i]==0xff10a060u);
@@ -24,7 +24,7 @@ static void test_graphics_texture_write_watch(void)
      * the CPU pages themselves have not changed. */
     for(unsigned i=0;i<32*32;++i)other[i]=0xff2030d0u;
     pilot_gfx_texture_upload(texture->native,0,other,sizeof(other));
-    CHECK(texture->cpu_snapshot_revision!=pilot_gfx_texture_cpu_snapshot_revision(texture->native));
+    CHECK(texture->cpu_owner.gpu_revision!=pilot_gfx_texture_cpu_snapshot_revision(texture->native));
     graphics_texture_sample_prepare(slot);
     CHECK(!pilot_gfx_texture_readback(texture->native,0,pixels,sizeof(pixels)));
     for(unsigned i=0;i<32*32;++i)CHECK(pixels[i]==0xff10a060u);
@@ -33,7 +33,7 @@ static void test_graphics_texture_write_watch(void)
      * does not overwrite the other view's native write. */
     uint32_t alias=0;
     CHECK(!pilot_gfx_texture_alias(PILOT_GFX_TEXTURE,texture->native,0x12,&alias));
-    uint64_t shared_revision=texture->cpu_snapshot_revision;
+    uint64_t shared_revision=texture->cpu_owner.gpu_revision;
     pilot_gfx_texture_upload(alias,0,other,sizeof(other));pilot_gfx_texture_destroy(alias);
     CHECK(pilot_gfx_texture_cpu_snapshot_revision(texture->native)!=shared_revision);
     graphics_texture_sample_prepare(slot);

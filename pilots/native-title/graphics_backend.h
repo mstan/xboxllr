@@ -87,6 +87,8 @@ int pilot_gfx_deferred_revisions(uint64_t revisions[5]);
 /* False after native GPU writes or missing mip uploads: CPU bytes alone do
  * not establish that a previously prepared native image is still usable. */
 uint64_t pilot_gfx_texture_cpu_snapshot_revision(uint32_t handle);
+uint64_t pilot_gfx_texture_cpu_snapshot_identity(uint32_t handle,uint64_t *identity);
+int pilot_gfx_resource_mirror_owner(void);
 int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value);
 int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value);
 uint32_t pilot_gfx_width(void);

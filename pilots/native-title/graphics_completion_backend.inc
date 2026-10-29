@@ -13,12 +13,12 @@ static unsigned pilot_query_count,pilot_query_created;
  * reset; recording/querying use needs no search or GPU readback. */
 /* Reads advance completion ownership, but only content writes invalidate a
  * prepared CPU snapshot. Both revisions follow the shared image's lifetime. */
-struct PilotImageUse {uint64_t serial,write_serial;unsigned refs;};
+struct PilotImageUse {uint64_t serial,write_serial,identity;unsigned refs;};
 static struct PilotImageUse *pilot_surface_use[4];
 static struct PilotImageUse *pilot_image_use_create(void)
 {
     struct PilotImageUse *use=calloc(1,sizeof(*use));
-    if(use)use->refs=1;
+    if(use){use->refs=1;use->identity=pilot_resource_new_identity();}
     return use;
 }
 static void pilot_image_use_retain(struct PilotImageUse *use)
