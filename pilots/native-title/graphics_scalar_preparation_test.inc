@@ -65,6 +65,9 @@ static void test_graphics_scalar_preparation(void)
     CHECK(!pilot_gfx_scalar_prepare(144,2,&lowered) && !pilot_gfx_scalar_prepare(147,0x902,&lowered));
     ReleaseSRWLockExclusive(&graphics_lock);call_graphics(PILOT_D3D_D3DDevice_Release,NULL);scheduler_retire();
     CHECK(!graphics_active && !scheduler_owner);pilot_write_watch_finish();
+    /* Correctness only: keep this short-lived child observable for the
+     * external200ms GPU sampler. This idle tail is never timing evidence. */
+    fprintf(stderr,"[SCALAR FIXTURE TELEMETRY] checks complete;600ms idle tail, excluded from performance evidence\n");Sleep(600);
     fprintf(stderr,"PASS: isolated scalar preparation; actual callback old guest/native state and GPU pixels; late publication; changed input, unknown/running callbacks, alias and writer refusals\n");
 }
 #else
