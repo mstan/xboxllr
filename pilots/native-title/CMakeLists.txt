@@ -130,6 +130,12 @@ elseif(NOT PILOT_CACHE STREQUAL "ORIGINAL")
   message(FATAL_ERROR "PILOT_CACHE must be ORIGINAL or NATIVE")
 endif()
 add_executable(xlle_native_title runtime.c ${generated})
+if(PILOT_R06_CERTIFICATE_DIR)
+  # Private feasibility proof is separate from the immutable generated inventory.
+  # Only the runtime adapters consume it; generated CPU units are unchanged.
+  set_property(SOURCE runtime.c runtime_contract_test.c APPEND PROPERTY
+    INCLUDE_DIRECTORIES "${PILOT_R06_CERTIFICATE_DIR}")
+endif()
 target_link_libraries(xlle_native_title PRIVATE pilot_session_replay)
 target_compile_definitions(xlle_native_title PRIVATE PILOT_SESSION_RUNTIME)
 target_link_libraries(xlle_native_title PRIVATE pilot_resource_mirror)

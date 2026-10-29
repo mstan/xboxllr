@@ -181,6 +181,7 @@ static void graphics_target_prepare(uint32_t header);
 #include "graphics_completion.inc"
 #include "graphics_immediate.inc"
 #include "graphics_gpu_callback.inc"
+#include "graphics_callback_effects.inc"
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
 #include "graphics_original_callbacks.inc"
 #endif
@@ -250,6 +251,7 @@ static void graphics_set_targets(uint32_t color,uint32_t depth)
 
 #include "graphics_reset.inc"
 #include "graphics_commands.inc"
+#include "graphics_scalar_preparation.inc"
 #ifndef PILOT_SCHEDULING_LLE
 /* Standalone surfaces have caller-owned headers, not CreateTexture parents.
  * A caller can remove its tile mapping and free the physical image directly,
@@ -348,6 +350,8 @@ static void graphics_dispatch_impl(unsigned entry)
     if(graphics_active && entry!=PILOT_D3D_COMMANDS_RESERVE_ENTRY && entry!=PILOT_D3D_COMMANDS_SPACE_ENTRY)
         graphics_commands_flush();
 #endif
+    struct GraphicsScalarPreparation scalar_preparation;
+    graphics_scalar_prepare_frontier(entry,&scalar_preparation);
     if(entry!=PILOT_D3D_D3DDevice_InsertCallback)graphics_gpu_barrier();
     uint64_t barrier=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
@@ -356,6 +360,7 @@ static void graphics_dispatch_impl(unsigned entry)
 #ifdef PILOT_D3D_IMMEDIATE_VERSION
     if(graphics_immediate_dispatch(entry,arguments))goto graphics_dispatch_done;
 #endif
+    if(graphics_scalar_consume(&scalar_preparation))goto graphics_dispatch_done;
     switch(entry) {
 #ifdef PILOT_D3D_COMMANDS_VERSION
     case PILOT_D3D_COMMANDS_RESERVE_ENTRY:
@@ -803,9 +808,7 @@ static void graphics_dispatch_impl(unsigned entry)
         fputc('\n',stderr);
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
-#ifdef PILOT_D3D_IMMEDIATE_VERSION
 graphics_dispatch_done:
-#endif
     graphics_original_retire_drain();
     uint64_t unlocking=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT

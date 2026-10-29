@@ -86,6 +86,7 @@ static void test_usb_dpc(void);
 #ifdef PILOT_D3D_NATIVE
 static void test_vblank_callback(void);
 static void test_gpu_callback(void);
+static void test_scalar_callback(void);
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
 static void test_graphics_callback_vblank_a(void);
 static void test_graphics_callback_vblank_b(void);
@@ -150,6 +151,7 @@ recomp_func_t recomp_lookup(uint32_t va) {
 #ifdef PILOT_D3D_NATIVE
     if(va==0x12300 || va==0x12320)return test_vblank_callback;
     if(va==0x12360)return test_gpu_callback;
+    if(va==0x12380)return test_scalar_callback;
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
     if(va==0x17a00)return test_graphics_callback_vblank_a;
     if(va==0x17a40)return test_graphics_callback_vblank_b;
@@ -547,6 +549,7 @@ static void test_timers(void)
 
 #ifdef PILOT_D3D_NATIVE
 #include "graphics_contract_test.inc"
+#include "graphics_scalar_preparation_test.inc"
 #if defined(PILOT_SCHEDULING_LLE) && defined(PILOT_EVENT_TIMER_LLE)
 #include "thread_graphics_component_contract_test.inc"
 #include "thread_graphics_resource_contract_test.inc"
@@ -666,7 +669,7 @@ int main(int argc,char **argv)
     }
 #endif
 #ifdef PILOT_D3D_NATIVE
-    if(argc>=2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture") || !strncmp(argv[1],"graphics-present",16) || !strncmp(argv[1],"graphics-component-",19) || !strncmp(argv[1],"audio-component-",16))) {
+    if(argc>=2 && (!strcmp(argv[1],"graphics") || !strcmp(argv[1],"graphics-scheduler") || !strcmp(argv[1],"graphics-scalar") || !strcmp(argv[1],"graphics-depth-argb") || !strcmp(argv[1],"graphics-x8-texture") || !strncmp(argv[1],"graphics-present",16) || !strncmp(argv[1],"graphics-component-",19) || !strncmp(argv[1],"audio-component-",16))) {
         uint32_t graphics_image_size=((PILOT_D3D_DEVICE_OBJECT+PILOT_D3D_SHADER_CONSTANT_MODE_OFFSET+4+4095)&~4095u)-0x10000;
         if(graphics_image_size>fixture_image_size)fixture_image_size=graphics_image_size;
         image_base=0x10000;*(uint32_t*)(image_bytes+0x10c)=fixture_image_size;
@@ -834,6 +837,7 @@ int main(int argc,char **argv)
         if(!strncmp(argv[1],"graphics-commands-",18)){test_graphics_commands(argv[1]+18);return 1;}
 #endif
         if (!strcmp(argv[1],"graphics-scheduler")) { test_graphics_guest_scheduler(); return 0; }
+        if (!strcmp(argv[1],"graphics-scalar")) { test_graphics_scalar_preparation(); return 0; }
         if (!strcmp(argv[1],"graphics")) { test_graphics(0); return 0; }
         if (!strcmp(argv[1],"graphics-depth-argb")) { test_graphics(1); return 0; }
         if (!strcmp(argv[1],"graphics-x8-texture")) { test_graphics(2); return 0; }

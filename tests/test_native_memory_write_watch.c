@@ -16,6 +16,14 @@ static void capture(unsigned char *data,size_t bytes,PilotWriteSnapshot *snapsho
     pilot_write_watch_end(snapshot);assert(pilot_write_watch_reusable(snapshot));
 }
 static volatile LONG writing;
+struct NativeLeaseWriter {void *data;HANDLE entered,finished;};
+static DWORD WINAPI native_lease_writer(void *raw)
+{
+    struct NativeLeaseWriter *writer=raw;SetEvent(writer->entered);
+    assert(pilot_write_watch_native_begin(writer->data,4));
+    *(unsigned*)writer->data=123;pilot_write_watch_native_end(writer->data,4);
+    SetEvent(writer->finished);return 0;
+}
 static DWORD WINAPI writer(void *data)
 {
     while(InterlockedCompareExchange(&writing,0,0))InterlockedIncrement((volatile LONG*)data);
@@ -25,6 +33,15 @@ int main(void)
 {
     unsigned char *memory=VirtualAlloc(NULL,65536,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);assert(memory);
     assert(pilot_write_watch_initialize(memory,65536));
+    assert(pilot_write_watch_native_read_begin(memory,4));
+    struct NativeLeaseWriter lease_writer={memory,CreateEventW(NULL,TRUE,FALSE,NULL),CreateEventW(NULL,TRUE,FALSE,NULL)};
+    assert(lease_writer.entered && lease_writer.finished);
+    HANDLE lease_thread=CreateThread(NULL,0,native_lease_writer,&lease_writer,0,NULL);assert(lease_thread);
+    assert(WaitForSingleObject(lease_writer.entered,5000)==WAIT_OBJECT_0);
+    assert(WaitForSingleObject(lease_writer.finished,25)==WAIT_TIMEOUT);
+    pilot_write_watch_native_read_end();
+    assert(WaitForSingleObject(lease_thread,5000)==WAIT_OBJECT_0 && *(unsigned*)memory==123);
+    CloseHandle(lease_thread);CloseHandle(lease_writer.entered);CloseHandle(lease_writer.finished);
     PilotWriteSnapshot a,b,overlap;
     capture(memory+17,8000,&a);capture(memory+8192,4096,&b);
     SetLastError(0x12345678u);memory[4096]=91;assert(GetLastError()==0x12345678u);
@@ -67,6 +84,7 @@ int main(void)
     assert(pilot_write_watch_native_begin(memory+8192,4096));
     assert(!pilot_write_watch_reusable(&b));
     assert(!pilot_write_watch_begin(memory+8192,4096,&b));
+    assert(!pilot_write_watch_native_read_begin(memory+8192,4096));
     DWORD transferred=0;assert(ReadFile(file,memory+8192,4096,&transferred,NULL) && transferred==4096);
     assert(memory[8192]=='M' && memory[8193]=='Z');CloseHandle(file);
     pilot_write_watch_native_end(memory+8192,4096);
@@ -105,6 +123,7 @@ int main(void)
 {
     unsigned char memory[64]={0};PilotWriteSnapshot snapshot={0};
     assert(!pilot_write_watch_initialize(memory,sizeof(memory)));
+    assert(!pilot_write_watch_native_read_begin(memory,sizeof(memory)));
     assert(!pilot_write_watch_begin(memory,sizeof(memory),&snapshot));
     pilot_write_watch_end(&snapshot);assert(!pilot_write_watch_reusable(&snapshot));
     assert(pilot_write_watch_invalidate(memory,sizeof(memory)));pilot_write_watch_finish();
