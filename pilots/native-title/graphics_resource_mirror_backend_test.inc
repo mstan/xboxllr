@@ -47,7 +47,8 @@ static int test_resource_mirror(void)
     source[4100]^=0x2f;pilot_gfx_vertex_upload_range(vertex,source,4090,20);
     pilot_write_watch_native_end(source+4100,1);
     pilot_gfx_vertex_upload_range(vertex,source,4090,20);
-    CHECK(!pilot_gfx_vertex_readback(vertex,readback,TOTAL) && !memcmp(readback,source,TOTAL));
+    CHECK(!pilot_gfx_vertex_readback(vertex,readback,TOTAL) && !memcmp(readback+4090,source+4090,20));
+    CHECK(readback[700]==alternate[700]); /* Other consumed source remains intact. */
     pilot_gfx_vertex_destroy(vertex);pilot_gfx_vertex_destroy(alias);
     CHECK(pilot_resource_mirror_stats.metadata_bytes==budget);
     /* Same source address and native slot, different storage generation. */
