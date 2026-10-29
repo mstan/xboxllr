@@ -31,6 +31,19 @@ notices. Preparation/build steps must report missing required notices.
 
 ## Private native-title reference pilot
 
+### RAM-backed utility cache — 2026-10-29
+
+The cache-storage approach was inspired by apexJCL's
+[blinx1-recomp](https://github.com/apexJCL/blinx1-recomp) at
+`18324c3c8ae2c4edcd6487bbe9f04043fa47bdeb`, including
+`packaging/config.default.toml` and `docs/env.md`. Its pinned xboxrecomp fork
+at `e5a7087201cea886b3b5d72e50f5515581920526`,
+`src/kernel/kernel_ramfs.c`, was reviewed as a behavioral/design reference.
+No implementation bodies were imported. Our sparse RAM volume and native
+adapter reuse the existing first-party FATX storage service. Only the mounted
+utility partition is disposable; native saves and console identity remain
+with their persistent owners. Existing third-party component terms remain.
+
 ### Compact dispatch and HLE/CPU audit - 2026-10-18
 
 Phobos xboxrecomp `7bf9c188f6f4dd5e31dec8c477ae6dedcc0b48d1`,

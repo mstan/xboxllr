@@ -7,6 +7,7 @@ struct CacheSlot { uint32_t title,valid; uint64_t used; uint32_t unit,reserved; 
 struct CacheState { char magic[8]; uint64_t sequence; struct CacheSlot slot[3]; unsigned char hash[32]; };
 _Static_assert(sizeof(struct CacheState)==120,"native cache format size");
 static HANDLE cache_manifest;
+static struct CacheState cache_ram_state;
 typedef LONG (NTAPI *CacheDirectory)(HANDLE,HANDLE,PVOID,PVOID,PIO_STATUS_BLOCK,PVOID,ULONG,ULONG,BOOLEAN,PUNICODE_STRING,BOOLEAN);
 
 static uint32_t cache_digest(struct CacheState *state,unsigned char digest[32])
@@ -17,6 +18,7 @@ static uint32_t cache_digest(struct CacheState *state,unsigned char digest[32])
 static uint32_t cache_save(struct CacheState *state)
 {
     uint32_t status=cache_digest(state,state->hash); IO_STATUS_BLOCK io={0};
+    if(storage_ram_enabled()) {if(!status)cache_ram_state=*state;return status;}
     LARGE_INTEGER offset; offset.QuadPart=0;
     if (!status) status=(uint32_t)media_nt_write(cache_manifest,NULL,NULL,NULL,&io,state,sizeof(*state),&offset,NULL);
     if (!status && io.Information!=sizeof(*state)) status=0xc0000185u;
@@ -26,6 +28,10 @@ static uint32_t cache_save(struct CacheState *state)
 static uint32_t cache_load(struct CacheState *state)
 {
     if (!storage_parent) return MEDIA_NO_MEDIA;
+    if(storage_ram_enabled()) {
+        if(!cache_ram_state.magic[0])memcpy(cache_ram_state.magic,"XLLECCH1",8);
+        *state=cache_ram_state;return 0;
+    }
     IO_STATUS_BLOCK io={0}; uint32_t status=0;
     if (!cache_manifest) {
         status=storage_create_host(storage_parent,L"native-cache-v1.bin",GENERIC_READ|GENERIC_WRITE|SYNCHRONIZE,
@@ -102,9 +108,10 @@ static uint32_t cache_format(unsigned partition)
      * inside pinned, handle-relative ordinary directories. Root is retained. */
     WCHAR actual[32768],expected[32768];
     if (partition<3 || partition>5 || !storage_roots[partition]) return MEDIA_NO_MEDIA;
-    if(storage_image) {
+    struct StorageImageHandle *root=storage_image_find(storage_roots[partition]);
+    if(root) {
         for(unsigned i=0;i<256;++i)if(media_files[i].host && media_files[i].partition==partition)return 0xc0000043u;
-        return xllr_storage_clear_cache(storage_image,partition);
+        return xllr_storage_clear_cache(root->owner,partition);
     }
     if (swprintf(expected,32768,L"%ls\\Partition%u",storage_path,partition)<0) return MEDIA_INVALID;
     DWORD count=GetFinalPathNameByHandleW(storage_roots[partition],actual,32768,FILE_NAME_NORMALIZED);
@@ -135,6 +142,12 @@ static uint32_t cache_mount(uint32_t title,int clean,unsigned unit,unsigned *par
         clean=1;
     }
     if (!storage_roots[selected+3]) return MEDIA_NO_MEDIA;
+    if(storage_ram_enabled()) {
+        for(unsigned i=0;i<256;++i)
+            if(media_files[i].host && media_files[i].partition==selected+3)return 0xc0000043u;
+        status=storage_ram_mount(selected+3);
+        if(status)return status;
+    }
     if (state.sequence==UINT64_MAX) return 0xc0000095u;
     if (clean) {
         /* Durable invalidation precedes destruction; interruption or partial
