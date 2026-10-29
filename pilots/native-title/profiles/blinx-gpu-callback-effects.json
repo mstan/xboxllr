@@ -1,6 +1,7 @@
 {
   "schema": "gpu-callback-effects.v1",
   "adapter": "timestamp-context16.v1",
+  "effect_scope": "Persistent eight-byte timestamp output; ABI/stack/checkpoint execution remains under existing guest CPU ownership. Preparation publishes nothing and revalidates input after the callback barrier.",
   "xbe_sha256": "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249",
   "routine": "0x000bcc00",
   "write_base": "0x00408b28",

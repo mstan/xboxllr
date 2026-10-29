@@ -1,5 +1,7 @@
-/* No callback is replaced. Qualified CPU preparation stays effect-disjoint;
- * publication and every guest-observation callback barrier remain ordered. */
+/* No callback is replaced. These spans describe persistent timestamp output,
+ * not ABI/stack/checkpoint writes. Existing guest CPU ownership serializes that
+ * execution; preparation publishes nothing and revalidates its input afterward.
+ * Publication and every guest-observation callback barrier remain ordered. */
 #if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
 static int graphics_scalar_callback_effect(const struct GraphicsGpuCallback *callback,uint32_t *address)
 {

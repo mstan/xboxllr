@@ -1,5 +1,8 @@
 """Emit exact-image callback effects; original callback code remains unchanged.
 
+The spans identify persistent timestamp output, not all ABI/stack writes.
+Existing guest CPU ownership serializes callback execution, preparation publishes
+nothing, and postbarrier input revalidation rejects intervening changes.
 The reviewed closure only qualifies the native QPC/checkpoint configuration
 gated in graphics_callback_admission.h. Unknown images or changed closures emit
 an unavailable certificate. Input manifest/inventory tampering remains fatal.
