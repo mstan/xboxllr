@@ -25,6 +25,9 @@ be refreshed with `tools/native_gpu_callback_effects.py --xbe <image> --output
 <generated-output>`, then configured again. The refresh validates the complete
 existing inventory first and changes no generated CPU body. Unknown images or
 changed complete callback closures emit version0; artifact tampering is an error.
+For titles using `tools/native_title.py`, use its existing `bind` action before
+configuring instead: it revalidates the prior preparation and every selected
+binding, refreshes this metadata, then publishes the new preparation receipt.
 
 The reviewed Blinx metadata in
 `pilots/native-title/profiles/blinx-gpu-callback-effects.json` identifies the

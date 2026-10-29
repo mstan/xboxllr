@@ -406,6 +406,10 @@ def bind_prepared(source, data, paths, output):
         importlib.import_module(BINDINGS[family]).bind(paths["xbe"], output, paths["xdk_symbols"], profile=profile)
     if display:
         importlib.import_module("native_display_binding").bind(paths["xbe"], output, paths["xdk_symbols"], profile=profile)
+    # Existing preparations receive new callback metadata only after their
+    # original receipt and every retained binding have been revalidated.
+    from native_gpu_callback_effects import emit
+    emit(paths["xbe"], output)
     write_runtime_profile(output, data)
     result = _preparation_identity(source, data, output, completing_bind=True)
     preparation.write_text(json.dumps(result, indent=2) + "\n")
