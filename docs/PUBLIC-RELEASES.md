@@ -15,6 +15,8 @@ contents, never staging/build/QA directories.
 ```powershell
 python tools/release_dashboard.py `
   --version 2026.10.29.1 `
+  --runtime-framework-revision <full-framework-commit> `
+  --runtime-source-revision <full-framework-commit> `
   --runtime D:\Build\dashboard\native-title\Release\XboxDashboard.exe `
   --cache D:\Build\dashboard\CMakeCache.txt `
   --launcher D:\Build\launcher\Release\xlle_launcher.exe `
@@ -60,6 +62,9 @@ Use `tools/release_title.py` with the same common arguments, plus
 validated runtime/cache and alpha release notes. Initialize the title's pinned
 framework submodule before exporting recursive source. Its gameplay profile
 enables the RAM utility cache; cheats remain selectable and off by default.
+Record the compiled runtime's exact framework and title source hashes with the
+two `--runtime-*-revision` options. Packaging/docs-only follow-ups can differ;
+the provenance must preserve that distinction.
 
 ## Validate and publish
 

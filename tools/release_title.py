@@ -25,12 +25,19 @@ def main(argv=None, *, dashboard=False):
     parser.add_argument('--definition', default='titles/dashboard/title.toml' if dashboard else 'game.toml')
     parser.add_argument('--name', default='XboxDashboard' if dashboard else 'BlinxRecomp')
     parser.add_argument('--version', required=True)
+    parser.add_argument('--runtime-framework-revision', required=True,
+                        help='Framework commit whose native runtime code was compiled')
+    parser.add_argument('--runtime-source-revision', required=True,
+                        help='Title/source commit used for the validated native runtime')
     for name in ('runtime', 'cache', 'launcher', 'embed', 'boot-intro', 'renderer', 'ui', 'dsp', 'output', 'notes'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--runtime-dir', type=Path, action='append', default=[])
     args = parser.parse_args(argv)
     if not all(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', value) for value in (args.version, args.name)):
         parser.error('Use plain name/version identifiers')
+    if not all(re.fullmatch(r'[0-9a-f]{40}', value) for value in
+               (args.runtime_framework_revision, args.runtime_source_revision)):
+        parser.error('Runtime source identities must be full Git commit hashes')
     repo = args.repo.resolve(strict=True)
     if git(ROOT, 'status', '--porcelain').strip() or git(repo, 'status', '--porcelain').strip():
         raise ValueError('Commit release sources first')
@@ -49,6 +56,8 @@ def main(argv=None, *, dashboard=False):
         args.embed, args.runtime_dir, target, boot_intro=args.boot_intro)
     provenance = dict(schema='xboxllr.windows-build-provenance.v1',
         source_revision=source_revision, packaging_framework_revision=revision,
+        runtime_framework_revision=args.runtime_framework_revision,
+        runtime_source_revision=args.runtime_source_revision,
         runtime_sha256=sha(args.runtime), cache_sha256=sha(args.cache),
         launcher_sha256=sha(args.launcher), startup_sha256=sha(args.boot_intro),
         source_archive=source_record, dependency_source_archive=dependency_record,
