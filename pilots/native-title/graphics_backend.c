@@ -7,11 +7,25 @@
 #include "d3d8_combiners.h"
 #include "graphics_backend.h"
 #include "session_replay.h"
+#include "resource_mirror.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int pilot_gfx_resource_mirror_owner(void)
+{
+    static int enabled=-1;
+    if(enabled<0){
+        const char *setting=getenv("XLLE_PILOT_RESOURCE_MIRROR_OWNER");
+        const char *profile=getenv("XLLE_PILOT_RESOURCE_OWNER_PROFILE");
+        enabled=setting && !strcmp(setting,"1");
+        pilot_resource_mirror_diagnostics=profile && !strcmp(profile,"1");
+        fprintf(stderr,"[RESOURCE MIRROR] owner=%u profile=%u; byte fallback retained\n",enabled,pilot_resource_mirror_diagnostics);
+    }
+    return enabled;
+}
 static int pilot_visibility_active(void);
 #include "native_debug.h"
 #include "pilot_d3d_checks.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include <limits.h>
 #include <math.h>
 #include "event_trace.h"
@@ -165,7 +179,10 @@ struct PilotNativeTexture {
 };
 static struct PilotNativeTexture *pilot_textures;
 static unsigned pilot_texture_capacity;
-struct PilotNativeVertex { IDirect3DVertexBuffer8 *object; int uploaded,refetch; uint64_t last_use; };
+struct PilotNativeVertex {
+    IDirect3DVertexBuffer8 *object;int uploaded,refetch;uint64_t last_use,generation;
+    PilotResourcePages mirror;
+};
 static struct PilotNativeVertex *pilot_vertices;
 static unsigned pilot_vertex_capacity;
 static uint32_t pilot_bound_textures[4],pilot_bound_vertices[16];
@@ -314,8 +331,10 @@ void pilot_gfx_close(void)
     pilot_visual_close();
     pilot_logic_copy=pilot_requested_blend=0;
     pilot_gfx_shaders_close();
-    for (unsigned i=0;i<pilot_vertex_capacity;++i)
+    for (unsigned i=0;i<pilot_vertex_capacity;++i){
         if(pilot_vertices[i].object) pilot_d3d_backend_stop("device close with outstanding vertex ownership");
+        pilot_resource_pages_clear(&pilot_vertices[i].mirror);
+    }
     free(pilot_vertices);pilot_vertices=NULL;pilot_vertex_capacity=0;
     for (unsigned i=0;i<pilot_texture_capacity;++i)
         if(pilot_textures[i].object) pilot_d3d_backend_stop("device close with outstanding texture ownership");
@@ -750,6 +769,7 @@ int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle)
     HRESULT hr=d3d8_CreateVertexBufferImpl(bytes,0,0,&object);
     if(FAILED(hr)) return hr;
     pilot_vertices[slot].object=object; pilot_vertices[slot].uploaded=0;
+    pilot_vertices[slot].generation=pilot_resource_new_identity();
     *handle=slot+1; return S_OK;
 }
 void pilot_gfx_vertex_destroy(uint32_t handle)
@@ -759,6 +779,7 @@ void pilot_gfx_vertex_destroy(uint32_t handle)
     for(unsigned i=0;i<16;++i)if(pilot_bound_vertices[i]==handle)pilot_d3d_backend_stop("destroying a bound vertex buffer");
     if(vertex->iface.lpVtbl->Release(&vertex->iface)!=0)
         pilot_d3d_backend_stop("native vertex buffer still referenced at destruction");
+    pilot_resource_pages_clear(&pilot_vertices[handle-1].mirror);
     memset(&pilot_vertices[handle-1],0,sizeof(pilot_vertices[0]));
 }
 void pilot_gfx_vertex_bind(unsigned stream,uint32_t handle,uint32_t stride)
@@ -776,29 +797,56 @@ void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
 {
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
     if(!data || bytes!=vertex->size) pilot_d3d_backend_stop("invalid vertex upload range");
-    if(pilot_vertices[handle-1].uploaded && !pilot_vertices[handle-1].refetch && !memcmp(vertex->sys_mem,data,bytes)) return;
+    (void)pilot_gfx_resource_mirror_owner();PILOT_RESOURCE_COUNT(vertex_full_calls,1);
+    if(pilot_vertices[handle-1].uploaded && !pilot_vertices[handle-1].refetch){
+        PILOT_RESOURCE_COUNT(vertex_full_compares,1);PILOT_RESOURCE_COUNT(vertex_full_compare_bytes,bytes);
+        if(!memcmp(vertex->sys_mem,data,bytes))return;
+    }
+    pilot_resource_pages_invalidate_all(&pilot_vertices[handle-1].mirror);
     pilot_gfx_batch_flush();
     BYTE *destination=NULL;
     pilot_d3d_require(vertex->iface.lpVtbl->Lock(&vertex->iface,0,bytes,&destination,0),__FILE__,__LINE__);
     memcpy(destination,data,bytes);
     pilot_d3d_require(vertex->iface.lpVtbl->Unlock(&vertex->iface),__FILE__,__LINE__);
     pilot_vertices[handle-1].uploaded=1;pilot_vertices[handle-1].refetch=0;
+    PILOT_RESOURCE_COUNT(vertex_full_updates,1);PILOT_RESOURCE_COUNT(vertex_full_bytes,bytes);
     pilot_vertices[handle-1].last_use=pilot_mark_work();
+}
+static PilotResourceIdentity pilot_vertex_mirror_identity(uint32_t handle,uint32_t bytes)
+{
+    PilotResourceIdentity identity={pilot_vertices[handle-1].generation,1,0,0,bytes,1,1};
+    return identity;
+}
+static void pilot_vertex_mirror_capture(uint32_t handle,D3D8VertexBuffer *vertex,const void *data,uint32_t offset,uint32_t bytes)
+{
+    PilotResourceIdentity identity=pilot_vertex_mirror_identity(handle,vertex->size);
+    pilot_resource_pages_capture(&pilot_vertices[handle-1].mirror,&identity,data,vertex->sys_mem,vertex->size,offset,bytes);
 }
 void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t offset,uint32_t bytes)
 {
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
     if(!data || !bytes || offset>vertex->size || bytes>vertex->size-offset)
         pilot_d3d_backend_stop("invalid vertex synchronization span");
+    int use_owner=pilot_gfx_resource_mirror_owner();PILOT_RESOURCE_COUNT(vertex_range_calls,1);
     /* Startup-only A/B selection. Phobos's HLE vertex bridge submits only
      * draw-consumed vertices; retain our multistream bindings and ownership. */
     static int ranges=-1;
     if(ranges<0) {const char *setting=getenv("XLLE_PILOT_VERTEX_RANGES");ranges=!(setting && !strcmp(setting,"0"));}
     if(!ranges || !pilot_vertices[handle-1].uploaded || pilot_vertices[handle-1].refetch) {
-        pilot_gfx_vertex_upload(handle,data,vertex->size);return;
+        pilot_gfx_vertex_upload(handle,data,vertex->size);
+        if(use_owner)pilot_vertex_mirror_capture(handle,vertex,data,offset,bytes);
+        return;
+    }
+    if(use_owner){
+        PilotResourceIdentity identity=pilot_vertex_mirror_identity(handle,vertex->size);
+        if(pilot_resource_pages_reusable(&pilot_vertices[handle-1].mirror,&identity,data,vertex->size,offset,bytes))return;
     }
     const BYTE *source=(const BYTE*)data+offset;
-    if(!memcmp(vertex->sys_mem+offset,source,bytes))return;
+    PILOT_RESOURCE_COUNT(vertex_range_compares,1);PILOT_RESOURCE_COUNT(vertex_range_compare_bytes,bytes);
+    if(!memcmp(vertex->sys_mem+offset,source,bytes)){
+        if(use_owner)pilot_vertex_mirror_capture(handle,vertex,data,offset,bytes);
+        return;
+    }
     pilot_gfx_batch_flush();
     /* Snapshot a bounded page when batching short buffered draws. Subsequent
      * draws still compare their actual consumed bytes; later inline writes
@@ -811,12 +859,15 @@ void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t off
         bytes=end-offset;source=(const BYTE*)data+offset;
     }
     /* DEFAULT storage snapshots source bytes and preserves earlier draws. */
+    pilot_resource_pages_invalidate(&pilot_vertices[handle-1].mirror,offset,bytes);
     ++pilot_strip_batch.stats.vertex_updates;pilot_strip_batch.stats.vertex_bytes+=bytes;
+    PILOT_RESOURCE_COUNT(vertex_range_updates,1);PILOT_RESOURCE_COUNT(vertex_range_bytes,bytes);
     D3D11_BOX box={offset,0,0,offset+bytes,1,1};
     ID3D11DeviceContext_UpdateSubresource(d3d8_GetD3D11Context(),
         (ID3D11Resource*)pilot_donor_vertex(vertex),0,&box,source,0,0);
     memcpy(vertex->sys_mem+offset,source,bytes);
     pilot_vertices[handle-1].last_use=pilot_mark_work();
+    if(use_owner)pilot_vertex_mirror_capture(handle,vertex,data,offset,bytes);
 }
 int32_t pilot_gfx_vertex_readback(uint32_t handle,void *data,uint32_t capacity)
 {
@@ -995,8 +1046,11 @@ void pilot_gfx_texture_prepare_sample(uint32_t handle,uint32_t level,const void 
     pilot_gpu_call_end("texture upload",started);
 }
 uint64_t pilot_gfx_texture_cpu_snapshot_revision(uint32_t handle)
+{return pilot_gfx_texture_cpu_snapshot_identity(handle,NULL);}
+uint64_t pilot_gfx_texture_cpu_snapshot_identity(uint32_t handle,uint64_t *identity)
 {
     D3D8Texture *texture=pilot_texture(handle);
+    if(identity)*identity=pilot_textures[handle-1].use->identity;
     uint32_t levels=texture->levels;
     if(!levels || levels>=32 || pilot_textures[handle-1].gpu_written ||
        (pilot_textures[handle-1].uploaded&((1u<<levels)-1))!=((1u<<levels)-1))return 0;
@@ -1157,9 +1211,15 @@ int32_t pilot_gfx_texture_alias(unsigned kind,uint32_t source,uint32_t format,ui
     (void)kind;(void)source;(void)format;(void)handle;return E_NOTIMPL;
 #endif
 }
+static int pilot_texture_compare(const void *a,const void *b,size_t bytes)
+{
+    PILOT_RESOURCE_COUNT(texture_compare_spans,1);PILOT_RESOURCE_COUNT(texture_compare_bytes,bytes);
+    return memcmp(a,b,bytes);
+}
 void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,uint32_t bytes)
 {
     D3D8Texture *texture=pilot_texture(handle);
+    (void)pilot_gfx_resource_mirror_owner();PILOT_RESOURCE_COUNT(texture_upload_calls,1);
     if(level>=texture->levels || !data) pilot_d3d_backend_stop("invalid texture upload level/data");
     UINT width=texture->width>>level,height=texture->height>>level;
     if(!width)width=1; if(!height)height=1;
@@ -1173,7 +1233,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         pilot_d3d_backend_stop("texture upload size does not match subresource");
     if(depth) {
         int changed=!pilot_textures[handle-1].uploaded || pilot_textures[handle-1].gpu_written;
-        for(UINT row=0;row<rows && !changed;++row)changed=memcmp(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
+        for(UINT row=0;row<rows && !changed;++row)changed=pilot_texture_compare(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
         if(!changed)return;
         pilot_gfx_batch_flush();
         /* Xbox Z24S8 stores stencil in the low byte; native D24S8 stores it
@@ -1194,6 +1254,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource*)pilot_donor_texture(texture),(ID3D11Resource*)staging);
         for(UINT row=0;row<rows;++row)memcpy(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
         ID3D11Texture2D_Release(staging);pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=0;
+        PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);
         pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
             pilot_textures[handle-1].use->write_serial=pilot_mark_work();return;
     }
@@ -1202,18 +1263,22 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     int changed=!(pilot_textures[handle-1].uploaded&(1u<<level));
     if(pair) {
         const BYTE *src=data;const BYTE *dst=lock.pBits;
-        for(UINT i=0;i<width*height && !changed;++i)
+        for(UINT i=0;i<width*height && !changed;++i){
+            PILOT_RESOURCE_COUNT(texture_compare_spans,1);PILOT_RESOURCE_COUNT(texture_compare_bytes,2);
             changed=dst[i*4]!=src[i*2] || dst[i*4+1]!=src[i*2+1];
+        }
     } else if(texture->d3d8_format==3) {
         const BYTE *src=data;const BYTE *dst=lock.pBits;
-        for(UINT i=0;i<width*height && !changed;++i)
+        for(UINT i=0;i<width*height && !changed;++i){
+            PILOT_RESOURCE_COUNT(texture_compare_spans,1);PILOT_RESOURCE_COUNT(texture_compare_bytes,2);
             changed=dst[i*2]!=src[i*2] || dst[i*2+1]!=(src[i*2+1]|0x80);
+        }
     } else if(!changed && pitch==guest_pitch) {
         /* Compressed/swizzled and equally pitched linear levels are contiguous.
          * Compare the identical byte range once rather than calling memcmp for
          * every logical row. Padded guest rows retain their existing row walk. */
-        changed=memcmp(lock.pBits,data,bytes)!=0;
-    } else for(UINT row=0;row<rows && !changed;++row)changed=memcmp((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
+        changed=pilot_texture_compare(lock.pBits,data,bytes)!=0;
+    } else for(UINT row=0;row<rows && !changed;++row)changed=pilot_texture_compare((BYTE*)lock.pBits+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
     if(!changed) {
         texture->locked=FALSE; return; /* No changed CPU work to upload. */
     }
@@ -1237,6 +1302,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
             ((BYTE*)lock.pBits)[i*2+1]|=0x80;
     }
     pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
+    PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);
     if(!level)pilot_replacement_match(handle,data,bytes);
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
@@ -1817,7 +1883,11 @@ int pilot_gfx_vertex_cache_break(int apply)
     // source-upload reuse: the next draw snapshots/refetches its vertex bytes.
     // Existing GPU draws retain their ordered D3D11 resources and work.
     if(apply)for(unsigned i=0;i<pilot_vertex_capacity;++i)
-        if(pilot_vertices[i].object)pilot_vertices[i].refetch=1;
+        if(pilot_vertices[i].object){
+            pilot_vertices[i].refetch=1;
+            pilot_resource_pages_invalidate_all(&pilot_vertices[i].mirror);
+            PILOT_RESOURCE_COUNT(vertex_refetches,1);
+        }
     return 1;
 }
 int pilot_gfx_command_submit(void)
