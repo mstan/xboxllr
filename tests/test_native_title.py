@@ -165,6 +165,8 @@ class NativeTitleTests(unittest.TestCase):
         self.assertIn('-DPILOT_SECTION_MOD_SOURCE=',cmd)
 
     def setUp(self):
+        effects = patch('native_gpu_callback_effects.emit', return_value={'version': 0})
+        self.effects = effects.start(); self.addCleanup(effects.stop)
         framework=patch.object(n,'framework_identity',return_value=dict(revision='authored framework'))
         self.framework=framework.start();self.addCleanup(framework.stop)
         self.temp = tempfile.TemporaryDirectory()
@@ -392,6 +394,34 @@ XLLE_PILOT_TRACE = "0"
         n.identity(self.source, self.data, self.output)
         with self.assertRaises(ValueError):
             n.launch(self.data, self.paths, self.output, self.build, source=self.source)
+
+    def test_callback_metadata_refresh_is_bound_to_the_new_preparation(self):
+        self.paths['xdk_symbols'] = self.root / 'symbols.json'
+        old_receipt = (self.output / 'native-title-preparation.json').read_bytes()
+        def emit(xbe, output):
+            self.assertEqual((xbe, output), (self.xbe, self.output))
+            self.assertEqual((output / 'native-title-preparation.json').read_bytes(), old_receipt)
+            value = n.check_generated(output, self.data['title'])
+            header = output / 'gen/pilot_gpu_callback_effects.h'
+            header.write_bytes(b'#define PILOT_GPU_CALLBACK_EFFECTS_VERSION 0u\n')
+            value['files'][header.name] = n.digest(header)
+            value['gpu_callback_effects'] = {'version': 0}
+            self.manifest.write_text(json.dumps(value))
+        self.effects.side_effect = emit
+        with patch.object(n.importlib, 'import_module', return_value=Mock(bind=Mock(return_value={}))):
+            n.bind_prepared(self.source, self.data, self.paths, self.output)
+        self.effects.assert_called_once_with(self.xbe, self.output)
+        n.identity(self.source, self.data, self.output)
+        self.assertNotEqual((self.output / 'native-title-preparation.json').read_bytes(), old_receipt)
+
+    def test_callback_metadata_failure_keeps_preparation_unpublishable(self):
+        self.paths['xdk_symbols'] = self.root / 'symbols.json'
+        self.effects.side_effect = ValueError('callback inventory rejected')
+        with patch.object(n.importlib, 'import_module', return_value=Mock(bind=Mock(return_value={}))), self.assertRaisesRegex(ValueError, 'callback inventory rejected'):
+            n.bind_prepared(self.source, self.data, self.paths, self.output)
+        self.assertTrue((self.output / n.INCOMPLETE_BIND).exists())
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            n.identity(self.source, self.data, self.output)
 
     def test_incremental_bind_cannot_leave_an_old_family_unvalidated(self):
         manifest = json.loads(self.manifest.read_text())

@@ -103,6 +103,19 @@ apply: if(apply)pilot_gfx_set_state(host,converted); return 1;
 }
 int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value)
 {return render_state(state,value,1);}
+/* Complete bounded lowering for two scalar families. Preparation has no guest,
+ * native-context, batch or device access. Commit uses the original mutation
+ * boundary, including any required strip flush, AFTER the callback barrier. */
+int pilot_gfx_scalar_prepare(uint32_t state,uint32_t value,struct PilotPreparedScalarState *prepared)
+{
+    if(!prepared)return 0;
+    if(state==144 && value<=1){prepared->host=D3DRS_STENCILENABLE;prepared->value=value;return 1;}
+    if(state==147 && (value==0 || value==0x900 || value==0x901)){
+        prepared->host=D3DRS_CULLMODE;prepared->value=value?value-0x8fe:1;return 1;}
+    return 0;
+}
+void pilot_gfx_scalar_commit(const struct PilotPreparedScalarState *prepared)
+{pilot_gfx_set_state(prepared->host,prepared->value);}
 int pilot_gfx_command_method(uint32_t method,uint32_t value,int apply)
 {
     if(method==0x1710)return !value && pilot_gfx_vertex_cache_break(apply);

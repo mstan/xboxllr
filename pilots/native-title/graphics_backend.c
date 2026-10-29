@@ -1449,6 +1449,13 @@ void pilot_gfx_set_state(uint32_t state,uint32_t value)
 #endif
     pilot_d3d_require(pilot_device->lpVtbl->SetRenderState(pilot_device,(D3DRENDERSTATETYPE)state,value),__FILE__,__LINE__);
 }
+int pilot_gfx_scalar_current(uint32_t state,uint32_t *value)
+{
+    if(!pilot_device || !value || (state!=144 && state!=147))return 0;
+    DWORD current=0;HRESULT result=pilot_device->lpVtbl->GetRenderState(pilot_device,
+        state==144?D3DRS_STENCILENABLE:D3DRS_CULLMODE,&current);
+    if(result<0)return 0;*value=current;return 1;
+}
 int pilot_gfx_logic_op(uint32_t value)
 {
     if(value && value!=0x1503)return 0;

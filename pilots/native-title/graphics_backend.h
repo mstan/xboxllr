@@ -90,6 +90,11 @@ uint64_t pilot_gfx_texture_cpu_snapshot_revision(uint32_t handle);
 uint64_t pilot_gfx_texture_cpu_snapshot_identity(uint32_t handle,uint64_t *identity);
 int pilot_gfx_resource_mirror_owner(void);
 int pilot_gfx_xbox_render_state(uint32_t state,uint32_t value);
+struct PilotPreparedScalarState {uint32_t host,value;};
+int pilot_gfx_scalar_prepare(uint32_t state,uint32_t value,struct PilotPreparedScalarState *prepared);
+void pilot_gfx_scalar_commit(const struct PilotPreparedScalarState *prepared);
+int pilot_gfx_scalar_current(uint32_t state,uint32_t *value);
+
 int pilot_gfx_xbox_texture_state(uint32_t stage,uint32_t state,uint32_t value);
 uint32_t pilot_gfx_width(void);
 uint32_t pilot_gfx_height(void);

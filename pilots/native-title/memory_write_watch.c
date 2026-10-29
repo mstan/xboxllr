@@ -143,6 +143,15 @@ void pilot_write_watch_native_end(const void *data,size_t bytes)
     for(size_t i=first;i<=last;++i)InterlockedDecrement(&watch.pages[i].writers);
     ReleaseSRWLockExclusive(&watch_lock);
 }
+int pilot_write_watch_native_read_begin(const void *data,size_t bytes)
+{
+    AcquireSRWLockShared(&watch_lock);size_t first,last;
+    if(!span(data,bytes,&first,&last)){ReleaseSRWLockShared(&watch_lock);return 0;}
+    for(size_t i=first;i<=last;++i)if(read32(&watch.pages[i].writers)){
+        ReleaseSRWLockShared(&watch_lock);return 0;}
+    return 1;
+}
+void pilot_write_watch_native_read_end(void){ReleaseSRWLockShared(&watch_lock);}
 int pilot_write_watch_begin(const void *data,size_t bytes,PilotWriteSnapshot *snapshot)
 {
     memset(snapshot,0,sizeof(*snapshot));size_t first,last;
@@ -263,6 +272,8 @@ int pilot_write_watch_reusable(PilotWriteSnapshot *snapshot){(void)snapshot;retu
 int pilot_write_watch_invalidate(const void *data,size_t bytes){(void)data;(void)bytes;return 1;}
 int pilot_write_watch_native_begin(const void *data,size_t bytes){(void)data;(void)bytes;return 1;}
 void pilot_write_watch_native_end(const void *data,size_t bytes){(void)data;(void)bytes;}
+int pilot_write_watch_native_read_begin(const void *data,size_t bytes){(void)data;(void)bytes;return 0;}
+void pilot_write_watch_native_read_end(void){}
 uint64_t pilot_write_watch_faults(void){return 0;}
 #if defined(_WIN32)
 #include "memory_write_watch_win32.h"

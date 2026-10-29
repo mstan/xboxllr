@@ -24,6 +24,13 @@ int pilot_write_watch_invalidate(const void *data,size_t bytes);
  * Hold a native writer lease from before submission through async completion. */
 int pilot_write_watch_native_begin(const void *data,size_t bytes);
 void pilot_write_watch_native_end(const void *data,size_t bytes);
+/* Short CPU-owner input captures may share the native-writer ledger without
+ * installing read-only pages or depending on their hot-page policy. A true
+ * begin holds the observer lock until end; no native writer may start then.
+ * Caller must separately exclude guest writers and validate logical access.
+ * Unsupported/uninitialized observers and outstanding writers refuse. */
+int pilot_write_watch_native_read_begin(const void *data,size_t bytes);
+void pilot_write_watch_native_read_end(void); /* only after a true begin */
 uint64_t pilot_write_watch_faults(void);
 #ifdef __cplusplus
 }
