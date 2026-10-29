@@ -1,8 +1,21 @@
 # xboxllr release readiness
 
+## Public beta/alpha — October 29, 2026
+
+The owner explicitly authorized public XboxLLR and Blinx releases. XboxLLR is
+beta; Blinx is the only publicly supported game and its playable alpha is tested
+through World 2, with no end-to-end guarantee. JSRF remains outside public support.
+Separate Dashboard and build-tool EXE releases, corresponding-source bundles,
+screenshots, setup and repeatable scripts are documented in [Public releases](PUBLIC-RELEASES.md).
+The build toolkit now includes a real `xboxllr.exe` entry point plus bundled
+Python/Capstone; MSVC, CMake and prepared title profiles remain required.
+
+## Historical private previews
+
+
 Controller hotfix updated October 23, 2026. Tracking: `beads-s7mu`;
 initial preparation `.1.187`; licensing `.1.21`.
-All three repositories remain private. The owner selected GPL distribution and
+At that milestone all three repositories were private. The owner selected GPL distribution and
 authorized playable Windows prereleases. Native Linux releases remain deferred.
 
 | Repository | Windows preview and source downloads |
@@ -77,7 +90,8 @@ Xbox Live cache (`.1.188`), Dashboard Gaussian upscaling (`.1.189`) and supporti
 startup hardware/audio precision (`.1.195`). Native startup presentation is
 available; full firmware boot is separate. Xbox Live is unavailable. Cheat-assisted coverage is not
 exhaustive natural-mechanics qualification. Legacy full-system binaries are not
-included. The toolkit is source/Python tooling, not a standalone compiler EXE.
+included. The older previews provided source/Python tooling; the public beta adds the
+EXE entry point described above.
 
 Native ISO/XISO selection and a reusable extracted cache are implemented; see
 [disc import](DISC-IMPORT.md) and `beads-xbox.1.187.10` for qualification.

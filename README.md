@@ -1,145 +1,122 @@
-# xboxllr
+> **BETA:** XboxLLR is an early Xbox recompiler ecosystem. Expect bugs, incomplete hardware coverage and unsupported software. **Blinx is the only publicly supported game at this time.** Please [file reproducible GitHub issues](https://github.com/mstan/xboxllr/issues).
 
-**Xbox Low Level Recompiler** turns original Xbox CPU code into native host code
-and supplies reusable console services. Its approach is to establish low-level
-behavior, then use fast native implementations under the same observable
-contracts. xboxllr was previously named **xboxlle**; some internal identifiers
-and checkout directory names still use that name.
+# XboxLLR
 
-The current Windows x64 development previews run the original Xbox Dashboard,
-Blinx: The Time Sweeper and Jet Set Radio Future. This is a shared framework;
-game projects carry their own revision metadata, mods and tested framework pin.
+**Xbox Low Level Recompiler** is an early, low-level original Xbox recompilation
+ecosystem: an ahead-of-time x86 recompiler pipeline, reusable console services,
+native title host, Xbox-themed launcher and tools for preparing and building
+individual titles. It was previously called **xboxlle**; some internal names
+and checkout directories retain that spelling.
 
-| Xbox Dashboard | Blinx: The Time Sweeper | Jet Set Radio Future |
-| --- | --- | --- |
-| ![Original Xbox Dashboard Home menu rendered by the native title host](docs/screenshots/dashboard.png) | ![Blinx gameplay in adaptive widescreen](docs/screenshots/blinx-widescreen.jpg) | ![Jet Set Radio Future gameplay in widescreen](docs/screenshots/jsrf-widescreen.png) |
-| Interactive Home, Memory, Music and Settings; Xbox Live stays offline. | Assisted campaign through ending/save, five time controls and optional visual mods. | Native attract and gameplay, rapid campaign/encounter coverage and optional visual mods. |
+XboxLLR establishes console behavior through low-level devices and original-code
+reference paths, then supplies native implementations under those contracts.
+The fast Windows title profiles execute translated CPU code ahead of time.
+Unresolved targets stop with diagnostics. This is ongoing compatibility work;
+the downloads do not run arbitrary Xbox games.
 
-*Actual development captures, not mockups. [Image credits](docs/screenshots/NOTICE.md).
-Coverage is scoped in the linked title records below.*
+## Downloads
 
-[Architecture](#native-code-and-low-level-contracts) |
-[Setup and required files](docs/SETUP.md) | [Development](#development) |
-[Release plan](docs/RELEASE-READINESS.md) |
-[Credits](CREDITS.md)
+| Download | Who it is for |
+| --- | --- |
+| **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/dashboard-beta-2026.10.29.1)** | Run the original Dashboard 5960 using your own matching Dashboard executable and assets. Includes the launcher and native runtime. |
+| **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/toolkit-beta-2026.10.29.1)** | Developers: `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
+| **[Blinx playable public alpha](https://github.com/mstan/BlinxRecomp/releases/tag/alpha-2026.10.29.1)** | Players: a ready-to-run native game package. No compiler required; supply your own supported NTSC-U game dump. |
 
-For crash reports, see [tester diagnostics](docs/TESTER-DIAGNOSTICS.md): retained
-per-launch crash context and private input recording/playback are shared by
-the native title packages. Blinx and JSRF enable crash and input logs by default.
+Current playable downloads target **Windows x64 with D3D11**. Linux component
+checks do not establish a working Linux game release. JSRF and other experimental
+titles are not publicly supported in this beta.
 
-## Native code and low-level contracts
+## Blinx: The Time Sweeper
 
-**Native** describes how CPU instructions execute. The title pipeline translates
-original Xbox x86 functions into C and compiles them ahead of time. The fast
-title profiles do not fall back to a guest x86 interpreter: unresolved targets
-stop with a diagnostic.
+[BlinxRecomp](https://github.com/mstan/BlinxRecomp) is the first publicly supported
+game. **Tested through World 2; end-to-end completion is not guaranteed.** Please
+[report game bugs in BlinxRecomp](https://github.com/mstan/BlinxRecomp/issues).
 
-**LLE and HLE** describe the level at which console behavior is implemented.
-Maintained low-level devices and original-code reference routes establish
-contracts for memory, files, input, graphics, audio and other services. Native
-high-level implementations accelerate those services while preserving the
-behavior visible to their callers. Accuracy work can refine those contracts
-without forcing normal play through a slow whole-console reference run.
+![Blinx gameplay with adaptive widescreen and edge-anchored HUD](docs/screenshots/blinx-widescreen.jpg)
 
-Reference and fast profiles are selected at build time. Normal gameplay does
-not execute both paths in parallel. A retained LLE foundation also does not mean
-every hardware detail or unreached game path is already qualified; evidence,
-limits and deferred questions remain explicit.
+![Blinx native gameplay in a 16:9 window](docs/screenshots/blinx-alpha-16x9.png)
 
-xboxllr builds on work from the **xboxrecomp family** rather than replacing that
-history. Its focus is shared console contracts, separately runnable correctness
-references and reusable native services across titles. See
-[Credits](CREDITS.md) for the people and projects behind those foundations.
+The game package includes adaptive **Fit to screen** through 32:9, internal
+resolution up to 2160p, FXAA, supersampling, anisotropic filtering, controller
+selection, camera-invert options and optional blended 60/120 Hz presentation.
+Blending preserves original simulation timing; it can add double edges and
+latency. Actual higher-rate simulation is not currently available.
 
-## Current titles and enhancements
+Optional gameplay mods remove the **ten-minute stage limit**, expand time-control
+stock to 20, or provide infinite controls with non-heart crystals suppressed.
+Those cheats are independent and off by default; heart crystals are preserved.
+The disposable utility cache now stays in RAM, allocated on demand within a
+750 MiB volume. Native in-game saves stay on persistent storage.
+See [Blinx features and mods](https://github.com/mstan/BlinxRecomp#features).
 
-| Title | Current evidence | Record |
-| --- | --- | --- |
-| Original Xbox Dashboard 5960 | Responsive native menus, console settings, persistent state and themed Credits/System Info screens. Original Dashboard files are supplied by the owner. | [Dashboard burndown](docs/NATIVE-DASHBOARD-BURNDOWN.md) |
-| Blinx: The Time Sweeper, NTSC-U | Bounded 9/9 attract qualification; assisted campaign through ending/save/title; widescreen owner playtest. Full natural mechanics coverage is separate. | [Game project](https://github.com/mstan/BlinxRecomp), [burndown](docs/BLINX-BURNDOWN.md) |
-| Jet Set Radio Future, NTSC-U | Native attract and interactive gameplay; rapid campaign/boss-entry sweep with explicit cheats; save/load and brief owner visual review. Extra modes and exhaustive mechanics remain deferred. | [Game project](https://github.com/mstan/JSRFRecomp), [shared title driver](docs/NATIVE-TITLE-DRIVER.md) |
+## Original Xbox Dashboard
 
-The shared launcher provides Player 1 controller selection and optional visual
-mods. Current game profiles support adaptive widescreen through 32:9, internal
-heights through 2160p, FXAA, supersampling, filtering and blended 60/120 Hz
-presentation. Actual faster game simulation is a separate mode and is unavailable
-until its title timing adapter is qualified. Details and costs are recorded in
-the [visual-mod design](docs/NATIVE-VISUAL-MODS-2026-10-18.md).
+![Original Xbox Dashboard Home menu running in the native host](docs/screenshots/dashboard.png)
 
-## Development
+![Original Xbox Dashboard Settings screen running in the native host](docs/screenshots/dashboard-settings.png)
 
-Start with the [developer setup guide](docs/DEVELOPMENT.md) for a clean checkout,
-toolchains, ROM-free checks, pinned dependencies and native title builds.
-Use the [native-title driver guide](docs/NATIVE-TITLE-DRIVER.md) and
-[native reference pilot documentation](pilots/native-title/README.md) for current
-build profiles, private input preparation and bounded validation. Title projects
-pin this framework; shared CPU, kernel, renderer, audio and input changes belong
-here, with title identity, revision bindings and data-only mods in each game repo.
+The native Dashboard preview supports Home, Memory, Music and Settings, local
+console settings, persistent state and Credits/System Info screens. Xbox Live
+stays offline. It is a separate title application, not a way to launch other
+unprepared games inside this ecosystem.
 
-The current native host uses Windows APIs, D3D11 and XAudio2. Generated C and
-portable component tests alone do not establish a native Linux game build.
-Linux host/backend work and real title validation are required before a Linux
-release is advertised.
+### Load the Dashboard
 
-The older whole-console route has different requirements and performance. Its
-former README is preserved as the
-[legacy full-system setup guide](docs/LEGACY-FULL-SYSTEM-SETUP.md), rather than
-used as instructions for the native previews.
+1. Download the **Dashboard** Windows ZIP above and extract the entire package
+   into a writable folder. Open **Start Game.exe**.
+2. Supply your own original **Dashboard 5960** backup: `xboxdash.xbe` and its
+   complete related asset tree from the Xbox C: partition. Preserve names and
+   layout. A homebrew dashboard or the executable alone is insufficient.
+3. Choose **Skip** in the optional console-files setup to create a new local
+   console identity and save folders. No BIOS, EEPROM or large HDD image is
+   required for direct native Dashboard launch.
+4. On the main launcher screen, select that `xboxdash.xbe`. Select your
+   controller in **Player 1**, then start. [Exact supported hash and setup details](docs/SETUP.md#dashboard-beta-quick-start).
 
-## Toward a release
+The optional Xbox startup animation is on by default for Dashboard. It needs
+startup data prepared from your compatible complete kernel dump. Without that
+optional input, the title launches directly. This is a native reconstruction
+of the animation, not a full firmware boot. Settings can import original console
+files or select an existing supported raw/QCOW2 FATX image. Keep the package's
+`data` folder, external save storage and any `<image>.xboxllr` profile when updating.
 
-xboxllr is intended to publish the **recompiler toolkit** and a separate
-**Dashboard title** artifact. Blinx and JSRF retain their own game repos and
-reuse build/release tooling from a pinned xboxllr version. Windows x64 ZIPs are
-the current target; native Linux releases are deferred. Shared packaging now
-produces self-contained local candidates with a bundled launcher and Python.
-The current [toolkit release](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026.10.27.1)
-provides framework source/tools and prepared dependency-source downloads, with
-graffiti-management, crash-reporting and renderer corrections described in the
-[release notes](docs/RELEASE-NOTES-2026.10.27.1.md). The precompiled Windows
-[Dashboard preview](https://github.com/mstan/xboxllr/releases/tag/windows-preview-2026-10-23.2)
-remains available separately. The toolkit
-is Python/source tooling rather than a standalone compiler EXE. Users supply
-their own supported original title data; see [license scope](LICENSE-SCOPE.md)
-and [original rights notice](RIGHTS-NOTICE.md).
+## Development and releases
 
-The setup target is the user's matching game dump, plus original Dashboard files
-only if they want that Dashboard. Writable console storage, settings and other
-supported generated inputs are created locally. On first launch, choose **Skip**
-to use a persistent virtual-console identity and automatic private save folders.
-Original console files are optional for new local play. Settings also accepts
-an existing raw/QCOW2 FATX HDD image with validated original signing inputs and
-matching EEPROM. An image takes priority over folder storage; no 8 GB image is
-created per game. See [setup](docs/SETUP.md) for save compatibility and limits.
-Select the supported extracted XBE on the main screen and keep its complete
-asset folder. Direct ISO import remains unfinished.
+Start with [developer setup](docs/DEVELOPMENT.md), the
+[native-title driver](docs/NATIVE-TITLE-DRIVER.md) and [build-tool guide](docs/BUILD-TOOL.md).
+Title repositories own revision metadata, mods and their tested framework pin;
+shared CPU, graphics, audio, input, kernel and storage services belong here.
+The older whole-console reference route has its own
+[setup guide](docs/LEGACY-FULL-SYSTEM-SETUP.md).
 
-Neither native games nor the native Dashboard currently boot the firmware.
-Firmware startup is a separate follow-up: if qualified, its intended default
-is off for games and on for Dashboard. A redistributable default dashboard
-also remains a future capability; the current Dashboard needs your own files.
+Reusable release scripts create **separate Dashboard and build-tool archives**:
+[`release_dashboard.py`](tools/release_dashboard.py),
+[`release_toolkit.py`](tools/release_toolkit.py), and the shared
+[`release_title.py`](tools/release_title.py) for Blinx.
+See [public release instructions](docs/PUBLIC-RELEASES.md). Each playable ZIP
+includes its corresponding project and prepared dependency source. Original
+title bodies are regenerated privately from the user's matching input.
 
-The [release readiness plan](docs/RELEASE-READINESS.md) tracks shared packaging,
-clean-machine setup, native Linux support and incorporated-code licensing.
-The owner selected GPL distribution on October 22. Windows title downloads
-are accompanied by project and prepared dependency source. Original Xbox
-firmware, XBEs, game media, Dashboard data/assets, keys and saves are supplied
-separately by users; original-title source bodies are generated from their input.
+For failures, include the release version, Windows/GPU details, selected mods
+and reproducible steps in a [GitHub issue](https://github.com/mstan/xboxllr/issues).
+The launcher retains [crash diagnostics](docs/TESTER-DIAGNOSTICS.md). Review
+attachments before sharing; never upload game files, keys, EEPROMs or saves
+containing private console material.
 
 ## Credits and license
 
-Development and integration: **Matthew Stanley**. Special thanks to
+Development and integration: **Matthew Stanley**. Thanks to
 [sp00nz / sp00nznet](https://github.com/sp00nznet/xboxrecomp),
 [Phobos](https://github.com/phobos665/DirectXbox-Recomp),
-[NoRain](https://github.com/NoRain211/doaxbv-re), and the
-[xemu team](https://github.com/xemu-project/xemu).
+[NoRain](https://github.com/NoRain211/doaxbv-re),
+[xemu contributors](https://github.com/xemu-project/xemu) and
+[apexJCL](https://github.com/apexJCL/blinx1-recomp).
+The RAM-cache design was inspired by apexJCL's Blinx work; the implementation
+here uses XboxLLR's own FATX storage. See [Credits](CREDITS.md) and
+[exact component attribution](THIRD_PARTY_ATTRIBUTION.md).
 
-Readable recognition is in [Credits](CREDITS.md). Exact revisions, imported files,
-modifications and license notices are in
-[third-party attribution](THIRD_PARTY_ATTRIBUTION.md).
-Owner-original material uses [GNU GPL version 3 or later](LICENSE), subject to
-[license scope](LICENSE-SCOPE.md). Third-party work retains its own terms.
-Neither this grant nor private repository visibility changes original-media
-rights. Original-title source bodies and original media are not in the source
-downloads; native applications contain ahead-of-time translated execution code.
-See [the original rights notice](RIGHTS-NOTICE.md).
+Owner-original source uses [GPL version 3 or later](LICENSE), subject to
+[license scope](LICENSE-SCOPE.md). Third-party work keeps its own terms.
+Users supply original game and Dashboard data; no firmware, media, keys or
+personal saves are bundled. [Original rights notice](RIGHTS-NOTICE.md).
+The screenshots are real development captures; [image provenance and rights](docs/screenshots/NOTICE.md).
