@@ -1,12 +1,15 @@
-# Immutable preload ownership prototype (L02)
+# Immutable preload ownership (L02)
 
-Issue `beads-xbox.1.206`, campaign `beads-2wy8.1`. Default off:
-`XLLE_PILOT_RESIDENT_FILE_VIEWS=1` selects the experimental constructor.
+Issue `beads-xbox.1.206`, campaign `beads-2wy8.1`. MSVC uses prefaulted
+read-only file views by default. `XLLE_PILOT_RESIDENT_FILE_VIEWS=0` retains the
+private-copy constructor for comparisons. Other compilers retain private
+copies by default and under the same interface when views are requested.
 
 The retained USA smoke preloads 976,975,369 bytes in 2,518 files and reports
 813.093 ms elapsed startup work. That is an actual workload observation, not
-inclusive CPU time. Blinx's accepted Stage 2-1 control logs have no resident
-preload; neutrality there must still be checked in the combined package.
+inclusive CPU time. Blinx has no resident preload configuration; its installed
+media path does not call the HOST preload preparation. Independent review
+confirmed that its file-service execution path is unchanged by L02.
 
 The prototype replaces private per-file preload copies with read-only file views,
 prefaulting every page before publishing the existing complete cache. The same
@@ -19,7 +22,8 @@ MSVC structured exception handling guards prefaulting and later view reads;
 an in-page failure returns to the original I/O/error path. A failed mapping
 attempt falls back to the original private preload. GCC uses that private-copy
 path under the same interface. No new supported host is required to accept
-SEH syntax. Whole-game stress and failure-path qualification remain pending.
+SEH syntax. A mapping or prefault admission failure retains the private-copy
+constructor, and a later source fault retains original file I/O.
 
 A CPU-only SERVER reservation ran a 256 MiB deterministic warm-cache file in
 four fresh processes, copy/view/view/copy, with one MSVC 14.29 binary. The
@@ -35,8 +39,11 @@ retained writer denial, borrowed-handle lifetime and idempotent retirement
 pass in that real Windows fixture. The Windows SDK 19041 C5105 warning with
 MSVC 1929 is scoped to the SDK include only; authored code retains `/W4 /WX`.
 Modern MSVC and Windows GCC checks and strict USA title compilation pass.
-Per-game startup, loading, traversal/re-entry, audio and runtime measurements
-remain pending; component evidence alone does not close L02.
+The isolated USA title uses the unchanged original CPU preparation, without
+the other unfinished prototypes. Its actual resident and full media contracts
+pass with views off/on, including async/APC/event/EOF behavior. The same
+engine builds rev4 and passes native-save load, assisted original area loading,
+movement and re-entry in both revisions, with actual DSP and muted output.
 
 Independent review found that a mapped-copy fault could advance a synchronous
 NULL/-2 read's host cursor before the original I/O fallback. Copy now precedes
@@ -47,11 +54,22 @@ mapping rejection, prefault failure and private-copy recovery; unrelated and
 destination faults retain their original propagation. No production fault
 injection switch is introduced.
 
-One large local file on SERVER does not predict the cost of 2,518 USA files
-on its actual storage. Shared pages may be reclaimed and later faulted again;
-the game evaluation must include reads and re-entry, not constructor timing
-alone. The component result justifies testing this whole cache-owner
-replacement. It closes neither L02 nor the related launch/loading entries.
+A capacity-reserved USA copy/view/view/copy block observed gameplay private
+commit reductions of 980,566,016 and 984,981,504 bytes (935–939 MiB), and startup
+peak private commit reductions of 988,098,560 and 988,438,528 bytes. Working
+sets remained similar. Actual views covered all 976,975,369 bytes in 2,517
+nonempty files; the remaining admitted file was empty. Preload elapsed times
+were 1295.019/347.881 ms for copies and 267.753/249.727 ms for views. These
+were fresh processes with uncontrolled OS file-cache state; cold-storage
+startup remains unmeasured, and these are not preload-only CPU measurements.
+
+Gameplay CPU changed +1.57%/+3.57% versus 3.73% copy A/A variation; source-swap
+arrival tails were comparable. Runtime is neutral/inconclusive at this sample
+size, with no gameplay CPU or uncapped throughput win claimed. Three resident
+reads served 35,992 bytes before the timing window. Most game asset opens are
+nonbuffered and retain original I/O; assisted handovers added no resident hits.
+Their success establishes loading behavior, not broader mapped-read coverage.
+The narrower memory ownership benefit does not close related L01/B01 work.
 
 Private raw evidence:
 `private-audit-20261027-architecture/prototype-cohort-20261028/server-resident-return-001`.

@@ -30,6 +30,9 @@ int main(void)
     media_content_path=root;media_nt_set=(MediaInfo)(void*)GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtSetInformationFile");CHECK(media_nt_set);
     const char *extensions[]={".adx"};CHECK(media_resident_configure(1,extensions,1));media_resident_prepare();
     CHECK(media_resident_ready() && resident_count==1 && resident_total==9000);
+    const char *view_setting=getenv("XLLE_PILOT_RESIDENT_FILE_VIEWS");
+    unsigned expect_view=PILOT_RESIDENT_FILE_VIEWS_AVAILABLE && (!view_setting || !strcmp(view_setting,"1"));
+    CHECK(resident_files[0].blob.mapped==expect_view);
     HANDLE h=CreateFileW(asset,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);CHECK(h!=INVALID_HANDLE_VALUE);
     struct MediaFile file={h,0,media_resident_find(h)};CHECK(file.resident);
     HANDLE writer=CreateFileW(asset,GENERIC_WRITE,FILE_SHARE_READ,NULL,OPEN_EXISTING,0,NULL);CHECK(writer==INVALID_HANDLE_VALUE && GetLastError()==ERROR_SHARING_VIOLATION);

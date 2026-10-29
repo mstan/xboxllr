@@ -93,7 +93,7 @@ static void media_resident_prepare(void)
 {
     if(!resident_budget || !media_content_path || resident_files)return;
     const char *views=getenv("XLLE_PILOT_RESIDENT_FILE_VIEWS");
-    resident_file_views=views && !strcmp(views,"1");
+    resident_file_views=views?!strcmp(views,"1"):PILOT_RESIDENT_FILE_VIEWS_AVAILABLE;
     uint64_t begin=dispatch_monotonic();MEMORYSTATUSEX memory_status={sizeof(memory_status)};
     WCHAR *path=calloc(32768,sizeof(WCHAR));
     int ok=path && GlobalMemoryStatusEx(&memory_status) &&
