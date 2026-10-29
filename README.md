@@ -155,4 +155,3 @@ Owner-original source uses [GPL version 3 or later](LICENSE), subject to
 [license scope](LICENSE-SCOPE.md). Third-party work keeps its own terms.
 Users supply original game and Dashboard data; no firmware, media, keys or
 personal saves are bundled. [Original rights notice](RIGHTS-NOTICE.md).
-The screenshots are real development captures; [image provenance and rights](docs/screenshots/NOTICE.md).

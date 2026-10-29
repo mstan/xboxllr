@@ -24,8 +24,3 @@ This page is readable recognition, not a replacement for the
 exact revisions, file-level provenance, modifications and component licenses,
 and distinguishes incorporated code from behavioral references. Review the
 [license scope](LICENSE-SCOPE.md) for the current combined-build restrictions.
-
-Microsoft's Xbox Dashboard, Artoon/Microsoft's Blinx and Sega/Smilebit's Jet Set
-Radio Future are owned by their respective rights holders. Documentation images
-are credited in the [screenshot notice](docs/screenshots/NOTICE.md). No endorsement
-by any original author, contributor or rights holder is implied.
