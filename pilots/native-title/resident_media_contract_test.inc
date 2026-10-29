@@ -22,6 +22,30 @@ static void test_media_resident(const char *directory,const unsigned char *conte
     LARGE_INTEGER zero={0},position;
     CHECK(SetFilePointerEx(media_handle(first),zero,&position,FILE_CURRENT) && position.QuadPart==4);
     CHECK(SetFilePointerEx(media_handle(second),zero,&position,FILE_CURRENT) && position.QuadPart==9);
+#if PILOT_RESIDENT_FILE_VIEWS_AVAILABLE
+    if(media_owned(first)->resident->blob.mapped) {
+        const PilotResidentBlob *blob=&media_owned(first)->resident->blob;
+        DWORD previous;
+        CHECK(VirtualProtect(blob->bytes,(SIZE_T)blob->size,PAGE_NOACCESS,&previous));
+        /* An actual mapped-source fault must fall through to NtReadFile with
+         * the original NULL/-2/explicit position, bytes and IOSB preserved. */
+        const uint64_t offsets[]={0,UINT64_MAX-1,5};
+        for(unsigned i=0;i<3;++i) {
+            LARGE_INTEGER start;start.QuadPart=3;
+            CHECK(SetFilePointerEx(media_handle(first),start,NULL,FILE_BEGIN));
+            fsc_forget(first);
+            read[0]=first;read[7]=i?offset:0;MEM64(offset)=offsets[i];
+            memset(memory+buffer,0xcc,8);MEM32(iosb)=0xdeadbeef;MEM32(iosb+4)=0x12345678;
+            uint64_t before=(uint64_t)resident_hits;
+            call_kernel(219,read,8);
+            CHECK(!g_eax && !MEM32(iosb) && MEM32(iosb+4)==4);
+            CHECK(!memcmp(memory+buffer,content+(i==2?5:3),4) && MEM8(buffer+4)==0xcc);
+            CHECK(SetFilePointerEx(media_handle(first),zero,&position,FILE_CURRENT) && position.QuadPart==(i==2?9:7));
+            CHECK((uint64_t)resident_hits==before);
+        }
+        CHECK(VirtualProtect(blob->bytes,(SIZE_T)blob->size,previous,&previous));
+    }
+#endif
     call_kernel(187,&first,1);CHECK(!g_eax);call_kernel(187,&second,1);CHECK(!g_eax);
     /* Reuse the actual async/APC/event/EOF and close-drain suite on resident
      * bytes too, including its original nonbuffered read fallback. */

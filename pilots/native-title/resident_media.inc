@@ -2,11 +2,13 @@
  * handles deny writers/deletion; opens match volume/file identity, never a path
  * suffix. Native saves, utility-cache writes and streaming exclusions stay on
  * their original I/O path. Incomplete preloads are discarded atomically. */
-struct ResidentFile {HANDLE handle;BY_HANDLE_FILE_INFORMATION identity;unsigned char *bytes;uint64_t size;WCHAR *relative;};
+#include "resident_blob.h"
+struct ResidentFile {HANDLE handle;BY_HANDLE_FILE_INFORMATION identity;PilotResidentBlob blob;uint64_t size;WCHAR *relative;};
 static struct ResidentFile *resident_files;
 static unsigned resident_count,resident_ready,resident_budget,resident_exclusion_count;
 static WCHAR resident_exclusions[8][12];
 static uint64_t resident_total;
+static unsigned resident_file_views;
 static size_t resident_root_length;
 static volatile LONG64 resident_hits,resident_hit_bytes;
 static int media_resident_configure(uint32_t budget,const char *const *extensions,uint32_t count)
@@ -24,7 +26,7 @@ static int media_resident_ready(void){return resident_ready!=0;}
 static void media_resident_close(void)
 {
     if(resident_files)for(unsigned i=0;i<resident_count;++i) {
-        if(resident_files[i].bytes)VirtualFree(resident_files[i].bytes,0,MEM_RELEASE);
+        pilot_resident_blob_release(&resident_files[i].blob);
         if(resident_files[i].handle)CloseHandle(resident_files[i].handle);
         free(resident_files[i].relative);
     }
@@ -69,15 +71,7 @@ static int resident_scan(WCHAR *path,unsigned depth)
                         (file->identity.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)) ||
                         (((uint64_t)file->identity.nFileSizeHigh<<32)|file->identity.nFileSizeLow)!=size)ok=0;
                     else if(size) {
-                        file->bytes=VirtualAlloc(NULL,(SIZE_T)size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
-                        if(!file->bytes)ok=0;
-                        for(uint64_t done=0;ok && done<size;) {
-                            DWORD got=0,wanted=(DWORD)((size-done)>4*1024*1024?4*1024*1024:size-done);
-                            if(!ReadFile(file->handle,file->bytes+done,wanted,&got,NULL) || got!=wanted)ok=0;
-                            done+=got;
-                        }
-                        DWORD previous;
-                        if(ok && !VirtualProtect(file->bytes,(SIZE_T)size,PAGE_READONLY,&previous))ok=0;
+                        ok=pilot_resident_blob_load(file->handle,size,resident_file_views,&file->blob);
                     }
                     if(ok) {
                         size_t characters=wcslen(path+resident_root_length+1)+1;
@@ -98,6 +92,8 @@ static int resident_scan(WCHAR *path,unsigned depth)
 static void media_resident_prepare(void)
 {
     if(!resident_budget || !media_content_path || resident_files)return;
+    const char *views=getenv("XLLE_PILOT_RESIDENT_FILE_VIEWS");
+    resident_file_views=views && !strcmp(views,"1");
     uint64_t begin=dispatch_monotonic();MEMORYSTATUSEX memory_status={sizeof(memory_status)};
     WCHAR *path=calloc(32768,sizeof(WCHAR));
     int ok=path && GlobalMemoryStatusEx(&memory_status) &&
@@ -113,6 +109,12 @@ static void media_resident_prepare(void)
     resident_ready=1;atexit(media_resident_close);
     fprintf(stderr,"[RESIDENT MEDIA] ready files=%u bytes=%llu elapsed_ms=%.3f streaming_exclusions=%u\n",
         resident_count,(unsigned long long)resident_total,(dispatch_monotonic()-begin)/10000.0,resident_exclusion_count);
+    if(resident_file_views){
+        unsigned mapped=0;uint64_t mapped_bytes=0;
+        for(unsigned i=0;i<resident_count;++i)if(resident_files[i].blob.mapped){++mapped;mapped_bytes+=resident_files[i].size;}
+        fprintf(stderr,"[RESIDENT MEDIA OWNER] requested=1 available=%u mapped_files=%u mapped_bytes=%llu\n",
+            PILOT_RESIDENT_FILE_VIEWS_AVAILABLE,mapped,(unsigned long long)mapped_bytes);
+    }
 }
 static int media_resident_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *buffer,unsigned length,
     LARGE_INTEGER *offset,uint32_t *status)
@@ -123,11 +125,14 @@ static int media_resident_read(struct MediaFile *file,IO_STATUS_BLOCK *io,void *
     if(start>=resident->size){*status=0xc0000011u;return 1;}
     unsigned count=length;
     if(count>resident->size-start)count=(unsigned)(resident->size-start);
+    /* A mapping fault falls back to the original read. Leave the host cursor
+     * untouched until the guarded copy succeeds, including NULL/-2 reads. */
+    if(!pilot_resident_blob_copy(&resident->blob,start,buffer,count))return 0;
     if(!file->asynchronous) {
         LARGE_INTEGER next;next.QuadPart=start+count;IO_STATUS_BLOCK position_io={0};
         *status=(uint32_t)media_nt_set(file->host,&position_io,&next,sizeof(next),14);
         if(*status)return 1;
     }
-    memcpy(buffer,resident->bytes+start,count);io->Status=0;io->Information=count;*status=0;
+    io->Status=0;io->Information=count;*status=0;
     InterlockedIncrement64(&resident_hits);InterlockedAdd64(&resident_hit_bytes,count);return 1;
 }
