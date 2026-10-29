@@ -32,11 +32,17 @@ maintained independently.
 Do not enable the owner globally from the USA result. Games receive different
 packages; an aggregate benefit cannot offset another game's regression.
 
+Combined release catalogs retain the complete runtime policy for each revision.
+Selection and reselection replace that policy, so the USA owner setting reaches
+its actual child process and cannot leak into rev4. Catalogs from older releases
+without revision-specific policy retain their original shared-policy behavior.
+
 ## Measured built-game evidence
 
 The actual source baseline is 225d8a8197158c547ea2a455710c4a893c7d10e3
 (L02, PR 3); runtime candidate is 13649ef9a45e188d8b2cd4865baa8840e5eab37e.
-The later documentation commit changes no runtime source. Both games use the
+Later commits add documentation and per-revision release selection; native C
+runtime sources remain identical to the measured candidate. Both games use the
 same guard-free generated inputs, MSVC optimized FINAL/IPO configuration and
 one build worker. Each matched block stays on one Windows host/configuration
 under a capacity reservation, with real DSP muted, matching private saves and
