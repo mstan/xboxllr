@@ -15,7 +15,7 @@ static void test_scalar_callback(void)
     uint32_t output=MEM32(g_esp+4);MEM32(output)=0x12345678;MEM32(output+4)=0x87654321;
     ++scalar_test_callbacks;g_esp+=4;
 }
-#ifndef PILOT_SCHEDULING_LLE
+#if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
 static void test_graphics_scalar_preparation(void)
 {
     GRAPHICS_TEST_REQUIRE("scalar callback preparation",PILOT_D3D_D3DDevice_InsertCallback);

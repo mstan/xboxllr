@@ -4,7 +4,9 @@
 struct GraphicsGpuCallback {uint64_t serial;uint32_t routine,context,type;struct GraphicsGpuCallback *next;
     uint64_t queued,first_poll,checkpoint_time;unsigned polls,busy_polls;};
 static struct GraphicsGpuCallback *graphics_gpu_head,*graphics_gpu_tail;
+#if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
 static struct GraphicsGpuCallback *graphics_gpu_running_callback;
+#endif
 static unsigned graphics_gpu_running;
 static uint64_t graphics_gpu_delivered;
 static CONDITION_VARIABLE graphics_gpu_changed=CONDITION_VARIABLE_INIT;
@@ -29,14 +31,21 @@ static int graphics_gpu_deliver(void)
     }
     uint64_t ready=graphics_gpu_profile()?dispatch_monotonic():0;
     graphics_gpu_head=c->next;if(!graphics_gpu_head)graphics_gpu_tail=NULL;
-    graphics_gpu_running=1;graphics_gpu_running_callback=c;ReleaseSRWLockExclusive(&graphics_lock);
+    graphics_gpu_running=1;
+#if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
+    graphics_gpu_running_callback=c;
+#endif
+    ReleaseSRWLockExclusive(&graphics_lock);
     uint32_t top=MEM32(g_fs_base+4);g_esp=top-8;
     MEM32(g_esp)=0;MEM32(g_esp+4)=c->context;
     scheduler_callback_enter();recomp_lookup(c->routine)();scheduler_retire();
     if(g_esp!=top-4)stop("GPU cdecl callback stack imbalance",c->routine);
     g_esp+=4;
     AcquireSRWLockExclusive(&graphics_lock);
-    ++graphics_gpu_delivered;graphics_gpu_running=0;graphics_gpu_running_callback=NULL;
+    ++graphics_gpu_delivered;graphics_gpu_running=0;
+#if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
+    graphics_gpu_running_callback=NULL;
+#endif
     if(graphics_gpu_profile())fprintf(stderr,"[GPU CALLBACK PROFILE] serial=%llu context=%x checkpoint_ms=%.3f queued_ms=%.3f first_poll_ms=%.3f execution_ms=%.3f polls=%u busy=%u\n",
         (unsigned long long)c->serial,c->context,c->checkpoint_time/10000.0,(ready-c->queued)/10000.0,
         (c->first_poll-c->queued)/10000.0,(dispatch_monotonic()-ready)/10000.0,c->polls,c->busy_polls);

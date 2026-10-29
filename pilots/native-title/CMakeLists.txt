@@ -130,11 +130,10 @@ elseif(NOT PILOT_CACHE STREQUAL "ORIGINAL")
   message(FATAL_ERROR "PILOT_CACHE must be ORIGINAL or NATIVE")
 endif()
 add_executable(xlle_native_title runtime.c ${generated})
-if(PILOT_R06_CERTIFICATE_DIR)
-  # Private feasibility proof is separate from the immutable generated inventory.
-  # Only the runtime adapters consume it; generated CPU units are unchanged.
+if(EXISTS "${PILOT_GENERATED}/pilot_gpu_callback_effects.h")
+  # Also notice an admitted header newly introduced into an older input set.
   set_property(SOURCE runtime.c runtime_contract_test.c APPEND PROPERTY
-    INCLUDE_DIRECTORIES "${PILOT_R06_CERTIFICATE_DIR}")
+    OBJECT_DEPENDS "${PILOT_GENERATED}/pilot_gpu_callback_effects.h")
 endif()
 target_link_libraries(xlle_native_title PRIVATE pilot_session_replay)
 target_compile_definitions(xlle_native_title PRIVATE PILOT_SESSION_RUNTIME)
@@ -1142,6 +1141,8 @@ if(PILOT_D3D_SOURCE)
       set_tests_properties(pilot_graphics_x8_texture_abi PROPERTIES TIMEOUT 30)
     endif()
     pilot_add_test(NAME pilot_graphics_scheduler COMMAND pilot_contract_test graphics-scheduler)
+    pilot_add_test(NAME pilot_graphics_scalar_preparation COMMAND pilot_contract_test graphics-scalar)
+    set_tests_properties(pilot_graphics_scalar_preparation PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
     set_tests_properties(pilot_graphics_scheduler PROPERTIES TIMEOUT 15)
     pilot_add_test(NAME pilot_graphics_present_status COMMAND pilot_contract_test graphics-present)
     set_tests_properties(pilot_graphics_present_status PROPERTIES TIMEOUT 15)
@@ -1381,6 +1382,9 @@ pilot_add_test(NAME pilot_session_replay_transport COMMAND "${CMAKE_COMMAND}" -E
   "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_session_replay.py")
 set_tests_properties(pilot_session_replay_transport PROPERTIES TIMEOUT 45)
 add_dependencies(pilot_native_iteration pilot_session_replay_test)
+pilot_add_test(NAME pilot_gpu_callback_effects_generation COMMAND "${Python3_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_gpu_callback_effects.py")
+set_tests_properties(pilot_gpu_callback_effects_generation PROPERTIES TIMEOUT 30)
 pilot_add_test(NAME pilot_native_audio_binding COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_audio_binding.py")
 set_tests_properties(pilot_native_audio_binding PROPERTIES TIMEOUT 30)

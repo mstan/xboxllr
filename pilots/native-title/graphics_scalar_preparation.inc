@@ -1,6 +1,7 @@
-/* Private R06 dependency-motion experiment. Only immutable local lowering may
+/* Only immutable local lowering may
  * cross the callback barrier. All guest-cache/native-context publication stays
  * after it: another eligible guest may run during that real wait. */
+#if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
 struct GraphicsScalarPreparation {
     struct PilotPreparedScalarState native;
     uint32_t state,value,input,cache;
@@ -10,8 +11,8 @@ struct {uint64_t frontiers,unknown,aliases,unavailable,prepared,consumed,changed
 static int graphics_scalar_preparation_enabled(void)
 {
     static int enabled=-1;
-    if(enabled<0){const char *value=getenv("XLLE_PILOT_R06_SCALAR_PREPARE");enabled=value && !strcmp(value,"1");
-        fprintf(stderr,"[R06 SCALAR PREPARE] requested=%d; publication and guest-return barrier retained\n",enabled);}
+    if(enabled<0){const char *value=getenv("XLLE_PILOT_GPU_SCALAR_PREPARATION");enabled=!value || strcmp(value,"0")!=0;
+        fprintf(stderr,"[GPU SCALAR PREPARATION] enabled=%d certificate=%u; publication and guest-return barrier retained\n",enabled,PILOT_GPU_CALLBACK_EFFECTS_VERSION);}
     return enabled;
 }
 static int graphics_scalar_capture(unsigned entry,const uint32_t *writes,unsigned count,struct GraphicsScalarPreparation *p)
@@ -64,3 +65,4 @@ static int graphics_scalar_consume(struct GraphicsScalarPreparation *p)
     pilot_gfx_scalar_commit(&p->native);MEM32(p->cache)=p->value;
     ++graphics_scalar_preparation_stats.consumed;return 1;
 }
+#endif

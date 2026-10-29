@@ -273,6 +273,8 @@ def prepare(args):
         manifest['files'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                              for p in sorted((out/'gen').iterdir()) if p.is_file()}
         path.write_text(json.dumps(manifest, indent=2) + '\n')
+    from native_gpu_callback_effects import emit as emit_callback_effects
+    emit_callback_effects(args.xbe, out)
     retained=retain_identical_file_times(out/'gen',previous_file_times)
     manifest_path=out/'generation.aot-private.json'
     manifest=json.loads(manifest_path.read_text())

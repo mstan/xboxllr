@@ -2,6 +2,7 @@
  * Only qualified whole entry points return; other identified driver entries
  * stop before executing against a device owned by the native renderer. */
 #include "graphics_backend.h"
+#include "graphics_callback_admission.h"
 #include "pilot_d3d_bindings.h"
 #ifndef PILOT_D3D_CREATE_BEHAVIOR_MASK
 /* Compatibility with already generated headers for the original adapter. */
@@ -350,8 +351,10 @@ static void graphics_dispatch_impl(unsigned entry)
     if(graphics_active && entry!=PILOT_D3D_COMMANDS_RESERVE_ENTRY && entry!=PILOT_D3D_COMMANDS_SPACE_ENTRY)
         graphics_commands_flush();
 #endif
+#if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
     struct GraphicsScalarPreparation scalar_preparation;
     graphics_scalar_prepare_frontier(entry,&scalar_preparation);
+#endif
     if(entry!=PILOT_D3D_D3DDevice_InsertCallback)graphics_gpu_barrier();
     uint64_t barrier=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
@@ -360,7 +363,9 @@ static void graphics_dispatch_impl(unsigned entry)
 #ifdef PILOT_D3D_IMMEDIATE_VERSION
     if(graphics_immediate_dispatch(entry,arguments))goto graphics_dispatch_done;
 #endif
+#if PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
     if(graphics_scalar_consume(&scalar_preparation))goto graphics_dispatch_done;
+#endif
     switch(entry) {
 #ifdef PILOT_D3D_COMMANDS_VERSION
     case PILOT_D3D_COMMANDS_RESERVE_ENTRY:
@@ -808,7 +813,9 @@ static void graphics_dispatch_impl(unsigned entry)
         fputc('\n',stderr);
         stop(pilot_d3d_calls[entry].name,pilot_d3d_calls[entry].address);
     }
+#if defined(PILOT_D3D_IMMEDIATE_VERSION) || PILOT_GPU_SCALAR_PREPARATION_AVAILABLE
 graphics_dispatch_done:
+#endif
     graphics_original_retire_drain();
     uint64_t unlocking=entered?dispatch_monotonic():0;
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
