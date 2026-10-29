@@ -19,4 +19,4 @@ At the current pin the audio probe passes and the renderer probe deliberately
 retains a discovered failure: an X8R8G8B8 surface exposes RGBA native bytes.
 CTest exits nonzero. Do not label it expected-pass or relax the check; adapt
 the CPU-visible surface contract during integration. See the full
-[adoption map and evidence](../../docs/DONOR-SERVICE-ADOPTION-2026-10-07.md).
+[adoption map and evidence](../../docs/reference/runtime/DONOR-SERVICE-ADOPTION-2026-10-07.md).

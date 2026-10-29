@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Structural regression checks for the witnessed raster loop specialization
-(beads-xbox.1.15.2, docs/DESIGN-NV2A-SEAM.md stage (b), src/machine/nv2a.cpp).
+(beads-xbox.1.15.2, docs/reference/graphics/DESIGN-NV2A-SEAM.md stage (b), src/machine/nv2a.cpp).
 
 WHY A STRUCTURAL TEST
 ---------------------
 Stage (b) is a performance change whose whole value is a SHAPE, and every part
 of that shape can be undone by an edit that still builds, still runs, and still
 produces the identical 22 hashes. The three defects the audit named
-(docs/PERF-AUDIT-2026-09-02.md §5) were:
+(https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-AUDIT-2026-09-02.md §5) were:
 
   * ~57 runtime `profile ==` compares per fragment against a value that is
     invariant for the whole batch;

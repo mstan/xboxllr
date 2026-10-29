@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Symbolize and account a `[host-sampler]` report from an xlle stdout log.
 
-What this tool guarantees (docs/PERF-METHODOLOGY.md section 2 rule 9):
+What this tool guarantees (docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 9):
 
 * **The denominator is the window's TRUE sample count**, read from the
   `window=... samples=N` line, never the sum of the lines that happened to be

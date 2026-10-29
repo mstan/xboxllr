@@ -11,7 +11,7 @@ silent. Delete the region from Nv2a::submit_vertex_batch and xlle still builds,
 still runs, still prints a [perf-excl] line; the vertex cost simply reappears
 inside NV2A_DISPATCH and nothing goes red. Six months later someone re-derives
 "68-78 % of wall is the device path" as an inference, which is the exact hole
-this module was built to close (docs/PERF-AUDIT-2026-09-02.md §6).
+this module was built to close (https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-AUDIT-2026-09-02.md §6).
 
 So each property below is one named assertion:
 
@@ -200,7 +200,7 @@ check("format_report emits the bucket_ns/bucket_n field pair",
       '" %s_ns=%llu %s_n=%llu"' in report,
       "every bucket must ship its ns AND its entry count: a sampler without "
       "its denominator is what forced field analysis to guess a ratio "
-      "(docs/PERF-METHODOLOGY.md §2 rule 9)")
+      "(docs/reference/testing/PERF-METHODOLOGY.md §2 rule 9)")
 for field in ("wall_ns=", "unaccounted_ns=", "clock_reads=",
               "overhead_ticks_per_read="):
     check("format_report emits %s" % field, field in report,

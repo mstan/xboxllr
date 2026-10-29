@@ -16,10 +16,13 @@ the downloads do not run arbitrary Xbox games.
 
 ## Downloads
 
+**[Download XboxLLR beta](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2)** — one release contains both the
+Dashboard app and the developer build tool. Choose the ZIP you need below.
+
 | Download | Who it is for |
 | --- | --- |
-| **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/dashboard-beta-2026.10.29.1)** | Run the original Dashboard 5960 using your own matching Dashboard executable and assets. Includes the launcher and native runtime. |
-| **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/toolkit-beta-2026.10.29.1)** | Developers: `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
+| **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2)** | Player app: download `XboxDashboard-windows-x64-2026.10.29.2.zip`, extract it, then open **Start Game.exe**. Supply your own Dashboard 5960 executable and assets. No compiler required. |
+| **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2)** | Developer package: `xboxllr-build-tool-windows-x64-2026.10.29.2.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
 | **[Blinx playable public alpha](https://github.com/mstan/BlinxRecomp/releases/tag/alpha-2026.10.29.1)** | Players: a ready-to-run native game package. No compiler required; supply your own supported NTSC-U game dump. |
 
 Current playable downloads target **Windows x64 with D3D11**. Linux component
@@ -57,8 +60,38 @@ See [Blinx features and mods](https://github.com/mstan/BlinxRecomp#features).
 
 The native Dashboard preview supports Home, Memory, Music and Settings, local
 console settings, persistent state and Credits/System Info screens. Xbox Live
-stays offline. It is a separate title application, not a way to launch other
-unprepared games inside this ecosystem.
+stays offline. Launch it like the game packages: **Start Game.exe** opens the launcher,
+then starts the native Dashboard app. It does not launch arbitrary Xbox games.
+
+### Dashboard support
+
+“Tested” means the listed action was exercised in the native Dashboard; it is
+not a claim that every submenu, device or hardware setting is complete.
+
+| Feature | Status | What works / remaining limit |
+| --- | --- | --- |
+| Dashboard 5960 startup and Home | **Tested** | Native launch, controller navigation and normal close. Matching executable and complete assets required. |
+| Player 1 input | **Tested** | Launcher controller selection and keyboard support; shared Windows controller event-pump fix included. |
+| Video settings | **Tested** | Normal / Letterbox / Wide Screen selection, visible status and saved user settings. |
+| Language and audio settings | **Tested** | Language changes; Mono / Stereo / Dolby Surround selection and persistence. This does not establish surround-output fidelity. |
+| Parental controls | **Tested** | Rating settings and passcode set/verify, including a fresh-process passcode check. |
+| Timezone and daylight savings | **Tested** | User-setting changes persist. |
+| Clock / date Apply | **Partial** | Changes the console clock for the session. Persistent RTC behavior across restarts is not qualified. Host clock is untouched. |
+| Auto Off | **Partial** | Enabled/Disabled setting saves. The actual six-hour shutdown was not exercised. |
+| System Info and Credits | **Tested** | Original info panel; custom scrolling Credits/notices under Settings, with Back/reopening. |
+| Memory | **Partial** | Menu opens and returns. End-to-end save copying/deletion and memory-unit workflows are not qualified. |
+| Music | **Partial** | Menu opens and returns. Soundtrack management, CD playback and ripping are not qualified. |
+| Menu audio | **Partial** | Native audio output and nonzero stereo samples verified. Subjective fidelity/listening coverage remains limited. |
+| Save storage / existing HDD images | **Partial** | Local profiles and persistent user settings work. Supported raw/QCOW2 import has identity/layout checks; the complete Dashboard save-management matrix is not qualified. |
+| Network Settings / Auto Sign-In | **Offline only** | Native offline notice and Back work. Original XoDash network configuration and Xbox Live are unsupported. |
+| Physical optical drives / USB memory units | **Unsupported** | The beta uses an empty optical-drive policy and does not provide these hardware devices. |
+| Launch arbitrary games / full firmware boot | **Unsupported** | Dashboard is its own native port. Optional startup animation is a reconstruction, not firmware execution. |
+| Visual precision and smoothness | **Partial** | Main menus are usable. Some menu-entry hitches and graphics precision questions remain open. |
+| Native Linux app | **Not released** | Playable beta targets Windows x64 / D3D11. |
+
+[Dashboard details and coverage](docs/DASHBOARD.md). Please
+[report reproducible failures](https://github.com/mstan/xboxllr/issues), including
+the release version and the menu/action that failed.
 
 ### Load the Dashboard
 
@@ -82,14 +115,17 @@ files or select an existing supported raw/QCOW2 FATX image. Keep the package's
 
 ## Development and releases
 
-Start with [developer setup](docs/DEVELOPMENT.md), the
+Start with [the documentation index](docs/README.md),
+[architecture](docs/ARCHITECTURE.md), [developer setup](docs/DEVELOPMENT.md), the
 [native-title driver](docs/NATIVE-TITLE-DRIVER.md) and [build-tool guide](docs/BUILD-TOOL.md).
 Title repositories own revision metadata, mods and their tested framework pin;
 shared CPU, graphics, audio, input, kernel and storage services belong here.
 The older whole-console reference route has its own
 [setup guide](docs/LEGACY-FULL-SYSTEM-SETUP.md).
 
-Reusable release scripts create **separate Dashboard and build-tool archives**:
+One release command stages both the Dashboard and build-tool archives for the
+same GitHub beta release: [`release_xboxllr.py`](tools/release_xboxllr.py).
+The component scripts remain available:
 [`release_dashboard.py`](tools/release_dashboard.py),
 [`release_toolkit.py`](tools/release_toolkit.py), and the shared
 [`release_title.py`](tools/release_title.py) for Blinx.

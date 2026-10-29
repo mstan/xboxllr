@@ -33,7 +33,7 @@
 //                                   instead of a handful, a 64 MB working set, softmmu TLB
 //                                   refills, 17.5 M MMIO exits, and IDT delivery.
 //
-// Methodology (docs/PERF-METHODOLOGY.md section 2): interleaved repetitions in one process,
+// Methodology (docs/reference/testing/PERF-METHODOLOGY.md section 2): interleaved repetitions in one process,
 // min and median both reported, a fixed retired-instruction budget per cell so host seconds
 // are the output and never the input. Every cell verifies its own architectural end state and
 // its own block-entry count, so a configuration that silently executed something else is a

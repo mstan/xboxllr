@@ -2,7 +2,7 @@
 
 Current bounded Blinx qualification is **9/9 families**. G01-G05 and A01-A05 are
 accepted for the agreed NTSC attract profile. Use the
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) for current gates
+[closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md) for current gates
 and [audio evidence](AUDIO-LLE.md) for the latest GP/EP milestones. The earlier
 component observations below retain their original scope and limitations.
 
@@ -12,7 +12,7 @@ movie, and enters the first stage. A 125.141s HLE run with real gamepad replay
 moves Blinx off the spawn and along the street, then sideways, without guards.
 Original-derived signing keys and SHA, owned cached texture backing, and one
 recovered original movie-function extent repair the reached failures. See the
-[gameplay checkpoint](../../docs/BLINX-BURNDOWN.md#post-qualification-new-game-and-first-stage---2026-10-17).
+[gameplay checkpoint](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-BURNDOWN.md#post-qualification-new-game-and-first-stage---2026-10-17).
 This establishes entry and movement, not a campaign completion or a new FPS claim.
 
 The owner-facing HLE preview selects native scheduling/services and D3D11 with
@@ -43,7 +43,7 @@ standard-library HMAC producer, then authenticates/decrypts the supplied EEPROM.
 It reads private material from the reviewed owned kernel but does not execute
 it. `--verify-original` explicitly adds bounded original execution and needs
 the optional Unicorn reference dependency. See
-[signing setup](../../docs/NATIVE-SIGNING-SETUP.md) and the
+[signing setup](../../docs/reference/storage/NATIVE-SIGNING-SETUP.md) and the
 [complete setup/input guide](../../docs/SETUP.md). The default CMake input is
 `PILOT_GENERATED/save-keys.aot-private.bin`;
 `PILOT_SAVE_KEYS_FILE` or the runtime path `XLLE_PILOT_SAVE_KEYS_FILE` relocates
@@ -173,7 +173,7 @@ component builds that never reach it need no ROM input.
 
 **Working attract checkpoint:** `milestone/blinx-attract-20261008` preserves
 owner-observed FMVs and real-time Demo play on runtime `318f5ac`. See the
-[milestone and remaining sign-off items](../../docs/BLINX-BURNDOWN.md) before
+[milestone and remaining sign-off items](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-BURNDOWN.md) before
 claiming complete original-speed/A-V qualification. Next work strengthens the
 independent LLE contracts for this exercised path; New Game is deferred.
 
@@ -327,7 +327,7 @@ match guest-written ring bytes. Actual post-GP output agrees closely with
 that game PCM through the tail, without changing decoder or playback semantics.
 This removes that comparison mismatch as evidence of an HLE transport defect;
 it does not declare all audio/video or attract cadence complete.
-The [movie audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md) records
+The [movie audit](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md) records
 measurements, provenance, bounded capture options and reproduction commands.
 
 A subsequent 600-second neutral-input observation (`scheduler-full-repeat`)
@@ -435,7 +435,7 @@ Private evidence: `build/blinx/scheduler-wait-hooks-input/` and
 
 ## Movie queue/stall investigation (2026-10-08)
 
-The [movie stall audit](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
+The [movie stall audit](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
 records the bounded audio timeline, callback/host-call timings, logging trials
 and unsuccessful affinity removal. The native queue stays full while fresh
 guest PCM writes pause. Logging changes have not established a speed gain;
@@ -3111,7 +3111,7 @@ pass. Private evidence is `build/vblank-contract-tests.log`,
 `build/blinx/run-vblank-{fresh,repeat}.log`.
 
 That checkpoint's effects-image stop is now passed by the integrated
-[MIT DSP core and native transport](../../docs/NATIVE-DSP-DONOR-2026-10-07.md).
+[MIT DSP core and native transport](../../docs/reference/audio/NATIVE-DSP-DONOR-2026-10-07.md).
 
 ### Native audio and media-worker checkpoint
 

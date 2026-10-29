@@ -19,7 +19,7 @@ or documentation changes.
 
 ## Current disposition - 2026-10-17
 
-The [bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md)
+The [bounded closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md)
 supersedes the original deferral status where a reopening trigger has fired:
 
 - **GFX-D06's promoted required work is complete** for the bounded profile.
@@ -235,7 +235,7 @@ establish that all reads of the write-only aperture always return zero.
 ## GFX-D05/D18 addendum: nominal SD digital picture - 2026-10-16
 
 The reached original640x480 NTSC tuple now has a bounded functional digital
-contract, documented in [NV2A-DIGITAL-INPUT](../../docs/NV2A-DIGITAL-INPUT.md).
+contract, documented in [NV2A-DIGITAL-INPUT](../../docs/reference/graphics/NV2A-DIGITAL-INPUT.md).
 Independent X-HD bus-receiver code identifies SD601 limited-range DDR444;
 ITU601/Khronos define the nominal conversion, and Conexant100381B supplies
 actual input packing and code remapping. The maintained GPU emits those digital
@@ -366,7 +366,7 @@ The HLE build preserves a real per-instance context capsule, not stale source
 bytes; strict SAVE rejection remains. Raw unknown prefix bytes lose their
 initialized bits and are rejected by CPU/GPU consumers. Only established
 surface projections are serialized; the eight constant anomalies remain
-unresolved. See [HLE context transport](../../docs/HLE-CONTEXT-TRANSPORT.md).
+unresolved. See [HLE context transport](../../docs/reference/runtime/HLE-CONTEXT-TRANSPORT.md).
 Reopen exact raw mapping when an actual saved-byte consumer is reached, a
 validated mapping contradicts semantic state, or an unsupported context-local
 field becomes necessary. This adds no silicon timing or netplay claim.
@@ -391,7 +391,7 @@ HLE preserves absent/known raw receipts, validates setters (0..4 or15), logs
 first omitted use and proceeds under an explicit raster-effect omission.
 Strict LLE retains its known-value4 restriction. No reset/LOAD default or
 physical pixel equivalence is inferred. See the
-[consumer policy](../../docs/HLE-OPAQUE-INITIALIZERS.md).
+[consumer policy](../../docs/reference/runtime/HLE-OPAQUE-INITIALIZERS.md).
 
 Reopen when physical evidence or visible output identifies a required effect,
 or a supported renderer adds a consumer. Clipping, depth, multisample storage,

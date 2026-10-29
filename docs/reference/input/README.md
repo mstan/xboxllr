@@ -1,0 +1,7 @@
+# Input reference
+
+[Documentation index](../../README.md) | [All references](../README.md)
+
+- [NATIVE INPUT ENUMERATION](NATIVE-INPUT-ENUMERATION.md)
+- [NATIVE INPUT MODS](NATIVE-INPUT-MODS.md)
+- [NATIVE LAUNCHER INPUT](NATIVE-LAUNCHER-INPUT.md)

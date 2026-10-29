@@ -130,7 +130,7 @@ than copying source directories manually.
 | Dependency | Source/preparation |
 | --- | --- |
 | CPU translator | Reviewed Phobos xboxrecomp revision `63f18f0334fbd8c00313c4bb565accf00627a4fd`; `tools/native_pilot.py` verifies its pin and tracked source. The native driver invokes it for preparation. |
-| CPU runtime helper | Attributed MIT upstream template plus authored bridge installed by the current preparation path; see [provenance](NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md). This is distinct from the translator source pin. |
+| CPU runtime helper | Attributed MIT upstream template plus authored bridge installed by the current preparation path; see [provenance](reference/cpu/NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md). This is distinct from the translator source pin. |
 | PHOBOS renderer | Reviewed fork revision `bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0`, prepared by `tools/native_phobos_d3d.py --donor <checkout> --output <private-build-directory> --reference <prepared-SPOON-directory>`. Its reference is the output of the SPOON preparer below, containing `donor.json` and `nv2a-reference/`, not a raw source checkout or image capture. Distribution review remains open. |
 | Alternative SPOON renderer | `tools/native_d3d_donor.py --donor <checkout> --output <private-build-directory> --vsh-reference <pinned-nv2a_vsh_cpu-source>`; donor pin `1409a7d7801d3e931fb1074be6104209ddd9a33e`. Do not change a title's renderer selection merely to bypass its required dependency. |
 | DSP | `mborgerson/dsp56300` revision `c60aeedb6a6014850204c71e53bc0cf5b3104222`; `tools/native_dsp_donor.py` prepares guarded source and records Cargo dependencies/notices. |
@@ -157,7 +157,7 @@ The selected `dsp_library` then points to
 `build/dsp-target/release/dsp56300_emu_ffi.lib`; `dsp_source` points to the
 prepared source. Keep its notices and preparation receipts. Current production
 ADPCM uses the maintained dr_wav adapter; an old GPL comparison decoder is not
-a required native dependency. See [ADPCM integration](NATIVE-ADPCM-RELEASE-2026-10-21.md).
+a required native dependency. See [ADPCM integration](reference/audio/NATIVE-ADPCM-RELEASE-2026-10-21.md).
 
 ## Prepare owned content and private paths
 
@@ -289,8 +289,8 @@ Before a commit, use `git diff --check` and
 `python tools/check_repository_hygiene.py`; use its `--history` mode before
 publishing source. Do not commit game/generated original code, firmware, keys,
 EEPROMs, profiles, raw images or diagnostic trees. The installed hooks/CI enforce
-additional hygiene. See [Windows dependency preflight](WINDOWS-RELEASE-DEPENDENCIES.md)
-and [release readiness](RELEASE-READINESS.md) for packaging, exact DLL closure,
+additional hygiene. See [Windows dependency preflight](reference/release/WINDOWS-RELEASE-DEPENDENCIES.md)
+and [release readiness](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/RELEASE-READINESS.md) for packaging, exact DLL closure,
 licenses and clean-profile acceptance. No release or title-pin update is
 established by these setup commands alone.
 

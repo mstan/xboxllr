@@ -22,16 +22,25 @@ PRIVATE_ROOTS = {'machine', 'private', 'secrets', 'dumps', 'captures', 'play'}
 # Owner-requested README images, visually reviewed with source/rights notices.
 # Exact paths AND SHA256 bytes are required; this is not an image-directory exemption.
 DOCUMENTATION_IMAGES = {
-    'docs/screenshots/blinx-alpha-16x9.png': '0826bced9675d5ea6b3c422f1859dbb9f8451004c4287e426baafedd35efb821',
-    'docs/screenshots/alpha-16x9.png': '0826bced9675d5ea6b3c422f1859dbb9f8451004c4287e426baafedd35efb821',
-    'docs/screenshots/alpha-21x9.png': '3fc79aaf211c51cb4f5e4c907ad12827ece22bb9f74489cc723735455852617e',
+    'docs/screenshots/blinx-alpha-16x9.png': (
+        '0826bced9675d5ea6b3c422f1859dbb9f8451004c4287e426baafedd35efb821',
+        '98018d90292f7ec3b4d680a17c673279e5ba30656ab7f7ba13ae2d158f8b2d28'),
+    'docs/screenshots/alpha-16x9.png': (
+        '0826bced9675d5ea6b3c422f1859dbb9f8451004c4287e426baafedd35efb821',
+        '98018d90292f7ec3b4d680a17c673279e5ba30656ab7f7ba13ae2d158f8b2d28'),
+    'docs/screenshots/alpha-21x9.png': (
+        '3fc79aaf211c51cb4f5e4c907ad12827ece22bb9f74489cc723735455852617e',
+        '5286a6d9a54a6227222247819d528fdeefd4861ae5445369d728ca5119af1489'),
     'docs/screenshots/blinx-widescreen.jpg': '52c135a49255fc1271bc0142384fe602b3e1b946056e6fbc328cfb93920980e2',
     'docs/screenshots/adaptive-gameplay.jpg': '52c135a49255fc1271bc0142384fe602b3e1b946056e6fbc328cfb93920980e2',
     'assets/launcher/boxart.png': '53046772e18e124d79277535c5c9cdd63390f8907bffd4aa015221f6cfe4b836',
     'docs/screenshots/dashboard.png': (
         '9ad68fba44cf1deca41a95222c010f58eee339ac9ba416b53c598fcfd3587378',
-        '0fc44ab0fddc63670ff7f52d6a24fbce3e9ec0d9317e593ee42966ed990ed569'),
-    'docs/screenshots/dashboard-settings.png': '7fc89fe459c12a074215362c527490a8cad921687116aad924911c62bd28d64d',
+        '0fc44ab0fddc63670ff7f52d6a24fbce3e9ec0d9317e593ee42966ed990ed569',
+        '378e5cbf6e2c6e134cc9b1c040e3a6f7d95a43b8755afbfb1be328e9a9710dc7'),
+    'docs/screenshots/dashboard-settings.png': (
+        '7fc89fe459c12a074215362c527490a8cad921687116aad924911c62bd28d64d',
+        '6eb24712e8bffd0b717de1c53499a0cb80da16cfcc0b32495738fa08ede3a5d4'),
     'docs/screenshots/jsrf-widescreen.png': 'f87db9810f706b99d88544368d56f8c4a68dd1b7c8f039d41d0ec018167397eb',
     'titles/dashboard/assets/launcher/boxart.png': (
         'efa469ca1b82307111e04831f38aff71fbda1faff7283a3b217eb4f55306fcd3',

@@ -123,7 +123,7 @@ layout and dashboard, and the firmware must accept the EEPROM revision/settings.
 The virtual drive must be provisioned from the selected EEPROM before boot;
 the IDE model checks the guest's password against that independent credential.
 The virtual identity differs from the source physical drive, whose password
-storage is not part of a raw sector image. See [HDD security setup](HDD-SECURITY.md)
+storage is not part of a raw sector image. See [HDD security setup](reference/storage/HDD-SECURITY.md)
 for the provisioning command, explicit unlocked option and remaining limits.
 
 Keep the original EEPROM if you need the original console identity. Data tied

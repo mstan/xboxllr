@@ -3,7 +3,7 @@
 // Tracker: beads-xbox.1.16.2. Companion to tools/bench/unicorn_hook_bench.cpp (TCG throughput)
 // and tools/bench/block_size_bench.cpp (per-block cost decomposition).
 //
-// The CPU-tier replacement decision (docs/PERF-METHODOLOGY.md section 1 item 11) turns on
+// The CPU-tier replacement decision (docs/reference/testing/PERF-METHODOLOGY.md section 1 item 11) turns on
 // whether hardware virtualization's floor is below the TCG floor for THIS workload. Guest
 // instructions run at native speed under WHPX, so the floor is set almost entirely by VM
 // EXITS. The canonical 12 B replay takes 17 546 710 MMIO dispatches and 41 951 I/O port

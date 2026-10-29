@@ -4,7 +4,7 @@ Qualified family `beads-xbox.1.112`, under the revised `.102` burndown.
 Accepted Q01-Q03 establish the bounded original scheduling/thread/event/timer
 contract; calendar is part of this family. The current overall total is
 **9/9 bounded families** under the
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+[closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md).
 Earlier dated sections preserve their historical counts and remaining work.
 
 ## Original physical resource backing and native lifetime - 2026-10-11
@@ -2307,7 +2307,7 @@ an excuse to fake cursor/completion progress or a canonical TSC-policy change.
 Root proof `qualified-observation-v75.aot-private.json`, SHA256
 `7cdaa89bfb96d22b97145371e40dc4955d747ed0e19bdc4f4eb405add7119cf3`,
 binds264 verified identities. See the
-[actual original movie and audio evidence](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#composed-original-movie-observation-and-consumer-replay---2026-10-11).
+[actual original movie and audio evidence](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#composed-original-movie-observation-and-consumer-replay---2026-10-11).
 The completed default-HLE repeat/interruption result is reused; no new build,
 title run or physical request is needed to record this finding.
 
@@ -2342,7 +2342,7 @@ Fixed-time-jump and automatic next-PIT-deadline pump experiments remain failed
 and excluded. Native compute handoffs, ordinary movie controls and runtime
 capture ownership still require composition. No full-title or movie acceptance
 is inferred from these fixture passes. See the
-[reference consumer foundation](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#controlled-reference-clock-and-audio-consumer-foundation---2026-10-11).
+[reference consumer foundation](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#controlled-reference-clock-and-audio-consumer-foundation---2026-10-11).
 
 ## Maintained reference runtime and controlled compute - 2026-10-11
 

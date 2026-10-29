@@ -6,7 +6,7 @@ input/display regression and integrated queue/lifetime qualification pass.
 The final game-owned native regression also passes. This closes the bounded
 display gate. The current overall total is **9/9 bounded families**, including
 the later original graphics attract route; see the
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+[closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md).
 Encoder phase, other modes and exhaustive draw coverage retain their explicit
 limits. Dated component reports below preserve historical checkpoints.
 

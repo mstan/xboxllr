@@ -14,7 +14,7 @@ Two modes:
           --require-same-final-sha \
           --min-final-fps-gain-pct 10
 
-  Set vs set (the retention gate of docs/PERF-METHODOLOGY.md section 2 rule 7):
+  Set vs set (the retention gate of docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 7):
 
       py tools/compare_xbox_reports.py \
           --set-a build/leg-00-A-r1.report.json build/leg-02-A-r2.report.json \
@@ -57,7 +57,7 @@ from typing import Any
 
 NS_PER_SEC = 1_000_000_000
 
-# docs/PERF-METHODOLOGY.md section 2 rule 7.
+# docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 7.
 DEFAULT_MIN_IMPROVEMENT_PCT = 5.0
 
 
@@ -558,7 +558,7 @@ def run_pair(args: argparse.Namespace) -> int:
     print("result: PASS")
     print(
         "note: a single pair cannot clear the retention gate of "
-        "docs/PERF-METHODOLOGY.md section 2 rule 3 (>= 3 interleaved legs per "
+        "docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 3 (>= 3 interleaved legs per "
         "arm); use --set-a/--set-b."
     )
     return 0
@@ -618,7 +618,7 @@ def run_sets(args: argparse.Namespace) -> int:
         failed.append(
             f"fewer than 3 legs per arm "
             f"({summary['protocol']['arm_a_legs']}/{summary['protocol']['arm_b_legs']}); "
-            "docs/PERF-METHODOLOGY.md section 2 rule 3"
+            "docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 3"
         )
 
     if args.require_quiescence:
@@ -656,7 +656,7 @@ def run_sets(args: argparse.Namespace) -> int:
             "rule": "median AND min must improve by >= threshold",
             "threshold_pct": threshold,
             "reference": (
-                "docs/PERF-METHODOLOGY.md section 2 rule 5/7 (amended 2026-09-03)"
+                "docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 5/7 (amended 2026-09-03)"
             ),
             "median_improvement_pct": median_gain,
             "min_improvement_pct": min_gain,

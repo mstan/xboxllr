@@ -8,8 +8,8 @@ xboxlle runs original Xbox software by emulating the console's hardware. This is
 called **low-level emulation (LLE)**. The first goal is to run the original Xbox
 dashboard, the menu with Memory, Music, Xbox Live, and Settings.
 
-The active target is a [faithful LLE floor with interchangeable enhanced execution](GOAL-AOT-DASHBOARD.md).
-The current [Blinx milestone and burndown](BLINX-BURNDOWN.md) preserves working
+The active target is a [faithful LLE floor with interchangeable enhanced execution](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/GOAL-AOT-DASHBOARD.md).
+The current [Blinx milestone and burndown](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-BURNDOWN.md) preserves working
 FMVs and real-time attract gameplay. Next, complete and qualify the maintained LLE
 routes beneath the native services before expanding into New Game. The accepted
 28.5-28.8 fps is tracked performance debt; dashboard performance remains ongoing.
@@ -27,18 +27,18 @@ Shared CPU, device, renderer, audio and kernel services remain here.
 Dashboard support and real persistent console storage remain architectural
 requirements. Users should be able to choose a dashboard route or accelerated
 title launch; missing dashboard assets must not remove HDD/save support. See
-[console launch and storage requirements](CONSOLE-LAUNCH-STORAGE.md).
+[console launch and storage requirements](reference/storage/CONSOLE-LAUNCH-STORAGE.md).
 
 **This is development software.** Earlier builds rendered the dashboard with
 the tested files. HDD startup now requires independently provisioned credentials;
 the kernel must supply the correct password. An explicit unlocked-drive setting
-is also available. See [HDD security setup and limits](HDD-SECURITY.md).
+is also available. See [HDD security setup and limits](reference/storage/HDD-SECURITY.md).
 Support for other firmware and disk images is not yet established.
 Original-speed, responsive output is the product goal; it is not yet achieved.
 Any subsystem may have a native/HLE replacement backed by its implemented LLE
 contract. Internal algorithms may differ, with compatible observable behavior
 and documented numerical/presentation tolerances. Current implementation status
-is in [STATUS](../STATUS.md); the new delivery policy does not imply those enhanced
+is in [STATUS](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/STATUS.md); the new delivery policy does not imply those enhanced
 paths already exist.
 
 Portable native versions of selected Xbox software are a required project goal,
@@ -47,19 +47,19 @@ to portable C, then compiles it for the host computer. The runtime will provide
 places to add wider camera views, higher resolution, and higher frame rates later.
 Generated portable C runs in **machine-adapter tests** and an experimental private
 dashboard build, including transitions to and from Unicorn. Normal builds use
-Unicorn. The [dashboard AOT validation record](RESULTS-AOT4-2026-09-07.md)
+Unicorn. The [dashboard AOT validation record](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/RESULTS-AOT4-2026-09-07.md)
 reports matching dashboard images and a slower native path, which stays opt-in.
-Developers can follow the [private dashboard AOT workflow](AOT-PRIVATE-WORKFLOW.md)
+Developers can follow the [private dashboard AOT workflow](reference/cpu/AOT-PRIVATE-WORKFLOW.md)
 to capture, generate, build and measure selected regions locally. This remains
 experimental; native coverage does not imply a performance improvement.
-See [machine integration and validation](DESIGN-AOT-MACHINE.md).
-See the [Blinx launch burndown](BLINX-BURNDOWN.md) for the game-launch
+See [machine integration and validation](reference/cpu/DESIGN-AOT-MACHINE.md).
+See the [Blinx launch burndown](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-BURNDOWN.md) for the game-launch
 dependencies and the distinction between first execution, playable LLE and
 strict AOT. The drive-security gate must pass before qualifying a faithful boot.
 The current tested runtime setup is Windows x64; ARM hardware testing is deferred.
-See the [AOT implementation plan and test commands](PLAN-AOT-BURNDOWN-2026-09-06.md)
+See the [AOT implementation plan and test commands](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PLAN-AOT-BURNDOWN-2026-09-06.md)
 and the
-[comparison with xemu and psxrecomp, and the implementation milestones](COMPARISON-XEMU-NATIVIZATION-2026-09-06.md)
+[comparison with xemu and psxrecomp, and the implementation milestones](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/COMPARISON-XEMU-NATIVIZATION-2026-09-06.md)
 for what exists today and what we still need to prove.
 
 This guide takes you from a fresh Windows setup to a dashboard window you can
@@ -362,7 +362,7 @@ py -3 tools/provision_hdd_security.py --eeprom ..\machine\eeprom.bin --output ..
 
 Keep that private file between runs. Existing output is never overwritten.
 The emulator checks the guest's password against these independent credentials.
-See [HDD security modes and remaining limits](HDD-SECURITY.md).
+See [HDD security modes and remaining limits](reference/storage/HDD-SECURITY.md).
 See [EEPROM profiles and compatibility](INPUTS.md#generated-eeprom-setup).
 
 ## 8. Check the files, then open the dashboard
@@ -429,7 +429,7 @@ An experimental borrowed shader path is selectable with `--nv2a-renderer xemu`.
 It uses xemu-generated pixel shaders for supported draws and the reference path
 for the remainder. Return to `opengl` to opt out. This is an integration option,
 not a promise of 60 FPS or a qualified shipping default; see the
-[renderer contract and qualification notes](RENDERER-XEMU-PSH.md).
+[renderer contract and qualification notes](reference/graphics/RENDERER-XEMU-PSH.md).
 
 **Check:** a window should open and eventually show Xbox video. A fresh profile
 may first show the **CLOCK** screen. Let it finish loading, click inside the window,
@@ -489,7 +489,7 @@ the EEPROM again unless something has changed.
 | A DLL is missing | Keep MinGW64 on PATH and `SDL3.dll` beside `xlle.exe`; do not copy just the EXE out of the build folder. |
 | Keys do nothing | Click the window, keep `--test-synthetic-controller-hub`, and do not add a test input script. Use Z to select, not Enter. |
 | The clock or settings return to their old values next run | Guest changes are temporary with the default disk and EEPROM behavior. See step 9. |
-| Xbox video is black or stops changing | Read the PowerShell error and [dashboard debugging guide](DASHBOARD-DEBUGGING.md). Firmware/disk compatibility is still limited. |
+| Xbox video is black or stops changing | Read the PowerShell error and [dashboard debugging guide](reference/dashboard/DASHBOARD-DEBUGGING.md). Firmware/disk compatibility is still limited. |
 
 If you report a problem, include the source commit (`git rev-parse --short HEAD`),
 Windows version, GPU/driver, and the relevant error after checking it for private
@@ -516,7 +516,7 @@ another recording.
 The empty `-ExpectedFinalSha ''` disables the final-image check against the
 maintainer's private files. Your files or generated EEPROM can produce a different
 image. This command does not establish that your run matches a reference console
-or that a performance change is faster. See [the measurement rules](PERF-METHODOLOGY.md)
+or that a performance change is faster. See [the measurement rules](reference/testing/PERF-METHODOLOGY.md)
 before comparing performance, and [golden records](../goldens/README.md) for reference
 checks.
 
@@ -536,16 +536,16 @@ behavior reference. The CPU uses Unicorn, with SDL3 and OpenGL for host graphics
 
 | Topic | Read more |
 |---|---|
-| Goals and current progress | [North star](../NORTH-STAR.md), [status](../STATUS.md), [roadmap](ROADMAP.md) |
-| Build options and portable builds | [Building](BUILDING.md) |
+| Goals and current progress | [North star](reference/architecture/NORTH-STAR.md), [status](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/STATUS.md), [roadmap](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/ROADMAP.md) |
+| Build options and portable builds | [Building](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BUILDING.md) |
 | File formats, EEPROM profiles, and planned input generation | [Private inputs](INPUTS.md) |
-| How the emulator is organized | [Design](DESIGN.md) |
-| Measuring speed and interactive presentation | [Methodology](PERF-METHODOLOGY.md), [presentation measurements](PERF-PRESENT-2026-09-06.md) |
+| How the emulator is organized | [Design](reference/architecture/DESIGN.md) |
+| Measuring speed and interactive presentation | [Methodology](reference/testing/PERF-METHODOLOGY.md), [presentation measurements](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-PRESENT-2026-09-06.md) |
 | Keeping private material out of Git | [Hygiene guide](REPOSITORY-HYGIENE.md), [publication guard](../tools/check_repository_hygiene.py) |
 
 Credit to [sp00nznet's xboxdashboard](https://github.com/sp00nznet/xboxdashboard)
 for investigation lessons used in our debugging guide. Our
-[external source review](PERF-EXTERNAL-REVIEW-2026-09-06.md) also covers
+[external source review](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-EXTERNAL-REVIEW-2026-09-06.md) also covers
 sp00nznet's xboxrecomp GPU techniques and their limits for faithful LLE.
 
 ## License and private material

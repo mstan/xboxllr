@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a pristine playable Windows alpha archive with corresponding source.
+"""Build a pristine playable Windows title archive with corresponding source.
 
 The native executable must already be built and validated. Never stage a used
 player folder. This command does not publish or modify saves or existing output.

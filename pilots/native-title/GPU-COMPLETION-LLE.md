@@ -9,8 +9,8 @@ moving attract pairs 7/8 and 11/12, genuine Start/release, visible title 9,
 16 matched material-resource retirements and fresh creation after neutral reentry.
 Accepted G01 supplies original full-device Reset/Release; host stop is not guest
 teardown. See the
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) and
-[acceptance sequence](../../docs/BLINX-GRAPHICS-ACCEPTANCE.md).
+[closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md) and
+[acceptance sequence](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-GRAPHICS-ACCEPTANCE.md).
 
 **Hardware scope:** the owner later deferred console-dependent questions to the
 end. Existing source/physical observations support this completed bounded path;
@@ -20,7 +20,7 @@ The dated observations below preserve their historical partial results and
 startup guards; the current checklist above records their later disposition.
 No unobserved behavior is waived or counted as qualified.
 Earlier dated sections retain their historical family counts; the current
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md) governs acceptance.
+[closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md) governs acceptance.
 
 ## Encoder command transport and next clock boundary - 2026-10-15
 
@@ -1493,7 +1493,7 @@ The family count remains **4/9**.
 ## First authorized AV handshake observation - 2026-10-09
 
 After the verified recovery scope and separate XBE upload described in the
-[burndown](../../docs/BLINX-BURNDOWN.md), the owner manually launched the
+[burndown](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-BURNDOWN.md), the owner manually launched the
 reviewed v0.4.0 probe. An earlier identity check saw the legacy v0.2 program
 and stopped before ARM; no experiment was sent in that attempt. The corrected
 session passed the exact new-agent identity and fixed CPU/NV2A read-only probes,

@@ -5,12 +5,12 @@ sp00nznet MIT template at `1409a7d7801d3e931fb1074be6104209ddd9a33e` and a separ
 authored runtime bridge. Exact source/license hashes and imported files are in
 [the component inventory](src/third_party/xboxrecomp_cpu/README.md); adaptations
 and qualification are recorded in the
-[CPU helper integration](docs/NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md).
+[CPU helper integration](docs/reference/cpu/NATIVE-CPU-HELPER-PROVENANCE-2026-10-21.md).
 Other generated glue and the private renderer still need their own review.
 
 Current native-title ADPCM, October 21, 2026: production audio uses the existing
 MIT-0 dr_wav adapter; the NoRain/Phobos codec below is now comparison-only.
-See the [integration and measured evidence](docs/NATIVE-ADPCM-RELEASE-2026-10-21.md).
+See the [integration and measured evidence](docs/reference/audio/NATIVE-ADPCM-RELEASE-2026-10-21.md).
 Historical import records remain intact. This change does not clear the other
 private pilot dependencies for the intended shipping product.
 
@@ -54,7 +54,7 @@ lookup transformation for the existing private GPL-dependent generated pilot;
 no additional donor implementation body is copied. Existing generated CPU and
 renderer notices still apply. The register declaration, HLE binding and sampling
 references and exact fork revisions are recorded in the
-[optimization audit](docs/NATIVE-HLE-OPTIMIZATION-2026-10-18.md). No new donor
+[optimization audit](docs/reference/runtime/NATIVE-HLE-OPTIMIZATION-2026-10-18.md). No new donor
 kernel or live shadow execution is adopted.
 
 ### Deferred stream upload - 2026-10-08
@@ -73,7 +73,7 @@ exclusion remain unchanged.
 
 ### Movie queue/stall audit - 2026-10-08
 
-The [movie stall audit](docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
+The [movie stall audit](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md)
 records the pinned Phobos audio queue/buffer/diagnostic references and the
 independent FFmpeg ADX comparison. The new bounded timeline, sparse timings and
 event-trace gate are independently authored. No additional donor or FFmpeg
@@ -643,7 +643,7 @@ The C FFI static library supplies actual instruction execution. Xbox image,
 DMA and XAudio2 adapters are independently authored; no GPL audio implementation
 was imported. The dependency record includes the MPL-2.0 cbindgen build tool;
 the MIT root license does not replace dependencies' own terms. See the
-[DSP audit](docs/NATIVE-DSP-DONOR-2026-10-07.md) and existing
+[DSP audit](docs/reference/audio/NATIVE-DSP-DONOR-2026-10-07.md) and existing
 [private CPU pilot distribution limits](LICENSE-SCOPE.md).
 
 The maintained GP path additionally uses this same pinned MIT core through
@@ -1449,7 +1449,7 @@ behavioral references. Original title-owned setter/helper bodies separately
 establish the low-byte store and low-three-bit method mask. The atomic native
 gain control and diagnostic capture completion event are independently authored;
 no source-processing body was copied. See
-[native mix-bin headroom](docs/NATIVE-AUDIO-MIXBIN-HEADROOM.md) for scope and
+[native mix-bin headroom](docs/reference/audio/NATIVE-AUDIO-MIXBIN-HEADROOM.md) for scope and
 actual-output validation.
 
 The native notification extension additionally checked Cxbx-Reloaded's
@@ -1458,7 +1458,7 @@ position-notification capability and public API role. Actual owned original
 wrapper/caller code independently establishes the copied position/handle list
 and ADPCM block offsets. The retained host references, decoded-position
 adapter and consumed-sample observer are independently authored; no Cxbx body
-was copied. See [notification scope](docs/NATIVE-AUDIO-NOTIFICATIONS.md).
+was copied. See [notification scope](docs/reference/audio/NATIVE-AUDIO-NOTIFICATIONS.md).
 
 [libsamplerate 0.2.2](https://github.com/libsndfile/libsamplerate/tree/0.2.2),
 copyright Erik de Castro Lopo and upstream contributors, was initially consulted
@@ -1826,7 +1826,7 @@ revision `5fc7ddddd03b4b5a7e6233769ad6a8fe46009965`, was inspected as a
 behavioral reference at the owner's request. Credit belongs to its authors
 and contributors. Its dashboard reverse-engineering notes, XAP interface
 inventory and desktop source informed the
-[reference assessment](docs/DONOR-SERVICE-ADOPTION-2026-10-07.md#theseus-reference-audit-owner-follow-up-2026-10-07).
+[reference assessment](docs/reference/runtime/DONOR-SERVICE-ADOPTION-2026-10-07.md#theseus-reference-audit-owner-follow-up-2026-10-07).
 The repository declares GPL-3.0-or-later and includes separate component
 notices. No Theseus implementation, assets or linked dependency were added by
 this assessment; the external checkout is research material only. This entry
@@ -1843,7 +1843,7 @@ claims of runtime initialization or complete function boundaries. The Credits
 mod transforms the owner's original XAP/geometry locally and preserves the
 original archives and unrelated payloads. No retail scripts, assets, XDK
 headers or private annotation output are committed. See
-[the dashboard mod notes](docs/DASHBOARD-ANNOTATIONS-AND-CREDITS.md) for the
+[the dashboard mod notes](docs/reference/dashboard/DASHBOARD-ANNOTATIONS-AND-CREDITS.md) for the
 source/version boundary and still-pending dashboard validation.
 
 ## Actual AC97 PCM payload consumer (2026-10-11)

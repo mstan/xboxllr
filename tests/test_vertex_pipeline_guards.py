@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Structural guards for the phase-5 vertex-pipeline work and its censuses.
 
-Bead beads-xbox.1.15.10 phase 5; acceptance docs/PERF-METHODOLOGY.md section 3
+Bead beads-xbox.1.15.10 phase 5; acceptance docs/reference/testing/PERF-METHODOLOGY.md section 3
 (behavioural faithfulness). Companion to tests/test_gpu_profiles_guards.py.
 
 Three things landed and each has a property a compiler cannot check and a

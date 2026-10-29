@@ -8,7 +8,7 @@ Linux releases are deferred. Tracking: `beads-xbox.1.187.10`, release
 
 ## Dashboard beta quick start
 
-Download the separate [Dashboard beta](https://github.com/mstan/xboxllr/releases/tag/dashboard-beta-2026.10.29.1),
+Download the separate [Dashboard beta](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2),
 extract the complete ZIP to a writable folder, and open **Start Game.exe**.
 Choose **Skip** in optional console setup for a new local console profile.
 On the main launcher screen select your own `xboxdash.xbe` from Dashboard 5960,
@@ -43,7 +43,7 @@ the Microsoft kernel. An optional kernel dump supplies original signing
 material offline; new virtual-console profiles do not require one. The
 native Dashboard is another title using those services; its original artwork
 and program are separate from boot firmware. See the
-[kernel-service and profile design](KERNEL-SERVICES-SETUP.md).
+[kernel-service and profile design](reference/runtime/KERNEL-SERVICES-SETUP.md).
 
 ## 1. Obtain your own content
 
@@ -99,7 +99,7 @@ the complete per-title image-backed save matrix remain qualification checks.
 The public packages contain no original Xbox content, console keys or personal
 profiles. Historical owner handoffs included local **Setup Inputs** links;
 those are private workstation conveniences and are not in the public downloads.
-See [preview packaging](NATIVE-FIRST-RUN-PREVIEW.md) for the shared build path.
+See [preview packaging](reference/release/NATIVE-FIRST-RUN-PREVIEW.md) for the shared build path.
 
 Use game and console backups you are entitled to make and use. This project
 does not supply Microsoft firmware, retail Dashboard assets, games or private
@@ -145,7 +145,7 @@ files; backup and circumvention rules depend on where you live.
   write or boot modification is needed merely to use already made backups.
 
 The current signing preparer accepts only the reviewed loaded-kernel SHA256
-listed in [signing setup](NATIVE-SIGNING-SETUP.md). A kernel from another BIOS,
+listed in [signing setup](reference/storage/NATIVE-SIGNING-SETUP.md). A kernel from another BIOS,
 or a decompressed file instead of that loaded capture, is **not automatically
 accepted**. General firmware/key import is a remaining setup task, not a reason
 to search for someone else's matching dump or disable the identity check.
@@ -263,7 +263,7 @@ Continue with the relevant guide for build and launcher commands:
 - [JSRF developer setup](https://github.com/mstan/JSRFRecomp/blob/main/docs/DEVELOPMENT.md)
 - [Shared native title driver](NATIVE-TITLE-DRIVER.md) and
   [native pilot](../pilots/native-title/README.md)
-- [Native Dashboard status and title work](NATIVE-DASHBOARD-BURNDOWN.md)
+- [Native Dashboard status and title work](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/NATIVE-DASHBOARD-BURNDOWN.md)
 
 Do not advance a game's pinned framework merely because its setup guide links
 to newer framework documentation. That requires its own compatible build check.
@@ -286,7 +286,7 @@ open under `beads-xbox.1.22`. Do not treat a zero-filled file as a formatted HDD
 
 For the original-system/reference route, follow the separate
 [private input guide](INPUTS.md), [legacy setup](LEGACY-FULL-SYSTEM-SETUP.md)
-and [HDD security guide](HDD-SECURITY.md). They specify compatible flash,
+and [HDD security guide](reference/storage/HDD-SECURITY.md). They specify compatible flash,
 decrypted 2BL, raw FATX HDD and EEPROM inputs, including external BIOS
 extraction. The current entry is a supplied 2BL handoff; it is not qualified
 authentic MCPX cold boot. Keep source backups untouched and use working copies.

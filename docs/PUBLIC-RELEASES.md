@@ -2,7 +2,8 @@
 
 XboxLLR is beta. Blinx's playable public alpha is tested through World 2;
 end-to-end completion is not guaranteed. Blinx is the only publicly supported
-game. Dashboard and the build toolkit are separate releases in xboxllr.
+game. One XboxLLR beta release contains both the Dashboard player ZIP and the build-tool
+ZIP. Blinx keeps its separate game release.
 
 Commit clean source first. Use separate output directories outside checkouts,
 build and validate the native applications, then run the scripts below. They
@@ -10,11 +11,22 @@ refuse existing outputs and never package player state. No script changes GitHub
 visibility or publishes automatically. Publish only the verified `assets/`
 contents, never staging/build/QA directories.
 
-## Dashboard
+## One XboxLLR release
+
+Use **tools/release_xboxllr.py** to stage both components and combine their
+verified assets and checksums in one output directory. It accepts the common
+Dashboard arguments below plus `--tool-launcher <xboxllr.exe>` and
+`--capstone-wheel <pinned-wheel>`. Use `--help` for the complete interface.
+It packages the already validated Dashboard executable and build-tool EXE;
+it does not compile or run games. Publish the combined `assets/` directory to
+one `beta-<version>` prerelease. The two component packagers below remain useful
+for development and are called by the combined command.
+
+## Dashboard component
 
 ```powershell
 python tools/release_dashboard.py `
-  --version 2026.10.29.1 `
+  --version 2026.10.29.2 `
   --runtime-framework-revision <full-framework-commit> `
   --runtime-source-revision <full-framework-commit> `
   --runtime D:\Build\dashboard\native-title\Release\XboxDashboard.exe `
@@ -25,8 +37,8 @@ python tools/release_dashboard.py `
   --runtime-dir D:\Inputs\reviewed-msvc-redist-x64 `
   --renderer D:\Build\prepared-d3d --ui D:\Build\prepared-ui `
   --dsp D:\Build\prepared-dsp `
-  --notes docs/RELEASE-NOTES-BETA-2026.10.29.1.md `
-  --output D:\Release\dashboard-beta-2026.10.29.1
+  --notes docs/RELEASE-NOTES-BETA-2026.10.29.2.md `
+  --output D:\Release\xboxllr-beta-2026.10.29.2
 ```
 
 Supply additional `--runtime-dir` arguments for declared runtime DLL directories
@@ -36,7 +48,7 @@ renderer/UI/DSP source, stages a pristine launcher/runtime package, attaches
 corresponding source inside it, verifies the archive and writes SHA256SUMS.txt.
 Users still supply Dashboard 5960 and its complete asset tree.
 
-## Build tool EXE
+## Build tool component
 
 Build `tools/windows-build-launcher` as described in [BUILD-TOOL](BUILD-TOOL.md).
 Use an official Python embeddable archive and the pinned PyPI Capstone wheel:
@@ -44,10 +56,10 @@ Use an official Python embeddable archive and the pinned PyPI Capstone wheel:
 ```powershell
 python -m pip download --only-binary=:all: --no-deps --platform win_amd64 --dest D:\Inputs capstone==5.0.9
 python tools/release_toolkit.py `
-  --version 2026.10.29.1 --launcher D:\Build\xboxllr-tool\Release\xboxllr.exe `
+  --version 2026.10.29.2 --launcher D:\Build\xboxllr-tool\Release\xboxllr.exe `
   --embed D:\Inputs\python-3.13.17-embed-amd64.zip `
   --capstone-wheel D:\Inputs\capstone-5.0.9-py3-none-win_amd64.whl `
-  --output D:\Release\toolkit-beta-2026.10.29.1
+  --output D:\Release\toolkit-beta-2026.10.29.2
 ```
 
 The archive contains xboxllr.exe, embedded Python/Capstone, their notices, the
@@ -75,7 +87,7 @@ games must be hidden and muted. Never run the pristine staging tree.
 
 Create a GitHub draft prerelease at the exact committed source, upload only the
 asset files, compare the returned GitHub asset SHA-256 digests with SHA256SUMS.txt,
-then publish. Use separate tags `dashboard-beta-<version>`,
-`toolkit-beta-<version>` and Blinx's `alpha-<version>`. Keep alpha limitations
+then publish. Use one XboxLLR tag `beta-<version>` for both components,
+and Blinx's separate `alpha-<version>`. Keep alpha limitations
 and user-supplied-input instructions in the release body. Verify unauthenticated
 public access after publication. Existing private-preview history is historical.
