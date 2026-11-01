@@ -254,10 +254,14 @@ XLLE_PILOT_TRACE = "0"
         (self.output / 'gen/unlisted.c').write_text('extra')
         with self.assertRaises(ValueError):
             n.check_generated(self.output, self.data['title'])
+        self.assert_not_configurable_or_launchable()
         (self.output / 'gen/unlisted.c').unlink()
         (self.output / 'gen/recomp.c').write_text('changed')
         with self.assertRaises(ValueError):
             n.check_generated(self.output, self.data['title'])
+        self.assert_not_configurable_or_launchable()
+        (self.output / 'gen/recomp.c').unlink()
+        self.assert_not_configurable_or_launchable()
 
     def test_external_profile_and_private_path_resolution(self):
         pathsfile = self.root / 'external/paths.json'
