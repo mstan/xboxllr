@@ -25,6 +25,8 @@ void pilot_dsp_process(PilotDsp *dsp,const uint32_t mix[1024],uint32_t output[19
 uint64_t pilot_dsp_fingerprint(const PilotDsp *dsp);
 uint64_t pilot_dsp_blocks(const PilotDsp *dsp);
 uint64_t pilot_dsp_dma_nodes(const PilotDsp *dsp);
+/* Diagnostic read only while the processing owner is stopped/excluded. */
+uint64_t pilot_dsp_native_dma_payloads(const PilotDsp *dsp);
 /* CPU shadow state is separate from live GP execution. A patch batch validates
  * every range before changing either owner. The caller must exclude Process. */
 struct PilotDspPatch {uint32_t offset,bytes;const void *data;};

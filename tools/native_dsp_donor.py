@@ -13,6 +13,60 @@ from native_dsp_sen import FILES as SEN_FILES, patch as resident_sen_patch
 
 PIN = 'c60aeedb6a6014850204c71e53bc0cf5b3104222'
 GIT = 'C:/Program Files/Git/cmd/git.exe'
+GRAPH_FILES = frozenset({'crates/emu-ffi/src/lib.rs',
+    'crates/emu-ffi/include/dsp56300.h', 'crates/emu/src/jit.rs'})
+
+
+def graph_cache_patch(name, text):
+    """Bound host per-PC metadata independently of guarded memory-map extent."""
+    if name == 'crates/emu-ffi/src/lib.rs':
+        anchor = '/// Destroy a DSP JIT instance.'
+        addition = '''/// Create with a bounded host block-cache domain. Memory maps and
+/// instruction semantics are unchanged; PCs outside this cache use the
+/// existing native single-instruction path. Zero, over-24-bit and larger-than-
+/// map cache extents return null. Buffer/callback lifetime rules match create.
+///
+/// # Safety
+/// All buffer and callback pointers in info must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dsp56300_create_cached(info: *const CCreateInfo, cache_words: u32) -> *mut DspJit {
+    if cache_words == 0 || cache_words > 0x1000000 { return std::ptr::null_mut(); }
+    let map = if info.is_null() { MemoryMap::default() }
+        else { unsafe { convert_create_info(info) } };
+    if cache_words > map.p_space_end() { return std::ptr::null_mut(); }
+    let state = DspState::new(map);
+    Box::into_raw(Box::new(DspJit { state, jit: JitEngine::new(cache_words as usize) }))
+}
+
+'''
+    elif name == 'crates/emu-ffi/include/dsp56300.h':
+        anchor = 'Dsp56300Jit *dsp56300_create(const Dsp56300CreateInfo *info);'
+        addition = anchor + '''
+
+/**
+ * Create with a bounded host block-cache domain. Memory maps and
+ * instruction semantics are unchanged; PCs outside this cache use the
+ * existing native single-instruction path. Zero, over-24-bit and larger-than-
+ * map cache extents return null. Buffer/callback lifetime rules match create.
+ *
+ * # Safety
+ * All buffer and callback pointers in info must be valid.
+ */
+Dsp56300Jit *dsp56300_create_cached(const Dsp56300CreateInfo *info, uint32_t cache_words);'''
+        if text.count(anchor) != 1:
+            raise ValueError('DSP graph-cache header no longer matches')
+        return text.replace(anchor, addition)
+    elif name == 'crates/emu/src/jit.rs':
+        anchor = '        let p_end = map.p_space_end();'
+        addition = '        let p_end = map.p_space_end().min(self.pram_size as u32);'
+        if text.count(anchor) != 1:
+            raise ValueError('DSP graph-cache diagnostic extent no longer matches')
+        return text.replace(anchor, addition)
+    else:
+        return text
+    if text.count(anchor) != 1:
+        raise ValueError('DSP graph-cache factory no longer matches')
+    return text.replace(anchor, addition + anchor)
 
 
 def preparation_identity():
@@ -41,7 +95,7 @@ def guarded(name, text):
         if text.count(old) != 1:
             raise ValueError('donor guard no longer matches: ' + name)
         text = text.replace(old, new)
-    return resident_sen_patch(name, text)
+    return graph_cache_patch(name, resident_sen_patch(name, text))
 
 
 def prepare(donor, output, cargo):
@@ -61,7 +115,7 @@ def prepare(donor, output, cargo):
         # Copy tracked source only; .git and build products never cross over.
         blob = (donor / name).read_bytes()
         hashes[name] = hashlib.sha256(blob).hexdigest()
-        if name in SEN_FILES:
+        if name in SEN_FILES | GRAPH_FILES:
             blob = guarded(name, blob.decode()).encode()
             patched[name] = hashlib.sha256(blob).hexdigest()
         path = output / name

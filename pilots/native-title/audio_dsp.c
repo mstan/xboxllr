@@ -8,6 +8,9 @@
 #include <string.h>
 #include "dsp56300.h"
 #include "audio_dsp.h"
+#ifdef PILOT_DSP_DMA
+#include "dsp_dma.h"
+#endif
 #ifdef PILOT_SESSION_RUNTIME
 #include "session_replay.h"
 #endif
@@ -31,6 +34,10 @@ struct PilotDsp {
     uint64_t blocks,nodes;
     uint8_t *owned,*guest,*dirty,*published;
     uint32_t storage_bytes,processing;
+#ifdef PILOT_DSP_DMA
+    uint32_t native_dma;
+    uint64_t native_dma_payloads;
+#endif
 };
 static uint32_t word(const void *p) {uint32_t v;memcpy(&v,p,4);return v;}
 static int range(uint32_t start,uint32_t bytes,uint32_t begin,uint32_t end)
@@ -155,6 +162,17 @@ static void transfer(PilotDsp *d)
             invalid("DMA format/stride",control);
         uint32_t size=n[6]+1,offset=n[4];
         if(offset>=size || (uint64_t)n[5]+size>d->scratch_bytes)invalid("DMA scratch bounds",n[5]);
+#ifdef PILOT_DSP_DMA
+        int native=d->native_dma;
+#ifdef PILOT_SESSION_RUNTIME
+        if(pilot_session_mode()!=PILOT_SESSION_OFF)native=0;
+#endif
+        PilotDspDmaView view={d->x,d->y,d->mix,d->scratch,d->scratch_bytes,
+            d->owned,d->dirty,d->storage_bytes,(uint32_t)(((uint64_t)d->storage_bytes+7)/8)};
+        if(native && pilot_dsp_dma_payload(&view,(control&2)!=0,n[3],count,n[5],size,offset,&offset))++d->native_dma_payloads;
+        else
+#endif
+        {
         /* Validate the entire descriptor before a single byte is transferred. */
         for(unsigned i=0;i<count;++i)dma_word(d,n[3]+i);
         for(unsigned i=0;i<count;++i) {
@@ -165,6 +183,7 @@ static void transfer(PilotDsp *d)
                 if(++offset==size)offset=0;
             }
             if(!(control&2)){*dst=sample>>8;mark_store(d,dst,4);}
+        }
         }
         if(control&16){uint32_t *position=dma_word(d,at+4);*position=offset;mark_store(d,position,4);}
         d->next=n[0];++d->nodes;
@@ -208,7 +227,23 @@ static void unmapped_write(void *opaque,uint32_t address,uint32_t value)
 static PilotDsp *create(const PilotDspImage *image,void *storage,uint32_t guest_base,int isolated)
 {
     if(!image || !storage || ((uintptr_t)storage&3) || (uint64_t)guest_base+image->storage_bytes>0x100000000ull)return NULL;
+#ifdef PILOT_DSP_GRAPH_OWNER
+    const char *cache=getenv("XLLE_PILOT_DSP_GRAPH_OWNER");
+    if(cache && strcmp(cache,"0") && strcmp(cache,"1")){fprintf(stderr,"[DSP GRAPH OWNER] invalid startup selection\n");return NULL;}
+    int bounded_cache=!isolated && (!cache || !strcmp(cache,"1"));
+#ifdef PILOT_SESSION_RUNTIME
+    if(pilot_session_mode()!=PILOT_SESSION_OFF)bounded_cache=0;
+#endif
+#endif
+#ifdef PILOT_DSP_DMA
+    const char *dma=getenv("XLLE_PILOT_DSP_DMA");
+    if(dma && strcmp(dma,"0") && strcmp(dma,"1")){fprintf(stderr,"[DSP DMA] invalid startup selection\n");return NULL;}
+#endif
     PilotDsp *d=calloc(1,sizeof(*d));if(!d)return NULL;
+#ifdef PILOT_DSP_DMA
+    d->native_dma=dma && !strcmp(dma,"1");
+    fprintf(stderr,"[DSP DMA] native_payload=%u session=original\n",d->native_dma);
+#endif
     if(isolated) {
         d->owned=malloc((size_t)image->storage_bytes*2+(image->storage_bytes+7)/8);
         if(!d->owned){free(d);return NULL;}
@@ -246,7 +281,12 @@ static PilotDsp *create(const PilotDspImage *image,void *storage,uint32_t guest_
         yr[0]=(Dsp56300MemoryRegion){0,2048,DSP56300_REGION_CALLBACK,{.callback={d,isolated_y_read,isolated_y_write}}};
     }
     Dsp56300CreateInfo info={.memory_map={xr,4,yr,2,pr,2}};
+#ifdef PILOT_DSP_GRAPH_OWNER
+    d->core=bounded_cache?dsp56300_create_cached(&info,GP_WORDS):dsp56300_create(&info);
+    fprintf(stderr,"[DSP GRAPH OWNER] cache_words=%u guarded_program_words=%u\n",bounded_cache?GP_WORDS:0x1000000u,GP_WORDS);
+#else
     d->core=dsp56300_create(&info);
+#endif
     if(!d->core){free(d->owned);free(d);return NULL;}
     if(d->owned){memcpy(d->guest,storage,d->storage_bytes);memcpy(d->published,storage,d->storage_bytes);}
     return d;
@@ -323,6 +363,14 @@ uint64_t pilot_dsp_fingerprint(const PilotDsp *d)
 }
 uint64_t pilot_dsp_blocks(const PilotDsp *d){return d->blocks;}
 uint64_t pilot_dsp_dma_nodes(const PilotDsp *d){return d->nodes;}
+uint64_t pilot_dsp_native_dma_payloads(const PilotDsp *d)
+{
+#ifdef PILOT_DSP_DMA
+    return d?d->native_dma_payloads:0;
+#else
+    (void)d;return 0;
+#endif
+}
 static int effect_range(const PilotDsp *d,unsigned effect,uint32_t offset,uint32_t bytes)
 {
     return d && effect<d->count && !(offset&3) && !(bytes&3) &&
