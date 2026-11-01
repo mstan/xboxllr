@@ -46,12 +46,15 @@ def main():
                         "set_input " + "0001" + "00"*16 + " 100", "screenshot extra",
                         'resize 0 720', 'resize 8192 8192', 'resize 1680 -1', 'resize 1680 720 extra',
                         'connect_input 0','connect_input 2','connect_input 16','connect_input -1',
+                        'read_memory 0 0','read_memory 65536 4097','read_memory 67108863 2',
+                        'read_memory -1 4','read_memory 65536 4 extra','read_memory 65537 4',
                         'set_input_port 4 '+'00'*18+' 100','set_input_port -1 '+'00'*18+' 100'):
             try:
                 request(port, command)
                 raise AssertionError("invalid command accepted")
             except ValueError:
                 pass
+        assert base64.b64decode(request(port,'read_memory 65536 4')['data'])==bytes((0,128,255,42))
         pad = gamepad("up,a", -12345, 12345)
         assert request(port, 'resize 1680 720')['queued']
         assert pad == struct.pack("<H8Bhhhh", 1, 255, 0, 0, 0, 0, 0, 0, 0, -12345, 12345, 0, 0)

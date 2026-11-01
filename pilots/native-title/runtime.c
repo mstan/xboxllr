@@ -3,6 +3,13 @@
  * kernel, device acknowledgement thread or missing-call success is linked.
  * Unsupported operations terminate before returning to the title.
  */
+#ifdef __linux__
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
 #include <windows.h>
 #include <winternl.h>
 #include <bcrypt.h>
@@ -1400,6 +1407,17 @@ static void load_image(const char *path)
 #endif
 }
 
+static int debug_read_memory(uint32_t address,void *data,uint32_t bytes)
+{
+    if(!memory || !data || !bytes || bytes>4096 || address>=0x04000000u || bytes>0x04000000u-address)return 0;
+#ifdef __linux__
+    struct iovec local={data,bytes},remote={memory+address,bytes};
+    return process_vm_readv(getpid(),&local,1,&remote,1,0)==bytes;
+#else
+    SIZE_T copied=0;
+    return ReadProcessMemory(GetCurrentProcess(),memory+address,data,bytes,&copied) && copied==bytes;
+#endif
+}
 int main(int argc,char **argv)
 {
 #ifdef __linux__
@@ -1459,6 +1477,7 @@ int main(int argc,char **argv)
     trace_function_trigger=getenv("XLLE_PILOT_TRACE_FUNCTION_TRIGGER");
     install_fault_handler();
     if (argc<2 || argc>5) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory] [local-storage-directory]\n"); return 1; }
+    pilot_debug_memory_reader(debug_read_memory);
     if(pilot_debug_start(getenv("XLLE_PILOT_DEBUG_PORT")))stop("native TCP listener configuration/bind failed",0);
     if (argc>=3) {
         FILE *input=fopen(argv[2],"rb");

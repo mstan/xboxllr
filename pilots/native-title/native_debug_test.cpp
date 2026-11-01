@@ -7,10 +7,15 @@
 #include <string>
 #include <thread>
 #include <vector>
+static int memory_reader(uint32_t address,void *data,uint32_t bytes) {
+    if(address!=65536 || bytes!=4)return 0;
+    const unsigned char expected[]={0,128,255,42};std::memcpy(data,expected,4);return 1;
+}
 int main(int argc,char **argv) {
     if(argc!=2 || pilot_debug_active() || pilot_debug_capture_requested())return 1;
     std::array<uint8_t,18> pad{};if(pilot_debug_input(pad.data()))return 1;
     if(!pilot_debug_start("invalid") || pilot_debug_active())return 1;
+    pilot_debug_memory_reader(memory_reader);
     if(pilot_debug_start(nullptr) || pilot_debug_active() || pilot_debug_start(argv[1]))return 1;
     std::atomic<bool> running{true},observed{false},resized{false},second{false};
     std::thread producer([&] {

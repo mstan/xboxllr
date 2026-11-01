@@ -10,6 +10,10 @@ input and audio; HLE calendar; IO/USB off. Windows reference/LLE configurations
 remain available. The optional Xbox firmware startup animation and GDI debug
 overlay are unavailable on Linux. Game startup movies remain game content.
 Native debug input and presented screenshots use the existing TCP interface.
+With an explicitly enabled localhost debug port, `native_debug.py read_memory
+ADDRESS BYTES` observes up to 4096 live guest bytes within 64 MiB. Unreadable
+pages fail safely through the host's process-read API. Reads do not freeze the
+simulation and are not atomic snapshots; no memory-write command is provided.
 
 ## Build
 
