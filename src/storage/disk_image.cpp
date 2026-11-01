@@ -64,6 +64,14 @@ DiskImage::DiskImage(const std::string& path,bool writable) : writable_(writable
         else if(physical_size_%512) bad("Raw HDD image length must be a multiple of 512 bytes");
     } catch(...) { if(file_)std::fclose(file_);file_=nullptr;throw; }
 }
+DiskImage::DiskImage(uint64_t bytes) : memory_(true), writable_(true) {
+    if(bytes<65536 || bytes>750ull*1024*1024 || bytes%16384)
+        bad("RAM utility volume must be 64 KiB to 750 MiB in 16 KiB units");
+    virtual_size_=bytes;
+    // The bounded page index costs at most 384 KiB. Data pages remain lazy;
+    // ordinary cache traffic does not pay a tree lookup for every byte range.
+    ram_.resize(size_t(bytes/16384));
+}
 DiskImage::~DiskImage() {
     // Every public mutation is flushed explicitly. Never clear a dirty marker
     // after an I/O failure or silently repair a user's image during teardown.
@@ -214,6 +222,18 @@ uint64_t DiskImage::mapping(uint64_t offset,bool create) {
 void DiskImage::read(uint64_t offset,void* output,size_t count) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if(!fits(offset,count,virtual_size_))bad("HDD image read outside capacity");
+    if(memory_) {
+        ram_read_+=count;
+        auto* bytes=static_cast<uint8_t*>(output);
+        while(count) {
+            size_t n=std::min(count,size_t(16384-offset%16384));
+            const auto& page=ram_[size_t(offset/16384)];
+            if(!page)std::memset(bytes,0,n);
+            else std::memcpy(bytes,page.get()+offset%16384,n);
+            offset+=n;bytes+=n;count-=n;
+        }
+        return;
+    }
     if(!qcow_) {host_read(offset,output,count);return;}
     auto* bytes=static_cast<uint8_t*>(output);
     while(count) {
@@ -226,6 +246,17 @@ void DiskImage::write(uint64_t offset,const void* input,size_t count) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if(!writable_ || failed_ || !fits(offset,count,virtual_size_))bad("HDD image write outside capacity or not writable");
     if(!count)return;
+    if(memory_) {
+        const auto* bytes=static_cast<const uint8_t*>(input);
+        while(count) {
+            size_t n=std::min(count,size_t(16384-offset%16384));
+            auto& page=ram_[size_t(offset/16384)];
+            if(!page){page=std::make_unique<uint8_t[]>(16384);++ram_pages_;}
+            std::memcpy(page.get()+offset%16384,bytes,n);
+            offset+=n;bytes+=n;count-=n;ram_written_+=n;
+        }
+        return;
+    }
     mark_dirty();
     if(!qcow_) {host_write(offset,input,count);return;}
     const auto* bytes=static_cast<const uint8_t*>(input);
@@ -238,6 +269,7 @@ void DiskImage::write(uint64_t offset,const void* input,size_t count) {
 }
 void DiskImage::flush() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if(memory_)return; // All mutations already belong to these process-local bytes.
     if(failed_)bad("Previous HDD image I/O failed; close and inspect the image");
     if(!writable_ || !dirty_)return;
     sync();

@@ -49,8 +49,13 @@ def save_png(result, path):
         raise ValueError("incomplete screenshot pixels")
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-    rows = b"".join(b"\0" + rgba[y*width*4:(y+1)*width*4] for y in range(height))
-    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+    # A presented swapchain ignores framebuffer alpha. Export its displayed RGB,
+    # not a transparent PNG whose appearance depends on the web page behind it.
+    rgb = bytearray(width * height * 3)
+    for channel in range(3):
+        rgb[channel::3] = rgba[channel::4]
+    rows = b"".join(b"\0" + rgb[y*width*3:(y+1)*width*3] for y in range(height))
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
     Path(path).write_bytes(png + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
     return {k: v for k, v in result.items() if k != "data"}
 

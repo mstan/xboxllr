@@ -3,7 +3,7 @@
 This is a post-processing helper for performance gates. It does not launch xlle;
 it turns repeated replay reports into a noise-floor summary so small code-shape
 deltas are not accepted or rejected from one run
-(docs/PERF-METHODOLOGY.md section 2, beads-xbox.1.14.1).
+(docs/reference/testing/PERF-METHODOLOGY.md section 2, beads-xbox.1.14.1).
 
 Two modes:
 
@@ -56,7 +56,7 @@ NS_PER_SEC = 1_000_000_000
 OBSERVER_SCHEMA = "xboxlle.process-observer.v1"
 OBSERVER_MODE = "sampled"
 
-# Gate metric (docs/PERF-METHODOLOGY.md section 2 rule 5, amended 2026-09-03):
+# Gate metric (docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 5, amended 2026-09-03):
 # the TOTAL 12 B wall, i.e. the sum of every frame-series window wall. The
 # final-four wall below is retained as a reported tail-phase indicator only,
 # because the final four windows are generic-combiner / GL-tail dominated and
@@ -539,7 +539,7 @@ def two_arm_summary(
         "gate_metric": GATE_METRIC,
         "indicator_metric": INDICATOR_METRIC,
         "gate_reference": (
-            "docs/PERF-METHODOLOGY.md section 2 rule 5 (amended 2026-09-03): "
+            "docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 5 (amended 2026-09-03): "
             "total 12 B wall, median AND min"
         ),
         "arm_a": arm_a,
@@ -580,7 +580,7 @@ def two_arm_summary(
             "arm_a_legs": len(paths_a),
             "arm_b_legs": len(paths_b),
             "meets_minimum": len(paths_a) >= 3 and len(paths_b) >= 3,
-            "reference": "docs/PERF-METHODOLOGY.md section 2 rule 3",
+            "reference": "docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 3",
         },
     }
 

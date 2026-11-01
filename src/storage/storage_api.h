@@ -22,6 +22,8 @@ typedef struct XllrStorageDirectoryEntry {
     char name[43];
 } XllrStorageDirectoryEntry;
 XLLR_STORAGE_API void* xllr_storage_open(const char* path,int writable,char* error,size_t capacity);
+XLLR_STORAGE_API void* xllr_storage_open_ram_cache(unsigned partition,uint64_t bytes,char* error,size_t capacity);
+XLLR_STORAGE_API uint32_t xllr_storage_ram_stats(void*,uint64_t* resident,uint64_t* read,uint64_t* written);
 XLLR_STORAGE_API uint32_t xllr_storage_destroy(void*);
 XLLR_STORAGE_API uint64_t xllr_storage_bytes(void*);
 XLLR_STORAGE_API int xllr_storage_is_qcow2(void*);

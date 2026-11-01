@@ -1,9 +1,33 @@
 # Setup: games, console profiles and the original Dashboard
 
-Status: October 26, 2026. Current previews run on Windows x64. Private owner-use
-packages have a shared first-run interface and reusable ISO/XISO imports.
+Status: October 29, 2026. Public alpha/beta packages run on Windows x64.
+Blinx is the only publicly supported game; JSRF references below describe
+experimental developer work. Packages share first-run setup and reusable ISO/XISO imports.
 Linux releases are deferred. Tracking: `beads-xbox.1.187.10`, release
 `beads-xbox.1.187`, console/storage provisioning `beads-xbox.1.22`.
+
+## Dashboard beta quick start
+
+Download the separate [Dashboard beta](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2),
+extract the complete ZIP to a writable folder, and open **Start Game.exe**.
+Choose **Skip** in optional console setup for a new local console profile.
+On the main launcher screen select your own `xboxdash.xbe` from Dashboard 5960,
+inside its **complete C-partition asset tree**. Preserve all relative names,
+including revision-specific data directories. The executable alone is not enough.
+Choose a controller under **Player 1**, then start.
+
+The supported Dashboard XBE SHA-256 is
+`832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d`.
+This is the extracted XBE hash, not a whole HDD/disc image hash.
+No BIOS, kernel, EEPROM or HDD image is required for direct native launch.
+First run may show the original Dashboard's information popup; press A to accept.
+Xbox Live remains offline. The Dashboard does not launch arbitrary unprepared games.
+
+The optional startup animation defaults on. Compatible complete kernel data is
+needed to prepare its private startup assets; otherwise launch goes directly to
+the Dashboard. A small signing dump is insufficient for the animation. It is a
+native reconstruction, not a full firmware boot. Keep `data`, selected save
+storage and any `<image>.xboxllr` profile across updates.
 
 ## Choose what you want to run
 
@@ -19,17 +43,19 @@ the Microsoft kernel. An optional kernel dump supplies original signing
 material offline; new virtual-console profiles do not require one. The
 native Dashboard is another title using those services; its original artwork
 and program are separate from boot firmware. See the
-[kernel-service and profile design](KERNEL-SERVICES-SETUP.md).
+[kernel-service and profile design](reference/runtime/KERNEL-SERVICES-SETUP.md).
 
 ## 1. Obtain your own content
 
-### Private Windows preview packages
+### Public Windows packages
 
 Open **Start Game.cmd** in the title's folder. First run shows an optional
 console-files popup. **Skip** chooses new local saves and automatic
 storage; the choice is saved immediately and the popup does not reappear.
 Select the supported extracted `.xbe` on the **main screen**, keeping it
-inside its complete asset tree. This preview does not accept an ISO directly.
+inside its complete asset tree. Blinx also accepts Xbox `.iso`/`.xiso` images:
+the launcher imports them once with progress and Cancel, then reuses `data/discs`.
+For Dashboard, select `xboxdash.xbe` from your complete Dashboard backup.
 
 The launcher reads the selected XBE's certificate to show its title name and
 title ID and distinguish a wrong game from an unsupported revision. The name
@@ -70,10 +96,10 @@ matching identity and pass normal verification; disk validation cannot identify
 the signer of every existing save. New virtual-profile save/restart/load and
 the complete per-title image-backed save matrix remain qualification checks.
 
-These are private test candidates, not publication-cleared releases. The owner
-handoff includes a separate local **Setup Inputs** folder; its game directories
-are links to existing owned backups, not redistributable or portable content.
-See [preview packaging](NATIVE-FIRST-RUN-PREVIEW.md) for the shared build path.
+The public packages contain no original Xbox content, console keys or personal
+profiles. Historical owner handoffs included local **Setup Inputs** links;
+those are private workstation conveniences and are not in the public downloads.
+See [preview packaging](reference/release/NATIVE-FIRST-RUN-PREVIEW.md) for the shared build path.
 
 Use game and console backups you are entitled to make and use. This project
 does not supply Microsoft firmware, retail Dashboard assets, games or private
@@ -119,7 +145,7 @@ files; backup and circumvention rules depend on where you live.
   write or boot modification is needed merely to use already made backups.
 
 The current signing preparer accepts only the reviewed loaded-kernel SHA256
-listed in [signing setup](NATIVE-SIGNING-SETUP.md). A kernel from another BIOS,
+listed in [signing setup](reference/storage/NATIVE-SIGNING-SETUP.md). A kernel from another BIOS,
 or a decompressed file instead of that loaded capture, is **not automatically
 accepted**. General firmware/key import is a remaining setup task, not a reason
 to search for someone else's matching dump or disable the identity check.
@@ -152,8 +178,8 @@ identity and persistent storage together. The working package flow is described
 above; advanced developer preparation follows below.
 
 For a new virtual console, the package generates settings, identity and save
-folders locally. Today the required content is the matching extracted game
-tree; ISO extraction inside the launcher is future work. A BIOS, boot ROM,
+folders locally. Required content is the matching complete extracted tree, or a supported
+Blinx ISO/XISO that the launcher imports locally. A BIOS, boot ROM,
 existing HDD image or Dashboard is not a prerequisite for direct native games.
 
 Missing optional files warrant an informative, title-aware first-use notice,
@@ -237,7 +263,7 @@ Continue with the relevant guide for build and launcher commands:
 - [JSRF developer setup](https://github.com/mstan/JSRFRecomp/blob/main/docs/DEVELOPMENT.md)
 - [Shared native title driver](NATIVE-TITLE-DRIVER.md) and
   [native pilot](../pilots/native-title/README.md)
-- [Native Dashboard status and title work](NATIVE-DASHBOARD-BURNDOWN.md)
+- [Native Dashboard status and title work](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/NATIVE-DASHBOARD-BURNDOWN.md)
 
 Do not advance a game's pinned framework merely because its setup guide links
 to newer framework documentation. That requires its own compatible build check.
@@ -260,7 +286,7 @@ open under `beads-xbox.1.22`. Do not treat a zero-filled file as a formatted HDD
 
 For the original-system/reference route, follow the separate
 [private input guide](INPUTS.md), [legacy setup](LEGACY-FULL-SYSTEM-SETUP.md)
-and [HDD security guide](HDD-SECURITY.md). They specify compatible flash,
+and [HDD security guide](reference/storage/HDD-SECURITY.md). They specify compatible flash,
 decrypted 2BL, raw FATX HDD and EEPROM inputs, including external BIOS
 extraction. The current entry is a supplied 2BL handoff; it is not qualified
 authentic MCPX cold boot. Keep source backups untouched and use working copies.
@@ -307,7 +333,7 @@ in-game saves are persistent progress and must survive upgrades.
 | Missing private signing inputs | Today's profile has not completed signing preparation; this is not evidence that the game needs a running Microsoft kernel. |
 | Signing input belongs to another XBE/EEPROM | Select the correct prepared title/profile. Do not change identity or erase saves to bypass it. |
 | Dashboard files missing | Supply its complete matching asset tree, or launch a game directly. |
-| HDD/profile busy | Close the other writer and retry; never clone a live image as an implicit second writable save store. This message is a required future shared-image behavior, not an implemented UI claim. |
+| HDD/profile busy | Close the other writer and retry; never clone a live image as an implicit second writable save store. The selected image is never silently replaced with folder storage. |
 
 Packaging must ship its own runtime dependencies and usable setup UI without
 workstation paths, private files or a mandatory developer installation. A clean

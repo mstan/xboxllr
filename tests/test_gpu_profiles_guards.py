@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Structural guards for the stage (f) witnessed-profile GPU executor.
 
-Bead beads-xbox.1.15.7; design docs/DESIGN-NV2A-SEAM.md section 5(f);
-acceptance docs/PERF-METHODOLOGY.md section 3 (behavioral faithfulness).
+Bead beads-xbox.1.15.7; design docs/reference/graphics/DESIGN-NV2A-SEAM.md section 5(f);
+acceptance docs/reference/testing/PERF-METHODOLOGY.md section 3 (behavioral faithfulness).
 Predecessors: tests/test_seam_guards.py (stage (d)),
 tests/test_draw_threads_guards.py (stage (e)),
 tests/test_span_raster_guards.py (stage (e2)).

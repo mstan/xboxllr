@@ -25,6 +25,7 @@ struct Storage {
     std::map<uint64_t,OpenFile> handles;
     uint64_t next=1;
     explicit Storage(const char* path,bool writable):disk(path,writable) {}
+    Storage(unsigned partition,uint64_t bytes):disk(partition,bytes) {}
     OpenFile& file(uint64_t id) {
         auto found=handles.find(id);if(found==handles.end())throw FileError(bad_handle,"Unknown storage handle");
         auto& f=found->second;disk.partitions[f.partition]->refresh(f.entry);return f;
@@ -80,6 +81,15 @@ void* xllr_storage_open(const char* path,int writable,char* error,size_t capacit
 uint32_t xllr_storage_destroy(void* instance) {
     uint32_t result=xllr_storage_flush(instance);delete static_cast<Storage*>(instance);return result;
 }
+void* xllr_storage_open_ram_cache(unsigned partition,uint64_t bytes,char* error,size_t capacity) {
+    try {return new Storage(partition,bytes);}
+    catch(const std::exception& e) {if(error && capacity) {size_t n=std::min(capacity-1,std::strlen(e.what()));std::memcpy(error,e.what(),n);error[n]=0;}return nullptr;}
+}
+uint32_t xllr_storage_ram_stats(void* s,uint64_t* resident,uint64_t* read,uint64_t* written) {
+    if(!resident || !read || !written)return invalid;
+    return invoke(s,[&](Storage& v){if(!v.disk.image.memory())return invalid;
+        *resident=v.disk.image.resident_bytes();*read=v.disk.image.read_bytes();*written=v.disk.image.written_bytes();return 0u;});
+}
 uint64_t xllr_storage_bytes(void* instance) {return instance?static_cast<Storage*>(instance)->disk.image.size():0;}
 int xllr_storage_is_qcow2(void* instance) {return instance && static_cast<Storage*>(instance)->disk.image.qcow2();}
 uint32_t xllr_storage_read_blocks(void* s,uint64_t at,void* out,uint32_t size) {
@@ -95,6 +105,7 @@ uint32_t xllr_storage_file_open(void* s,unsigned part,uint64_t parent,const char
     uint32_t options,uint32_t disposition,uint32_t attrs,int64_t allocation,uint64_t* handle,uint32_t* result) {
     if(!handle || !result || part<1 || part>5 || share>7 || disposition>5 || allocation<0 || uint64_t(allocation)>UINT32_MAX)return invalid;
     return invoke(s,[&](Storage& v) {
+        if(!v.disk.partitions[part])return denied;
         if((options&0x30) && !(granted(access)&0x100000))return invalid;
         auto& fs=*v.disk.partitions[part];std::string path=v.path(part,parent,name);
         FatxEntry entry;bool exists=true;
@@ -138,7 +149,8 @@ uint32_t xllr_storage_file_close(void* s,uint64_t id) {
         v.handles.erase(id);v.disk.image.flush();return 0u;});
 }
 uint32_t xllr_storage_file_info(void* s,uint64_t id,XllrStorageInfo* out) {
-    if(!out)return invalid;return invoke(s,[&](Storage& v){info(v.file(id),out);return 0u;});
+    if(!out)return invalid;
+    return invoke(s,[&](Storage& v){info(v.file(id),out);return 0u;});
 }
 uint32_t xllr_storage_file_allocation(void* s,uint64_t id,uint64_t* bytes) {
     if(!bytes)return invalid;
@@ -147,10 +159,12 @@ uint32_t xllr_storage_file_allocation(void* s,uint64_t id,uint64_t* bytes) {
 uint32_t xllr_storage_file_read(void* s,uint64_t id,int64_t offset,void* buffer,uint32_t bytes,uint32_t* done) {
     if(!done || (!buffer && bytes))return invalid;
     return invoke(s,[&](Storage& v){auto& f=v.file(id);if(!(f.access&1))return denied;
-        if(offset==-2)offset=int64_t(f.position);if(offset<0)return invalid;
+        if(offset==-2)offset=int64_t(f.position);
+        if(offset<0)return invalid;
         if(bytes && uint64_t(offset)>=f.entry.size())return 0xc0000011u;
         size_t n=v.disk.partitions[f.partition]->read(f.entry,uint64_t(offset),buffer,bytes);
-        if(f.options&0x30)f.position=uint64_t(offset)+n;*done=uint32_t(n);return 0u;});
+        if(f.options&0x30)f.position=uint64_t(offset)+n;
+        *done=uint32_t(n);return 0u;});
 }
 uint32_t xllr_storage_file_write(void* s,uint64_t id,int64_t offset,const void* buffer,uint32_t bytes,uint32_t* done) {
     if(!done || (!buffer && bytes))return invalid;
@@ -158,13 +172,15 @@ uint32_t xllr_storage_file_write(void* s,uint64_t id,int64_t offset,const void* 
         if(offset==-1 || !(f.access&2))offset=f.entry.size();else if(offset==-2)offset=int64_t(f.position);
         if(offset<0)return invalid;
         size_t n=v.disk.partitions[f.partition]->write(f.entry,uint64_t(offset),buffer,bytes);
-        if(f.options&0x30)f.position=uint64_t(offset)+n;*done=uint32_t(n);return 0u;});
+        if(f.options&0x30)f.position=uint64_t(offset)+n;
+        *done=uint32_t(n);return 0u;});
 }
 uint32_t xllr_storage_file_resize(void* s,uint64_t id,int64_t bytes,int allocation) {
     if(bytes<0 || uint64_t(bytes)>UINT32_MAX)return invalid;
     return invoke(s,[&](Storage& v){auto& f=v.file(id);if(!(f.access&2))return denied;
         if(allocation)v.disk.partitions[f.partition]->reserve(f.entry,uint32_t(bytes));
-        else v.disk.partitions[f.partition]->resize(f.entry,uint32_t(bytes));return 0u;});
+        else v.disk.partitions[f.partition]->resize(f.entry,uint32_t(bytes));
+        return 0u;});
 }
 uint32_t xllr_storage_file_position(void* s,uint64_t id,int64_t position) {
     if(position<0)return invalid;
@@ -194,7 +210,8 @@ uint32_t xllr_storage_directory(void* s,uint64_t id,const char* mask,int restart
     if(!out)return invalid;
     return invoke(s,[&](Storage& v){auto& f=v.file(id);if(!(f.access&1))return denied;
         bool first=!f.search;if(first){f.mask=mask && *mask?mask:"*";if(f.mask=="*.*")f.mask="*";}
-        if(restart || first)f.cursor=0;f.search=true;
+        if(restart || first)f.cursor=0;
+        f.search=true;
         auto entries=v.disk.partitions[f.partition]->list(f.entry);
         while(f.cursor<entries.size()) {
             const auto& entry=entries[f.cursor++];if(!match(f.mask,entry.name()))continue;
@@ -204,11 +221,12 @@ uint32_t xllr_storage_directory(void* s,uint64_t id,const char* mask,int restart
 }
 uint32_t xllr_storage_capacity(void* s,unsigned partition,uint64_t* total,uint64_t* available,uint32_t* unit) {
     if(partition<1 || partition>5 || !total || !available || !unit)return invalid;
-    return invoke(s,[&](Storage& v){auto& fs=*v.disk.partitions[partition];*total=fs.clusters();*available=fs.free_clusters();*unit=fs.cluster_size();return 0u;});
+    return invoke(s,[&](Storage& v){if(!v.disk.partitions[partition])return denied;auto& fs=*v.disk.partitions[partition];*total=fs.clusters();*available=fs.free_clusters();*unit=fs.cluster_size();return 0u;});
 }
 uint32_t xllr_storage_clear_cache(void* s,unsigned partition) {
     if(partition<3 || partition>5)return denied;
     return invoke(s,[&](Storage& v){
+        if(!v.disk.partitions[partition])return denied;
         for(const auto& item:v.handles)if(item.second.partition==partition && !item.second.path.empty())return sharing;
         auto& fs=*v.disk.partitions[partition];
         std::vector<std::pair<FatxEntry,bool>> pending{{fs.root(),false}};

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Structural guards for the NV2A producer/consumer seam, stage (d).
 
-Bead beads-xbox.1.15.4; design docs/DESIGN-NV2A-SEAM.md sections 1.1-1.5, 2.2(c),
+Bead beads-xbox.1.15.4; design docs/reference/graphics/DESIGN-NV2A-SEAM.md sections 1.1-1.5, 2.2(c),
 3.1-3.2 and measurement M5.
 
 Stage (d) introduces a latch/execute seam at the draw-batch boundary with an

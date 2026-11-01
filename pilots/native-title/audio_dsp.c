@@ -1,6 +1,6 @@
 /* Independent image/GP-DMA adapter. MIT mborgerson/dsp56300 executes the actual
  * program. Public register facts are behavioral references, not imported code.
- * See docs/NATIVE-DSP-DONOR-2026-10-07.md for qualification and timing limits. */
+ * See docs/reference/audio/NATIVE-DSP-DONOR-2026-10-07.md for qualification and timing limits. */
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>

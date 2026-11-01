@@ -40,6 +40,7 @@ private:
     DiskImage& disk_;
     uint64_t base_,bytes_,data_;
     uint32_t cluster_bytes_=0,count_=0,entry_bytes_=0,root_cluster_=0;
+    uint32_t memory_next_=1;
     std::vector<uint8_t> fat_;
     uint32_t fat(uint32_t) const;
     void fat(uint32_t,uint32_t);
@@ -55,5 +56,6 @@ public:
     DiskImage image;
     std::unique_ptr<FatxVolume> partitions[6];
     XboxDisk(const std::string& path,bool writable);
+    XboxDisk(unsigned cache_partition,uint64_t memory_bytes);
 };
 }

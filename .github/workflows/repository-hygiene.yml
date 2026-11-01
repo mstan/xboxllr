@@ -11,6 +11,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: python3 tests/test_repository_hygiene.py
+      - run: python3 tests/test_native_debug_screenshot.py
+      - run: python3 tests/test_xboxllr_toolkit.py
       - run: python3 tests/test_eeprom_generation.py
       - run: python3 tests/test_aot_compile.py
       - run: python3 tests/test_aot_private_input.py

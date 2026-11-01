@@ -24,7 +24,7 @@ independently accepted retirement/reentry establish the required lifecycle.
 
 Root proof: build/blinx/audio-family-qualified-20261016/qualified-root.aot-private.json,
 SHA256 e5e7a9b380248bd3aa3e1d85e3f3126166a19755dbea3f37e3b9c0d807776e1d.
-The governing [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#audio-family-qualified-gpu-transfer-investigation-continues---2026-10-16)
+The governing [closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#audio-family-qualified-gpu-transfer-investigation-continues---2026-10-16)
 contains component composition and retained evidence. Default HLE remains
 unchanged; LLE speed is not required. GPU/graphics have since completed G01-G05.
 Earlier dated
@@ -65,7 +65,7 @@ This composes retained physical token evidence with original instructions and
 serialized method behavior; it is not new arbitrary-active-queue hardware proof.
 Issue `.115` closes. Connected output/timing/normal lifecycle A05 remains open;
 overall6/9. Default HLE evidence is unchanged and reused. See
-[the current milestone](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-queued-audio-dpc-and-serialized-fe-fence---2026-10-15).
+[the current milestone](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#original-queued-audio-dpc-and-serialized-fe-fence---2026-10-15).
 Earlier checkpoints below retain their historical remaining-work descriptions.
 
 A05 integration follow-up: controller-connected startup now reaches original
@@ -85,7 +85,7 @@ analog bytes matching digital PCM exactly;387 blocks match actual EP FIFO0 write
 with zero differences. Cyclic-output issue `.113.34` closes. This is a bounded
 partial capture; the separate APU DPC FEMEM consumer and complete
 connected title output/timing remain required. See the
-[analog checkpoint](../../docs/BLINX-QUALIFICATION-CLOSURE.md#analog-cyclic-output-and-original-codec-retirement---2026-10-15).
+[analog checkpoint](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#analog-cyclic-output-and-original-codec-retirement---2026-10-15).
 
 Latest A04 evidence,2026-10-15: the observed2010C setup stop and explicitly
 pending20104 notification now execute against maintained GP/EP owners. The
@@ -97,7 +97,7 @@ Pending transfers/events and an incomplete original stop sequence remain
 guarded. No synthetic completion or extra drain is supplied. DPC FEMEM and
 connected output remain required. See the source/physical evidence distinction
 and scope in the current
-[closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md#original-timeout-retirement-now-passes-all-configurations---2026-10-15).
+[closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#original-timeout-retirement-now-passes-all-configurations---2026-10-15).
 
 Tracked by `beads-xbox.1.113`. Audio is now qualified as recorded above;
 the original-scheduler/GPU startup experiments are not prerequisites. The overall
@@ -821,7 +821,7 @@ show that clearing this original startup control permits pending methods to
 publish even with SE stopped. Runtime held queues and active voice/DSP fence
 ordering remain guarded under A04; they are not supplied by immediate fake
 completion. Non-null field consumers and active method access also remain
-guarded. See the [current evidence and limits](../../docs/BLINX-QUALIFICATION-CLOSURE.md#complete-stopped-vp-initializer-and-ac97-boundary---2026-10-14).
+guarded. See the [current evidence and limits](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#complete-stopped-vp-initializer-and-ac97-boundary---2026-10-14).
 
 ## Original VP mappings and method boundary - 2026-10-14
 
@@ -839,7 +839,7 @@ restoration write followed. That result cannot establish synchronous completion
 or settle method timing/semantics. The owner-authorized dashboard SMC restart
 and remote probe return restored the stopped controls and replaced mappings;
 no manual console action remains pending. See the
-[evidence and remaining required work](../../docs/BLINX-QUALIFICATION-CLOSURE.md#vp-mapping-transport-and-unresolved-method-ordering---2026-10-14).
+[evidence and remaining required work](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#vp-mapping-transport-and-unresolved-method-ordering---2026-10-14).
 
 ## Stopped initialization and VP mapping boundary - 2026-10-14
 
@@ -856,7 +856,7 @@ The final connected title crosses FETFORCE0 and stops at FE802038=02F80000 with
 zero PCM, after57.453s. The next batch includes the actual VP setup17B79F plus
 the remaining DSP host controls; the retained65-write inventory now includes
 that previously omitted VP routine. See the
-[source, physical and title evidence](../../docs/BLINX-QUALIFICATION-CLOSURE.md#stopped-initialization-batch-and-connected-vp-mapping-boundary---2026-10-14).
+[source, physical and title evidence](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#stopped-initialization-batch-and-connected-vp-mapping-boundary---2026-10-14).
 This closes stopped transport, not the whole audio family. HLE remains unchanged.
 
 ## Physical XGSCNT control - 2026-10-14
@@ -872,7 +872,7 @@ All34 targeted checks pass, including shared-clock lifetimes and compiled
 ISR/DPC reads. The physical/reference checker binds nine matching volatile
 writes to retained original control execution. Exact edge phase is AUDIO-D09;
 start/stop/reset behavior is implemented, not deferred. See the
-[closing evidence](../../docs/BLINX-QUALIFICATION-CLOSURE.md#physical-sample-counter-gateresetresume---2026-10-14).
+[closing evidence](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md#physical-sample-counter-gateresetresume---2026-10-14).
 The earlier title stop remains FETFORCE0; no new title/playback run is claimed.
 
 ## Original reset/bootstrap transport - 2026-10-14
@@ -1151,7 +1151,7 @@ frame counter substitutes for CBO. The stopped branch uses authored saved
 fields and does not qualify the original Stop or finite-completion lifecycle.
 Private generation proof `reference-cursor-contract-20261011/qualified-original-cursor.aot-private.json`
 has SHA256 `5789775b03823bd94138180fc9b2d847126c6af17728eec44fc5abe96dbfddbf`.
-The [shared clock/audio composition](../../docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#original-positions-and-composed-clockaudio---2026-10-11)
+The [shared clock/audio composition](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-MOVIE-STALL-AUDIT-2026-10-08.md#original-positions-and-composed-clockaudio---2026-10-11)
 also passes host-delay invariance; full movie integration remains open.
 
 ## Whole native audio under the original CPU owner - 2026-10-11

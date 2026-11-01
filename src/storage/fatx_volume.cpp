@@ -135,9 +135,15 @@ uint32_t FatxVolume::free_clusters() const {
     uint32_t n=0;for(uint32_t c=1;c<=count_;++c)if(!fat(c))++n;return n;
 }
 uint32_t FatxVolume::allocate(bool directory) {
-    for(uint32_t c=1;c<=count_;++c)if(!fat(c)) {
+    // A newly populated RAM cache can contain tens of thousands of clusters.
+    // Retain the disk allocator's policy; RAM allocation resumes its free scan.
+    for(uint32_t n=0;n<count_;++n) {
+      uint32_t c=disk_.memory()?1+(memory_next_-1+n)%count_:n+1;
+      if(!fat(c)) {
         std::vector<uint8_t> bytes(cluster_bytes_,directory?255:0);
-        disk_.write(cluster_offset(c),bytes.data(),bytes.size());fat(c,0xffffffffu);return c;
+        disk_.write(cluster_offset(c),bytes.data(),bytes.size());fat(c,0xffffffffu);
+        memory_next_=c==count_?1:c+1;return c;
+      }
     }
     fail(0xc000007fu,"HDD partition is full");
 }
@@ -258,5 +264,18 @@ XboxDisk::XboxDisk(const std::string& path,bool writable) : image(path,writable)
     constexpr uint64_t starts[]={0,0xabe80000,0x8ca80000,0x80000,0x2ee80000,0x5dc80000};
     constexpr uint64_t sizes[]={0,0x1312d6000,0x1f400000,0x2ee00000,0x2ee00000,0x2ee00000};
     for(unsigned i=1;i<=5;++i)partitions[i]=std::make_unique<FatxVolume>(image,starts[i],sizes[i]);
+}
+XboxDisk::XboxDisk(unsigned partition,uint64_t bytes) : image(bytes) {
+    if(partition<3 || partition>5)fail(0xc0000022u,"RAM storage is restricted to utility partitions");
+    // Format only newly allocated RAM. This constructor cannot open, format or
+    // otherwise alter an owner's disk, image, saved games or existing cache.
+    std::vector<uint8_t> header(4096,0);
+    std::memcpy(header.data(),"FATX",4);put32(header.data()+8,32);put32(header.data()+12,1);
+    image.write(0,header.data(),header.size());
+    uint64_t entries=bytes/16384+1,table=(entries*2+4095)&~UINT64_C(4095);
+    std::vector<uint8_t> fat(size_t(table),0);put16(fat.data(),0xffff);put16(fat.data()+2,0xffff);
+    image.write(4096,fat.data(),fat.size());
+    std::vector<uint8_t> root(16384,255);image.write(4096+table,root.data(),root.size());
+    partitions[partition]=std::make_unique<FatxVolume>(image,0,bytes);
 }
 }

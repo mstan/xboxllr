@@ -38,9 +38,9 @@ shipping defaults have to reproduce, rather than a snapshot of one accelerated p
 * **Final SHA and scanout FNV**: reproduced by the shipping defaults as well — every arm of
   every measured set on 2026-09-05 ends on `36e87a97…`.
 * **The 24 per-profile hashes**: only emitted with `--nv2a-profile-hashes`, which is off by
-  default (`docs/PERF-METHODOLOGY.md` §3b). Compare them on reference legs only.
+  default (`docs/reference/testing/PERF-METHODOLOGY.md` §3b). Compare them on reference legs only.
 * **The 28 checkpoint PPMs**: 24 are byte-identical under the shipping defaults; 4 differ by a
-  handful of single pixels whose mechanism is measured in `docs/PERF-METHODOLOGY.md` §3a.
+  handful of single pixels whose mechanism is measured in `docs/reference/testing/PERF-METHODOLOGY.md` §3a.
   Acceptance is behavioural, not byte-exact (§3).
 
 ## How to use one
@@ -61,6 +61,6 @@ python tools\make_golden_record.py --report build\<label>.report.json `
     --stdout build\<label>.stdout.log --name <name> --out goldens\<file>.json
 ```
 
-Re-pin whenever a faithful change moves the record (`docs/PERF-METHODOLOGY.md` §3: no owner
+Re-pin whenever a faithful change moves the record (`docs/reference/testing/PERF-METHODOLOGY.md` §3: no owner
 sign-off needed), and record the evidence in §3a of that file. The per-run evidence itself —
 reports, PPMs, logs — stays under `build/`, which is ignored.

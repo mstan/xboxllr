@@ -2,8 +2,9 @@
  * content and private console metadata keep their existing host owners.
  * Only mounted HDD partitions dispatch to actual FATX image bytes. */
 #include "../../src/storage/storage_api.h"
-static void *storage_image;
-struct StorageImageHandle {HANDLE event;uint64_t file;unsigned partition;};
+static void *storage_image,*storage_ram_cache;
+static unsigned storage_ram_partition;
+struct StorageImageHandle {HANDLE event;uint64_t file;unsigned partition;void *owner;};
 static struct StorageImageHandle storage_image_handles[2048];
 static SRWLOCK storage_image_lock=SRWLOCK_INIT;
 static MediaOpen storage_host_open;
@@ -14,7 +15,7 @@ static MediaFlush storage_host_flush;
 static MediaDirectory storage_host_directory;
 static struct StorageImageHandle *storage_image_find(HANDLE h)
 {
-    if(!storage_image)return NULL;
+    if(!h || (!storage_image && !storage_ram_cache))return NULL;
     for(unsigned i=0;i<2048;++i)if(storage_image_handles[i].event==h)return &storage_image_handles[i];
     return NULL;
 }
@@ -39,10 +40,10 @@ static LONG NTAPI storage_image_create(PHANDLE out,ACCESS_MASK access,POBJECT_AT
     if(!status && ea_bytes)status=MEDIA_INVALID;
     HANDLE event=NULL;uint64_t file=0;uint32_t action=0;
     if(!status && !(event=CreateEventW(NULL,TRUE,TRUE,NULL)))status=0xc000009au;
-    if(!status)status=xllr_storage_file_open(storage_image,parent->partition,parent->file,path,access,share,options,
+    if(!status)status=xllr_storage_file_open(parent->owner,parent->partition,parent->file,path,access,share,options,
         disposition,attributes,allocation?allocation->QuadPart:0,&file,&action);
     if(!status) {
-        storage_image_handles[slot]=(struct StorageImageHandle){event,file,parent->partition};
+        storage_image_handles[slot]=(struct StorageImageHandle){event,file,parent->partition,parent->owner};
         *out=event;io->Status=0;io->Information=action;
     } else if(event)CloseHandle(event);
     ReleaseSRWLockExclusive(&storage_image_lock);return (LONG)status;
@@ -55,8 +56,8 @@ static LONG storage_image_transfer(HANDLE h,HANDLE event,PVOID apc,PVOID context
     AcquireSRWLockShared(&storage_image_lock);struct StorageImageHandle *f=storage_image_find(h);
     if(!f) {ReleaseSRWLockShared(&storage_image_lock);return (write?storage_host_write:storage_host_read)(h,event,apc,context,io,bytes,length,offset,key);}
     uint32_t done=0,status=apc||key?MEDIA_INVALID:write?
-        xllr_storage_file_write(storage_image,f->file,offset?offset->QuadPart:-2,bytes,length,&done):
-        xllr_storage_file_read(storage_image,f->file,offset?offset->QuadPart:-2,bytes,length,&done);
+        xllr_storage_file_write(f->owner,f->file,offset?offset->QuadPart:-2,bytes,length,&done):
+        xllr_storage_file_read(f->owner,f->file,offset?offset->QuadPart:-2,bytes,length,&done);
     if(!status){io->Status=0;io->Information=done;}
     ReleaseSRWLockShared(&storage_image_lock);return (LONG)status;
 }
@@ -90,7 +91,7 @@ static LONG NTAPI storage_image_query(HANDLE h,PIO_STATUS_BLOCK io,PVOID output,
 {
     AcquireSRWLockShared(&storage_image_lock);struct StorageImageHandle *f=storage_image_find(h);
     if(!f) {ReleaseSRWLockShared(&storage_image_lock);return storage_host_query(h,io,output,bytes,kind);}
-    XllrStorageInfo info;uint32_t status=xllr_storage_file_info(storage_image,f->file,&info),needed=0;
+    XllrStorageInfo info;uint32_t status=xllr_storage_file_info(f->owner,f->file,&info),needed=0;
     unsigned char stage[56]={0};
     if(!status) {
         if(kind==34 || kind==4) {
@@ -117,31 +118,31 @@ static LONG NTAPI storage_image_set(HANDLE h,PIO_STATUS_BLOCK io,PVOID input,ULO
     uint64_t changed=0;
     if(!status) {
         int64_t value=0;if(bytes>=8)memcpy(&value,input,8);
-        if(kind==14)status=xllr_storage_file_position(storage_image,f->file,value);
+        if(kind==14)status=xllr_storage_file_position(f->owner,f->file,value);
         else if(kind==19 || kind==20) {
             XllrStorageInfo previous;uint64_t before=0,after=0;
-            status=xllr_storage_file_info(storage_image,f->file,&previous);
-            if(!status)status=xllr_storage_file_allocation(storage_image,f->file,&before);
-            if(!status)status=xllr_storage_file_resize(storage_image,f->file,value,kind==19);
-            if(!status)status=xllr_storage_file_allocation(storage_image,f->file,&after);
+            status=xllr_storage_file_info(f->owner,f->file,&previous);
+            if(!status)status=xllr_storage_file_allocation(f->owner,f->file,&before);
+            if(!status)status=xllr_storage_file_resize(f->owner,f->file,value,kind==19);
+            if(!status)status=xllr_storage_file_allocation(f->owner,f->file,&after);
             if(!status)changed=(kind==20?previous.length!=(uint64_t)value:before!=after)?512:0;
         }
-        else if(kind==13)status=xllr_storage_file_delete(storage_image,f->file,*(unsigned char*)input!=0);
+        else if(kind==13)status=xllr_storage_file_delete(f->owner,f->file,*(unsigned char*)input!=0);
         else if(kind==4) {
             uint16_t times[6]={0};int64_t created,accessed,written;uint32_t attributes;
             memcpy(&created,input,8);memcpy(&accessed,(unsigned char*)input+8,8);memcpy(&written,(unsigned char*)input+16,8);memcpy(&attributes,(unsigned char*)input+32,4);
             status=storage_image_pack_time(created,times);
             if(!status)status=storage_image_pack_time(written,times+2);
             if(!status)status=storage_image_pack_time(accessed,times+4);
-            if(!status)status=xllr_storage_file_metadata(storage_image,f->file,attributes,times);
+            if(!status)status=xllr_storage_file_metadata(f->owner,f->file,attributes,times);
         } else if(kind==10) {
             FILE_RENAME_INFO *rename=(FILE_RENAME_INFO*)input;char path[1024];
             struct StorageImageHandle *parent=storage_image_find(rename->RootDirectory);
-            if(!parent || parent->partition!=f->partition || rename->FileNameLength>bytes-20 || rename->FileNameLength>2046)status=MEDIA_INVALID;
+            if(!parent || parent->owner!=f->owner || parent->partition!=f->partition || rename->FileNameLength>bytes-20 || rename->FileNameLength>2046)status=MEDIA_INVALID;
             else {
                 UNICODE_STRING name={(USHORT)rename->FileNameLength,(USHORT)rename->FileNameLength,rename->FileName};
                 status=storage_image_ascii(&name,path);
-                if(!status)status=xllr_storage_file_rename(storage_image,f->file,parent->file,path,rename->ReplaceIfExists);
+                if(!status)status=xllr_storage_file_rename(f->owner,f->file,parent->file,path,rename->ReplaceIfExists);
             }
         }
         if(!status){io->Status=0;io->Information=(ULONG_PTR)changed;}
@@ -152,7 +153,7 @@ static LONG NTAPI storage_image_flush(HANDLE h,PIO_STATUS_BLOCK io)
 {
     AcquireSRWLockShared(&storage_image_lock);struct StorageImageHandle *f=storage_image_find(h);
     if(!f) {ReleaseSRWLockShared(&storage_image_lock);return storage_host_flush(h,io);}
-    uint32_t status=xllr_storage_flush(storage_image);if(!status){io->Status=0;io->Information=0;}
+    uint32_t status=xllr_storage_flush(f->owner);if(!status){io->Status=0;io->Information=0;}
     ReleaseSRWLockShared(&storage_image_lock);return (LONG)status;
 }
 static LONG NTAPI storage_image_volume(HANDLE h,PIO_STATUS_BLOCK io,PVOID output,ULONG bytes,ULONG kind)
@@ -160,7 +161,7 @@ static LONG NTAPI storage_image_volume(HANDLE h,PIO_STATUS_BLOCK io,PVOID output
     AcquireSRWLockShared(&storage_image_lock);struct StorageImageHandle *f=storage_image_find(h);
     if(!f) {ReleaseSRWLockShared(&storage_image_lock);return storage_host_volume(h,io,output,bytes,kind);}
     uint64_t total,free;uint32_t unit,status=kind!=3?0xc0000003u:bytes<24?0xc0000004u:
-        xllr_storage_capacity(storage_image,f->partition,&total,&free,&unit);
+        xllr_storage_capacity(f->owner,f->partition,&total,&free,&unit);
     if(!status){uint32_t sectors=unit/512,sector_bytes=512;memcpy(output,&total,8);memcpy((char*)output+8,&free,8);memcpy((char*)output+16,&sectors,4);memcpy((char*)output+20,&sector_bytes,4);io->Status=0;io->Information=24;}
     ReleaseSRWLockShared(&storage_image_lock);return (LONG)status;
 }
@@ -171,7 +172,7 @@ static LONG NTAPI storage_image_directory(HANDLE h,HANDLE event,PVOID apc,PVOID 
     if(!f) {ReleaseSRWLockShared(&storage_image_lock);return storage_host_directory(h,event,apc,context,io,output,bytes,kind,single,pattern,restart);}
     char mask[1024];uint32_t status=event || apc || kind!=1?MEDIA_INVALID:bytes<64?0xc0000004u:pattern?storage_image_ascii(pattern,mask):0;
     XllrStorageDirectoryEntry e;
-    if(!status)status=xllr_storage_directory(storage_image,f->file,pattern?mask:NULL,restart,&e);
+    if(!status)status=xllr_storage_directory(f->owner,f->file,pattern?mask:NULL,restart,&e);
     if(!status) {
         unsigned n=(unsigned)strlen(e.name),copy=n<(bytes-64)/2?n:(bytes-64)/2;
         unsigned char metadata[56];storage_image_metadata_bytes(&e.info,metadata);
@@ -184,9 +185,9 @@ static LONG NTAPI storage_image_directory(HANDLE h,HANDLE event,PVOID apc,PVOID 
 }
 static BOOL storage_image_close(HANDLE h)
 {
-    if(!storage_image)return CloseHandle(h);
+    if(!storage_image && !storage_ram_cache)return CloseHandle(h);
     AcquireSRWLockExclusive(&storage_image_lock);struct StorageImageHandle *f=storage_image_find(h);uint32_t status=0;
-    if(f){status=xllr_storage_file_close(storage_image,f->file);if(!status)memset(f,0,sizeof(*f));}
+    if(f){status=xllr_storage_file_close(f->owner,f->file);if(!status)memset(f,0,sizeof(*f));}
     ReleaseSRWLockExclusive(&storage_image_lock);
     if(status){SetLastError(ERROR_WRITE_FAULT);return FALSE;}return CloseHandle(h);
 }
@@ -194,16 +195,74 @@ static BOOL storage_image_file_size(HANDLE h,PLARGE_INTEGER size)
 {
     AcquireSRWLockShared(&storage_image_lock);struct StorageImageHandle *f=storage_image_find(h);
     if(!f){ReleaseSRWLockShared(&storage_image_lock);return GetFileSizeEx(h,size);}
-    XllrStorageInfo info;uint32_t status=xllr_storage_file_info(storage_image,f->file,&info);
+    XllrStorageInfo info;uint32_t status=xllr_storage_file_info(f->owner,f->file,&info);
     if(!status)size->QuadPart=(LONGLONG)info.length;
     ReleaseSRWLockShared(&storage_image_lock);return status==0;
 }
 static void storage_image_shutdown(void)
 {
-    if(!storage_image)return;
+    if(!storage_image && !storage_ram_cache)return;
     for(unsigned i=0;i<2048;++i)if(storage_image_handles[i].event)storage_image_close(storage_image_handles[i].event);
-    uint32_t status=xllr_storage_destroy(storage_image);storage_image=NULL;
-    if(status)fprintf(stderr,"[STORAGE] final image flush failed status=%08x\n",status);
+    if(storage_ram_cache) {
+        uint64_t resident=0,read=0,written=0;
+        xllr_storage_ram_stats(storage_ram_cache,&resident,&read,&written);
+        fprintf(stderr,"[RAM CACHE] resident_bytes=%llu read_bytes=%llu written_bytes=%llu host_cache_writes=0\n",
+            (unsigned long long)resident,(unsigned long long)read,(unsigned long long)written);
+        xllr_storage_destroy(storage_ram_cache);storage_ram_cache=NULL;storage_ram_partition=0;
+    }
+    if(storage_image) {
+        uint32_t status=xllr_storage_destroy(storage_image);storage_image=NULL;
+        if(status)fprintf(stderr,"[STORAGE] final image flush failed status=%08x\n",status);
+    }
+}
+/* Both image files and a RAM utility volume use the same complete adapter.
+ * Untagged handles continue to the actual host API, including saved games. */
+static void storage_image_install(void)
+{
+    if(media_nt_open==storage_image_open)return;
+    storage_host_open=media_nt_open;storage_host_create=media_nt_create;storage_host_read=media_nt_read;storage_host_write=media_nt_write;
+    storage_host_query=media_nt_query;storage_host_set=media_nt_set;storage_host_volume=media_nt_volume;
+    storage_host_flush=media_nt_flush;storage_host_directory=media_nt_directory;
+    media_nt_open=storage_image_open;media_nt_create=storage_image_create;media_nt_read=storage_image_read;media_nt_write=storage_image_write;
+    media_nt_query=storage_image_query;media_nt_set=storage_image_set;media_nt_volume=storage_image_volume;
+    media_nt_flush=storage_image_flush;media_nt_directory=storage_image_directory;
+    atexit(storage_image_shutdown);
+}
+static int storage_ram_enabled(void)
+{
+    static int enabled=-1;
+    if(enabled<0) {
+        const char *value=getenv("XLLE_PILOT_RAM_CACHE");
+        if(value && strcmp(value,"0") && strcmp(value,"1"))stop("invalid RAM cache selection",0);
+        enabled=value && !strcmp(value,"1");
+    }
+    return enabled;
+}
+static uint32_t storage_ram_mount(unsigned partition)
+{
+    if(storage_ram_cache)return partition==storage_ram_partition?0:0xc00000bbu;
+    for(unsigned i=0;i<2048;++i)
+        if(storage_image_handles[i].event && storage_image_handles[i].partition==partition &&
+           storage_image_handles[i].event!=storage_roots[partition])return 0xc0000043u;
+    char error[256]={0};
+    void *owner=xllr_storage_open_ram_cache(partition,750ull*1024*1024,error,sizeof(error));
+    if(!owner){fprintf(stderr,"[RAM CACHE] %s\n",error);return 0xc000009au;}
+    uint64_t file=0;uint32_t action=0;
+    uint32_t status=xllr_storage_file_open(owner,partition,0,"",FILE_LIST_DIRECTORY|FILE_TRAVERSE|FILE_READ_ATTRIBUTES|SYNCHRONIZE,7,0x21,1,0,0,&file,&action);
+    HANDLE event=status?NULL:CreateEventW(NULL,TRUE,TRUE,NULL);
+    if(!status && !event)status=0xc000009au;
+    if(status){xllr_storage_destroy(owner);return status;}
+    /* Called under the media owner lock before publishing the utility link.
+     * A title cannot replace a root while one of its files is still open. */
+    if(storage_roots[partition] && !storage_image_close(storage_roots[partition])) {
+        CloseHandle(event);xllr_storage_destroy(owner);return 0xc0000185u;
+    }
+    storage_ram_cache=owner;storage_ram_partition=partition;
+    storage_roots[partition]=event;
+    storage_image_handles[partition]=(struct StorageImageHandle){event,file,partition,owner};
+    storage_image_install();
+    fprintf(stderr,"[RAM CACHE] partition=%u capacity_bytes=%llu sparse=1 fresh=1\n",partition,750ull*1024*1024);
+    return 0;
 }
 static void storage_image_mount(const char *path)
 {
@@ -222,15 +281,10 @@ static void storage_image_mount(const char *path)
         if(status)stop("HDD image root mount failed",status);
         HANDLE event=CreateEventW(NULL,TRUE,TRUE,NULL);if(!event)stop("HDD root event unavailable",i);
         CloseHandle(storage_roots[i]);storage_roots[i]=event;
-        storage_image_handles[i]=(struct StorageImageHandle){event,file,i};
+        storage_image_handles[i]=(struct StorageImageHandle){event,file,i,storage_image};
     }
-    storage_host_open=media_nt_open;storage_host_create=media_nt_create;storage_host_read=media_nt_read;storage_host_write=media_nt_write;
-    storage_host_query=media_nt_query;storage_host_set=media_nt_set;storage_host_volume=media_nt_volume;
-    storage_host_flush=media_nt_flush;storage_host_directory=media_nt_directory;
-    media_nt_open=storage_image_open;media_nt_create=storage_image_create;media_nt_read=storage_image_read;media_nt_write=storage_image_write;
-    media_nt_query=storage_image_query;media_nt_set=storage_image_set;media_nt_volume=storage_image_volume;
-    media_nt_flush=storage_image_flush;media_nt_directory=storage_image_directory;
-    atexit(storage_image_shutdown);fprintf(stderr,"[STORAGE] verified existing %s HDD; actual shared FATX partitions\n",xllr_storage_is_qcow2(storage_image)?"QCOW2":"raw");
+    storage_image_install();
+    fprintf(stderr,"[STORAGE] verified existing %s HDD; actual shared FATX partitions\n",xllr_storage_is_qcow2(storage_image)?"QCOW2":"raw");
 }
 /* Include before the remaining runtime services so closes release their actual
  * FATX owner. Other kernel objects retain their ordinary Windows lifetime. */

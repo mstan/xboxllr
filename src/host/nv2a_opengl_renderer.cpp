@@ -1952,7 +1952,7 @@ public:
         // NV2A_GL (beads-xbox.1.14.3): host GL driver wall time for one resident submit --
         // context switch, surface residency, staging, uploads, uniforms and the draw. This
         // is CPU-side API time, not a GPU timer query; the distinction is the audit's
-        // (docs/PERF-AUDIT-2026-09-02.md §6, "zero timer queries/fences").
+        // (https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-AUDIT-2026-09-02.md §6, "zero timer queries/fences").
         perf_excl::Scope gl_region(perf_excl::kNv2aGl);
         SDL_Window* previous_window = nullptr;
         SDL_GLContext previous_context = nullptr;

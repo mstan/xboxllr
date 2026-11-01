@@ -2,7 +2,7 @@
 
 Bounded serial family `beads-xbox.1.106`, after display `.105`, is qualified
 on runtime `4a5dd48`. The current overall total is **9/9 bounded families**;
-see the [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+see the [closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md).
 Dated component reports below preserve historical checkpoints. Original
 virtual memory, pool/contiguous queries, residency, physical-page relocation
 and resource ownership run through the maintained kernel/page bridge.

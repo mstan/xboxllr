@@ -6,12 +6,12 @@ transform, rasterization, framebuffer writes and visibility-report DMA in
 `src/machine/nv2a.cpp`. This document records component qualification; full
 graphics-family acceptance is complete for the bounded NTSC attract profile.
 The current total is **9/9** under the
-[bounded closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md); counts
+[bounded closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md); counts
 in the dated component reports below describe their historical checkpoints.
 
 ## Fixed SD digital input - 2026-10-16
 
-The [digital input contract](../../docs/NV2A-DIGITAL-INPUT.md) connects actual
+The [digital input contract](../../docs/reference/graphics/NV2A-DIGITAL-INPUT.md) connects actual
 GPU storage through nominal SD601 limited-range conversion and12-bit DDR
 packing to the maintained encoder input receiver. It admits the reached exact
 NTSC profile, complete identity DAC, disabled scaling and known edge-correction

@@ -40,7 +40,7 @@ GFX-D23 records unreached DAC modes/readback and partial-upload timing; the
 reached full RGB upload and digital output lookup are implemented separately.
 See the
 [current dispositions](GRAPHICS-DEFERRED-QUESTIONS.md#current-disposition---2026-10-17)
-and [closing checklist](../../docs/BLINX-QUALIFICATION-CLOSURE.md).
+and [closing checklist](https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/BLINX-QUALIFICATION-CLOSURE.md).
 
 The final reached-mode census A01 and ordinary stages A02 are complete.
 References below to missing filter/spatial/headroom stages are extension
@@ -213,7 +213,7 @@ new profile, output validation contradicts the declared model, or a new signal
 policy is selected. Retain saved authored impulse/frequency/partition/lifetime
 and preflight checks, then validate the affected actual output and compatibility
 identity. There is no new hardware probe authorization or netplay qualification.
-See [model contract](../../docs/APU-NOMINAL-DLS2.md).
+See [model contract](../../docs/reference/audio/APU-NOMINAL-DLS2.md).
 
 AUDIO-D17 follow-up: nominal zero-rate/count-zero attack uses level255 then
 normal hold publication. Exact zero-rate silicon transient/crackle is unqualified;

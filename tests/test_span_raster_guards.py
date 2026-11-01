@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Structural guards for within-job destination-span parallel raster, stage (e2).
 
-Bead beads-xbox.1.15.9; design docs/DESIGN-NV2A-SEAM.md sections 1.3, 1.5, 3.1
-and 4.3; methodology docs/PERF-METHODOLOGY.md section 4. Predecessor guards:
+Bead beads-xbox.1.15.9; design docs/reference/graphics/DESIGN-NV2A-SEAM.md sections 1.3, 1.5, 3.1
+and 4.3; methodology docs/reference/testing/PERF-METHODOLOGY.md section 4. Predecessor guards:
 tests/test_seam_guards.py (stage (d)) and tests/test_draw_threads_guards.py
 (stage (e)); this file pins only what stage (e2) adds.
 

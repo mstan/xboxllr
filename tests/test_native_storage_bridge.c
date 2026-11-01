@@ -36,7 +36,8 @@ static HANDLE create(HANDLE parent,WCHAR *path,ULONG options)
 }
 int main(int argc,char **argv)
 {
-    if(argc!=3 || strcmp(argv[1],"--fixture"))return 2;
+    int ram=argc==2 && !strcmp(argv[1],"--ram");
+    if(!ram && (argc!=3 || strcmp(argv[1],"--fixture")))return 2;
     HMODULE nt=GetModuleHandleW(L"ntdll.dll");
 #define IMPORT(name,type,export_name) name=(type)(void*)GetProcAddress(nt,export_name);CHECK(name)
     IMPORT(media_nt_open,MediaOpen,"NtOpenFile");IMPORT(media_nt_create,MediaCreate,"NtCreateFile");
@@ -44,6 +45,7 @@ int main(int argc,char **argv)
     IMPORT(media_nt_query,MediaInfo,"NtQueryInformationFile");IMPORT(media_nt_set,MediaInfo,"NtSetInformationFile");
     IMPORT(media_nt_volume,MediaInfo,"NtQueryVolumeInformationFile");IMPORT(media_nt_flush,MediaFlush,"NtFlushBuffersFile");
     IMPORT(media_nt_directory,MediaDirectory,"NtQueryDirectoryFile");
+    if(ram) {CHECK(!storage_ram_mount(3));} else {
     char error[1024]={0};void *inspection=xllr_storage_open(argv[2],0,error,sizeof(error));
     CHECK(inspection);
     uint8_t identity[88],digest[32];uint64_t size=xllr_storage_bytes(inspection);memcpy(identity,&size,8);
@@ -53,7 +55,8 @@ int main(int argc,char **argv)
     CHECK(BCryptHash(BCRYPT_SHA256_ALG_HANDLE,NULL,0,identity,sizeof(identity),digest,32)>=0);
     char hex[65];for(unsigned i=0;i<32;++i)sprintf(hex+i*2,"%02x",digest[i]);
     CHECK(!_putenv_s("XLLE_PILOT_HDD_IDENTITY",hex));storage_image_mount(argv[2]);
-    HANDLE dir=create(storage_roots[1],L"xllr-bridge",0x21);
+    }
+    HANDLE dir=create(storage_roots[ram?3:1],L"xllr-bridge",0x21);
     HANDLE file=create(dir,L"payload.dat",0x60);
     LARGE_INTEGER offset;offset.QuadPart=29;IO_STATUS_BLOCK io={0};
     uint8_t payload[19001],loaded[19030];for(unsigned i=0;i<sizeof(payload);++i)payload[i]=(uint8_t)(i*13+i/19);
@@ -83,10 +86,12 @@ int main(int argc,char **argv)
     BOOLEAN remove=TRUE;CHECK(!media_nt_set(file,&io,&remove,1,13));CHECK(CloseHandle(file));
     CHECK(!media_nt_set(dir,&io,&remove,1,13));CHECK(CloseHandle(dir));
     storage_image_shutdown();
-    inspection=xllr_storage_open(argv[2],0,error,sizeof(error));CHECK(inspection);
+    if(!ram) {
+    char error[1024]={0};void *inspection=xllr_storage_open(argv[2],0,error,sizeof(error));CHECK(inspection);
     uint64_t handle=0;uint32_t action=0;
     CHECK(xllr_storage_file_open(inspection,1,0,"xllr-bridge",GENERIC_READ|SYNCHRONIZE,7,0x21,1,0,0,&handle,&action)==0xc0000034u);
     CHECK(!xllr_storage_destroy(inspection));
+    }
     puts("actual native NT bridge save/reopen/rename/enumerate/delete passed");
     return 0;
 }

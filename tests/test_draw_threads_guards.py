@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Structural guards for the threaded NV2A draw consumer, stage (e).
 
-Bead beads-xbox.1.15.5; design docs/DESIGN-NV2A-SEAM.md sections 1.3, 1.5, 2.2(c),
-3.1, 4 and 5(e); methodology docs/PERF-METHODOLOGY.md section 4.
+Bead beads-xbox.1.15.5; design docs/reference/graphics/DESIGN-NV2A-SEAM.md sections 1.3, 1.5, 2.2(c),
+3.1, 4 and 5(e); methodology docs/reference/testing/PERF-METHODOLOGY.md section 4.
 
 Stage (e) hands DrawJobs to one worker thread behind a default-off flag. The
 properties that make that safe are not checkable by the compiler and are not

@@ -1604,7 +1604,7 @@ bool write_generic_packet_dump(const char* path,
 // retired/IRQ0/injected/pending/early-stop counters, the IDE census, AND the two always-on
 // input digests -- dev_digest over all 17,588,661 device-register accesses and dma_digest over
 // all 1,610,786 device DMA writes into guest RAM. Only the slice census moves, which is what
-// the feature is defined to move. See docs/PERF-METHODOLOGY.md section 3d.
+// the feature is defined to move. See docs/reference/testing/PERF-METHODOLOGY.md section 3d.
 static constexpr bool kIdleFastForwardDefault = true;
 
 // ---- draw-thread and profile-hash defaults (beads-xbox.1.15.9, 2026-09-05) ----
@@ -1718,7 +1718,7 @@ int main(int argc, char** argv) {
     // turns on per-vertex stats folding and the generic-combiner fingerprint census
     // (nv2a.cpp submit_vertex_batch / rasterize_generic_combiner_batch), which is a large
     // part of the 17.1 % cost attributed to --perf-accounting
-    // (docs/PERF-AUDIT-2026-09-02.md §6). It now has its own switch
+    // (https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-AUDIT-2026-09-02.md §6). It now has its own switch
     // (beads-xbox.1.14.3 item 4).
     bool nv2a_detailed_telemetry = false;
     // Per-write FNV-1a output-hash folds in the witnessed raster fragment loop
@@ -2641,7 +2641,7 @@ int main(int argc, char** argv) {
         } else {
             if (!hdd_security_file) {
                 std::fprintf(stderr, "[hdd] locked mode requires --hdd-security-file <private.key>; "
-                             "see docs/HDD-SECURITY.md for provisioning or explicit unlocked mode\n");
+                             "see docs/reference/storage/HDD-SECURITY.md for provisioning or explicit unlocked mode\n");
                 return 1;
             }
             // Bounded read. Passwords never appear in argv, diagnostics or reports.

@@ -1,6 +1,6 @@
 """Build a golden record from an existing xlle replay report (+ stdout log).
 
-A golden record names its own identity, per docs/PERF-METHODOLOGY.md section 3
+A golden record names its own identity, per docs/reference/testing/PERF-METHODOLOGY.md section 3
 item 5: the chunk size, engine and build that produced it, together with every
 per-profile output hash and the final frame SHA-256. That is what makes a
 re-baseline auditable -- a bare `final_frame_dump_sha256` cannot attribute drift
@@ -173,7 +173,7 @@ def build_golden(
         # --- input identity (beads-xbox.1.14.11) -----------------------------
         # The guest media are inputs, not constants. The HDD image in particular
         # WAS being modified by the run itself until the copy-on-write attach
-        # landed (docs/PERF-METHODOLOGY.md section 3b), so a golden that does not
+        # landed (docs/reference/testing/PERF-METHODOLOGY.md section 3b), so a golden that does not
         # name the image it was produced against cannot be checked.
         "input_sha256": input_hashes(command),
         "hdd_write_policy": ("writeback" if "--hdd-writeback" in command

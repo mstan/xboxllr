@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Archive the exact binary a `[host-sampler]` profile came from.
 
-docs/PERF-METHODOLOGY.md section 2 rule 9: "A profile is archived with the exact
+docs/reference/testing/PERF-METHODOLOGY.md section 2 rule 9: "A profile is archived with the exact
 binary SHA and symbol map it came from." Without this, a profile outlives its
 binary and its function names become unverifiable -- exactly what happened to
 `build/oxalpha-sampler-12b-v6.stdout.log` (profiled 2026-08-21; neither

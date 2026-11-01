@@ -756,7 +756,7 @@ uint64_t XboxMachine::run(uint32_t start, uint64_t max, std::string& err) {
         // pending check, the device frame clocks, interrupt-injection bookkeeping,
         // get_regs() and the idle census. This replaces three separate host_poll_devices
         // ScopedAdd scopes whose six steady_clock reads per slice were most of what that
-        // bucket reported (71.7 ns/scope, docs/PERF-AUDIT-2026-09-02.md §6).
+        // bucket reported (71.7 ns/scope, https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-AUDIT-2026-09-02.md §6).
         perf_excl::Scope slice_region(perf_excl::kSliceOverhead);
         bool irq_armed = false;
         {

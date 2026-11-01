@@ -3748,7 +3748,7 @@ bool Nv2a::submit_vertex_batch() {
         }
         // Native HLE deliberately retains compressed GPU sampling. The small
         // reconstruction variation is the documented, owner-accepted HLE
-        // approximation (docs/NV2A-DXT1-NOISE.md), not a register-state reset.
+        // approximation (docs/reference/graphics/NV2A-DXT1-NOISE.md), not a register-state reset.
     }
     if(!ram_tile_configuration())return false;
     if(ram_tiles_active() && renderer_ && !gpu_phase_depth_) {
@@ -10757,7 +10757,7 @@ bool Nv2a::rasterize_generic_combiner_batch(DrawJob& job, bool& executed) {
     // --perf-accounting made the timed code differ from the untimed code.
     // DECISION: the "[2bl] NV2A generic-combiner fingerprints:" census now requires
     // --nv2a-detailed-telemetry; it is no longer produced by --perf-accounting alone.
-    // docs/PERF-METHODOLOGY.md section 5a already declares these families
+    // docs/reference/testing/PERF-METHODOLOGY.md section 5a already declares these families
     // instrumentation artifacts and out of scope for goldens. The two per-profile
     // hashes (generic_combiner, transform_position_fnv64) therefore stay at the FNV-1a
     // offset basis 14650fb0739d0383 in a --perf-accounting run, which is what section

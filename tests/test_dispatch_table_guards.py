@@ -8,7 +8,7 @@ Nv2a::dispatch_method used to be 126 top-level `if / else if (method ...)` arms
 in source order.  Method 0x1800 (ARRAY_ELEMENT16) is 76.9 % of the 83.3 M
 dispatched method words in the canonical run and sat at arm #120, so almost
 every dispatched word walked ~120 predicted-not-taken compares before reaching
-its body (docs/PERF-AUDIT-2026-09-02.md §5; 17.4 s of 251 s wall at 209 ns/word).
+its body (https://github.com/mstan/xboxllr/blob/5faaafad269d671b39737edbebaed66c81b2b9fb/docs/PERF-AUDIT-2026-09-02.md §5; 17.4 s of 251 s wall at 209 ns/word).
 
 The chain is now a 2048-entry byte table indexed by `method >> 2` feeding one
 `switch`.  What that change can silently break is not the timing -- it is the
