@@ -113,7 +113,11 @@ static int32_t native_shader_compile(struct NativeShader *candidate,char *source
     /* Reuse the renderer's exact-source/entry/profile/settings cache. Input
      * layouts and device-owned shader objects still belong to each caller.
      * A rejected blob is a miss; compilation remains the portable fallback. */
+#ifdef PILOT_DXVK_NATIVE
+    const char *cache_tag=PILOT_NATIVE_HLSL_COMPILER_ID "-native-vs5";
+#else
     const char *cache_tag="xboxlle-native-d3dcompiler47-vs5-O3-v1";
+#endif
     RhiShaderSource cache_source={0};
     cache_source.hlsl=source;cache_source.len=strlen(source);cache_source.name="xlle-nv2a";
     cache_source.entry="raster_main";cache_source.target="vs_5_0";cache_source.optimize=1;

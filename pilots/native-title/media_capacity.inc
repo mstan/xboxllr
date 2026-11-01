@@ -26,7 +26,10 @@ static uint32_t media_capacity_walk(HANDLE directory,unsigned depth,uint64_t *se
             memcpy(&attributes,buffer+offset+56,4);memcpy(&name_bytes,buffer+offset+60,4);
             if((name_bytes&1) || name_bytes>io.Information-offset-64 || name_bytes>=520)
                 {status=0xc0000106u;break;}
-            WCHAR name[260];memcpy(name,buffer+offset+64,name_bytes);name[name_bytes/2]=0;
+            WCHAR name[260];
+            const uint16_t *record_name=(const uint16_t*)(buffer+offset+64);
+            for(unsigned n=0;n<name_bytes/2;++n)name[n]=(WCHAR)record_name[n];
+            name[name_bytes/2]=0;
             if(wcscmp(name,L".") && wcscmp(name,L"..")) {
                 if(!name_bytes || wcschr(name,'\\') || wcschr(name,'/') || wcslen(name)*2!=name_bytes)
                     {status=MEDIA_INVALID;break;}

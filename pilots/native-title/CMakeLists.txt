@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(xlle_native_title_pilot C CXX)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(native_linux.cmake)
+  return()
+endif()
 # Qualified titles may request whole-program optimization without making another
 # host/compiler a build requirement. Keep the normal portable build available;
 # diagnostic/iterative builds retain their existing compilation policy.

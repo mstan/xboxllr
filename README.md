@@ -25,9 +25,10 @@ Dashboard app and the developer build tool. Choose the ZIP you need below.
 | **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2)** | Developer package: `xboxllr-build-tool-windows-x64-2026.10.29.2.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
 | **[Blinx playable public alpha](https://github.com/mstan/BlinxRecomp/releases/tag/alpha-2026.10.29.1)** | Players: a ready-to-run native game package. No compiler required; supply your own supported NTSC-U game dump. |
 
-Current playable downloads target **Windows x64 with D3D11**. Linux component
-checks do not establish a working Linux game release. JSRF and other experimental
-titles are not publicly supported in this beta.
+Current public downloads target **Windows x64 with D3D11**. Native Linux x86_64
+title builds and AppImage packaging use SDL2, DXVK Native/Vulkan and FAudio;
+see [Linux build and packaging instructions](docs/NATIVE-LINUX.md).
+JSRF and other experimental titles are not publicly supported in this beta.
 
 ## Blinx: The Time Sweeper
 

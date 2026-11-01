@@ -149,8 +149,13 @@ static void storage_mount(const char *directory)
             DWORD count=GetFinalPathNameByHandleW(check,content,32768,FILE_NAME_NORMALIZED); CloseHandle(check);
             if (!count || count>=32768) stop("cannot resolve content directory",0);
             size_t common=count<length ? count : length;
+#ifndef _WIN32
+            if (!wcsncmp(content,resolved,common) &&
+                (content[common]==0 || content[common]=='/') && (resolved[common]==0 || resolved[common]=='/'))
+#else
             if (!_wcsnicmp(content,resolved,common) &&
                 (content[common]==0 || content[common]=='\\') && (resolved[common]==0 || resolved[common]=='\\'))
+#endif
                 stop("writable storage overlaps installed content",0);
         }
     }

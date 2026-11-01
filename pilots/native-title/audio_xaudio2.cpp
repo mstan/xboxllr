@@ -11,8 +11,10 @@
 #include <windows.h>
 #include <xaudio2.h>
 #include <xapo.h>
+#ifdef _WIN32
 #include <ks.h>
 #include <ksmedia.h>
+#endif
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -215,7 +217,9 @@ static HRESULT start_engine(){SessionHostWait wait;return engine->StartEngine();
 static IXAudio2MasteringVoice *master;
 static IXAudio2SubmixVoice *mixer;
 static Effects *effects;
+#ifdef _WIN32
 static CO_MTA_USAGE_COOKIE mta;
+#endif
 static HANDLE wake,feeder;
 static std::atomic<bool> exiting{false};
 static SRWLOCK lock=SRWLOCK_INIT;
@@ -424,7 +428,10 @@ static DWORD WINAPI feed(void*)
 int32_t pilot_audio_open(void)
 {
     if(engine)return S_OK;
-    HRESULT hr=CoIncrementMTAUsage(&mta);
+    HRESULT hr=S_OK;
+#ifdef _WIN32
+    hr=CoIncrementMTAUsage(&mta);
+#endif
     if(SUCCEEDED(hr))hr=XAudio2Create(&engine,0,XAUDIO2_DEFAULT_PROCESSOR);
     if(FAILED(hr))fprintf(stderr,"[AUDIO INIT] XAudio2Create=%08x\n",(unsigned)hr);
     if(SUCCEEDED(hr))hr=engine->RegisterForCallbacks(&engine_events);
@@ -462,7 +469,9 @@ void pilot_audio_close(void)
     if(effects){effects->Release();effects=nullptr;}
     if(engine){engine->UnregisterForCallbacks(&engine_events);engine->Release();engine=nullptr;}
     if(wake){CloseHandle(wake);wake=nullptr;}
+#ifdef _WIN32
     if(mta){CoDecrementMTAUsage(mta);mta=nullptr;}
+#endif
 }
 int32_t pilot_audio_effects_install(PilotDsp *graph)
 {

@@ -264,7 +264,7 @@ int pilot_write_watch_invalidate(const void *data,size_t bytes){(void)data;(void
 int pilot_write_watch_native_begin(const void *data,size_t bytes){(void)data;(void)bytes;return 1;}
 void pilot_write_watch_native_end(const void *data,size_t bytes){(void)data;(void)bytes;}
 uint64_t pilot_write_watch_faults(void){return 0;}
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(PILOT_POSIX_HOST)
 #include "memory_write_watch_win32.h"
 BOOL WINAPI pilot_write_watch_virtual_protect(LPVOID address,SIZE_T bytes,DWORD protect,PDWORD previous)
 {
