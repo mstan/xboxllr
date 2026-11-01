@@ -28,6 +28,6 @@ static void pilot_quad_draw(unsigned first,unsigned count)
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();ID3D11Buffer *previous=NULL;DXGI_FORMAT format;UINT offset;
     ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
     ID3D11DeviceContext_IASetIndexBuffer(context,pilot_quad_indices,DXGI_FORMAT_R32_UINT,0);
-    ID3D11DeviceContext_DrawIndexed(context,quads*6,0,(INT)first);
+    pilot_native_draw_indexed(quads*6,0,(INT)first);
     ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);if(previous)ID3D11Buffer_Release(previous);
 }

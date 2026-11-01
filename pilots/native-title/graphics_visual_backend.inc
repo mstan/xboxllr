@@ -3,6 +3,30 @@
  * textures are untouched. All calls share the graphics owner's lock. */
 static struct PilotVisualMods pilot_visual={1,0,1,0,1,0,0,4,3};
 static uint32_t pilot_guest_width,pilot_guest_height,pilot_guest_viewport[6];
+#ifdef PILOT_D3D_PHOBOS
+/* Companion sizing keeps the existing scene/target classification, including
+ * original lookup grids. Actual native/logical ratios carry guest MSAA and
+ * explicitly supplied depth-grid dimensions without changing native storage. */
+static int pilot_native_dimensions(unsigned logical_width,unsigned logical_height,
+    unsigned native_width,unsigned native_height,unsigned *enhanced_width,unsigned *enhanced_height)
+{
+    if(!enhanced_width || !enhanced_height || !logical_width || !logical_height ||
+       !native_width || !native_height || native_width>16384 || native_height>16384)return 0;
+    uint32_t size[2];
+    int valid;
+    if(logical_width==pilot_guest_width && logical_height==pilot_guest_height)
+        valid=pilot_visual_mods_size(&pilot_visual,pilot_guest_width,pilot_guest_height,
+            logical_width,logical_height,16384,size);
+    else valid=pilot_visual_mods_target_size(&pilot_visual,pilot_guest_width,pilot_guest_height,
+        logical_width,logical_height,16384,size);
+    if(!valid)return 0;
+    uint64_t width=((uint64_t)size[0]*native_width+logical_width-1)/logical_width;
+    uint64_t height=((uint64_t)size[1]*native_height+logical_height-1)/logical_height;
+    if(!width || !height || width>16384 || height>16384)return 0;
+    *enhanced_width=(unsigned)width;*enhanced_height=(unsigned)height;
+    return 1;
+}
+#endif
 int pilot_gfx_visual_mods(const struct PilotVisualMods *options)
 {
     if(pilot_device || !pilot_visual_mods_validate(options))return 0;
@@ -21,13 +45,21 @@ int pilot_gfx_visual_mods(const struct PilotVisualMods *options)
 }
 void pilot_d3d_scene_size(unsigned width,unsigned height,unsigned *out_width,unsigned *out_height)
 {
-    uint32_t size[2];
-    if(!pilot_visual_mods_size(&pilot_visual,width,height,width,height,16384,size))
-        pilot_d3d_backend_stop("visual mod scene dimensions exceed native capability");
     pilot_guest_width=width;pilot_guest_height=height;
     memset(pilot_guest_viewport,0,sizeof(pilot_guest_viewport));
     pilot_guest_viewport[2]=width;pilot_guest_viewport[3]=height;pilot_guest_viewport[5]=0x3f800000u;
     uint32_t axis=pilot_presentation_axis(&pilot_presentation);
+#ifdef PILOT_D3D_PHOBOS
+    if(pilot_native_enabled()) {
+        if(!width || !height || width>16384/axis || height>16384/axis)
+            pilot_d3d_backend_stop("guest raster dimensions exceed native capability");
+        *out_width=width*axis;*out_height=height*axis;
+        return;
+    }
+#endif
+    uint32_t size[2];
+    if(!pilot_visual_mods_size(&pilot_visual,width,height,width,height,16384,size))
+        pilot_d3d_backend_stop("visual mod scene dimensions exceed native capability");
     if(size[0]>16384/axis || size[1]>16384/axis)pilot_d3d_backend_stop("guest raster dimensions exceed native capability");
     *out_width=size[0]*axis;*out_height=size[1]*axis;
     if(size[0]!=width || size[1]!=height)
@@ -41,6 +73,9 @@ void pilot_d3d_target_size(unsigned usage,unsigned width,unsigned height,unsigne
     if((usage&2) && pilot_depth_allocation_size) {
         *out_width=pilot_depth_allocation_size[0];*out_height=pilot_depth_allocation_size[1];return;
     }
+#ifdef PILOT_D3D_PHOBOS
+    if(pilot_native_enabled())return;
+#endif
     if(!(usage&3) || (!pilot_visual.internal_height && pilot_visual.supersample==1))return;
     uint32_t size[2];
     /* Ordinary sampled lookup allocations retain their native-size policy.
@@ -53,7 +88,15 @@ void pilot_d3d_target_size(unsigned usage,unsigned width,unsigned height,unsigne
 int pilot_gfx_render_size(uint32_t size[2])
 {
     if(!pilot_device || !size)return 0;
-    size[0]=d3d8_GetBackbufferWidth();size[1]=d3d8_GetBackbufferHeight();return 1;
+    size[0]=d3d8_GetBackbufferWidth();size[1]=d3d8_GetBackbufferHeight();
+#ifdef PILOT_D3D_PHOBOS
+    if(pilot_native_enabled()) {
+        /* Only the source actually selected after view/allocation admission
+         * counts as presented HD. Before first resolve, retain native size. */
+        if(pilot_native_presented_size[0])memcpy(size,pilot_native_presented_size,sizeof(pilot_native_presented_size));
+    }
+#endif
+    return 1;
 }
 /* Native CPU writes to scaled color RTs are uncommon (locks/save images), not
  * a per-draw or per-frame image conversion. Resample only after the donor has

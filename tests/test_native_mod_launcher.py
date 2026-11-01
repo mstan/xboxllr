@@ -153,6 +153,29 @@ class LauncherPolicy(unittest.TestCase):
             frame = next(f for f in enabled.features if f['id'] == 'frame-rate')
             self.assertEqual([v for v, _ in frame['options'][0]['choices']], ['original', 'interpolated', 'actual'])
 
+    def test_8x_choice_keeps_defaults_and_independent_saved_resolution(self):
+        with tempfile.TemporaryDirectory() as d:
+            state=Path(d)/'selection.json'
+            supersampling=PID+'/supersampling';resolution=PID+'/resolution'
+            defaults={supersampling:dict(enabled=True,options={'axis':'2'}),
+                      resolution:dict(enabled=True,options={'height':'1080'})}
+            fresh=ui.Catalog(MANIFESTS,state,defaults=defaults)
+            feature=next(f for f in fresh.features if f['id']=='supersampling')
+            option=feature['options'][0]
+            self.assertEqual([v for v,_ in option['choices']],['1','2','3','8'])
+            self.assertEqual((option['default'],option['value']),('2','2'))
+            self.assertEqual(option['label'],'Per-axis multiplier')
+            self.assertIn('Original internal resolution',feature['description'])
+            self.assertEqual(fresh.values()[(PID,'resolution','height')],'1080')
+            ui.atomic_json(state,dict(version=1,features={
+                supersampling:dict(enabled=True,options={'axis':'8'}),
+                resolution:dict(enabled=True,options={'height':'1440'})}))
+            saved=ui.Catalog(MANIFESTS,state,defaults=defaults)
+            self.assertEqual(saved.values()[(PID,'supersampling','axis')],'8')
+            self.assertEqual(saved.values()[(PID,'resolution','height')],'1440')
+            ui.atomic_json(state,saved.selection())
+            self.assertEqual(ui.Catalog(MANIFESTS,state,defaults=defaults).values(),saved.values())
+
     def test_hidden_active_choice_disables_feature(self):
         with tempfile.TemporaryDirectory() as d:
             state, policy = Path(d) / 'selection.json', Path(d) / 'visibility.json'

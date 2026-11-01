@@ -8,6 +8,9 @@ def prepare_feedback(code):
         code=code.replace(old,new)
     once('static void up_ring_shutdown(void);',
          'static void up_ring_shutdown(void);\nstatic void pilot_feedback_shutdown(void);\n'
+         'extern void pilot_native_snapshot_copy(RhiImage *,RhiImage *,void **);\n'
+         'extern void pilot_native_snapshot_release(void **);\n'
+         'extern void pilot_native_draw_prepared(unsigned,unsigned);\n'
          'static RhiImage *pilot_output_color, *pilot_output_depth;\n'
          'static int pilot_feedback_alias(RhiImage *a,RhiImage *b) {\n'
          '    return a && b && rhi_d3d11_native_image(a)==rhi_d3d11_native_image(b);\n}\n')
@@ -30,7 +33,8 @@ def prepare_feedback(code):
          '!g_cur_textures[stage] || !pilot_feedback_alias(d3d8_base_resource(g_cur_textures[stage]),target)')
     code,n=re.subn(r'            if \(!feedback_scratch\(target\) \|\| rhi_image_copy\(g_feedback.img, target\) != 0\) \{.*?\n            \}',
         '            if (!feedback_scratch(target) || rhi_image_copy(g_feedback.img, target) != 0)\n'
-        '                pilot_d3d_backend_stop("native feedback scratch allocation/copy failed");',code,flags=re.S)
+        '                pilot_d3d_backend_stop("native feedback scratch allocation/copy failed");\n'
+        '            pilot_native_snapshot_copy(g_feedback.img,target,&g_feedback.native_plane_owner);',code,flags=re.S)
     if n!=1:raise ValueError('unreviewed donor feedback failure')
     once('static void feedback_end(DWORD mask)',
          'static DWORD feedback_begin(void) {\n'
@@ -50,6 +54,7 @@ def prepare_feedback(code):
     RhiImage     *img;
     RhiView      *srv;
     RhiImageDesc  desc;
+    void        *native_plane_owner;
 } PilotFeedbackScratch;
 static PilotFeedbackScratch g_feedback,pilot_blend_destination;
 static unsigned long pilot_blend_copies,pilot_blend_allocations;''')
@@ -58,12 +63,27 @@ static unsigned long pilot_blend_copies,pilot_blend_allocations;''')
     allocator=code[start:end].replace('static int feedback_scratch(RhiImage *target)',
         'static int feedback_scratch_for(PilotFeedbackScratch *scratch,RhiImage *target,unsigned long *allocations)')
     allocator=allocator.replace('g_feedback.', 'scratch->').replace('++pilot_feedback_allocations;', '++(*allocations);')
+    # Preserve existing conditional cleanup/control flow: a comma expression
+    # retires the owned map immediately before EACH scratch image destruction.
+    retire='rhi_image_destroy(scratch->img);'
+    if retire not in allocator:raise ValueError('unreviewed feedback scratch retirement')
+    allocator=allocator.replace(retire,
+        '(pilot_native_snapshot_release(&scratch->native_plane_owner),rhi_image_destroy(scratch->img));')
     allocator+='''
 static int feedback_scratch(RhiImage *target) {
     return feedback_scratch_for(&g_feedback,target,&pilot_feedback_allocations);
 }
 '''
     code=code[:start]+allocator+code[end:]
+    # Intercept the donor's exact prepared UP submission while its ring/IA is
+    # still retained and its original feedback scope is active. Never infer a
+    # second draw's count/start after DrawPrimitiveUP has returned.
+    draw='rhi_draw(vertex_count, 0);'
+    if code.count(draw)!=1:raise ValueError('unreviewed prepared UP draw count')
+    at=code.index(draw);up=code.rfind('dev_DrawPrimitiveUP(',0,at)
+    if up<0 or code.rfind('feedback_begin(',up,at)<0 or code.find('feedback_end(',at)<0:
+        raise ValueError('unreviewed prepared UP feedback scope')
+    once(draw,'pilot_native_draw_prepared(vertex_count, 0);')
     code+='''
 /* Native adapter access; resources remain owned by the donor/backend. */
 RhiImage *pilot_donor_default_depth(void) { return g_device_state.depth_image; }
@@ -84,6 +104,7 @@ RhiView *pilot_donor_blend_destination(void) {
         !feedback_scratch_for(&pilot_blend_destination,target,&pilot_blend_allocations) ||
         rhi_image_copy(pilot_blend_destination.img,target)!=0)
         pilot_d3d_backend_stop("explicit blend destination allocation/copy failed");
+    pilot_native_snapshot_copy(pilot_blend_destination.img,target,&pilot_blend_destination.native_plane_owner);
     ++pilot_blend_copies;
     return pilot_blend_destination.srv;
 }
@@ -91,6 +112,7 @@ void pilot_donor_blend_destination_stats(uint32_t *copies,uint32_t *allocations)
     *copies=pilot_blend_copies;*allocations=pilot_blend_allocations;
 }
 static void pilot_feedback_shutdown(void) {
+    pilot_native_snapshot_release(&pilot_blend_destination.native_plane_owner);
     if(pilot_blend_destination.srv) {
         RhiView *none=NULL;rhi_set_textures(4,1,&none);
         rhi_view_destroy(pilot_blend_destination.srv);
@@ -98,6 +120,7 @@ static void pilot_feedback_shutdown(void) {
     if(pilot_blend_destination.img)rhi_image_destroy(pilot_blend_destination.img);
     memset(&pilot_blend_destination,0,sizeof(pilot_blend_destination));
     pilot_blend_copies=pilot_blend_allocations=0;
+    pilot_native_snapshot_release(&g_feedback.native_plane_owner);
     if(g_feedback.srv)rhi_view_destroy(g_feedback.srv);
     if(g_feedback.img)rhi_image_destroy(g_feedback.img);
     memset(&g_feedback,0,sizeof(g_feedback));

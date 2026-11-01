@@ -13,7 +13,11 @@ static unsigned pilot_query_count,pilot_query_created;
  * reset; recording/querying use needs no search or GPU readback. */
 /* Reads advance completion ownership, but only content writes invalidate a
  * prepared CPU snapshot. Both revisions follow the shared image's lifetime. */
-struct PilotImageUse {uint64_t serial,write_serial,identity;unsigned refs;};
+struct PilotImageUse {uint64_t serial,write_serial,identity;unsigned refs;
+#ifdef PILOT_D3D_PHOBOS
+    struct PilotNativeMap *native_map;
+#endif
+};
 static struct PilotImageUse *pilot_surface_use[4];
 static struct PilotImageUse *pilot_image_use_create(void)
 {
@@ -30,7 +34,12 @@ static void pilot_image_use_release(struct PilotImageUse *use)
 {
     if(!use)return;
     if(!use->refs)pilot_d3d_backend_stop("invalid image completion release");
-    if(!--use->refs)free(use);
+    if(!--use->refs){
+#ifdef PILOT_D3D_PHOBOS
+        pilot_native_map_release(use->native_map);
+#endif
+        free(use);
+    }
 }
 /* Optional sparse diagnosis of native driver stalls. Report only calls over
  * 50 ms, after the measured call returns; ordinary completion is unchanged. */

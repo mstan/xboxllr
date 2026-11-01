@@ -29,6 +29,12 @@ int main(void)
     o.supersample=1;CHECK(!pilot_visual_mods_size(&o,640,480,4096,4096,16384,size));
     CHECK(!pilot_visual_mods_size(&o,640,480,0xffffffffu,1,16384,size));
     struct PilotVisualMods original=o;
+    pilot_visual_mods_default(&o);o.supersample=16;
+    CHECK(pilot_visual_mods_size(&o,640,480,640,480,16384,size) && size[0]==10240 && size[1]==7680);
+    o.supersample=64;CHECK(pilot_visual_mods_validate(&o));
+    CHECK(!pilot_visual_mods_size(&o,640,480,640,480,16384,size));
+    CHECK(pilot_visual_mods_size(&o,64,48,64,48,16384,size) && size[0]==4096 && size[1]==3072);
+    o.supersample=65;CHECK(!pilot_visual_mods_validate(&o));
     for(unsigned mode=0;mode<=2;++mode){o=original;o.frame_mode=mode;o.frame_rate=mode?60:0;CHECK(pilot_visual_mods_validate(&o));}
     o.frame_mode=3;CHECK(!pilot_visual_mods_validate(&o));
     o=original;o.frame_mode=PILOT_FRAMES_ACTUAL;o.frame_rate=0;CHECK(!pilot_visual_mods_validate(&o));
@@ -36,6 +42,7 @@ int main(void)
     o=original;o.anisotropy=3;CHECK(!pilot_visual_mods_validate(&o));
     o=original;o.aspect_numerator=64;CHECK(!pilot_visual_mods_validate(&o));
     struct PilotVisualPlan p;
+    CHECK(parse("operation supersampling 1 16\nend\n",&p) && p.options.supersample==16);
     CHECK(parse("operation aspect 1 example.widescreen 7 3 1\noperation resolution 1 1080\noperation frame-rate 1 1 60\nend\n",&p));
     CHECK(p.options.frame_mode==PILOT_FRAMES_INTERPOLATED && p.options.internal_height==1080 && p.adaptive==1);
     CHECK(parse("operation frame-rate 1 2 60\nend\n",&p) && p.options.frame_mode==PILOT_FRAMES_ACTUAL);

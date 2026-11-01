@@ -1,9 +1,9 @@
 /* Native implementation of the bounded NV097/XDK visibility contract.
  * Real D3D11 samples and GPU timestamps. Independent of the CPU reference;
  * production selects one renderer and never executes both. See pilot README. */
-struct PilotVisibilityExclusion {ID3D11Query *query;struct PilotVisibilityExclusion *next;};
+struct PilotVisibilityExclusion {ID3D11Query *query;struct PilotVisibilityExclusion *next;unsigned optional;};
 struct PilotVisibilityCounter { ID3D11Query *query; unsigned refs; int ended,ready; uint32_t value;
-    struct PilotVisibilityExclusion *excluded;unsigned exclusions; };
+    struct PilotVisibilityExclusion *excluded;unsigned exclusions,optional_exclusions; };
 struct PilotVisibilityReport {
     uint32_t index;struct PilotVisibilityCounter *counter;
     ID3D11Query *begin_stamp,*end_stamp,*clock;
@@ -11,14 +11,20 @@ struct PilotVisibilityReport {
     struct PilotVisibilityReport *next;
 };
 static struct PilotVisibilityCounter *pilot_visibility_current;
+static ID3D11Query *pilot_visibility_excluded_scope;
 static int pilot_visibility_active(void)
 {return pilot_visibility_current && !pilot_visibility_current->ended;}
 static struct PilotVisibilityReport *pilot_visibility_reports;
-static unsigned pilot_visibility_counter_count,pilot_visibility_report_count;
+static unsigned pilot_visibility_counter_count,pilot_visibility_report_count,pilot_visibility_optional_count;
+static void pilot_visibility_exclusion_release(struct PilotVisibilityCounter *c,struct PilotVisibilityExclusion *e)
+{
+    if(e->optional){--c->optional_exclusions;--pilot_visibility_optional_count;}
+    ID3D11Query_Release(e->query);free(e);
+}
 static void pilot_visibility_unref(struct PilotVisibilityCounter *c)
 {
     if(c && !--c->refs){
-        while(c->excluded){struct PilotVisibilityExclusion *e=c->excluded;c->excluded=e->next;ID3D11Query_Release(e->query);free(e);}
+        while(c->excluded){struct PilotVisibilityExclusion *e=c->excluded;c->excluded=e->next;pilot_visibility_exclusion_release(c,e);}
         ID3D11Query_Release(c->query);free(c);--pilot_visibility_counter_count;
     }
 }
@@ -42,10 +48,35 @@ static ID3D11Query *pilot_visibility_internal_begin(void)
     if(!e)pilot_d3d_backend_stop("internal visibility allocation");
     pilot_d3d_require(pilot_visibility_query(D3D11_QUERY_OCCLUSION,&e->query),__FILE__,__LINE__);
     e->next=pilot_visibility_current->excluded;pilot_visibility_current->excluded=e;++pilot_visibility_current->exclusions;
-    ID3D11DeviceContext_Begin(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)e->query);return e->query;
+    ID3D11DeviceContext_Begin(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)e->query);
+    pilot_visibility_excluded_scope=e->query;return e->query;
+}
+/* Optional enhanced draws use the same exact GPU subtraction, but cannot
+ * exhaust the native rectangle-clear budget or make a guest draw fail. The
+ * counter owns each query until its result is cached or its owner retires. */
+static int pilot_visibility_internal_try_begin(ID3D11Query **out)
+{
+    if(!out)return 0;*out=NULL;
+    if(!pilot_visibility_active())return 1;
+    if(pilot_visibility_excluded_scope || pilot_visibility_current->optional_exclusions>=4096 ||
+       pilot_visibility_optional_count>=4096)return 0;
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();if(!context)return 0;
+    struct PilotVisibilityExclusion *e=calloc(1,sizeof(*e));if(!e)return 0;
+    HRESULT result=pilot_visibility_query(D3D11_QUERY_OCCLUSION,&e->query);
+    if(result!=S_OK || !e->query) {if(e->query)ID3D11Query_Release(e->query);free(e);return 0;}
+    e->optional=1;
+    e->next=pilot_visibility_current->excluded;pilot_visibility_current->excluded=e;
+    ++pilot_visibility_current->optional_exclusions;++pilot_visibility_optional_count;
+    ID3D11DeviceContext_Begin(context,(ID3D11Asynchronous*)e->query);
+    pilot_visibility_excluded_scope=e->query;*out=e->query;return 1;
 }
 static void pilot_visibility_internal_end(ID3D11Query *query)
-{if(query)ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)query);}
+{
+    if(query) {
+        ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)query);
+        if(pilot_visibility_excluded_scope==query)pilot_visibility_excluded_scope=NULL;
+    }
+}
 int32_t pilot_gfx_visibility_begin(void)
 {
     pilot_gfx_batch_flush();
@@ -104,6 +135,15 @@ int32_t pilot_gfx_visibility_result(uint32_t index,uint32_t *count,uint64_t *sta
             samples-=excluded;
         }
         r->counter->value=(uint32_t)samples;r->counter->ready=1;
+        /* Once the exact result is cached, later reports sharing this counter
+         * need no child queries. Reclaim optional capacity immediately; native
+         * rectangle exclusions keep their original report-owned lifetime. */
+        struct PilotVisibilityExclusion **at=&r->counter->excluded;
+        while(*at) {
+            struct PilotVisibilityExclusion *e=*at;
+            if(e->optional){*at=e->next;pilot_visibility_exclusion_release(r->counter,e);}
+            else at=&e->next;
+        }
     }
     if(!r->ready){
         UINT64 begin,end;D3D11_QUERY_DATA_TIMESTAMP_DISJOINT clock;
@@ -125,5 +165,6 @@ static void pilot_visibility_close(void)
         ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)pilot_visibility_current->query);
     while(pilot_visibility_reports){struct PilotVisibilityReport *r=pilot_visibility_reports;pilot_visibility_reports=r->next;pilot_visibility_drop(r);}
     pilot_visibility_unref(pilot_visibility_current);pilot_visibility_current=NULL;
-    if(pilot_visibility_counter_count || pilot_visibility_report_count)pilot_d3d_backend_stop("visibility ownership leak");
+    if(pilot_visibility_counter_count || pilot_visibility_report_count || pilot_visibility_optional_count)
+        pilot_d3d_backend_stop("visibility ownership leak");
 }

@@ -372,6 +372,28 @@ XLLE_PILOT_TRACE = "0"
         with patch.object(sys, 'argv', arguments), patch.object(n.subprocess, 'Popen', return_value=child):
             self.assertEqual(n.main(), 2)
 
+    def test_run_cli_native_8x_plan_and_oversized_rejection_before_spawn(self):
+        self.source.write_text(self.source.read_text()+'\n[mods]\nregistry = "visuals.c"\n')
+        (self.source.parent/'visuals.c').write_text('/* authored registry */')
+        _,self.data=n.definition(self.source)
+        self.receipt()
+        pathsfile=self.root/'paths.json'
+        pathsfile.write_text(json.dumps({key:str(value) for key,value in self.paths.items()}))
+        arguments=['native_title.py','run','--title',str(self.source),'--paths',str(pathsfile),
+                   '--generated',str(self.output),'--build-dir',str(self.build),
+                   '--automated','--seconds','1','--supersampling','8','--no-launcher']
+        with patch.object(sys,'argv',arguments),patch.object(n.subprocess,'Popen',return_value=Mock(pid=123,returncode=0)) as spawn:
+            self.assertEqual(n.main(),0)
+        plan=Path(spawn.call_args.kwargs['env']['XLLE_PILOT_MOD_PLAN'])
+        retained=plan.read_bytes()
+        self.assertIn('operation supersampling 1 8\n',plan.read_text())
+        self.assertNotIn('operation resolution',plan.read_text())
+        with patch.object(sys,'argv',arguments+['--internal-resolution','2160']),patch.object(n.subprocess,'Popen') as rejected:
+            with self.assertRaisesRegex(ValueError,'texture limit'):
+                n.main()
+        rejected.assert_not_called()
+        self.assertEqual(plan.read_bytes(),retained)
+
     def test_incremental_bind_revalidates_old_admission_and_refreshes_proof(self):
         manifest = json.loads(self.manifest.read_text())
         manifest['cpu_binding'] = {'authored': 'previous proof'}

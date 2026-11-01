@@ -69,14 +69,14 @@ static void pilot_strip_batch_drain(void)
             ID3D11Buffer *previous=NULL;DXGI_FORMAT format;UINT offset;
             ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
             ID3D11DeviceContext_IASetIndexBuffer(context,pilot_strip_batch.buffer,DXGI_FORMAT_R32_UINT,0);
-            ID3D11DeviceContext_DrawIndexed(context,words,0,0);
+            pilot_native_draw_indexed(words,0,0);
             ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);
             if(previous)ID3D11Buffer_Release(previous);
             merged=1;
         }
     }
     if(!merged)for(unsigned draw=0;draw<count;++draw)
-        ID3D11DeviceContext_Draw(context,pilot_strip_batch.ranges[draw].count,pilot_strip_batch.ranges[draw].first);
+        pilot_native_draw(pilot_strip_batch.ranges[draw].count,pilot_strip_batch.ranges[draw].first);
     pilot_strip_batch.stats.queued_draws+=count;
     pilot_strip_batch.stats.native_draws+=merged?1:count;
     if(count>pilot_strip_batch.stats.largest_batch)pilot_strip_batch.stats.largest_batch=count;

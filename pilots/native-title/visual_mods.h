@@ -15,7 +15,7 @@ enum PilotAntialiasing { PILOT_AA_ORIGINAL, PILOT_AA_FXAA };
 struct PilotVisualMods {
     uint32_t version;
     uint32_t internal_height; /* 0 = original; otherwise 1080/1440/1800/2160 */
-    uint32_t supersample;     /* per axis: 1, 2 or 3; 2 means four samples/pixel */
+    uint32_t supersample;     /* requested per axis: 1..64; actual GPU admission is separate */
     uint32_t antialiasing;
     uint32_t anisotropy;      /* 1 = original; otherwise 2/4/8/16 */
     uint32_t frame_mode, frame_rate; /* Original requires 0; other modes 60/120 */
