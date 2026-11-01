@@ -99,6 +99,22 @@ int main(void)
     DWORD *guest_previous=(DWORD*)(memory+49152);
     assert(pilot_write_watch_virtual_protect(memory+53248,4096,PAGE_READONLY,guest_previous));
     assert(*guest_previous==PAGE_READWRITE && !pilot_write_watch_reusable(&b));
+    /* Genuine RO can physically coalesce with watched, logically RW storage.
+     * Querying either side must not report its protection across the other.
+     * This deliberately uses only the original writable snapshot API. */
+    unsigned char *readonly_page=memory+57344,*watched_page=memory+61440;
+    assert(pilot_write_watch_virtual_protect(readonly_page,4096,PAGE_READONLY,&previous));
+    assert(previous==PAGE_READWRITE && !pilot_write_watch_begin(readonly_page,4096,&a));
+    capture(watched_page,4096,&b);
+    assert(pilot_write_watch_virtual_query(readonly_page,&info,sizeof(info)));
+    if(info.Protect!=PAGE_READONLY || (unsigned char*)info.BaseAddress>readonly_page ||
+       (unsigned char*)info.BaseAddress+info.RegionSize>watched_page) {
+        fprintf(stderr,"genuine RO query extends into adjacent logical RW page\n");return 1;
+    }
+    assert(pilot_write_watch_virtual_query(watched_page,&info,sizeof(info)));
+    assert(info.Protect==PAGE_READWRITE && info.BaseAddress==watched_page && info.RegionSize==4096);
+    assert(pilot_write_watch_virtual_protect(readonly_page,4096,PAGE_READWRITE,&previous));
+    assert(previous==PAGE_READONLY && pilot_write_watch_reusable(&b));
     /* Repeated rearming and concurrent native stores exercise handler races.
      * Hot-page refusal is permitted and must fall back, never lose writes. */
     InterlockedExchange(&writing,1);
