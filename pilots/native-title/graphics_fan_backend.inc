@@ -34,7 +34,7 @@ static void pilot_fan_draw(unsigned first,unsigned count)
     ID3D11Buffer *previous=NULL;DXGI_FORMAT format;UINT offset;
     ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
     ID3D11DeviceContext_IASetIndexBuffer(context,pilot_fan_indices,DXGI_FORMAT_R32_UINT,0);
-    ID3D11DeviceContext_DrawIndexed(context,triangles*3,0,(INT)first);
+    pilot_native_draw_indexed(triangles*3,0,(INT)first);
     ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);
     if(previous)ID3D11Buffer_Release(previous);
 }

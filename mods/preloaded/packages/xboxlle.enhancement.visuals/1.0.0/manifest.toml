@@ -45,15 +45,16 @@ id = "xboxlle.visuals.antialiasing"
 [[feature]]
 id = "supersampling"
 name = "Supersampling"
-description = "Render extra pixels and downsample for smoother edges. This can substantially increase GPU load."
+description = "Multiply render width and height, then downsample for smoother edges. Choose Original internal resolution for 8x native rendering. Higher multipliers increase GPU load."
 default_enabled = false
 [[option]]
 feature = "supersampling"
 id = "axis"
+label = "Per-axis multiplier"
 type = "choice"
 default = "2"
-values = ["1", "2", "3"]
-labels = ["Original", "2 x 2 (4 samples)", "3 x 3 (9 samples)"]
+values = ["1", "2", "3", "8"]
+labels = ["Original", "2 x 2 (4 samples)", "3 x 3 (9 samples)", "8 x 8 (64 samples)"]
 [[plugin]]
 feature = "supersampling"
 id = "xboxlle.visuals.supersampling"

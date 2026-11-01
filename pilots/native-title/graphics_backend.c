@@ -88,7 +88,28 @@ int pilot_d3d_has_auto_depth(void){return pilot_presentation.depth!=0;}
 /* Optional raster policy is owned by the resolved static mod registry. */
 __declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);
 static const uint32_t *pilot_depth_allocation_size;
+#ifdef PILOT_D3D_PHOBOS
+static uint32_t pilot_native_presented_size[2];
+#endif
+#include "graphics_native_plane.h"
 #include "graphics_visual_backend.inc"
+#ifdef PILOT_D3D_PHOBOS
+static unsigned pilot_native_frame_degraded;
+static int pilot_native_enabled(void)
+{
+#if defined(PILOT_NATIVE_RENDER_PLANES) && PILOT_NATIVE_RENDER_PLANES
+    /* Private same-binary A/B control; elective scale remains owner-selected. */
+    static int enabled=-1;
+    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_RENDER_PLANES");enabled=!value || strcmp(value,"0");}
+    return enabled && pilot_visual_scaled();
+#else
+    return 0;
+#endif
+}
+static int pilot_native_frame_valid(void){return !pilot_native_frame_degraded;}
+static void pilot_native_degrade(void){pilot_native_frame_degraded=1;}
+static int pilot_native_query_active(void){return pilot_visibility_active();}
+#endif
 static uint32_t pilot_window_aspect[2],pilot_window_height,pilot_frame_aspect[2];
 static int pilot_aspect_valid(uint32_t n,uint32_t d)
 {return n && d && n<=65536 && d<=65536 && (uint64_t)n*3>=(uint64_t)d*4 && (uint64_t)n*9<=(uint64_t)d*32;}
@@ -221,6 +242,13 @@ static unsigned pilot_sampling_views_dirty=15;
 void pilot_d3d_raster_texture_mode(UINT native,const float scale[4][4]);
 void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_completion_backend.inc"
+#include "graphics_native_plane_resources.inc"
+#include "graphics_native_plane_copy.inc"
+#include "graphics_native_plane_draw.inc"
+#ifdef PILOT_D3D_PHOBOS
+/* The prepared donor UP ring is still bound at this exact submission point. */
+void pilot_native_draw_prepared(unsigned count,unsigned first){pilot_native_draw(count,first);}
+#endif
 #include "graphics_strip_batch_backend.inc"
 #include "graphics_visibility_backend.inc"
 #if defined(PILOT_GPU_MOVIE_UPLOAD) && PILOT_GPU_MOVIE_UPLOAD
@@ -235,6 +263,9 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_depth_texture_backend.inc"
 #include "graphics_default_depth_backend.inc"
 #include "graphics_clear_backend.inc"
+#include "graphics_native_plane_upload.inc"
+#include "graphics_native_plane_backend.inc"
+#include "graphics_gpu_profile.inc"
 
 void pilot_gfx_pixel_fixed(void)
 {
@@ -312,6 +343,11 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
 }
 void pilot_gfx_close(void)
 {
+#ifdef PILOT_D3D_PHOBOS
+    pilot_native_upload_close();pilot_native_frame_degraded=0;
+    memset(pilot_native_presented_size,0,sizeof(pilot_native_presented_size));
+#endif
+    pilot_gpu_measure_close();
     pilot_replacement_close();
     pilot_strip_batch_close();
     pilot_deferred_invalidate();
@@ -476,6 +512,9 @@ int32_t pilot_gfx_create(const uint32_t p[17])
     if(SUCCEEDED(result))for(unsigned i=0;i<4;++i)if(pilot_surfaces[i]) {
         pilot_surface_use[i]=pilot_image_use_create();
         if(!pilot_surface_use[i]){result=E_OUTOFMEMORY;break;}
+#ifdef PILOT_D3D_PHOBOS
+        pilot_native_attach(pilot_surface_use[i],pilot_surfaces[i],p[0],p[1]);
+#endif
     }
     if (FAILED(result)) pilot_gfx_close();
     else {free(pilot_saved_display);pilot_saved_display=NULL;
@@ -483,6 +522,7 @@ int32_t pilot_gfx_create(const uint32_t p[17])
         pilot_donor_output_images(d3d8_GetSceneImage(),pilot_donor_default_depth(),1);
 #endif
     }
+    if(SUCCEEDED(result))pilot_gpu_measure_open();
     return result;
 }
 int32_t pilot_gfx_reset(const uint32_t p[17])
@@ -508,7 +548,8 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
         front=(ID3D11Texture2D*)rhi_d3d11_native_image(staged.image);ID3D11Texture2D_AddRef(front);
     } else {
         uint32_t size[2];
-        if(!pilot_visual_mods_size(&pilot_visual,p[0],p[1],p[0],p[1],16384,size)){result=E_INVALIDARG;goto stage_failed;}
+        if(pilot_native_enabled()){size[0]=p[0];size[1]=p[1];}
+        else if(!pilot_visual_mods_size(&pilot_visual,p[0],p[1],p[0],p[1],16384,size)){result=E_INVALIDARG;goto stage_failed;}
         D3D11_TEXTURE2D_DESC desc={0};desc.Width=size[0];desc.Height=size[1];desc.MipLevels=desc.ArraySize=1;
         desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;desc.SampleDesc.Count=1;
         desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
@@ -522,6 +563,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     uint32_t old_width=pilot_guest_width,old_height=pilot_guest_height,old_viewport[6];
     memcpy(old_viewport,pilot_guest_viewport,sizeof(old_viewport));pilot_presentation=next;
     extern HRESULT pilot_donor_reset_display(UINT width,UINT height,DWORD format);
+    pilot_gpu_measure_end(1);
     result=pilot_donor_reset_display(p[0],p[1],p[2]);
     if(FAILED(result)) {
         ID3D11DeviceContext_OMSetRenderTargets(ctx,1,&old_color,old_depth);
@@ -532,6 +574,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     if(old_depth)ID3D11DepthStencilView_Release(old_depth);
     if(FAILED(result))goto stage_failed;
     pilot_visual_close();
+    pilot_native_upload_close();
 #if defined(PILOT_GPU_MOVIE_UPLOAD) && PILOT_GPU_MOVIE_UPLOAD
     pilot_movie_gpu_close();
 #endif
@@ -559,6 +602,9 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
         desc.ArraySize==1 && desc.SampleDesc.Count==1 && !desc.SampleDesc.Quality &&
         !(desc.MiscFlags&D3D11_RESOURCE_MISC_TEXTURECUBE) && desc.Format==DXGI_FORMAT_R8G8B8A8_UNORM;
     pilot_blend_default_depth_shape=pilot_surfaces[2] && pilot_blend_depth_shape(pilot_surfaces[2],0);
+    pilot_native_frame_degraded=0;
+    memset(pilot_native_presented_size,0,sizeof(pilot_native_presented_size));
+    for(unsigned i=0;i<3;++i)if(pilot_surfaces[i])pilot_native_attach(pilot_surface_use[i],pilot_surfaces[i],p[0],p[1]);
     pilot_blend_transient=pilot_blend_transient_proof=0;
     pilot_color_target=0;pilot_depth_target=next.depth?UINT32_MAX:0;pilot_default_color_format=p[2];
     pilot_edge_close();
@@ -569,11 +615,13 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
      * belongs to the player: preserve its size, position and maximized state.
      * The donor's next present fits/resizes its swapchain to that client area. */
     free(pilot_saved_display);pilot_saved_display=NULL;
+    pilot_gpu_measure_begin();
     return S_OK;
 stage_failed:
     if(front)ID3D11Texture2D_Release(front);
     for(unsigned i=0;i<3;++i)pilot_image_use_release(uses[i]);
     pilot_guest_resolved=staged;pilot_guest_resolve_close();pilot_guest_resolved=retained;
+    pilot_gpu_measure_begin();
     return result;
 #else
     (void)p;return E_NOTIMPL;
@@ -605,6 +653,7 @@ int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stenc
                     if(flags&1){float rgba[]={((color>>16)&255)/255.0f,((color>>8)&255)/255.0f,(color&255)/255.0f,(color>>24)/255.0f};ID3D11DeviceContext_ClearRenderTargetView(ctx,rtv,rgba);}
                     if(flags&6)ID3D11DeviceContext_ClearDepthStencilView(ctx,dsv,((flags&2)?1:0)|((flags&4)?2:0),depth,(UINT8)stencil);
                 }
+                pilot_native_clear(rtv,dsv,flags,color,depth,stencil,&rect);
             }
         }
         if((flags&1) && pilot_color_target){pilot_textures[pilot_color_target-1].uploaded=1;pilot_textures[pilot_color_target-1].gpu_written=1;}
@@ -699,24 +748,35 @@ int32_t pilot_gfx_present(void)
         pilot_window_host_show(&pilot_window_host);pilot_visible=1;
     }
     uint64_t started=pilot_gpu_call_begin();
+    pilot_gpu_measure_split(1);
 #ifdef PILOT_D3D_PHOBOS
     if(pilot_presentation.sample_type==0x2222) {
-        int32_t resolved=pilot_guest_resolve();if(resolved<0)return resolved;
+        int32_t resolved=pilot_guest_resolve();if(resolved<0){pilot_gpu_measure_end(1);pilot_gpu_measure_begin();return resolved;}
     } else
 #endif
     ID3D11DeviceContext_CopyResource(d3d8_GetD3D11Context(),(ID3D11Resource*)pilot_surfaces[1],(ID3D11Resource*)pilot_surfaces[0]);
+#ifdef PILOT_D3D_PHOBOS
+    if(pilot_presentation.sample_type!=0x2222)pilot_native_copy_completed((ID3D11Resource*)pilot_surfaces[1],(ID3D11Resource*)pilot_surfaces[0]);
+#endif
     pilot_gpu_call_end("present CopyResource",started);
     pilot_surface_use[0]->serial=pilot_surface_use[1]->serial=pilot_mark_work();
     pilot_surface_use[1]->write_serial=pilot_surface_use[1]->serial;
     started=pilot_gpu_call_begin();
 #ifdef PILOT_D3D_PHOBOS
     pilot_visual_real_present=1;
+    pilot_native_presented_size[0]=d3d8_GetBackbufferWidth();
+    pilot_native_presented_size[1]=d3d8_GetBackbufferHeight();
 #endif
+    pilot_gpu_measure_split(2);
     int32_t result=pilot_device->lpVtbl->Swap(pilot_device,0);
 #ifdef PILOT_D3D_PHOBOS
     pilot_visual_real_present=0;
 #endif
     pilot_gpu_call_end("donor Swap",started);
+    pilot_gpu_measure_present(result);
+#ifdef PILOT_D3D_PHOBOS
+    pilot_native_frame_degraded=0;
+#endif
     if(boot_handoff && SUCCEEDED(result) && !pilot_visible && visible && !strcmp(visible,"1")) {
         /* Show the prepared title window without stealing focus from the
          * retained boot window. An occluded swap may show it, but cannot retire
@@ -1158,6 +1218,9 @@ static int32_t pilot_texture_create_policy(uint32_t width,uint32_t height,uint32
         object->lpVtbl->Release(object);return E_OUTOFMEMORY;
     }
     pilot_textures[slot].use=use;
+#ifdef PILOT_D3D_PHOBOS
+    if(usage)pilot_native_attach(use,pilot_donor_texture((D3D8Texture*)object),width,height);
+#endif
     pilot_textures[slot].rtv=rtv;
     pilot_textures[slot].dsv=dsv;
     pilot_textures[slot].object=object; pilot_textures[slot].uploaded=0;
@@ -1263,6 +1326,9 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         ID3D11DeviceContext_CopyResource(ctx,(ID3D11Resource*)pilot_donor_texture(texture),(ID3D11Resource*)staging);
         for(UINT row=0;row<rows;++row)memcpy(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch);
         ID3D11Texture2D_Release(staging);pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=0;
+#ifdef PILOT_D3D_PHOBOS
+        pilot_native_written(pilot_donor_texture(texture),0);
+#endif
         PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);
         pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
             pilot_textures[handle-1].use->write_serial=pilot_mark_work();return;
@@ -1322,6 +1388,9 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     if(!level)pilot_replacement_match(handle,data,bytes);
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
+#ifdef PILOT_D3D_PHOBOS
+    if(!level)pilot_native_written(pilot_donor_texture(texture),1);
+#endif
     pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
         pilot_textures[handle-1].use->write_serial=pilot_mark_work();
     if(pilot_event_trace_enabled())fprintf(stderr,"[TEXTURE UPLOAD] native=%u level=%u %ux%u bytes=%u\n",handle,level,width,height,bytes);
@@ -1363,6 +1432,9 @@ int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
     if(!rtv)return E_INVALIDARG;
     float rgba[]={((color>>16)&255)/255.0f,((color>>8)&255)/255.0f,(color&255)/255.0f,(color>>24)/255.0f};
     ID3D11DeviceContext_ClearRenderTargetView(d3d8_GetD3D11Context(),rtv,rgba);
+#ifdef PILOT_D3D_PHOBOS
+    pilot_native_clear(rtv,NULL,1,color,0,0,NULL);
+#endif
     pilot_textures[handle-1].uploaded=1;
     pilot_textures[handle-1].gpu_written=1;
     pilot_textures[handle-1].use->serial=pilot_textures[handle-1].use->write_serial=pilot_mark_work();
@@ -1391,6 +1463,9 @@ int32_t pilot_gfx_texture_clear_depth(uint32_t handle,uint32_t flags,float depth
     pilot_texture(handle);ID3D11DepthStencilView *dsv=pilot_textures[handle-1].dsv;
     if(!dsv || !(flags&3) || (flags&~3u) || !(depth>=0 && depth<=1) || stencil>255)return E_INVALIDARG;
     ID3D11DeviceContext_ClearDepthStencilView(d3d8_GetD3D11Context(),dsv,flags,depth,(UINT8)stencil);
+#ifdef PILOT_D3D_PHOBOS
+    pilot_native_clear(NULL,dsv,((flags&1)?2:0)|((flags&2)?4:0),0,depth,stencil,NULL);
+#endif
     pilot_textures[handle-1].uploaded=1;pilot_textures[handle-1].gpu_written=1;
     pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
         pilot_textures[handle-1].use->write_serial=pilot_mark_work();return S_OK;
@@ -1684,7 +1759,7 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
         ID3D11Buffer *previous=NULL;DXGI_FORMAT format;UINT offset;
         ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
         ID3D11DeviceContext_IASetIndexBuffer(context,pilot_index_buffer,DXGI_FORMAT_R32_UINT,0);
-        ID3D11DeviceContext_DrawIndexed(context,index_words,0,base);
+        pilot_native_draw_indexed(index_words,0,base);
         ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);
         if(previous)ID3D11Buffer_Release(previous);
     } else if(batchable) {
@@ -1697,7 +1772,7 @@ static int32_t pilot_gfx_draw_submit(unsigned primitive,unsigned first,unsigned 
     }
     else if(primitive==7)pilot_fan_draw(first,count);
     else if(primitive==8 && !flat_quad)pilot_quad_draw(first,count);
-    else ID3D11DeviceContext_Draw(context,count,first);
+    else pilot_native_draw(count,first);
     pilot_edge_end(&edge_draw);
     pilot_point_end(&point_draw);
 #ifdef PILOT_D3D_PHOBOS
@@ -1832,6 +1907,10 @@ int32_t pilot_gfx_reference_target_readback(unsigned depth,void *data,uint32_t c
     ID3D11Texture2D *source=NULL,*staging=NULL;
     HRESULT status=ID3D11Resource_QueryInterface(resource,&IID_ID3D11Texture2D,(void**)&source);
     ID3D11Resource_Release(resource);if(FAILED(status))return status;
+#ifdef PILOT_D3D_PHOBOS
+    struct PilotNativePlane *plane=pilot_native_plane_find((ID3D11Resource*)source);
+    if(pilot_native_enabled() && plane && plane->coherent){ID3D11Texture2D_Release(source);source=plane->enhanced;ID3D11Texture2D_AddRef(source);}
+#endif
     D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(source,&desc);
     /* The captured Blinx targets are one 2D image. Reject other views before
      * returning a base-level shape that might describe the wrong subresource. */

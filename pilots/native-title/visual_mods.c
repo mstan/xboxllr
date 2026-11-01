@@ -11,7 +11,7 @@ int pilot_visual_mods_validate(const struct PilotVisualMods *o)
     if(!o || o->version!=PILOT_VISUAL_MOD_VERSION ||
        (o->internal_height && o->internal_height!=1080 && o->internal_height!=1440 &&
         o->internal_height!=1800 && o->internal_height!=2160) ||
-       o->supersample<1 || o->supersample>3 || o->antialiasing>PILOT_AA_FXAA ||
+       o->supersample<1 || o->supersample>64 || o->antialiasing>PILOT_AA_FXAA ||
        (o->anisotropy!=1 && o->anisotropy!=2 && o->anisotropy!=4 &&
         o->anisotropy!=8 && o->anisotropy!=16) || o->frame_mode>PILOT_FRAMES_ACTUAL ||
        (!o->frame_mode && o->frame_rate) ||

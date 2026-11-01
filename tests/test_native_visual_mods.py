@@ -37,6 +37,20 @@ class VisualResolverTests(unittest.TestCase):
         self.assertEqual(result['catalog_sha256'],{})
         self.assertEqual(self.plan.read_text(),'xlle-mod-plan 2\nidentity '+'a'*64+'\nend\n')
 
+    def test_native_8x_and_oversized_combinations_preserve_prior_plan(self):
+        result=v.resolve(self.root/'title.toml',self.data,self.plan,supersample=8)
+        self.assertEqual(result['internal_canvas'],[5120,3840])
+        self.assertEqual(result['operations'],['operation supersampling 1 8'])
+        retained=self.plan.read_bytes()
+        metadata=self.plan.with_suffix('.plan.json').read_bytes()
+        with self.assertRaisesRegex(ValueError,'texture limit'):
+            v.resolve(self.root/'title.toml',self.data,self.plan,height=2160,supersample=8)
+        for scale in (16,32,64):
+            with self.subTest(scale=scale),self.assertRaisesRegex(ValueError,'Invalid visual mod option'):
+                v.resolve(self.root/'title.toml',self.data,self.plan,supersample=scale)
+        self.assertEqual(self.plan.read_bytes(),retained)
+        self.assertEqual(self.plan.with_suffix('.plan.json').read_bytes(),metadata)
+
     def test_title_aspect_identity_and_wide_supersampling_limit(self):
         pid,plugin='authored.enhancement.widescreen','authored.widescreen'
         self.data['title']['game_id']='1234ABCD'

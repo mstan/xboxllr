@@ -37,6 +37,10 @@ static HRESULT pilot_depth_match_color(uint32_t handle,ID3D11Texture2D *color,un
     RhiView *view=texture->srv;texture->srv=replacement->srv;replacement->srv=view;
     BYTE *cpu=texture->sys_mem;texture->sys_mem=replacement->sys_mem;replacement->sys_mem=cpu;
     ID3D11DepthStencilView *dsv=owner->dsv;owner->dsv=next->dsv;next->dsv=dsv;
+    /* Registration follows the physical image; all logical aliases keep their
+     * shared completion owner. Retire the old map with the temporary image. */
+    struct PilotNativeMap *native_map=owner->use->native_map;
+    owner->use->native_map=next->use->native_map;next->use->native_map=native_map;
     uint64_t serial=next->use->serial;
     if(serial>owner->use->serial)owner->use->serial=serial;
     owner->use->write_serial=owner->content_serial=serial;

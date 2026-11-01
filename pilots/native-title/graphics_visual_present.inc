@@ -164,12 +164,84 @@ static void pilot_debug_capture_presented(void)
     } else status=E_INVALIDARG;
     pilot_debug_capture_complete(request,rgba,width,height,status);free(rgba);
 }
+static RhiView *pilot_visual_native_scene(RhiView *scene,unsigned *width,unsigned *height)
+{
+    if(!pilot_native_enabled())return scene;
+    if(!pilot_native_frame_valid()) {
+        /* Bounded attribution for a real-title fallback decision. No samples,
+         * inventories or per-frame logging: first coherent/incoherent veto. */
+        static int diagnostics=-1;static unsigned reported;
+        if(diagnostics<0){const char *v=getenv("XLLE_PILOT_NATIVE_RENDER_DIAGNOSTICS");diagnostics=v && !strcmp(v,"1");}
+        if(diagnostics && scene && reported!=3) {
+            ID3D11View *v=(ID3D11View*)rhi_d3d11_native_view(scene);ID3D11Resource *r=NULL;
+            if(v)ID3D11View_GetResource(v,&r);
+            struct PilotNativePlane *p=pilot_native_plane_find(r);if(r)ID3D11Resource_Release(r);
+            unsigned bit=p && p->coherent?1:2;
+            if(!(reported&bit)) {
+                reported|=bit;
+                fprintf(stderr,"[NATIVE PRESENT DEGRADATION] frame_valid=0 source=%ux%u enhanced=%ux%u coherent=%u aspects=%u\n",
+                    *width,*height,p?p->width:0,p?p->height:0,p?p->coherent:0,p?p->valid_aspects:0);
+            }
+        }
+        /* Unrelated resource degradation cannot stale this already rendered
+         * image. Its own validity/shape checks below remain authoritative. */
+    }
+    if(!scene)goto fallback;
+    ID3D11View *native_view=(ID3D11View*)rhi_d3d11_native_view(scene);
+    if(!native_view)goto fallback;
+    ID3D11Resource *resource=NULL;ID3D11Texture2D *source=NULL;
+    ID3D11View_GetResource(native_view,&resource);
+    if(!resource)goto fallback;
+    struct PilotNativePlane *plane=pilot_native_plane_find(resource);
+    HRESULT result=ID3D11Resource_QueryInterface(resource,&IID_ID3D11Texture2D,(void**)&source);
+    ID3D11Resource_Release(resource);
+    if(FAILED(result))goto fallback;
+    D3D11_TEXTURE2D_DESC native,enhanced;
+    ID3D11Texture2D_GetDesc(source,&native);ID3D11Texture2D_Release(source);
+    if(!plane || !plane->coherent || !plane->enhanced)goto fallback;
+    ID3D11Texture2D_GetDesc(plane->enhanced,&enhanced);
+    D3D11_SHADER_RESOURCE_VIEW_DESC interpretation={0};
+    ID3D11ShaderResourceView_GetDesc((ID3D11ShaderResourceView*)native_view,&interpretation);
+    /* The display source is a complete sampled color image. Preserve custom
+     * view/crop/MSAA interpretations through native presentation until they
+     * have an explicit enhanced presentation implementation. */
+    if((native.Format!=DXGI_FORMAT_R8G8B8A8_UNORM && native.Format!=DXGI_FORMAT_B8G8R8A8_UNORM) ||
+       enhanced.Format!=native.Format || interpretation.Format!=native.Format ||
+       interpretation.ViewDimension!=D3D11_SRV_DIMENSION_TEXTURE2D || interpretation.Texture2D.MostDetailedMip ||
+       (interpretation.Texture2D.MipLevels!=1 && interpretation.Texture2D.MipLevels!=UINT_MAX) ||
+       native.MipLevels!=1 || enhanced.MipLevels!=1 || native.ArraySize!=1 || enhanced.ArraySize!=1 ||
+       native.SampleDesc.Count!=1 || enhanced.SampleDesc.Count!=1 || native.SampleDesc.Quality || enhanced.SampleDesc.Quality ||
+       native.Width!=*width || native.Height!=*height || native.Width!=plane->native_width || native.Height!=plane->native_height ||
+       enhanced.Width!=plane->width || enhanced.Height!=plane->height || !plane->width || !plane->height)goto fallback;
+    if(plane->presentation_image && rhi_d3d11_native_image(plane->presentation_image)!=plane->enhanced)goto fallback;
+    if(!plane->presentation_view) {
+        RhiImage *image=plane->presentation_image;
+        if(!image)image=rhi_d3d11_wrap_image(plane->enhanced);
+        if(!image)goto fallback;
+        RhiView *view=rhi_view_create(image,RHI_VIEW_SAMPLED,NULL);
+        if(!view) {
+            if(!plane->presentation_image)rhi_image_destroy(image);
+            goto fallback;
+        }
+        plane->presentation_image=image;plane->presentation_view=view;
+    }
+    if(!plane->presentation_image)goto fallback;
+    *width=plane->width;*height=plane->height;
+    return plane->presentation_view;
+fallback:
+    /* Allocation/admission/coherence failure affects only this presentation.
+     * The original native source remains the source of every guest read. */
+    pilot_native_degrade();
+    return scene;
+}
 HRESULT pilot_d3d_visual_resolve(RhiView *scene,unsigned width,unsigned height,RhiView *output,D3D8DisplayFit fit,unsigned output_width,unsigned output_height)
 {
     if(!scene || !output || !fit.w || !fit.h || !output_width || !output_height)return E_INVALIDARG;
     if(pilot_presentation.sample_type==0x2222) {
         scene=pilot_guest_resolved.sample;width=pilot_presentation.width;height=pilot_presentation.height;
     }
+    scene=pilot_visual_native_scene(scene,&width,&height);
+    if(pilot_visual_real_present){pilot_native_presented_size[0]=width;pilot_native_presented_size[1]=height;}
     int interpolate=pilot_visual.frame_mode==PILOT_FRAMES_INTERPOLATED && pilot_visual_scope && pilot_visual_real_present;
     if(!pilot_visual.antialiasing && !interpolate && !pilot_gamma_active) {
         HRESULT result=d3d8_display_resolve(scene,width,height,output,fit);

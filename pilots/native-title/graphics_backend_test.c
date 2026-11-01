@@ -31,6 +31,7 @@
 #include "graphics_pixel_bump_backend_test.inc"
 #include "graphics_fan_backend_test.inc"
 #include "graphics_visual_backend_test.inc"
+#include "graphics_native_scale_test.inc"
 #include "graphics_radial_blur_test.inc"
 #include "graphics_gamma_backend_test.inc"
 #include "graphics_presentation_backend_test.inc"
@@ -160,6 +161,7 @@ int main(int argc,char **argv)
     if(argc==2 && !strcmp(argv[1],"--guest-presentation"))return test_guest_presentation();
     if(argc==2 && !strcmp(argv[1],"--radial-blur"))return test_radial_blur();
     if(argc==2 && !strcmp(argv[1],"--visual"))return test_visual_mod_resources();
+    if(argc==2 && !strcmp(argv[1],"--native-scale"))return test_native_scale_coherence();
     if(argc==2 && !strcmp(argv[1],"--visual-depth-mismatch"))return test_visual_depth_mismatch();
 #endif
     uint32_t pp[17]={64,64,D3DFMT_X8R8G8B8,1,0x11,1,0,0,1,D3DFMT_D24S8,0,60,1};
