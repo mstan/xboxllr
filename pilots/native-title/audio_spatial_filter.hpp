@@ -15,6 +15,59 @@ struct PilotSpatialFilter {
         memset(history,0,sizeof(history));direct=room=0;cursor=0;
         // Parameter changes do not reset histories; Reset is a transport event.
     }
+#if defined(PILOT_AUDIO_DORMANT_OWNER) && PILOT_AUDIO_DORMANT_OWNER
+    void parameters(const PilotAudioSpatialState &p) {
+        if(!initialized) {
+            memcpy(coefficients,p.taps,sizeof(coefficients));delay=p.delay;initialized=true;
+        } else {
+            for(unsigned ear=0;ear<2;++ear)for(unsigned k=0;k<31;++k)
+                coefficients[ear][k]+=.01f*(p.taps[ear][k]-coefficients[ear][k]);
+            delay+=.01f*(p.delay-delay);
+        }
+    }
+    /* Only for a reset signal history and nearest rounding. Keep every
+     * smoothing step: freezing it would change the first audible sample. */
+    bool silent_pristine_supported(const PilotAudioSpatialState &p) const {
+        auto ordinary=[](float value) {
+            uint32_t bits;memcpy(&bits,&value,sizeof(bits));
+            return (bits&0x7f800000u)!=0 || (bits&0x7fffffffu)==0;
+        };
+        if(!ordinary(delay) || !ordinary(p.delay))return false;
+        for(unsigned ear=0;ear<2;++ear)for(unsigned k=0;k<31;++k)
+            if(!ordinary(coefficients[ear][k]) || !ordinary(p.taps[ear][k]))return false;
+        return true;
+    }
+    void silent_pristine(unsigned frames,const PilotAudioSpatialState &p) {
+        for(unsigned frame=0;frame<frames;++frame) {
+            parameters(p);
+            direct=(1-p.direct_pole)*0.0f+p.direct_pole*direct;
+            room=(1-p.room_pole)*0.0f+p.room_pole*room;
+            history[cursor]=direct;
+            /* Truncating a fractional lag raises the original inexact flag.
+             * Retain those conversions even though the FIR signal is zero. */
+            for(unsigned ear=0;ear<2;++ear) {
+                float lag=std::fmax(0.0f,ear?-delay:delay);
+                volatile unsigned integer=(unsigned)lag;
+                volatile float fraction=lag-integer;(void)fraction;
+            }
+            /* Cancellation can create a subnormal during this block. The
+             * original zero-valued FIR multiplication still reads it and
+             * raises denormal status. Retain an actual zero multiplication,
+             * with exceptions masked by the caller's admission predicate. */
+            uint32_t denormal=0;
+            for(auto &ear:coefficients)for(float value:ear) {
+                uint32_t bits;memcpy(&bits,&value,sizeof(bits));
+                if(!(bits&0x7f800000u) && (bits&0x7fffffu))denormal=bits;
+            }
+            if(denormal) {
+                float value;memcpy(&value,&denormal,sizeof(value));
+                volatile float coefficient=value,zero=0;
+                volatile float contribution=coefficient*zero;(void)contribution;
+            }
+            cursor=(cursor+1)&127;
+        }
+    }
+#endif
     void sample(float input,const PilotAudioSpatialState &p,float *out) {
         if(!initialized) {
             memcpy(coefficients,p.taps,sizeof(coefficients));delay=p.delay;initialized=true;

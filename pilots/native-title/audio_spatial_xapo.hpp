@@ -12,6 +12,9 @@ class SpatialEffect final:public IXAPO,public IXAPOParameters {
     PilotAudioSpatialState states[3]{},latest{};
     PilotSpatialFilter filter;
     bool locked=false;
+#if defined(PILOT_AUDIO_DORMANT_OWNER) && PILOT_AUDIO_DORMANT_OWNER
+    bool pristine=true;
+#endif
     UINT32 max_frames=0;
 public:
     SpatialEffect() {
@@ -46,7 +49,11 @@ public:
         return float_format(out,PILOT_AUDIO_SPATIAL_CHANNELS) && (!in || float_format(in,1))?S_OK:XAPO_E_FORMAT_UNSUPPORTED;
     }
     HRESULT STDMETHODCALLTYPE Initialize(const void *,UINT32 bytes) override {return bytes?E_INVALIDARG:S_OK;}
+#if defined(PILOT_AUDIO_DORMANT_OWNER) && PILOT_AUDIO_DORMANT_OWNER
+    void STDMETHODCALLTYPE Reset() override {filter.reset();pristine=true;}
+#else
     void STDMETHODCALLTYPE Reset() override {filter.reset();}
+#endif
     HRESULT STDMETHODCALLTYPE LockForProcess(UINT32 ni,const XAPO_LOCKFORPROCESS_PARAMETERS *in,UINT32 no,const XAPO_LOCKFORPROCESS_PARAMETERS *out) override {
         if(locked || ni!=1 || no!=1 || !in || !out || !float_format(in->pFormat,1) ||
            !float_format(out->pFormat,PILOT_AUDIO_SPATIAL_CHANNELS) || !in->MaxFrameCount || in->MaxFrameCount!=out->MaxFrameCount)return E_INVALIDARG;
@@ -71,6 +78,20 @@ public:
            out->ValidFrameCount!=in->ValidFrameCount)fail("spatial processing shape");
         if(middle.load(std::memory_order_acquire)&4)front=middle.exchange(front,std::memory_order_acq_rel)&3;
         const auto &p=states[front];const auto *src=static_cast<const float*>(in->pBuffer);auto *dst=static_cast<float*>(out->pBuffer);
+#if defined(PILOT_AUDIO_DORMANT_OWNER) && PILOT_AUDIO_DORMANT_OWNER
+        if(pristine && in->BufferFlags==XAPO_BUFFER_SILENT && audio_dormant_owner() &&
+           audio_nearest_rounding() && filter.silent_pristine_supported(p)) {
+            filter.silent_pristine(in->ValidFrameCount,p);
+            memset(dst,0,(size_t)in->ValidFrameCount*PILOT_AUDIO_SPATIAL_CHANNELS*sizeof(float));
+            static std::atomic<bool> reported{false};
+            if(!reported.load(std::memory_order_relaxed) && !reported.exchange(true))
+                fprintf(stderr,"[AUDIO DORMANT OWNER] first pristine silent quantum frames=%u\n",in->ValidFrameCount);
+            out->BufferFlags=XAPO_BUFFER_SILENT;return;
+        }
+        /* A previously audible voice can have a real FIR/filter tail. Keep
+         * its ordinary path until an actual transport Reset clears history. */
+        if(in->BufferFlags!=XAPO_BUFFER_SILENT && in->ValidFrameCount)pristine=false;
+#endif
         bool nonzero=false;
         for(UINT32 frame=0;frame<in->ValidFrameCount;++frame) {
             float sample=in->BufferFlags==XAPO_BUFFER_SILENT?0:src[frame];

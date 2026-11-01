@@ -19,6 +19,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#if defined(PILOT_AUDIO_DORMANT_OWNER) && PILOT_AUDIO_DORMANT_OWNER
+#include <cfenv>
+#if defined(_M_X64) || defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
+#endif
 #include "audio_backend.h"
 #include "audio_dsp.h"
 #include "audio_capture_windows.hpp"
@@ -61,6 +67,26 @@ static bool float_format(const WAVEFORMATEX *f,unsigned channels)
     const auto *e=reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(f);
     return e->Samples.wValidBitsPerSample==32 && e->SubFormat==KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 }
+#if defined(PILOT_AUDIO_DORMANT_OWNER) && PILOT_AUDIO_DORMANT_OWNER
+static bool audio_dormant_owner()
+{
+    static const bool enabled=[](){const char *p=getenv("XLLE_PILOT_AUDIO_DORMANT_OWNER");return !p || !strcmp(p,"1");}();
+    return enabled && pilot_session_mode()==PILOT_SESSION_OFF;
+}
+static bool audio_nearest_rounding()
+{
+    if(std::fegetround()!=FE_TONEAREST)return false;
+#if defined(_M_X64) || defined(__x86_64__)
+    unsigned csr=_mm_getcsr();
+    if((csr&(0x6000u|0x1f80u))!=0x1f80u)return false;
+#else
+    // The optimized FP profile is qualified on x64. Other targets keep the
+    // original path without importing or executing optional instructions.
+    return false;
+#endif
+    return true;
+}
+#endif
 #include "audio_spatial_xapo.hpp"
 struct CaptureStamp {uint64_t frame,time;};
 static uint64_t capture_clock(void)
