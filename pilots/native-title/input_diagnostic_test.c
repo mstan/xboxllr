@@ -22,6 +22,13 @@ static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right
 #define input_host_state_mapped input_host_state_raw
 #include "input_diagnostic.inc"
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %u: %s\n",__LINE__,#x);++failures;}}while(0)
+static uint64_t fixture_cpu_100ns(void)
+{
+    FILETIME created,ended,kernel,user;
+    CHECK(GetProcessTimes(GetCurrentProcess(),&created,&ended,&kernel,&user));
+    return ((uint64_t)kernel.dwHighDateTime<<32)+kernel.dwLowDateTime+
+        ((uint64_t)user.dwHighDateTime<<32)+user.dwLowDateTime;
+}
 static DWORD WINAPI concurrent_inputs(LPVOID unused)
 {
     (void)unused;uint8_t pad[18],rumble[4];
@@ -42,6 +49,45 @@ int main(int argc,char **argv)
     int capture=!strcmp(argv[1],"capture") || !strcmp(argv[1],"overflow") || fatal || concurrent;
     SetEnvironmentVariableW(capture?L"XLLE_PILOT_DIAGNOSTIC_RECORD":L"XLLE_PILOT_DIAGNOSTIC_REPLAY",path);
     uint8_t pad[18]={0},rumble[4]={0};
+    if(!strcmp(argv[1],"bulk-timed")) {
+        SetEnvironmentVariableA("XLLE_PILOT_DIAGNOSTIC_TIMED","1");
+        for(unsigned block=0;block<256;++block) {
+            if(block)input_timed_start=GetTickCount64()-(uint64_t)block*10000;
+            CHECK(!pilot_input_host_state(0,pad));
+            unsigned last=(block+1)*1024-1;
+            CHECK(pad[0]==(uint8_t)last && pad[1]==(uint8_t)(last>>8) && pad[2]==255);
+            CHECK(input_diagnostic_sequence==(uint64_t)(block+1)*1024);
+            if(!block){printf("TIMED REPLAY STEP block=0 records=1024\n");fflush(stdout);}
+        }
+        CHECK(input_timed_eof && raw_calls==0);return failures?1:0;
+    }
+    if(!strcmp(argv[1],"bulk") || !strcmp(argv[1],"bulk-eof")) {
+        LARGE_INTEGER frequency,begin,end,refill_begin={0},refill_end={0};IO_COUNTERS io_begin,io_end;
+        uint64_t refill_ticks=0,refill_max=0;
+        CHECK(QueryPerformanceFrequency(&frequency));CHECK(GetProcessIoCounters(GetCurrentProcess(),&io_begin));
+        uint64_t cpu=fixture_cpu_100ns();CHECK(QueryPerformanceCounter(&begin));
+        for(unsigned i=0;i<262144;++i) {
+            if(!(i&1023))CHECK(QueryPerformanceCounter(&refill_begin));
+            CHECK(!pilot_input_host_state(0,pad));
+            if(!(i&1023)) {
+                CHECK(QueryPerformanceCounter(&refill_end));
+                uint64_t ticks=(uint64_t)(refill_end.QuadPart-refill_begin.QuadPart);
+                refill_ticks+=ticks;if(ticks>refill_max)refill_max=ticks;
+            }
+            CHECK(pad[0]==(uint8_t)i && pad[1]==(uint8_t)(i>>8) && pad[2]==255 && pad[10]==0x34 && pad[11]==0x12);
+        }
+        CHECK(QueryPerformanceCounter(&end));cpu=fixture_cpu_100ns()-cpu;
+        CHECK(GetProcessIoCounters(GetCurrentProcess(),&io_end));
+        CHECK(raw_calls==0 && input_diagnostic_sequence==262144);
+        printf("INPUT REPLAY BENCH records=262144 seconds=%.9f cpu_100ns=%llu read_operations=%llu read_bytes=%llu\n",
+            (double)(end.QuadPart-begin.QuadPart)/(double)frequency.QuadPart,(unsigned long long)cpu,
+            (unsigned long long)(io_end.ReadOperationCount-io_begin.ReadOperationCount),
+            (unsigned long long)(io_end.ReadTransferCount-io_begin.ReadTransferCount));fflush(stdout);
+        printf("INPUT REPLAY REFILLS positions=256 mean_seconds=%.9f max_seconds=%.9f\n",
+            (double)refill_ticks/(256.0*(double)frequency.QuadPart),(double)refill_max/(double)frequency.QuadPart);fflush(stdout);
+        if(!strcmp(argv[1],"bulk-eof"))pilot_input_host_state(0,pad);
+        return failures?1:0;
+    }
     if(!strcmp(argv[1],"timed")) {
         SetEnvironmentVariableA("XLLE_PILOT_DIAGNOSTIC_TIMED","1");
         CHECK(!pilot_input_host_caps(0,pad,rumble));

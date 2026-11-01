@@ -193,13 +193,26 @@ static void session_terminal(const char *reason,uint32_t code)
         (session_perf_now()-session_perf_start)*scale,session_perf_guest*scale,session_perf_dsp*scale,session_perf_device*scale);
     pilot_session_finish();
 }
-static void session_frame_boundary(uint64_t frame)
+static void session_frame_evidence(uint64_t frame,int page_owner,uint64_t evidence[4])
 {
-    if(!g_pilot_session_enabled)return;
+#if !defined(PILOT_SESSION_PAGE_OWNER) || !PILOT_SESSION_PAGE_OWNER
+    (void)page_owner;
+#endif
     uint64_t h=UINT64_C(14695981039346656037),read_bytes=0;
     const unsigned phase=(unsigned)(frame&255u)*16;
     for(uint64_t offset=0;offset<UINT64_C(0x100000000);) {
         MEMORY_BASIC_INFORMATION info;
+#if defined(PILOT_SESSION_PAGE_OWNER) && PILOT_SESSION_PAGE_OWNER
+        if(page_owner && pilot_write_watch_session_page(memory+(size_t)offset)) {
+            /* The existing observer's current ARMED state proves exactly
+             * the one-page logical view the query wrapper would return.
+             * Session ownership already excludes VM and data writers here. */
+            info.BaseAddress=memory+(size_t)offset;info.RegionSize=4096;
+            info.State=MEM_COMMIT;info.Protect=PAGE_READWRITE;
+            static int reported;
+            if(!reported){reported=1;fprintf(stderr,"[SESSION PAGE OWNER] active; current watched page, unchanged sample/hash\n");}
+        } else
+#endif
         if(!VirtualQuery(memory+(size_t)offset,&info,sizeof(info)) || !info.RegionSize)
             stop("session memory map observation failed",(uint32_t)offset);
         uint64_t end=(uint64_t)((uintptr_t)info.BaseAddress-(uintptr_t)memory)+info.RegionSize;
@@ -217,6 +230,17 @@ static void session_frame_boundary(uint64_t frame)
         }
         offset=end;
     }
-    uint64_t evidence[]={frame,h,session_cpu_digest(),read_bytes};
+    evidence[0]=frame;evidence[1]=h;evidence[2]=session_cpu_digest();evidence[3]=read_bytes;
+}
+static void session_frame_boundary(uint64_t frame)
+{
+    if(!g_pilot_session_enabled)return;
+    int page_owner=0;
+#if defined(PILOT_SESSION_PAGE_OWNER) && PILOT_SESSION_PAGE_OWNER
+    static int selection;
+    if(!selection){const char *v=getenv("XLLE_PILOT_SESSION_PAGE_OWNER");selection=v && !strcmp(v,"0")?1:2;}
+    page_owner=selection==2;
+#endif
+    uint64_t evidence[4];session_frame_evidence(frame,page_owner,evidence);
     pilot_session_verify(PILOT_SESSION_FRAME,frame,evidence,sizeof(evidence));
 }

@@ -34,6 +34,57 @@ static int32_t test_desktop_result;
 #endif
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c); ExitProcess(1); } } while (0)
+#if defined(PILOT_SESSION_PAGE_OWNER) && PILOT_SESSION_PAGE_OWNER
+static void test_session_memory_pairs(unsigned *pairs)
+{
+    for(uint64_t frame=0;frame<256;++frame) {
+        uint64_t original[4],owned[4];
+        session_frame_evidence(frame,0,original);session_frame_evidence(frame,1,owned);
+        CHECK(!memcmp(original,owned,sizeof(original)));++*pairs;
+    }
+}
+static void test_session_memory_owner(void)
+{
+    unsigned pairs=0;DWORD previous;PilotWriteSnapshot snapshot;
+    CHECK(pilot_write_watch_initialize(memory,(SIZE_T)0x100000000ull));
+    commit(0x200000,65536);
+    for(unsigned i=0;i<65536;++i)memory[0x200000+i]=(uint8_t)(i*37u+(i>>8));
+    CHECK(!pilot_write_watch_session_page(memory+0x200000));
+    test_session_memory_pairs(&pairs);
+    CHECK(pilot_write_watch_begin(memory+0x200000,65536,&snapshot));
+    pilot_write_watch_end(&snapshot);CHECK(pilot_write_watch_reusable(&snapshot));
+    CHECK(pilot_write_watch_session_page(memory+0x200000));
+    CHECK(!pilot_write_watch_session_page(memory+0x200001));
+    test_session_memory_pairs(&pairs);
+    memory[0x200001]^=0x80;CHECK(!pilot_write_watch_session_page(memory+0x200000));
+    test_session_memory_pairs(&pairs);
+    CHECK(pilot_write_watch_native_begin(memory+0x202000,4096));
+    CHECK(!pilot_write_watch_session_page(memory+0x202000));
+    memory[0x202003]^=0x40;test_session_memory_pairs(&pairs);
+    pilot_write_watch_native_end(memory+0x202000,4096);
+    CHECK(pilot_write_watch_begin(memory+0x202000,4096,&snapshot));pilot_write_watch_end(&snapshot);
+    CHECK(pilot_write_watch_session_page(memory+0x202000));
+    test_session_memory_pairs(&pairs);
+    CHECK(VirtualProtect(memory+0x203000,4096,PAGE_READONLY,&previous));
+    CHECK(!pilot_write_watch_session_page(memory+0x203000));
+    CHECK(VirtualProtect(memory+0x204000,4096,PAGE_NOACCESS,&previous));
+    test_session_memory_pairs(&pairs);
+    CHECK(VirtualFree(memory+0x205000,4096,MEM_DECOMMIT));
+    CHECK(!pilot_write_watch_session_page(memory+0x205000));
+    test_session_memory_pairs(&pairs);
+    CHECK(VirtualAlloc(memory+0x205000,4096,MEM_COMMIT,PAGE_READWRITE)==memory+0x205000);
+    CHECK(pilot_write_watch_begin(memory+0x205000,4096,&snapshot));pilot_write_watch_end(&snapshot);
+    CHECK(pilot_write_watch_session_page(memory+0x205000));
+    CHECK(VirtualProtect(memory+0x206000,4096,PAGE_READWRITE|PAGE_GUARD,&previous));
+    test_session_memory_pairs(&pairs);
+    MEMORY_BASIC_INFORMATION info;
+    CHECK(VirtualQuery(memory+0x206000,&info,sizeof(info)) && (info.Protect&PAGE_GUARD));
+    CHECK(VirtualProtect(memory+0x206000,4096,PAGE_READWRITE,&previous));
+    pilot_write_watch_finish();CHECK(!pilot_write_watch_session_page(memory+0x200000));
+    test_session_memory_pairs(&pairs);
+    fprintf(stderr,"PASS: Session memory owner %u complete evidence pairs/all256 phases, dirty/native writers, rearm, genuine RO/noaccess/guard/decommit and inactive fallback\n",pairs);
+}
+#endif
 #ifdef PILOT_D3D_NATIVE
 #include "graphics_clock_handle_contract_test.inc"
 int32_t test_desktop_present(void)
@@ -634,6 +685,9 @@ int main(int argc,char **argv)
     g_xbox_mem_offset=(ptrdiff_t)memory;
     commit(0x10000,0x10000);
     g_esp=0x18000; MEM32(g_esp)=0x12340;
+#if defined(PILOT_SESSION_PAGE_OWNER) && PILOT_SESSION_PAGE_OWNER
+    if(argc==2 && !strcmp(argv[1],"session-memory")){test_session_memory_owner();return 0;}
+#endif
     image_size=0x200; image_bytes=calloc(1,image_size); CHECK(image_bytes!=NULL);
     if(argc==2 && !strcmp(argv[1],"settings-user")){test_settings_user();return 0;}
     if(argc==2 && !strcmp(argv[1],"system-time-set")){test_system_time_set(0);return 0;}

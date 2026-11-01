@@ -24,6 +24,7 @@ class HostInputDiagnosticTests(unittest.TestCase):
             work = Path(temporary)
             capture = work / 'capture.bin'
             env = {key: value for key, value in os.environ.items() if not key.startswith('XLLE_PILOT_')}
+            env['XLLE_PILOT_INPUT_REPLAY_OWNER'] = os.environ.get('XBOXLLR_INPUT_REPLAY_OWNER', '1')
             for name in ('TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA'):
                 directory = work / name.lower()
                 directory.mkdir(exist_ok=True)
@@ -78,6 +79,51 @@ class HostInputDiagnosticTests(unittest.TestCase):
             self.assertEqual(overflow.returncode, 0, overflow.stderr)
             self.assertIn('INPUTS INCOMPLETE', overflow.stderr)
             self.assertLessEqual(inspect_inputs(overflow_path)['records'], 4097)
+
+    def test_large_replay_exact_bytes_order_eof_and_refill_boundary_corruption(self):
+        binary = Path(os.environ['XBOXLLR_INPUT_DIAGNOSTIC_TEST_EXE']).resolve(strict=True)
+        root = Path(os.environ['XBOXLLR_DIAGNOSTIC_TEST_DIR'])
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root) as temporary:
+            path = Path(temporary)/'large.bin'
+            def write_rows(timed):
+                with path.open('wb') as stream:
+                    stream.write(INPUT_HEADER)
+                    for seq in range(262144):
+                        payload = bytearray(22)
+                        payload[0]=seq&255;payload[1]=(seq>>8)&255;payload[2]=255
+                        payload[10:12]=b'\x34\x12'
+                        stream.write(INPUT_RECORD.pack(seq,(seq//1024)*10000 if timed else 0,
+                            1,0,0,0,bytes(payload),bytes(10)))
+            write_rows(False)
+            env = {key: value for key, value in os.environ.items() if not key.startswith('XLLE_PILOT_')}
+            env['XLLE_PILOT_INPUT_REPLAY_OWNER'] = os.environ.get('XBOXLLR_INPUT_REPLAY_OWNER', '1')
+            def run(mode):
+                return subprocess.run([str(binary),mode,str(path)],env=env,capture_output=True,text=True,timeout=20)
+            result=run('bulk')
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('records=262144',result.stdout)
+            self.assertEqual(run('bulk-eof').returncode,4)
+            # Future malformed rows must be rejected on their own delivery,
+            # including either side of the 64KiB read-ahead boundary.
+            for seq in (1023,1024):
+                with path.open('r+b') as stream:
+                    stream.seek(16+64*seq+63);stream.write(b'\x01')
+                result=run('bulk')
+                self.assertEqual(result.returncode,3,result.stderr)
+                self.assertIn(f'sequence={seq} ',result.stderr)
+                with path.open('r+b') as stream:
+                    stream.seek(16+64*seq+63);stream.write(b'\0')
+            # The timed reader must retain exactly one future row across the
+            # same refill boundaries, then consume it only when its time is due.
+            write_rows(True)
+            result=run('bulk-timed')
+            self.assertEqual(result.returncode,0,result.stderr)
+            with path.open('r+b') as stream:
+                stream.seek(16+64*1025+63);stream.write(b'\x01')
+            result=run('bulk-timed')
+            self.assertEqual(result.returncode,3,result.stderr)
+            self.assertIn('block=0 records=1024',result.stdout)
 
 
 if __name__ == '__main__':

@@ -22,6 +22,30 @@ static uint8_t input_timed_row[64],input_timed_payload[4][2][22];
 static uint32_t input_timed_status[4][3];
 static uint64_t input_timed_start,input_timed_origin;
 static uint64_t input_diagnostic_sequence,input_diagnostic_started,input_diagnostic_previous_time;
+#if defined(PILOT_INPUT_REPLAY_OWNER) && PILOT_INPUT_REPLAY_OWNER
+/* OPEN_EXISTING plus FILE_SHARE_READ excludes writers for this lifetime.
+ * The existing replay lock serializes both strict and timed consumption.
+ * Read ahead without validating/delivering later records before their turn. */
+static int input_replay_owner;
+static uint8_t input_replay_bytes[64u*1024u];
+static DWORD input_replay_read,input_replay_size;
+#endif
+static BOOL input_diagnostic_read_record(uint8_t row[64],DWORD *count)
+{
+#if defined(PILOT_INPUT_REPLAY_OWNER) && PILOT_INPUT_REPLAY_OWNER
+    if(input_replay_owner) {
+        if(input_replay_read==input_replay_size) {
+            input_replay_read=input_replay_size=0;
+            if(!ReadFile(input_diagnostic_file,input_replay_bytes,(DWORD)sizeof(input_replay_bytes),&input_replay_size,NULL))return FALSE;
+        }
+        *count=input_replay_size-input_replay_read;
+        if(*count>64)*count=64;
+        if(*count)memcpy(row,input_replay_bytes+input_replay_read,*count);
+        input_replay_read+=*count;return TRUE;
+    }
+#endif
+    return ReadFile(input_diagnostic_file,row,64,count,NULL);
+}
 
 static void input_diagnostic_u32(uint8_t *p,uint32_t value)
 {for(unsigned i=0;i<4;++i)p[i]=(uint8_t)(value>>(8*i));}
@@ -91,6 +115,10 @@ static BOOL CALLBACK input_diagnostic_initialize(PINIT_ONCE once,PVOID parameter
     wchar_t record[4096],replay[4096];
     DWORD have_record=GetEnvironmentVariableW(L"XLLE_PILOT_DIAGNOSTIC_RECORD",record,4096);
     DWORD have_replay=GetEnvironmentVariableW(L"XLLE_PILOT_DIAGNOSTIC_REPLAY",replay,4096);
+#if defined(PILOT_INPUT_REPLAY_OWNER) && PILOT_INPUT_REPLAY_OWNER
+    const char *owner=getenv("XLLE_PILOT_INPUT_REPLAY_OWNER");
+    input_replay_owner=have_replay && !(owner && !strcmp(owner,"0"));
+#endif
     if(!have_record && !have_replay)return TRUE;
     if(have_record>=4096 || have_replay>=4096 || (have_record && have_replay)) {
         fprintf(stderr,"[DIAGNOSTIC INPUT STOP] invalid capture/replay configuration\n");ExitProcess(3);
@@ -162,7 +190,7 @@ static uint32_t input_diagnostic_timed_deliver(unsigned kind,unsigned port,uint8
     for(;;) {
         if(!input_timed_pending && !input_timed_eof) {
             DWORD count=0;
-            if(!ReadFile(input_diagnostic_file,input_timed_row,64,&count,NULL) || (count && count!=64)) {
+            if(!input_diagnostic_read_record(input_timed_row,&count) || (count && count!=64)) {
                 fprintf(stderr,"[DIAGNOSTIC INPUT STOP] truncated timed input record\n");ExitProcess(3);
             }
             if(!count){input_timed_eof=1;fprintf(stderr,"[DIAGNOSTIC INPUT PLAYBACK END] consumed=%llu; controls repeated, original outcome not established\n",(unsigned long long)input_diagnostic_sequence);}
@@ -195,7 +223,7 @@ static uint32_t input_diagnostic_deliver(unsigned kind,unsigned port,uint32_t ar
         uint32_t status=input_diagnostic_timed_deliver(kind,port,payload,bytes);
         ReleaseSRWLockExclusive(&input_diagnostic_lock);return status;
     }
-    if(!ReadFile(input_diagnostic_file,row,64,&count,NULL)) {
+    if(!input_diagnostic_read_record(row,&count)) {
         fprintf(stderr,"[DIAGNOSTIC INPUT STOP] replay read failure\n");ExitProcess(3);
     }
     if(!count) {

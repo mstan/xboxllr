@@ -207,6 +207,12 @@ int pilot_write_watch_reusable(PilotWriteSnapshot *snapshot)
     snapshot->checked=now;return 1;
 }
 uint64_t pilot_write_watch_faults(void){return read64(&watch.faults);}
+int pilot_write_watch_session_page(const void *data)
+{
+    size_t first,last;
+    return !((uintptr_t)data&(WATCH_PAGE-1)) && span(data,WATCH_PAGE,&first,&last) &&
+        first==last && read32(&watch.pages[first].state)==ARMED;
+}
 BOOL WINAPI pilot_write_watch_virtual_protect(LPVOID address,SIZE_T bytes,DWORD protect,PDWORD previous)
 {
     if(!pilot_write_watch_native_begin(address,bytes))return FALSE;
@@ -275,6 +281,7 @@ void pilot_write_watch_native_end(const void *data,size_t bytes){(void)data;(voi
 int pilot_write_watch_native_read_begin(const void *data,size_t bytes){(void)data;(void)bytes;return 0;}
 void pilot_write_watch_native_read_end(void){}
 uint64_t pilot_write_watch_faults(void){return 0;}
+int pilot_write_watch_session_page(const void *data){(void)data;return 0;}
 #if defined(_WIN32)
 #include "memory_write_watch_win32.h"
 BOOL WINAPI pilot_write_watch_virtual_protect(LPVOID address,SIZE_T bytes,DWORD protect,PDWORD previous)

@@ -33,6 +33,7 @@ int main(void)
 {
     unsigned char *memory=VirtualAlloc(NULL,65536,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);assert(memory);
     assert(pilot_write_watch_initialize(memory,65536));
+    assert(!pilot_write_watch_session_page(memory));
     assert(pilot_write_watch_native_read_begin(memory,4));
     struct NativeLeaseWriter lease_writer={memory,CreateEventW(NULL,TRUE,FALSE,NULL),CreateEventW(NULL,TRUE,FALSE,NULL)};
     assert(lease_writer.entered && lease_writer.finished);
@@ -44,7 +45,10 @@ int main(void)
     CloseHandle(lease_thread);CloseHandle(lease_writer.entered);CloseHandle(lease_writer.finished);
     PilotWriteSnapshot a,b,overlap;
     capture(memory+17,8000,&a);capture(memory+8192,4096,&b);
+    assert(pilot_write_watch_session_page(memory) && pilot_write_watch_session_page(memory+4096));
+    assert(!pilot_write_watch_session_page(memory+1) && !pilot_write_watch_session_page(memory+65536));
     SetLastError(0x12345678u);memory[4096]=91;assert(GetLastError()==0x12345678u);
+    assert(!pilot_write_watch_session_page(memory+4096));
     assert(!pilot_write_watch_reusable(&a));assert(pilot_write_watch_reusable(&b));
     capture(memory+17,8000,&a);
     memset(memory+4080,42,64);assert(!pilot_write_watch_reusable(&a));assert(pilot_write_watch_reusable(&b));
@@ -66,6 +70,7 @@ int main(void)
     assert(info.Protect==PAGE_READWRITE);
     DWORD previous;
     assert(pilot_write_watch_virtual_protect(memory,4096,PAGE_READONLY,&previous));assert(previous==PAGE_READWRITE);
+    assert(!pilot_write_watch_session_page(memory));
     assert(!pilot_write_watch_reusable(&a));
     assert(pilot_write_watch_virtual_query(memory,&info,sizeof(info)) && info.Protect==PAGE_READONLY);
     assert(!pilot_write_watch_begin(memory,4096,&a));
@@ -81,6 +86,7 @@ int main(void)
     assert(file!=INVALID_HANDLE_VALUE);
     capture(memory+8192,4096,&b);
     assert(pilot_write_watch_native_begin(memory+8192,4096));
+    assert(!pilot_write_watch_session_page(memory+8192));
     assert(pilot_write_watch_native_begin(memory+8192,4096));
     assert(!pilot_write_watch_reusable(&b));
     assert(!pilot_write_watch_begin(memory+8192,4096,&b));
@@ -113,6 +119,7 @@ int main(void)
     CloseHandle(threads[0]);CloseHandle(threads[1]);
     assert(pilot_write_watch_faults()>=4);
     pilot_write_watch_finish();memory[0]=39;
+    assert(!pilot_write_watch_session_page(memory));
     assert(!pilot_write_watch_reusable(&a));
     assert(pilot_write_watch_initialize(memory,65536));assert(!pilot_write_watch_reusable(&a));
     pilot_write_watch_finish();assert(VirtualFree(memory,0,MEM_RELEASE));
@@ -123,6 +130,7 @@ int main(void)
 {
     unsigned char memory[64]={0};PilotWriteSnapshot snapshot={0};
     assert(!pilot_write_watch_initialize(memory,sizeof(memory)));
+    assert(!pilot_write_watch_session_page(memory));
     assert(!pilot_write_watch_native_read_begin(memory,sizeof(memory)));
     assert(!pilot_write_watch_begin(memory,sizeof(memory),&snapshot));
     pilot_write_watch_end(&snapshot);assert(!pilot_write_watch_reusable(&snapshot));

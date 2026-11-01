@@ -32,6 +32,11 @@ void pilot_write_watch_native_end(const void *data,size_t bytes);
 int pilot_write_watch_native_read_begin(const void *data,size_t bytes);
 void pilot_write_watch_native_read_end(void); /* only after a true begin */
 uint64_t pilot_write_watch_faults(void);
+/* Session frame observation only, while its CPU/device ownership excludes
+ * mapping changes and writers. True proves one aligned, currently ARMED
+ * 4KiB page is committed with logical PAGE_READWRITE; it neither queries the
+ * OS nor changes protection/ownership. Other states/hosts must query normally. */
+int pilot_write_watch_session_page(const void *data);
 #ifdef __cplusplus
 }
 #endif
