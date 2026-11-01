@@ -165,6 +165,12 @@ int main(int argc,char **argv)
     uint32_t pp[17]={64,64,D3DFMT_X8R8G8B8,1,0x11,1,0,0,1,D3DFMT_D24S8,0,60,1};
     if(argc==2 && !strcmp(argv[1],"--float-blend")){pp[0]=640;pp[1]=480;}
     unsigned char pixels[64*64*4];
+#ifdef PILOT_D3D_PHOBOS
+    if(argc==2 && !strcmp(argv[1],"--movie-color-space")) {
+        CHECK(pilot_gfx_create(pp)>=0);
+        int result=test_movie_color_space();pilot_gfx_close();return result;
+    }
+#endif
     for (unsigned pass=0;pass<3;++pass) {
         CHECK(pilot_gfx_create(pp)>=0);
         if(argc==2 && !strcmp(argv[1],"--resource-mirror")) {

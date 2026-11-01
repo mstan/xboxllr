@@ -4,6 +4,7 @@ project(xlle_native_title_pilot C CXX)
 # host/compiler a build requirement. Keep the normal portable build available;
 # diagnostic/iterative builds retain their existing compilation policy.
 option(PILOT_NATIVE_IPO "Use qualified MSVC whole-program optimization in Release" OFF)
+option(PILOT_GPU_MOVIE_UPLOAD "Convert packed movie pixels on GPU with original CPU fallback" OFF)
 set(pilot_native_ipo_release OFF)
 if(PILOT_NATIVE_IPO AND WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC"
    AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_SIZEOF_VOID_P EQUAL 8
@@ -996,6 +997,9 @@ if(PILOT_D3D_SOURCE)
     target_include_directories(pilot_d3d_backend PUBLIC "${PILOT_D3D_SOURCE}/src/d3d"
       "${PILOT_D3D_SOURCE}/src" "${PILOT_D3D_SOURCE}/src/config")
     target_compile_definitions(pilot_d3d_backend PRIVATE PILOT_D3D_PHOBOS)
+    if(PILOT_GPU_MOVIE_UPLOAD)
+      target_compile_definitions(pilot_d3d_backend PRIVATE PILOT_GPU_MOVIE_UPLOAD=1)
+    endif()
     target_compile_definitions(pilot_contract_test PRIVATE PILOT_D3D_PHOBOS)
   elseif(PILOT_D3D_DONOR STREQUAL "SPOON")
     add_library(pilot_d3d_backend STATIC graphics_backend.c graphics_states.c graphics_shader_backend.c visual_mods.c visual_mod_plan.c
@@ -1029,6 +1033,9 @@ if(PILOT_D3D_SOURCE)
   target_compile_definitions(pilot_d3d_backend PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_link_libraries(pilot_d3d_backend PUBLIC d3d11 dxgi dxguid d3dcompiler pilot_vsh_reference)
   add_executable(pilot_graphics_test graphics_backend_test.c)
+  if(PILOT_GPU_MOVIE_UPLOAD AND PILOT_D3D_DONOR STREQUAL "PHOBOS")
+    target_compile_definitions(pilot_graphics_test PRIVATE PILOT_GPU_MOVIE_UPLOAD=1)
+  endif()
   if(PILOT_D3D_DONOR STREQUAL "PHOBOS")
     target_compile_definitions(pilot_graphics_test PRIVATE PILOT_D3D_PHOBOS)
   endif()

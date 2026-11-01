@@ -223,6 +223,9 @@ void pilot_d3d_fvf_prepare(UINT fvf,const float scale[4],const float offset[4]);
 #include "graphics_completion_backend.inc"
 #include "graphics_strip_batch_backend.inc"
 #include "graphics_visibility_backend.inc"
+#if defined(PILOT_GPU_MOVIE_UPLOAD) && PILOT_GPU_MOVIE_UPLOAD
+#include "graphics_movie_gpu.inc"
+#endif
 #include "graphics_quad_backend.inc"
 #include "graphics_fan_backend.inc"
 #include "graphics_index_backend.inc"
@@ -329,6 +332,9 @@ void pilot_gfx_close(void)
     pilot_default_depth_close();
     pilot_clear_close();
     pilot_visual_close();
+#if defined(PILOT_GPU_MOVIE_UPLOAD) && PILOT_GPU_MOVIE_UPLOAD
+    pilot_movie_gpu_close();
+#endif
     pilot_logic_copy=pilot_requested_blend=0;
     pilot_gfx_shaders_close();
     for (unsigned i=0;i<pilot_vertex_capacity;++i){
@@ -526,6 +532,9 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     if(old_depth)ID3D11DepthStencilView_Release(old_depth);
     if(FAILED(result))goto stage_failed;
     pilot_visual_close();
+#if defined(PILOT_GPU_MOVIE_UPLOAD) && PILOT_GPU_MOVIE_UPLOAD
+    pilot_movie_gpu_close();
+#endif
     pilot_default_depth_close();
     for(unsigned i=0;i<3;++i) {
         while(pilot_surface_refs[i]){ID3D11Texture2D_Release(pilot_surfaces[i]);--pilot_surface_refs[i];}
@@ -1301,6 +1310,13 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         if(texture->d3d8_format==3)for(UINT i=0;i<width*height;++i)
             ((BYTE*)lock.pBits)[i*2+1]|=0x80;
     }
+#if defined(PILOT_GPU_MOVIE_UPLOAD) && PILOT_GPU_MOVIE_UPLOAD
+    if(yuv && pilot_movie_gpu_upload(texture,level,width,height,lock.pBits,pitch)) {
+        /* Match the donor UnlockRect publication after our image update. */
+        texture->locked=FALSE;texture->dirty=FALSE;
+    }
+    else
+#endif
     pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
     PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);
     if(!level)pilot_replacement_match(handle,data,bytes);
