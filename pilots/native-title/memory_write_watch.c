@@ -251,12 +251,10 @@ SIZE_T WINAPI pilot_write_watch_virtual_query(LPCVOID address,PMEMORY_BASIC_INFO
     SIZE_T result=VirtualQuery(address,info,bytes);DWORD error=GetLastError();size_t first,last;
     if(result>=sizeof(*info) && info->State==MEM_COMMIT && info->Protect==PAGE_READONLY && span(address,1,&first,&last)) {
         LONG state=read32(&watch.pages[first].state);
-        if(state==ARMED || state==HANDLING || state==ARMING) {
-            /* Do not extend logical RW into adjacent genuinely readonly
-             * storage that Windows happened to coalesce with a watched page. */
-            info->BaseAddress=watch.base+first*WATCH_PAGE;
-            info->RegionSize=WATCH_PAGE;info->Protect=PAGE_READWRITE;
-        }
+        /* Physical RO may coalesce genuine RO with temporarily protected RW.
+         * Bound both logical views so neither leaks into its neighbor. */
+        info->BaseAddress=watch.base+first*WATCH_PAGE;info->RegionSize=WATCH_PAGE;
+        if(state==ARMED || state==HANDLING || state==ARMING)info->Protect=PAGE_READWRITE;
     }
     pilot_write_watch_native_end(info,output);SetLastError(error);return result;
 }
