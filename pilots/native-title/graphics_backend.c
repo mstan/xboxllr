@@ -2181,14 +2181,22 @@ int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint
     PACKET_CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before+1);
     PACKET_CHECK(!pending->jobs[count_before].state.vertices[31] && !pending->jobs[count_before].state.constants[0][13]);
     PACKET_CHECK(!pending->jobs[count_before].state.resources[2][127] && !pending->jobs[count_before].state.samplers[2][15]);
-    PACKET_CHECK(!pilot_gfx_reference_target_readback(0,enhanced,capacity,physical));
-    pilot_native_epoch_poll();PACKET_CHECK(pilot_native_cb_version_barrier(pilot_native_cb_epoch_barrier));
+    /* Observe the actual changed-range replay before final restoration can
+     * hide a missing high-slot clear. This emits no draw or success flags. */
+    struct PreparedState native_before_probe={0};
+    PACKET_CHECK(pilot_native_epoch_state_capture(&native_before_probe,context));
+    pilot_native_epoch_state_bind(context,first);
+    pilot_native_epoch_state_bind_changes(context,first,&pending->jobs[count_before].state);
     ID3D11ShaderResourceView *observed_view=NULL;ID3D11SamplerState *observed_sampler=NULL;
     ID3D11Buffer *observed_buffer=NULL;
     context->lpVtbl->PSGetShaderResources(context,127,1,&observed_view);PACKET_CHECK(!observed_view);
     context->lpVtbl->PSGetSamplers(context,15,1,&observed_sampler);PACKET_CHECK(!observed_sampler);
     context->lpVtbl->VSGetConstantBuffers(context,13,1,&observed_buffer);PACKET_CHECK(!observed_buffer);
     context->lpVtbl->IAGetVertexBuffers(context,31,1,&observed_buffer,&zero,&zero);PACKET_CHECK(!observed_buffer);
+    pilot_native_epoch_state_bind(context,&native_before_probe);
+    pilot_native_epoch_state_release(&native_before_probe);
+    PACKET_CHECK(!pilot_gfx_reference_target_readback(0,enhanced,capacity,physical));
+    pilot_native_epoch_poll();PACKET_CHECK(pilot_native_cb_version_barrier(pilot_native_cb_epoch_barrier));
     pilot_native_epoch_state_release(&original);
     ID3D11ShaderResourceView_Release(view);ID3D11SamplerState_Release(sampler);ID3D11Texture2D_Release(texture);
     fprintf(stderr,"BINDING EXTENTS: VB31 CB13 SRV127 sampler15 bound_cleared=1 raw_resync=1 replay_tail_clear=1\n");
