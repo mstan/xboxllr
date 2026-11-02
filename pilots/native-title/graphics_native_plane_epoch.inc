@@ -232,11 +232,11 @@ static int pilot_native_epoch_jobs_prepare(struct PilotNativeEpochGroup *group)
 }
 static void pilot_native_epoch_job_release(struct PilotNativeEpochJob *job)
 {
-    for(unsigned slot=0;slot<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++slot)
+    for(unsigned slot=0;slot<job->state.vertex_count;++slot)
         pilot_native_cb_version_release(&job->vertex_versions[slot]);
     pilot_native_cb_version_release(&job->index_version);
     for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
-        for(unsigned slot=0;slot<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++slot)
+        for(unsigned slot=0;slot<job->state.constant_count[stage];++slot)
             pilot_native_cb_version_release(&job->constant_versions[stage][slot]);
     pilot_native_epoch_state_release(&job->state);
 }
@@ -274,6 +274,12 @@ static int pilot_native_epoch_state_capture(struct PreparedState *s,ID3D11Device
     for(unsigned stage=0;stage<3;++stage)for(unsigned i=0;i<D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;++i)
         if(inactive_resources[stage][i]){unsupported=1;ID3D11ShaderResourceView_Release(inactive_resources[stage][i]);}
     if(unsupported)return 0;
+    s->vertex_count=D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;
+    for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage) {
+        s->constant_count[stage]=D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
+        s->resource_count[stage]=D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
+        s->sampler_count[stage]=D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;
+    }
     ID3D11DeviceContext_IAGetInputLayout(native,&s->layout);
     ID3D11DeviceContext_IAGetVertexBuffers(native,0,D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT,s->vertices,s->strides,s->offsets);
     ID3D11DeviceContext_IAGetIndexBuffer(native,&s->index,&s->index_format,&s->index_offset);
@@ -310,7 +316,7 @@ static int pilot_native_epoch_state_capture(struct PreparedState *s,ID3D11Device
     s->scissor_count=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
     ID3D11DeviceContext_RSGetViewports(native,&s->viewport_count,s->viewports);
     ID3D11DeviceContext_RSGetScissorRects(native,&s->scissor_count,s->scissors);
-    return 1;
+    prepared_state_derive_extents(s);return 1;
 }
 static void pilot_native_epoch_state_bind(ID3D11DeviceContext *context,const struct PreparedState *s)
 {
@@ -393,15 +399,16 @@ static void pilot_native_epoch_state_bind_changes(ID3D11DeviceContext *context,
     if(EPOCH_SHADER_CHANGED(geometry,1))ID3D11DeviceContext_GSSetShader(context,s->geometry,s->classes[1],s->class_count[1]);
     if(EPOCH_SHADER_CHANGED(pixel,2))ID3D11DeviceContext_PSSetShader(context,s->pixel,s->classes[2],s->class_count[2]);
 #undef EPOCH_SHADER_CHANGED
-#define EPOCH_CHANGED_RANGE(stage,n,field,limit,setter) do { \
-    unsigned a=(limit),b=0; \
+#define EPOCH_CHANGED_RANGE(stage,n,field,bound,setter) do { \
+    unsigned limit=before->bound[n]>s->bound[n]?before->bound[n]:s->bound[n]; \
+    unsigned a=limit,b=0; \
     for(unsigned i=0;i<(limit);++i)if(before->field[n][i]!=s->field[n][i]) {if(a==(limit))a=i;b=i+1;} \
     if(b)ID3D11DeviceContext_##stage##setter(context,a,b-a,s->field[n]+a); \
 }while(0)
 #define EPOCH_CHANGED_STAGE(stage,n) \
-    EPOCH_CHANGED_RANGE(stage,n,constants,D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT,SetConstantBuffers); \
-    EPOCH_CHANGED_RANGE(stage,n,resources,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,SetShaderResources); \
-    EPOCH_CHANGED_RANGE(stage,n,samplers,D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT,SetSamplers)
+    EPOCH_CHANGED_RANGE(stage,n,constants,constant_count,SetConstantBuffers); \
+    EPOCH_CHANGED_RANGE(stage,n,resources,resource_count,SetShaderResources); \
+    EPOCH_CHANGED_RANGE(stage,n,samplers,sampler_count,SetSamplers)
     EPOCH_CHANGED_STAGE(VS,0);EPOCH_CHANGED_STAGE(GS,1);EPOCH_CHANGED_STAGE(PS,2);
 #undef EPOCH_CHANGED_STAGE
 #undef EPOCH_CHANGED_RANGE
@@ -465,7 +472,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
     int admitted=0;unsigned borrowed=0,borrowed_constants=0;
     if(!pilot_native_epoch_state_capture(s,native))goto finished;
     uint32_t prepared_extents[16]={0};unsigned prepared_streams=pilot_gfx_shader_prepared_streams(prepared_extents);
-    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)if(s->vertices[i]) {
+    for(unsigned i=0;i<s->vertex_count;++i)if(s->vertices[i]) {
         if(pilot_native_prepared_jobs_enabled() &&
            pilot_native_cb_version_borrow(s->vertices[i],&job->vertex_versions[i])) {
             vertex_copies[i]=s->vertices[i];copy_offsets[i]=s->offsets[i];++borrowed;continue;
@@ -505,7 +512,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
         if(!index_copy)goto finished;
     }
     for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
-        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)if(s->constants[stage][i]) {
+        for(unsigned i=0;i<s->constant_count[stage];++i)if(s->constants[stage][i]) {
             if(pilot_native_prepared_jobs_enabled() &&
                pilot_native_cb_version_borrow(s->constants[stage][i],&job->constant_versions[stage][i])) {
                 constant_copies[stage][i]=s->constants[stage][i];++borrowed_constants;continue;
@@ -530,7 +537,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
     pilot_native_epoch.copy_count=0;
     /* Snapshot bindings replace unproved mutable sources; known owned mesh
      * bindings keep their captured refs and original byte offsets. */
-    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)if(s->vertices[i]) {
+    for(unsigned i=0;i<s->vertex_count;++i)if(s->vertices[i]) {
         if(s->vertices[i]!=vertex_copies[i]) {
             ID3D11Buffer_Release(s->vertices[i]);s->vertices[i]=vertex_copies[i];ID3D11Buffer_AddRef(s->vertices[i]);
         }
@@ -542,7 +549,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
         s->index=replayed_index;if(s->index)ID3D11Buffer_AddRef(s->index);
     }
     for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
-        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)if(s->constants[stage][i]) {
+        for(unsigned i=0;i<s->constant_count[stage];++i)if(s->constants[stage][i]) {
             if(s->constants[stage][i]!=constant_copies[stage][i]) {
                 ID3D11Buffer_Release(s->constants[stage][i]);s->constants[stage][i]=constant_copies[stage][i];
                 ID3D11Buffer_AddRef(s->constants[stage][i]);

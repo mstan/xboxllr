@@ -2102,14 +2102,49 @@ int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint
      * reservation; the later index reservation must decline. The
      * earlier draw and the next draw must survive in the same packet. */
     pilot_native_epoch_poll();
-
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();struct PreparedState original={0};
+    PACKET_CHECK(pilot_native_epoch_state_capture(&original,context));
+    PACKET_CHECK(original.vertices[0] && original.constants[0][0]);
+    /* Unused high slots are real API bindings. Capture them in the first
+     * packet, clear them, and force an unknown-boundary repair before the
+     * second packet so replay must clear through max(old,new) extents. */
+    D3D11_TEXTURE2D_DESC texture_desc={0};texture_desc.Width=texture_desc.Height=1;
+    texture_desc.MipLevels=texture_desc.ArraySize=1;texture_desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+    texture_desc.SampleDesc.Count=1;texture_desc.Usage=D3D11_USAGE_IMMUTABLE;texture_desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+    UINT color=0xff123456;D3D11_SUBRESOURCE_DATA initial={&color,4,4};
+    ID3D11Texture2D *texture=NULL;ID3D11ShaderResourceView *view=NULL;
+    ID3D11SamplerState *sampler=NULL;D3D11_SAMPLER_DESC sampler_desc={0};
+    sampler_desc.Filter=D3D11_FILTER_MIN_MAG_MIP_POINT;
+    sampler_desc.AddressU=sampler_desc.AddressV=sampler_desc.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler_desc.ComparisonFunc=D3D11_COMPARISON_NEVER;sampler_desc.MaxLOD=D3D11_FLOAT32_MAX;sampler_desc.MaxAnisotropy=1;
+    PACKET_CHECK(SUCCEEDED(ID3D11Device_CreateTexture2D(d3d8_GetD3D11Device(),&texture_desc,&initial,&texture)));
+    PACKET_CHECK(SUCCEEDED(ID3D11Device_CreateShaderResourceView(d3d8_GetD3D11Device(),(ID3D11Resource*)texture,NULL,&view)));
+    PACKET_CHECK(SUCCEEDED(ID3D11Device_CreateSamplerState(d3d8_GetD3D11Device(),&sampler_desc,&sampler)));
+    ID3D11DeviceContext_IASetVertexBuffers(context,31,1,&original.vertices[0],&original.strides[0],&original.offsets[0]);
+    ID3D11DeviceContext_VSSetConstantBuffers(context,13,1,&original.constants[0][0]);
+    ID3D11DeviceContext_PSSetShaderResources(context,127,1,&view);
+    ID3D11DeviceContext_PSSetSamplers(context,15,1,&sampler);
     PACKET_CHECK(!pilot_gfx_draw_vertices(6,0,4));
     unsigned packet=pilot_native_epoch.recording;PACKET_CHECK(packet);
     struct PilotNativeEpochGroup *pending=&pilot_native_epoch.groups[packet-1];
     unsigned count_before=pending->job_count,draws_before=pilot_native_epoch.draws;
     unsigned bytes_before=pilot_native_epoch.bytes;PACKET_CHECK(count_before && count_before<PILOT_NATIVE_EPOCH_DRAWS);
-    ID3D11DeviceContext *context=d3d8_GetD3D11Context();struct PreparedState saved={0};
-    PACKET_CHECK(pilot_native_epoch_state_capture(&saved,context));
+    const struct PreparedState *first=&pending->jobs[count_before-1].state;
+    PACKET_CHECK(first->vertex_count==32 && first->constant_count[0]==14 && first->resource_count[2]==128 && first->sampler_count[2]==16);
+    PACKET_CHECK(first->resources[2][127]==view && first->samplers[2][15]==sampler);
+    ID3D11Buffer *no_buffer=NULL;ID3D11ShaderResourceView *no_view=NULL;ID3D11SamplerState *no_sampler=NULL;
+    UINT zero=0;
+    ID3D11DeviceContext_IASetVertexBuffers(context,31,1,&no_buffer,&zero,&zero);
+    ID3D11DeviceContext_VSSetConstantBuffers(context,13,1,&no_buffer);
+    ID3D11DeviceContext_PSSetShaderResources(context,127,1,&no_view);
+    ID3D11DeviceContext_PSSetSamplers(context,15,1,&no_sampler);
+    struct PreparedState cleared={0};PACKET_CHECK(pilot_native_epoch_state_capture(&cleared,context));
+    PACKET_CHECK(cleared.vertex_count==original.vertex_count && cleared.constant_count[0]==original.constant_count[0]);
+    PACKET_CHECK(cleared.resource_count[2]==original.resource_count[2] && cleared.sampler_count[2]==original.sampler_count[2]);
+    pilot_native_epoch_state_release(&cleared);
+    prepared_state_invalidate(context);
+    struct PreparedState saved={0};PACKET_CHECK(pilot_native_epoch_state_capture(&saved,context));
+    PACKET_CHECK(saved.vertex_count==original.vertex_count && saved.resource_count[2]==original.resource_count[2]);
     void *registered_vertex=NULL;
     PACKET_CHECK(pilot_native_cb_version_borrow(saved.vertices[0],&registered_vertex));
     pilot_native_cb_version_release(&registered_vertex);
@@ -2144,8 +2179,19 @@ int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint
     ID3D11Buffer_Release(scratch_vertex);ID3D11Buffer_Release(scratch_index);
     PACKET_CHECK(!pilot_gfx_draw_vertices(6,4,4));
     PACKET_CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before+1);
+    PACKET_CHECK(!pending->jobs[count_before].state.vertices[31] && !pending->jobs[count_before].state.constants[0][13]);
+    PACKET_CHECK(!pending->jobs[count_before].state.resources[2][127] && !pending->jobs[count_before].state.samplers[2][15]);
     PACKET_CHECK(!pilot_gfx_reference_target_readback(0,enhanced,capacity,physical));
     pilot_native_epoch_poll();PACKET_CHECK(pilot_native_cb_version_barrier(pilot_native_cb_epoch_barrier));
+    ID3D11ShaderResourceView *observed_view=NULL;ID3D11SamplerState *observed_sampler=NULL;
+    ID3D11Buffer *observed_buffer=NULL;
+    context->lpVtbl->PSGetShaderResources(context,127,1,&observed_view);PACKET_CHECK(!observed_view);
+    context->lpVtbl->PSGetSamplers(context,15,1,&observed_sampler);PACKET_CHECK(!observed_sampler);
+    context->lpVtbl->VSGetConstantBuffers(context,13,1,&observed_buffer);PACKET_CHECK(!observed_buffer);
+    context->lpVtbl->IAGetVertexBuffers(context,31,1,&observed_buffer,&zero,&zero);PACKET_CHECK(!observed_buffer);
+    pilot_native_epoch_state_release(&original);
+    ID3D11ShaderResourceView_Release(view);ID3D11SamplerState_Release(sampler);ID3D11Texture2D_Release(texture);
+    fprintf(stderr,"BINDING EXTENTS: VB31 CB13 SRV127 sampler15 bound_cleared=1 raw_resync=1 replay_tail_clear=1\n");
 #undef PACKET_CHECK
     return 0;
 #else

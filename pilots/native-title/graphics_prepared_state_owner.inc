@@ -57,17 +57,40 @@ static UINT *prepared_class_count(unsigned stage)
 static int prepared_known(ID3D11DeviceContext *context)
 { return context && context==prepared_owner.context && prepared_owner.known; }
 
+/* Read pointer representation with memcpy, without aliasing typed slots. */
+static UINT prepared_live_extent(const void *slots,UINT limit)
+{
+    while(limit) {
+        void *value;memcpy(&value,(const unsigned char*)slots+(limit-1)*sizeof(value),sizeof(value));
+        if(value)break;--limit;
+    }
+    return limit;
+}
+static void prepared_extent_slot(UINT *extent,const void *slots,UINT slot,int live)
+{
+    if(live){if(*extent<=slot)*extent=slot+1;}
+    else if(*extent==slot+1)*extent=prepared_live_extent(slots,*extent);
+}
+void prepared_state_derive_extents(struct PreparedState *s)
+{
+    s->vertex_count=prepared_live_extent(s->vertices,D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT);
+    for(unsigned stage=0;stage<PREPARED_STAGES;++stage) {
+        s->constant_count[stage]=prepared_live_extent(s->constants[stage],D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT);
+        s->resource_count[stage]=prepared_live_extent(s->resources[stage],D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT);
+        s->sampler_count[stage]=prepared_live_extent(s->samplers[stage],D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT);
+    }
+}
 static void prepared_state_refs(struct PreparedState *s,int add)
 {
 #define PREPARED_REF(p) do {if(add)prepared_add(p);else prepared_drop(p);}while(0)
     PREPARED_REF(s->layout);PREPARED_REF(s->index);
-    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)PREPARED_REF(s->vertices[i]);
+    for(unsigned i=0;i<s->vertex_count;++i)PREPARED_REF(s->vertices[i]);
     PREPARED_REF(s->vertex);PREPARED_REF(s->geometry);PREPARED_REF(s->pixel);
     for(unsigned stage=0;stage<3;++stage) {
         for(unsigned i=0;i<s->class_count[stage];++i)PREPARED_REF(s->classes[stage][i]);
-        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)PREPARED_REF(s->constants[stage][i]);
-        for(unsigned i=0;i<D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;++i)PREPARED_REF(s->resources[stage][i]);
-        for(unsigned i=0;i<D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;++i)PREPARED_REF(s->samplers[stage][i]);
+        for(unsigned i=0;i<s->constant_count[stage];++i)PREPARED_REF(s->constants[stage][i]);
+        for(unsigned i=0;i<s->resource_count[stage];++i)PREPARED_REF(s->resources[stage][i]);
+        for(unsigned i=0;i<s->sampler_count[stage];++i)PREPARED_REF(s->samplers[stage][i]);
     }
     PREPARED_REF(s->raster);PREPARED_REF(s->blend);PREPARED_REF(s->depth);PREPARED_REF(s->predicate);
     for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i)PREPARED_REF(s->outputs[i]);
@@ -247,7 +270,9 @@ static int prepared_record_srv(unsigned stage,unsigned slot,ID3D11ShaderResource
     prepared_owner.buffer_input[stage][slot]=buffer;
     if(stage<3)prepared_owner.buffer_inputs+=buffer;
     else if(value)++prepared_owner.non_graphics_inputs;
-    prepared_assign(&old[slot],value);return 1;
+    prepared_assign(&old[slot],value);
+    if(stage<PREPARED_STAGES)prepared_extent_slot(&prepared_owner.state.resource_count[stage],old,slot,value!=NULL);
+    return 1;
 }
 static int prepared_unbind_inputs(ID3D11View *output,unsigned kind)
 {
@@ -275,6 +300,13 @@ static int prepared_resync(ID3D11DeviceContext *c)
 {
     if(!c || c!=prepared_owner.context)return 0;
     prepared_clear_bindings();struct PreparedState *s=&prepared_owner.state;
+    /* Full bounds also make partial/failing raw captures safe to destroy. */
+    s->vertex_count=D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;
+    for(unsigned stage=0;stage<PREPARED_STAGES;++stage) {
+        s->constant_count[stage]=D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
+        s->resource_count[stage]=D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
+        s->sampler_count[stage]=D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;
+    }
     c->lpVtbl->IAGetInputLayout(c,&s->layout);
     c->lpVtbl->IAGetVertexBuffers(c,0,32,s->vertices,s->strides,s->offsets);
     c->lpVtbl->IAGetIndexBuffer(c,&s->index,&s->index_format,&s->index_offset);
@@ -328,6 +360,7 @@ static int prepared_resync(ID3D11DeviceContext *c)
         prepared_owner.buffer_input[stage][i]=buffer;
         if(stage<3)prepared_owner.buffer_inputs+=buffer;else ++prepared_owner.non_graphics_inputs;
     }
+    prepared_state_derive_extents(s);
     prepared_describe_blend(s->blend,&prepared_owner.blend_desc);
     prepared_describe_depth(s->depth,&prepared_owner.depth_desc);
     prepared_owner.known=1;return 1;
@@ -379,6 +412,7 @@ void prepared_IASetVertexBuffers(ID3D11DeviceContext *c,UINT start,UINT n,ID3D11
         ID3D11Buffer *actual=v[i];
         for(unsigned j=0;j<D3D11_SO_BUFFER_SLOT_COUNT;++j)if(actual && actual==prepared_owner.so[j]){prepared_state_invalidate(c);return;}
         prepared_assign(&prepared_owner.state.vertices[start+i],actual);
+        prepared_extent_slot(&prepared_owner.state.vertex_count,prepared_owner.state.vertices,start+i,actual!=NULL);
         prepared_owner.state.strides[start+i]=strides[i];prepared_owner.state.offsets[start+i]=offsets[i];
     }
 }
@@ -443,7 +477,10 @@ void prepared_VSSetConstantBuffers(ID3D11DeviceContext *c,UINT start,UINT n,ID3D
     c->lpVtbl->VSSetConstantBuffers(c,start,n,v);if(!prepared_known(c))return;
     if(start>14 || n>14-start){prepared_state_invalidate(c);return;}
     ID3D11Buffer **old=prepared_constants(0);
-    for(unsigned i=0;i<n;++i)prepared_assign(&old[start+i],v?v[i]:NULL);
+    for(unsigned i=0;i<n;++i) {
+        prepared_assign(&old[start+i],v?v[i]:NULL);
+        prepared_extent_slot(&prepared_owner.state.constant_count[0],old,start+i,old[start+i]!=NULL);
+    }
 }
 void prepared_VSSetShaderResources(ID3D11DeviceContext *c,UINT start,UINT n,ID3D11ShaderResourceView *const *v)
 {
@@ -465,7 +502,10 @@ void prepared_VSSetSamplers(ID3D11DeviceContext *c,UINT start,UINT n,ID3D11Sampl
     c->lpVtbl->VSSetSamplers(c,start,n,v);if(!prepared_known(c))return;
     if(start>16 || n>16-start){prepared_state_invalidate(c);return;}
     ID3D11SamplerState **old=prepared_samplers(0);
-    for(unsigned i=0;i<n;++i)prepared_assign(&old[start+i],v?v[i]:NULL);
+    for(unsigned i=0;i<n;++i) {
+        prepared_assign(&old[start+i],v?v[i]:NULL);
+        prepared_extent_slot(&prepared_owner.state.sampler_count[0],old,start+i,old[start+i]!=NULL);
+    }
 }
 
 void prepared_GSSetShader(ID3D11DeviceContext *c,ID3D11GeometryShader *v,ID3D11ClassInstance *const *classes,UINT count)
@@ -483,7 +523,10 @@ void prepared_GSSetConstantBuffers(ID3D11DeviceContext *c,UINT start,UINT n,ID3D
     c->lpVtbl->GSSetConstantBuffers(c,start,n,v);if(!prepared_known(c))return;
     if(start>14 || n>14-start){prepared_state_invalidate(c);return;}
     ID3D11Buffer **old=prepared_constants(1);
-    for(unsigned i=0;i<n;++i)prepared_assign(&old[start+i],v?v[i]:NULL);
+    for(unsigned i=0;i<n;++i) {
+        prepared_assign(&old[start+i],v?v[i]:NULL);
+        prepared_extent_slot(&prepared_owner.state.constant_count[1],old,start+i,old[start+i]!=NULL);
+    }
 }
 void prepared_GSSetShaderResources(ID3D11DeviceContext *c,UINT start,UINT n,ID3D11ShaderResourceView *const *v)
 {
@@ -505,7 +548,10 @@ void prepared_GSSetSamplers(ID3D11DeviceContext *c,UINT start,UINT n,ID3D11Sampl
     c->lpVtbl->GSSetSamplers(c,start,n,v);if(!prepared_known(c))return;
     if(start>16 || n>16-start){prepared_state_invalidate(c);return;}
     ID3D11SamplerState **old=prepared_samplers(1);
-    for(unsigned i=0;i<n;++i)prepared_assign(&old[start+i],v?v[i]:NULL);
+    for(unsigned i=0;i<n;++i) {
+        prepared_assign(&old[start+i],v?v[i]:NULL);
+        prepared_extent_slot(&prepared_owner.state.sampler_count[1],old,start+i,old[start+i]!=NULL);
+    }
 }
 
 void prepared_PSSetShader(ID3D11DeviceContext *c,ID3D11PixelShader *v,ID3D11ClassInstance *const *classes,UINT count)
@@ -523,7 +569,10 @@ void prepared_PSSetConstantBuffers(ID3D11DeviceContext *c,UINT start,UINT n,ID3D
     c->lpVtbl->PSSetConstantBuffers(c,start,n,v);if(!prepared_known(c))return;
     if(start>14 || n>14-start){prepared_state_invalidate(c);return;}
     ID3D11Buffer **old=prepared_constants(2);
-    for(unsigned i=0;i<n;++i)prepared_assign(&old[start+i],v?v[i]:NULL);
+    for(unsigned i=0;i<n;++i) {
+        prepared_assign(&old[start+i],v?v[i]:NULL);
+        prepared_extent_slot(&prepared_owner.state.constant_count[2],old,start+i,old[start+i]!=NULL);
+    }
 }
 void prepared_PSSetShaderResources(ID3D11DeviceContext *c,UINT start,UINT n,ID3D11ShaderResourceView *const *v)
 {
@@ -545,7 +594,10 @@ void prepared_PSSetSamplers(ID3D11DeviceContext *c,UINT start,UINT n,ID3D11Sampl
     c->lpVtbl->PSSetSamplers(c,start,n,v);if(!prepared_known(c))return;
     if(start>16 || n>16-start){prepared_state_invalidate(c);return;}
     ID3D11SamplerState **old=prepared_samplers(2);
-    for(unsigned i=0;i<n;++i)prepared_assign(&old[start+i],v?v[i]:NULL);
+    for(unsigned i=0;i<n;++i) {
+        prepared_assign(&old[start+i],v?v[i]:NULL);
+        prepared_extent_slot(&prepared_owner.state.sampler_count[2],old,start+i,old[start+i]!=NULL);
+    }
 }
 
 void prepared_HSSetShader(ID3D11DeviceContext *c,ID3D11HullShader *v,ID3D11ClassInstance *const *classes,UINT count)

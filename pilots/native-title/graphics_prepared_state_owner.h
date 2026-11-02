@@ -29,6 +29,10 @@ struct PreparedState {
     D3D11_VIEWPORT viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
     D3D11_RECT scissors[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
     UINT viewport_count,scissor_count;
+    /* Highest live binding plus one; holes and the complete D3D slot domain
+     * remain valid. These bounds are owned alongside the retained pointers. */
+    UINT vertex_count,constant_count[PREPARED_STAGES];
+    UINT resource_count[PREPARED_STAGES],sampler_count[PREPARED_STAGES];
 };
 /* Resource pointer is BORROWED from the accompanying retained view. Metadata
  * is immutable. simple_whole admits only one-mip/one-slice 2D views, no readonly
@@ -63,6 +67,8 @@ void prepared_state_invalidate(ID3D11DeviceContext *);
 void prepared_state_detach(ID3D11DeviceContext *);
 int prepared_state_snapshot(ID3D11DeviceContext *,struct PreparedState *);
 void prepared_state_release(struct PreparedState *);
+/* Raw unknown-boundary capture derives bounds from complete slot arrays. */
+void prepared_state_derive_extents(struct PreparedState *);
 int prepared_state_draw_subset(ID3D11DeviceContext *,struct PreparedDrawSubset *);
 void prepared_state_draw_release(struct PreparedDrawSubset *);
 int prepared_state_view_facts(ID3D11View *,unsigned kind,struct PreparedViewFacts *);
