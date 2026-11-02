@@ -385,7 +385,9 @@ static int test_native_scale_coherence(void)
             CHECK(!pilot_gfx_texture_readback(wide,0,native,bytes));
             CHECK(!pilot_gfx_texture_readback(wide_alias,0,alias_pixels,bytes));
             CHECK(!memcmp(native,alias_pixels,bytes));
-            unsigned red=0;for(unsigned i=0;i<bytes;i+=4)red+=native[i]==255 && !native[i+1] && !native[i+2];
+            /* Texture readback retains donor BGRA; framebuffer readback above
+             * converts to RGBA. This test observes the original texture. */
+            unsigned red=0;for(unsigned i=0;i<bytes;i+=4)red+=!native[i] && !native[i+1] && native[i+2]==255;
             if(red<=8) {
                 unsigned lit=0,first=0;for(unsigned i=0;i<bytes;i+=4)if(native[i] || native[i+1] || native[i+2]){if(!lit)first=i;++lit;}
                 fprintf(stderr,"COMPANION NATIVE DRAW: red=%u lit=%u first=%u rgba=%u,%u,%u,%u\n",
