@@ -16,7 +16,7 @@ def main():
     with socket.socket() as temporary:
         temporary.bind(("127.0.0.1", 0))
         port = temporary.getsockname()[1]
-    child = subprocess.Popen([sys.argv[1], str(port)], stdin=subprocess.PIPE,
+    child = subprocess.Popen([sys.argv[1], str(port), *sys.argv[2:]], stdin=subprocess.PIPE,
                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
         deadline = time.monotonic() + 5
@@ -92,6 +92,8 @@ def main():
         if child.poll() is None:
             child.kill()
             child.communicate()
+        elif child.returncode:
+            sys.stderr.write(child.stderr.read().decode(errors="replace"))
 
 
 if __name__ == "__main__":
