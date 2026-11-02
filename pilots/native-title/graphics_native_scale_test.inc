@@ -358,6 +358,7 @@ static int test_native_scale_coherence(void)
                 }
                 CHECK(!native_scale_save(scale,9,constant_hd,(size_t)version_bytes));free(constant_hd);
                 fprintf(stderr,"PACKET ADMISSION ROLLBACK: axis=2 prior_next_pixels=2 reserved_copy=1 pins_released=1 same_slot_reused=1 samples=320\n");
+                CHECK(!pilot_gfx_native_present_resize_probe(physical[0],physical[1]));
             } else {
                 free(constant_hd);CHECK(!pilot_gfx_visibility_end(34));
             }
