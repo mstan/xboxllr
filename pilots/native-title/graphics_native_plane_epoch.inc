@@ -230,18 +230,21 @@ static int pilot_native_epoch_jobs_prepare(struct PilotNativeEpochGroup *group)
     }
     return group->jobs!=NULL;
 }
+static void pilot_native_epoch_job_release(struct PilotNativeEpochJob *job)
+{
+    for(unsigned slot=0;slot<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++slot)
+        pilot_native_cb_version_release(&job->vertex_versions[slot]);
+    pilot_native_cb_version_release(&job->index_version);
+    for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
+        for(unsigned slot=0;slot<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++slot)
+            pilot_native_cb_version_release(&job->constant_versions[stage][slot]);
+    pilot_native_epoch_state_release(&job->state);
+}
 static void pilot_native_epoch_jobs_release(struct PilotNativeEpochGroup *group)
 {
-    for(unsigned i=0;i<group->job_count;++i) {
-        for(unsigned slot=0;slot<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++slot)
-            pilot_native_cb_version_release(&group->jobs[i].vertex_versions[slot]);
-        pilot_native_cb_version_release(&group->jobs[i].index_version);
-        for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
-            for(unsigned slot=0;slot<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++slot)
-                pilot_native_cb_version_release(&group->jobs[i].constant_versions[stage][slot]);
-        pilot_native_epoch_state_release(&group->jobs[i].state);
-    }
-    if(group->jobs)memset(group->jobs,0,group->job_count*sizeof(*group->jobs));
+    for(unsigned i=0;i<group->job_count;++i)pilot_native_epoch_job_release(&group->jobs[i]);
+    /* The destructors clear every owned field. Draw parameters are overwritten
+     * at admission; do not clear the large binding snapshots a second time. */
     group->job_count=0;
 }
 static int pilot_native_epoch_state_capture(struct PreparedState *s,ID3D11DeviceContext *native)
@@ -447,67 +450,69 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
     }
     if(!pilot_native_epoch_reserve_group())return 0;
     pilot_native_epoch.copy_count=0;
-    struct PreparedState s={0};ID3D11DeviceContext *native=draw->context;
+    struct PilotNativeEpochGroup *group=&pilot_native_epoch.groups[pilot_native_epoch.recording-1];
+    struct PilotNativeEpochJob *job=&group->jobs[group->job_count];
+    /* The unpublished packet owns admission state and version pins directly.
+     * Publish job_count only after every reservation succeeds. Failed admission
+     * uses the same destructor as GPU retirement, leaving this slot reusable. */
+    struct PreparedState *s=&job->state;ID3D11DeviceContext *native=draw->context;
     /* Capture scratch is not part of immutable replay state. */
     ID3D11Buffer *vertex_copies[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT]={0},*index_copy=NULL;
     ID3D11Buffer *constant_copies[PILOT_NATIVE_EPOCH_STAGES][D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT]={{0}};
     UINT copy_offsets[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT]={0};
-    void *vertex_versions[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT]={0};
-    void *constant_versions[PILOT_NATIVE_EPOCH_STAGES][D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT]={{0}};
-    void *index_version=NULL;
     unsigned before_bytes=pilot_native_epoch.bytes,serial=++pilot_native_epoch.serial;
     if(!serial)serial=++pilot_native_epoch.serial;
     int admitted=0;unsigned borrowed=0,borrowed_constants=0;
-    if(!pilot_native_epoch_state_capture(&s,native))goto finished;
+    if(!pilot_native_epoch_state_capture(s,native))goto finished;
     uint32_t prepared_extents[16]={0};unsigned prepared_streams=pilot_gfx_shader_prepared_streams(prepared_extents);
-    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)if(s.vertices[i]) {
+    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)if(s->vertices[i]) {
         if(pilot_native_prepared_jobs_enabled() &&
-           pilot_native_cb_version_borrow(s.vertices[i],&vertex_versions[i])) {
-            vertex_copies[i]=s.vertices[i];copy_offsets[i]=s.offsets[i];++borrowed;continue;
+           pilot_native_cb_version_borrow(s->vertices[i],&job->vertex_versions[i])) {
+            vertex_copies[i]=s->vertices[i];copy_offsets[i]=s->offsets[i];++borrowed;continue;
         }
-        D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s.vertices[i],&desc);
-        if(desc.Usage==D3D11_USAGE_DEFAULT && !pilot_native_buffer_registered(s.vertices[i]) &&
-           pilot_native_vertex_borrowable(i,s.vertices[i])) {
+        D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s->vertices[i],&desc);
+        if(desc.Usage==D3D11_USAGE_DEFAULT && !pilot_native_buffer_registered(s->vertices[i]) &&
+           pilot_native_vertex_borrowable(i,s->vertices[i])) {
             /* The owner submits all queued readers before a changed write.
              * The capture Get ref becomes the packet's owned original ref. */
-            vertex_copies[i]=s.vertices[i];copy_offsets[i]=s.offsets[i];++borrowed;continue;
+            vertex_copies[i]=s->vertices[i];copy_offsets[i]=s->offsets[i];++borrowed;continue;
         }
         UINT offset=0,bytes=desc.ByteWidth,destination=0,size=desc.ByteWidth;
         unsigned extent=pilot_native_epoch_extents[i];
         if(!extent && i<16 && (prepared_streams&(1u<<i)))extent=prepared_extents[i];
-        if(!indexed && count && extent && extent<=s.strides[i]) {
-            uint64_t begin=(uint64_t)s.offsets[i]+(uint64_t)first*s.strides[i];
-            uint64_t length=(uint64_t)count*s.strides[i],end=(uint64_t)(first)+(uint64_t)count;
-            uint64_t target=end*s.strides[i];
+        if(!indexed && count && extent && extent<=s->strides[i]) {
+            uint64_t begin=(uint64_t)s->offsets[i]+(uint64_t)first*s->strides[i];
+            uint64_t length=(uint64_t)count*s->strides[i],end=(uint64_t)(first)+(uint64_t)count;
+            uint64_t target=end*s->strides[i];
             if(begin<=desc.ByteWidth && length<=desc.ByteWidth-begin && target<=UINT32_MAX &&
                !((begin|length|target)&3)) {
-                offset=(UINT)begin;bytes=(UINT)length;destination=first*s.strides[i];size=(UINT)target;
+                offset=(UINT)begin;bytes=(UINT)length;destination=first*s->strides[i];size=(UINT)target;
                 copy_offsets[i]=0;
             } else goto finished;
-        } else copy_offsets[i]=s.offsets[i];
-        vertex_copies[i]=pilot_native_epoch_buffer(s.vertices[i],offset,bytes,destination,size,D3D11_BIND_VERTEX_BUFFER,serial);
+        } else copy_offsets[i]=s->offsets[i];
+        vertex_copies[i]=pilot_native_epoch_buffer(s->vertices[i],offset,bytes,destination,size,D3D11_BIND_VERTEX_BUFFER,serial);
         if(!vertex_copies[i])goto finished;
     }
     if(indexed) {
-        if(!s.index)goto finished;
+        if(!s->index)goto finished;
         if(pilot_native_prepared_jobs_enabled() &&
-           pilot_native_cb_version_borrow(s.index,&index_version))index_copy=s.index;
+           pilot_native_cb_version_borrow(s->index,&job->index_version))index_copy=s->index;
         else {
-            D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s.index,&desc);
-            if(pilot_native_prepared_jobs_enabled() && desc.Usage==D3D11_USAGE_IMMUTABLE)index_copy=s.index;
-            else index_copy=pilot_native_epoch_buffer(s.index,0,desc.ByteWidth,0,desc.ByteWidth,D3D11_BIND_INDEX_BUFFER,serial);
+            D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s->index,&desc);
+            if(pilot_native_prepared_jobs_enabled() && desc.Usage==D3D11_USAGE_IMMUTABLE)index_copy=s->index;
+            else index_copy=pilot_native_epoch_buffer(s->index,0,desc.ByteWidth,0,desc.ByteWidth,D3D11_BIND_INDEX_BUFFER,serial);
         }
         if(!index_copy)goto finished;
     }
     for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
-        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)if(s.constants[stage][i]) {
+        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)if(s->constants[stage][i]) {
             if(pilot_native_prepared_jobs_enabled() &&
-               pilot_native_cb_version_borrow(s.constants[stage][i],&constant_versions[stage][i])) {
-                constant_copies[stage][i]=s.constants[stage][i];++borrowed_constants;continue;
+               pilot_native_cb_version_borrow(s->constants[stage][i],&job->constant_versions[stage][i])) {
+                constant_copies[stage][i]=s->constants[stage][i];++borrowed_constants;continue;
             }
-            D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s.constants[stage][i],&desc);
+            D3D11_BUFFER_DESC desc;ID3D11Buffer_GetDesc(s->constants[stage][i],&desc);
             /* D3D11 constant buffers require a full-resource copy. */
-            ID3D11Buffer *copy=pilot_native_epoch_buffer(s.constants[stage][i],0,desc.ByteWidth,0,desc.ByteWidth,D3D11_BIND_CONSTANT_BUFFER,serial);
+            ID3D11Buffer *copy=pilot_native_epoch_buffer(s->constants[stage][i],0,desc.ByteWidth,0,desc.ByteWidth,D3D11_BIND_CONSTANT_BUFFER,serial);
             if(!copy)goto finished;constant_copies[stage][i]=copy;
         }
     /* Admission and ALL reservations succeeded. Only now issue source-version
@@ -525,43 +530,40 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
     pilot_native_epoch.copy_count=0;
     /* Snapshot bindings replace unproved mutable sources; known owned mesh
      * bindings keep their captured refs and original byte offsets. */
-    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)if(s.vertices[i]) {
-        if(s.vertices[i]!=vertex_copies[i]) {
-            ID3D11Buffer_Release(s.vertices[i]);s.vertices[i]=vertex_copies[i];ID3D11Buffer_AddRef(s.vertices[i]);
+    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)if(s->vertices[i]) {
+        if(s->vertices[i]!=vertex_copies[i]) {
+            ID3D11Buffer_Release(s->vertices[i]);s->vertices[i]=vertex_copies[i];ID3D11Buffer_AddRef(s->vertices[i]);
         }
-        s.offsets[i]=copy_offsets[i];
+        s->offsets[i]=copy_offsets[i];
     }
     ID3D11Buffer *replayed_index=indexed?index_copy:NULL;
-    if(s.index!=replayed_index) {
-        if(s.index)ID3D11Buffer_Release(s.index);
-        s.index=replayed_index;if(s.index)ID3D11Buffer_AddRef(s.index);
+    if(s->index!=replayed_index) {
+        if(s->index)ID3D11Buffer_Release(s->index);
+        s->index=replayed_index;if(s->index)ID3D11Buffer_AddRef(s->index);
     }
     for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
-        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)if(s.constants[stage][i]) {
-            if(s.constants[stage][i]!=constant_copies[stage][i]) {
-                ID3D11Buffer_Release(s.constants[stage][i]);s.constants[stage][i]=constant_copies[stage][i];
-                ID3D11Buffer_AddRef(s.constants[stage][i]);
+        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)if(s->constants[stage][i]) {
+            if(s->constants[stage][i]!=constant_copies[stage][i]) {
+                ID3D11Buffer_Release(s->constants[stage][i]);s->constants[stage][i]=constant_copies[stage][i];
+                ID3D11Buffer_AddRef(s->constants[stage][i]);
             }
         }
     for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i) {
-        if(s.outputs[i])ID3D11RenderTargetView_Release(s.outputs[i]);s.outputs[i]=NULL;
+        if(s->outputs[i])ID3D11RenderTargetView_Release(s->outputs[i]);s->outputs[i]=NULL;
     }
-    s.outputs[0]=draw->enhanced_color;if(s.outputs[0])ID3D11RenderTargetView_AddRef(s.outputs[0]);
-    if(s.target_depth)ID3D11DepthStencilView_Release(s.target_depth);
-    s.target_depth=draw->enhanced_depth;if(s.target_depth)ID3D11DepthStencilView_AddRef(s.target_depth);
+    s->outputs[0]=draw->enhanced_color;if(s->outputs[0])ID3D11RenderTargetView_AddRef(s->outputs[0]);
+    if(s->target_depth)ID3D11DepthStencilView_Release(s->target_depth);
+    s->target_depth=draw->enhanced_depth;if(s->target_depth)ID3D11DepthStencilView_AddRef(s->target_depth);
     for(unsigned i=0;i<PILOT_NATIVE_DRAW_SRVS;++i) {
-        if(s.resources[2][i])ID3D11ShaderResourceView_Release(s.resources[2][i]);
-        s.resources[2][i]=draw->enhanced_inputs[i];
-        if(s.resources[2][i])ID3D11ShaderResourceView_AddRef(s.resources[2][i]);
+        if(s->resources[2][i])ID3D11ShaderResourceView_Release(s->resources[2][i]);
+        s->resources[2][i]=draw->enhanced_inputs[i];
+        if(s->resources[2][i])ID3D11ShaderResourceView_AddRef(s->resources[2][i]);
     }
-    s.viewport_count=draw->viewport_count;s.scissor_count=draw->scissor_count;
-    memcpy(s.viewports,draw->enhanced_viewports,sizeof(s.viewports));
-    memcpy(s.scissors,draw->enhanced_scissors,sizeof(s.scissors));
-    struct PilotNativeEpochGroup *group=&pilot_native_epoch.groups[pilot_native_epoch.recording-1];
-    struct PilotNativeEpochJob *job=&group->jobs[group->job_count++];
-    job->state=s;job->count=count;job->first=first;job->base=base;job->indexed=(unsigned)indexed;
-    memcpy(job->vertex_versions,vertex_versions,sizeof(vertex_versions));
-    memset(vertex_versions,0,sizeof(vertex_versions));
+    s->viewport_count=draw->viewport_count;s->scissor_count=draw->scissor_count;
+    memcpy(s->viewports,draw->enhanced_viewports,sizeof(s->viewports));
+    memcpy(s->scissors,draw->enhanced_scissors,sizeof(s->scissors));
+    job->count=count;job->first=first;job->base=base;job->indexed=(unsigned)indexed;
+    ++group->job_count; /* This packet now owns the complete immutable draw. */
     if(pilot_native_prepared_jobs_enabled()) {
         static int reported=0;
         for(unsigned i=0;!reported && i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)
@@ -569,27 +571,18 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
                 reported=1;fprintf(stderr,"[NATIVE PREPARED VB] shared_uploaded_versions=1 retirement=gpu-event\n");
             }
     }
-    memcpy(job->constant_versions,constant_versions,sizeof(constant_versions));
-    memset(constant_versions,0,sizeof(constant_versions));
-    job->index_version=index_version;index_version=NULL;
-    memset(&s,0,sizeof(s)); /* Ownership moved to the GPU-retired packet. */
     if(draw->color_plane){pilot_native_plane_retain(draw->color_plane);pilot_native_epoch.outputs[pilot_native_epoch.output_count++]=draw->color_plane;}
     if(draw->enhanced_depth){pilot_native_plane_retain(draw->depth_plane);pilot_native_epoch.outputs[pilot_native_epoch.output_count++]=draw->depth_plane;}
     ++pilot_native_epoch.draws;pilot_native_epoch.borrowed_vertices+=borrowed;
     pilot_native_epoch.borrowed_constants+=borrowed_constants;admitted=1;
     if(job->index_version)++pilot_native_epoch.borrowed_indices;
 finished:
-    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)
-        pilot_native_cb_version_release(&vertex_versions[i]);
-    pilot_native_cb_version_release(&index_version);
-    for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
-        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)
-            pilot_native_cb_version_release(&constant_versions[stage][i]);
     if(!admitted) {
+        pilot_native_epoch_job_release(job);
         for(struct PilotNativeEpochBuffer *p=pilot_native_epoch.buffers;p;p=p->next)if(p->used==serial)p->used=p->group=0;
         pilot_native_epoch.bytes=before_bytes;
         pilot_native_epoch_cancel_empty();
     }
     pilot_native_epoch.copy_count=0;
-    pilot_native_epoch_state_release(&s);return admitted;
+    return admitted;
 }
