@@ -372,7 +372,7 @@ static int test_native_scale_coherence(void)
             uint32_t wide=0,wide_alias=0;
             CHECK(!pilot_gfx_native_decline_create_probe(&wide));
             CHECK(!pilot_gfx_targets(wide,0));
-            uint32_t small_view[]={0,0,8,8,0,0x3f800000u};CHECK(!pilot_gfx_viewport(small_view));
+            uint32_t small_view[]={0,0,width,height,0,0x3f800000u};CHECK(!pilot_gfx_viewport(small_view));
             pilot_gfx_set_state(D3DRS_ZENABLE,0);pilot_gfx_set_state(D3DRS_STENCILENABLE,0);
             pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);pilot_gfx_set_state(D3DRS_CULLMODE,1);
             pilot_gfx_set_state(D3DRS_FOGENABLE,0);pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_DISABLE);
@@ -386,6 +386,11 @@ static int test_native_scale_coherence(void)
             CHECK(!pilot_gfx_texture_readback(wide_alias,0,alias_pixels,bytes));
             CHECK(!memcmp(native,alias_pixels,bytes));
             unsigned red=0;for(unsigned i=0;i<bytes;i+=4)red+=native[i]==255 && !native[i+1] && !native[i+2];
+            if(red<=8) {
+                unsigned lit=0,first=0;for(unsigned i=0;i<bytes;i+=4)if(native[i] || native[i+1] || native[i+2]){if(!lit)first=i;++lit;}
+                fprintf(stderr,"COMPANION NATIVE DRAW: red=%u lit=%u first=%u rgba=%u,%u,%u,%u\n",
+                    red,lit,first,native[first],native[first+1],native[first+2],native[first+3]);
+            }
             CHECK(red>8);free(native);free(alias_pixels);
             CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
             CHECK(physical[0]==width && physical[1]==height);
