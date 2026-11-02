@@ -37,10 +37,12 @@ class VisualResolverTests(unittest.TestCase):
         self.assertEqual(result['catalog_sha256'],{})
         self.assertEqual(self.plan.read_text(),'xlle-mod-plan 2\nidentity '+'a'*64+'\nend\n')
 
-    def test_native_8x_and_oversized_combinations_preserve_prior_plan(self):
-        result=v.resolve(self.root/'title.toml',self.data,self.plan,supersample=8)
-        self.assertEqual(result['internal_canvas'],[5120,3840])
-        self.assertEqual(result['operations'],['operation supersampling 1 8'])
+    def test_native_4x_8x_and_oversized_combinations_preserve_prior_plan(self):
+        for scale in (4,8):
+            with self.subTest(scale=scale):
+                result=v.resolve(self.root/'title.toml',self.data,self.plan,supersample=scale)
+                self.assertEqual(result['internal_canvas'],[640*scale,480*scale])
+                self.assertEqual(result['operations'],[f'operation supersampling 1 {scale}'])
         retained=self.plan.read_bytes()
         metadata=self.plan.with_suffix('.plan.json').read_bytes()
         with self.assertRaisesRegex(ValueError,'texture limit'):

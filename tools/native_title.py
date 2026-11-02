@@ -687,7 +687,7 @@ def main():
     ui.add_argument('--no-launcher', action='store_const', const=False, dest='launcher')
     parser.add_argument('--widescreen', help='Trusted title camera mod: adaptive or 4:3 through 32:9')
     parser.add_argument('--internal-resolution', type=int, choices=(0, 1080, 1440, 1800, 2160), default=0)
-    parser.add_argument('--supersampling', type=int, choices=(1, 2, 3, 8), default=1,
+    parser.add_argument('--supersampling', type=int, choices=(1, 2, 3, 4, 8), default=1,
                         help='Per-axis multiplier; use Original internal resolution (0) for 8x native rendering')
     parser.add_argument('--antialiasing', choices=('original', 'fxaa'), default='original')
     parser.add_argument('--anisotropy', type=int, choices=(1, 2, 4, 8, 16), default=1)

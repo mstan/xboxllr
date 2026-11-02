@@ -53,8 +53,8 @@ id = "axis"
 label = "Per-axis multiplier"
 type = "choice"
 default = "2"
-values = ["1", "2", "3", "8"]
-labels = ["Original", "2 x 2 (4 samples)", "3 x 3 (9 samples)", "8 x 8 (64 samples)"]
+values = ["1", "2", "3", "4", "8"]
+labels = ["Original", "2 x 2 (4 samples)", "3 x 3 (9 samples)", "4 x 4 (16 samples)", "8 x 8 (64 samples)"]
 [[plugin]]
 feature = "supersampling"
 id = "xboxlle.visuals.supersampling"

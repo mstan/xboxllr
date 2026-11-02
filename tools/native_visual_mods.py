@@ -41,7 +41,7 @@ def resolve(source, data, output, *, aspect=None, height=0, supersample=1,
             antialiasing='original', anisotropy=1, frame_mode='original', frame_rate=60,
             registry_available=None):
     if (any(type(v) is not int for v in (height, supersample, anisotropy, frame_rate))
-        or height not in (0, 1080, 1440, 1800, 2160) or supersample not in (1, 2, 3, 8)
+        or height not in (0, 1080, 1440, 1800, 2160) or supersample not in (1, 2, 3, 4, 8)
         or antialiasing not in ('original', 'fxaa') or anisotropy not in (1, 2, 4, 8, 16)
         or frame_rate not in (60, 120) or frame_mode not in ('original', 'interpolated', 'actual')):
         raise ValueError('Invalid visual mod option')
