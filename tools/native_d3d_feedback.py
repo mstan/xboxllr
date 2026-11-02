@@ -185,12 +185,23 @@ def prepare_cb_versions(code):
         ID3D11RenderTargetView_GetResource(saved[i], &resource);
         int old_backbuffer = backbuffer && resource == backbuffer;
         if (resource) ID3D11Resource_Release(resource);
-        if (old_backbuffer) {
-            replace_backbuffer |= 1u << i;
-            ID3D11RenderTargetView_Release(saved[i]); saved[i] = NULL;
-        }
+        if (old_backbuffer) replace_backbuffer |= 1u << i;
     }
     if (backbuffer) ID3D11Resource_Release(backbuffer);
+    if (replace_backbuffer) {
+        /* Private presentation binds only slot0 and no depth. A mixed set
+         * could combine new-size and old-size attachments; decline without
+         * disturbing that caller's existing bindings or presentation view. */
+        unsigned mixed = replace_backbuffer != 1 || saved_dsv != NULL;
+        for (unsigned i = 1; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) mixed |= saved[i] != NULL;
+        if (mixed) {
+            for (unsigned i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
+                if (saved[i]) ID3D11RenderTargetView_Release(saved[i]);
+            if (saved_dsv) ID3D11DepthStencilView_Release(saved_dsv);
+            return -1;
+        }
+        ID3D11RenderTargetView_Release(saved[0]); saved[0] = NULL;
+    }
     /* A private presentation view is an actual owner, too. Drop retained
      * binding/fact references before DXGI releases the underlying image.
      * The next snapshot repairs from the restored immediate context once. */
