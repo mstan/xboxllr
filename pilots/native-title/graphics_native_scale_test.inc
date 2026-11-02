@@ -339,7 +339,75 @@ static int test_native_scale_coherence(void)
             const unsigned char *pixel=constant_hd+((size_t)y*physical[0]+x)*4;
             CHECK(pixel[0]==(version==0?255:0) && pixel[1]==(version==1?255:0) && pixel[2]==(version==2?255:0));
         }
-        free(constant_hd);pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(constant_vertices);
+        free(constant_hd);
+#if defined(PILOT_NATIVE_RENDER_PLANES) && PILOT_NATIVE_RENDER_PLANES
+        if(scale==2 && pilot_native_prepared_jobs_enabled() && pilot_native_epoch_enabled()) {
+            /* Exhaust only the optional admission budget, without allocating
+             * a large buffer. A real borrowed VB is followed by a real scratch
+             * reservation; the later index reservation must decline. The
+             * earlier draw and the next draw must survive in the same packet. */
+            pilot_native_epoch_poll();
+            CHECK(!pilot_gfx_clear(1,0xff000000,1,0));CHECK(!pilot_gfx_visibility_begin());
+            CHECK(!pilot_gfx_draw_vertices(6,0,4));
+            unsigned packet=pilot_native_epoch.recording;CHECK(packet);
+            struct PilotNativeEpochGroup *pending=&pilot_native_epoch.groups[packet-1];
+            unsigned count_before=pending->job_count,draws_before=pilot_native_epoch.draws;
+            unsigned bytes_before=pilot_native_epoch.bytes;CHECK(count_before && count_before<PILOT_NATIVE_EPOCH_DRAWS);
+            ID3D11DeviceContext *context=d3d8_GetD3D11Context();struct PreparedState saved={0};
+            CHECK(pilot_native_epoch_state_capture(&saved,context));
+            void *registered_vertex=NULL;
+            CHECK(pilot_native_cb_version_borrow(saved.vertices[0],&registered_vertex));
+            pilot_native_cb_version_release(&registered_vertex);
+            D3D11_BUFFER_DESC scratch_desc={0};scratch_desc.ByteWidth=16;
+            scratch_desc.Usage=D3D11_USAGE_DYNAMIC;scratch_desc.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            scratch_desc.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+            ID3D11Buffer *scratch_vertex=NULL,*scratch_index=NULL;
+            CHECK(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&scratch_desc,NULL,&scratch_vertex)));
+            scratch_desc.Usage=D3D11_USAGE_DEFAULT;scratch_desc.BindFlags=D3D11_BIND_INDEX_BUFFER;scratch_desc.CPUAccessFlags=0;
+            CHECK(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&scratch_desc,NULL,&scratch_index)));
+            UINT extra_stride=4,extra_offset=0;
+            ID3D11DeviceContext_IASetVertexBuffers(context,1,1,&scratch_vertex,&extra_stride,&extra_offset);
+            ID3D11DeviceContext_IASetIndexBuffer(context,scratch_index,DXGI_FORMAT_R16_UINT,0);
+            struct PilotNativeDrawState declined;
+            CHECK(pilot_native_draw_prepare(&declined,0)==S_OK);
+            CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before);
+            pilot_native_epoch.bytes=PILOT_NATIVE_EPOCH_BYTES-256;
+            CHECK(!pilot_native_epoch_record(&declined,3,0,0,1));
+            CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before && pilot_native_epoch.draws==draws_before);
+            CHECK(pilot_native_epoch.bytes==PILOT_NATIVE_EPOCH_BYTES-256 && !pilot_native_epoch.copy_count);
+            CHECK(pilot_native_epoch.copies[0].source==scratch_vertex && pilot_native_epoch.copies[0].bytes==16);
+            struct PreparedState empty={0};struct PilotNativeEpochJob *refused=&pending->jobs[count_before];
+            CHECK(!memcmp(&refused->state,&empty,sizeof(empty)) && !refused->index_version);
+            for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)CHECK(!refused->vertex_versions[i]);
+            for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
+                for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)CHECK(!refused->constant_versions[stage][i]);
+            for(struct PilotNativeEpochBuffer *buffer=pilot_native_epoch.buffers;buffer;buffer=buffer->next)
+                CHECK(buffer->used!=pilot_native_epoch.serial);
+            pilot_native_epoch.bytes=bytes_before;
+            pilot_native_draw_release(&declined);
+            pilot_native_epoch_state_bind(context,&saved);pilot_native_epoch_state_release(&saved);
+            ID3D11Buffer_Release(scratch_vertex);ID3D11Buffer_Release(scratch_index);
+            CHECK(!pilot_gfx_draw_vertices(6,4,4));
+            CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before+1);
+            CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+            CHECK(!pilot_gfx_visibility_end(34));CHECK(!visibility_expect(34,320,NULL));
+            CHECK(!pilot_gfx_readback(constant_actual,sizeof(constant_actual)));
+            CHECK(!native_scale_save(scale,8,constant_actual,sizeof(constant_actual)));
+            constant_hd=malloc((size_t)version_bytes);CHECK(constant_hd);
+            CHECK(!pilot_gfx_reference_target_readback(0,constant_hd,(uint32_t)version_bytes,physical));
+            for(unsigned strip=0;strip<2;++strip) {
+                unsigned x=version_x[0]+strip*12+5,y=version_y[0]+5;
+                const unsigned char *native=constant_actual+((size_t)y*80+x)*4;
+                const unsigned char *enhanced=constant_hd+((size_t)(y*scale+scale/2)*physical[0]+x*scale+scale/2)*4;
+                CHECK(!native[0] && !native[1] && native[2]==255);
+                CHECK(!enhanced[0] && !enhanced[1] && enhanced[2]==255);
+            }
+            CHECK(!native_scale_save(scale,9,constant_hd,(size_t)version_bytes));free(constant_hd);
+            pilot_native_epoch_poll();CHECK(pilot_native_cb_version_barrier(pilot_native_cb_epoch_barrier));
+            fprintf(stderr,"PACKET ADMISSION ROLLBACK: axis=2 prior_next_pixels=2 reserved_copy=1 pins_released=1 same_slot_reused=1 samples=320\n");
+        }
+#endif
+        pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(constant_vertices);
         pilot_gfx_shader_destroy(constant_shader);
         fprintf(stderr,"CONSTANT INDEX VERSIONS SCALE: axis=%u native_bytes=0 red_green_blue=3 samples=960\n",scale);
         pilot_gfx_texture_destroy(alias);pilot_gfx_texture_destroy(depth);pilot_gfx_close();
