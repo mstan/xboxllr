@@ -12,7 +12,7 @@ static void pilot_clear_close(void)
 {
     if(pilot_clear.vertex)ID3D11VertexShader_Release(pilot_clear.vertex);
     if(pilot_clear.pixel)ID3D11PixelShader_Release(pilot_clear.pixel);
-    if(pilot_clear.constants)ID3D11Buffer_Release(pilot_clear.constants);
+    if(pilot_clear.constants)PILOT_NATIVE_CB_RELEASE(pilot_clear.constants);
     if(pilot_clear.raster)ID3D11RasterizerState_Release(pilot_clear.raster);
     for(unsigned i=0;i<2;++i)if(pilot_clear.blend[i])ID3D11BlendState_Release(pilot_clear.blend[i]);
     for(unsigned i=0;i<4;++i)if(pilot_clear.depth[i])ID3D11DepthStencilState_Release(pilot_clear.depth[i]);
@@ -67,6 +67,7 @@ static void pilot_clear_rectangle(uint32_t flags,uint32_t color,float depth,uint
     ID3D11DeviceContext_PSGetConstantBuffers(ctx,7,1,&constants);ID3D11DeviceContext_OMGetBlendState(ctx,&blend,factor,&mask);
     ID3D11DeviceContext_OMGetDepthStencilState(ctx,&ds,&reference);ID3D11DeviceContext_RSGetState(ctx,&raster);ID3D11DeviceContext_RSGetViewports(ctx,&count,views);
     float data[]={((color>>16)&255)/255.0f,((color>>8)&255)/255.0f,(color&255)/255.0f,(color>>24)/255.0f,depth,0,0,0};
+    PILOT_NATIVE_CB_BEFORE_WRITE(&pilot_clear.constants);
     ID3D11DeviceContext_UpdateSubresource(ctx,(ID3D11Resource*)pilot_clear.constants,0,NULL,data,0,0);
     ID3D11DeviceContext_VSSetShader(ctx,pilot_clear.vertex,NULL,0);ID3D11DeviceContext_PSSetShader(ctx,pilot_clear.pixel,NULL,0);ID3D11DeviceContext_GSSetShader(ctx,NULL,NULL,0);
     ID3D11DeviceContext_IASetInputLayout(ctx,NULL);ID3D11DeviceContext_IASetPrimitiveTopology(ctx,D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -76,7 +77,7 @@ static void pilot_clear_rectangle(uint32_t flags,uint32_t color,float depth,uint
     ID3D11DeviceContext_RSSetViewports(ctx,1,&viewport);
     ID3D11Query *excluded=pilot_visibility_internal_begin();ID3D11DeviceContext_Draw(ctx,3,0);pilot_visibility_internal_end(excluded);
     ID3D11DeviceContext_VSSetShader(ctx,vs,NULL,0);ID3D11DeviceContext_PSSetShader(ctx,ps,NULL,0);ID3D11DeviceContext_GSSetShader(ctx,gs,NULL,0);
-    ID3D11DeviceContext_IASetInputLayout(ctx,layout);ID3D11DeviceContext_IASetPrimitiveTopology(ctx,topology);ID3D11DeviceContext_PSSetConstantBuffers(ctx,7,1,&constants);
+    ID3D11DeviceContext_IASetInputLayout(ctx,layout);ID3D11DeviceContext_IASetPrimitiveTopology(ctx,topology);ID3D11Buffer *restored_constants=PILOT_NATIVE_CB_CURRENT(constants);ID3D11DeviceContext_PSSetConstantBuffers(ctx,7,1,&restored_constants);
     ID3D11DeviceContext_OMSetBlendState(ctx,blend,factor,mask);ID3D11DeviceContext_OMSetDepthStencilState(ctx,ds,reference);
     ID3D11DeviceContext_RSSetState(ctx,raster);ID3D11DeviceContext_RSSetViewports(ctx,count,views);
     if(vs)ID3D11VertexShader_Release(vs);if(ps)ID3D11PixelShader_Release(ps);if(gs)ID3D11GeometryShader_Release(gs);

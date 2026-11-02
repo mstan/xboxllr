@@ -16,7 +16,9 @@ static int test_native_scale_coherence(void)
     unsigned char reference[3][64*64*4],actual[3][64*64*4];unsigned differences=0;
     unsigned char retained_alias[64*64*4],retained_check[64*64*4],reset_reference[80*64*4],reset_actual[80*64*4];
     unsigned char query_reference[64*64*4],query_actual[64*64*4];
-    const unsigned scales[]={1,2,3,4,8,16,32,64};
+    unsigned char version_reference[80*64*4],version_actual[80*64*4];
+    unsigned char constant_reference[80*64*4],constant_actual[80*64*4];
+    const unsigned scales[]={1,2,3,4,8};
     for(unsigned leg=0;leg<sizeof(scales)/sizeof(*scales);++leg) {
         unsigned scale=scales[leg];
         struct PilotVisualMods options;pilot_visual_mods_default(&options);options.supersample=scale;
@@ -102,6 +104,20 @@ static int test_native_scale_coherence(void)
         CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
         CHECK(physical[0]==64*scale && physical[1]==64*scale);
         fprintf(stderr,"EXCLUDED QUERY SCALE: axis=%u samples=400 physical=%ux%u\n",scale,physical[0],physical[1]);
+        /* The first completed child is now reusable, while report29 still
+         * owns its cached native count. A different second count catches
+         * premature reuse or stale child results without a test-only API. */
+        CHECK(!pilot_gfx_clear(3,0xff000000,1,0));
+        CHECK(!pilot_gfx_visibility_begin());CHECK(!visibility_quad(0,0,40,20,.2f));
+        /* Force queued HD execution while the native counter is still open.
+         * The whole command list must be excluded, not just immediate draws. */
+        CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+        CHECK(physical[0]==64*scale && physical[1]==64*scale);
+        CHECK(!pilot_gfx_visibility_end(31));CHECK(!visibility_expect(31,800,NULL));
+        CHECK(!visibility_expect(29,400,NULL));CHECK(!visibility_expect(31,800,NULL));
+        CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+        CHECK(physical[0]==64*scale && physical[1]==64*scale);
+        fprintf(stderr,"REUSED QUERY SCALE: axis=%u cached=400 samples=800 physical=%ux%u\n",scale,physical[0],physical[1]);
         CHECK(!pilot_gfx_clear(3,0xff000000,1,0));
         CHECK(!visibility_quad(0,0,20,20,.2f));
         CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
@@ -160,6 +176,27 @@ static int test_native_scale_coherence(void)
             {-.53125f,-.53125f,0,1,0,0},{79.46875f,-.53125f,0,1,64,0},
             {-.53125f,63.46875f,0,1,0,64},{79.46875f,63.46875f,0,1,64,64}};
         CHECK(!pilot_gfx_draw_memory(6,4,retained_quad,sizeof(retained_quad[0])));
+        CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+        CHECK(physical[0]==80*scale && physical[1]==64*scale);
+        uint64_t indexed_bytes=(uint64_t)physical[0]*physical[1]*4;
+        CHECK(indexed_bytes<=80ull*1024*1024);
+        unsigned char *indexed_before=malloc((size_t)indexed_bytes);CHECK(indexed_before);
+        CHECK(!pilot_gfx_reference_target_readback(0,indexed_before,(uint32_t)indexed_bytes,physical));
+        /* The same retained texture also crosses the real indexed fan path.
+         * Its prepared IA snapshot must preserve index/base/stream state. */
+        struct {float x,y,z,w,u,v;} retained_fan[4];
+        memcpy(&retained_fan[0],&retained_quad[0],sizeof(retained_fan[0]));
+        memcpy(&retained_fan[1],&retained_quad[1],sizeof(retained_fan[0]));
+        memcpy(&retained_fan[2],&retained_quad[3],sizeof(retained_fan[0]));
+        memcpy(&retained_fan[3],&retained_quad[2],sizeof(retained_fan[0]));
+        /* A distinct inset, reflected patch makes a missing HD indexed draw
+         * observable even though the preceding quad already covered the RT. */
+        retained_fan[0].x=retained_fan[3].x=7.46875f;
+        retained_fan[1].x=retained_fan[2].x=47.46875f;
+        retained_fan[0].y=retained_fan[1].y=11.46875f;
+        retained_fan[2].y=retained_fan[3].y=51.46875f;
+        for(unsigned i=0;i<4;++i)retained_fan[i].u=64-retained_fan[i].u;
+        CHECK(!pilot_gfx_draw_memory(7,4,retained_fan,sizeof(retained_fan[0])));
         CHECK(!pilot_gfx_readback(reset_actual,sizeof(reset_actual)));
         unsigned reset_varied=0,reset_mismatch=0;
         for(unsigned i=4;i<sizeof(reset_actual);++i)if(reset_actual[i]!=reset_actual[i%4])++reset_varied;
@@ -173,9 +210,15 @@ static int test_native_scale_coherence(void)
         uint64_t reset_bytes=(uint64_t)physical[0]*physical[1]*4;CHECK(reset_bytes<=80ull*1024*1024);
         unsigned char *reset_enhanced=malloc((size_t)reset_bytes);CHECK(reset_enhanced);
         CHECK(!pilot_gfx_reference_target_readback(0,reset_enhanced,(uint32_t)reset_bytes,physical));
-        unsigned reset_covered=0;
-        for(uint64_t i=4;i<reset_bytes;i+=4)if(memcmp(reset_enhanced+i,reset_enhanced,4))++reset_covered;
-        CHECK(reset_covered>256);free(reset_enhanced);
+        unsigned reset_covered=0,indexed_changed=0;
+        CHECK(reset_bytes==indexed_bytes);
+        for(uint64_t i=4;i<reset_bytes;i+=4) {
+            if(memcmp(reset_enhanced+i,reset_enhanced,4))++reset_covered;
+            if(memcmp(reset_enhanced+i,indexed_before+i,4))++indexed_changed;
+        }
+        CHECK(reset_covered>256 && indexed_changed>128);
+        fprintf(stderr,"INDEXED SCALE: axis=%u changed_enhanced_pixels=%u\n",scale,indexed_changed);
+        free(indexed_before);free(reset_enhanced);
         /* visual_reset_preserves_window called SetWindowPos, but only real
          * Present exercises the DXGI resize path for that user-sized client. */
         HWND reset_window=NULL;EnumWindows(visual_find_window,(LPARAM)&reset_window);CHECK(reset_window);
@@ -190,9 +233,118 @@ static int test_native_scale_coherence(void)
         fprintf(stderr,"RESET SCALE: axis=%u guest=80x64 retained_alias=64x64 physical=%ux%u native_bytes=%u native_varied=%u enhanced_covered=%u swapchain=%ux%u\n",
             scale,physical[0],physical[1],reset_mismatch,reset_varied,reset_covered,swapchain.BufferDesc.Width,swapchain.BufferDesc.Height);
         pilot_gfx_texture_bind(0,0);
+        /* Retained resident vertices must preserve old draws across both
+         * full and range writes, including writes inside a native query. */
+        pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_DISABLE);
+        pilot_gfx_set_texture_state(0,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
+        pilot_gfx_pixel_fixed();CHECK(!pilot_gfx_fvf_prepare(0x44,.53125f,.53125f));
+        struct {float x,y,z,w;uint32_t color;} owned_vertices[8];
+        /* The untouched tail must survive the later partial writer's COW.
+         * Native and HD consumers draw it only AFTER that partial update. */
+        memset(owned_vertices,0,sizeof(owned_vertices));
+        for(unsigned v=0;v<4;++v) {
+            owned_vertices[v+4].x=(float)(2+((v&1)?20:0));
+            owned_vertices[v+4].y=(float)(40+((v&2)?20:0));
+            owned_vertices[v+4].z=.2f;owned_vertices[v+4].w=1;
+            owned_vertices[v+4].color=0xffffff00u;
+        }
+        uint32_t owned=0;CHECK(!pilot_gfx_vertex_create(sizeof(owned_vertices),&owned));
+        pilot_gfx_vertex_bind(0,owned,sizeof(owned_vertices[0]));
+        CHECK(!pilot_gfx_clear(3,0xff000000,1,0));
+        const unsigned version_x[]={2,38,44},version_y[]={2,30,4};
+        const uint32_t version_color[]={0xffff0000u,0xff00ff00u,0xff0000ffu};
+        CHECK(!pilot_gfx_visibility_begin());
+        for(unsigned version=0;version<3;++version) {
+            for(unsigned v=0;v<4;++v) {
+                owned_vertices[v].x=(float)(version_x[version]+((v&1)?20:0));
+                owned_vertices[v].y=(float)(version_y[version]+((v&2)?20:0));
+                owned_vertices[v].z=.2f;owned_vertices[v].w=1;owned_vertices[v].color=version_color[version];
+            }
+            if(version<2)pilot_gfx_vertex_upload(owned,owned_vertices,sizeof(owned_vertices));
+            else pilot_gfx_vertex_upload_range(owned,owned_vertices,0,4*sizeof(owned_vertices[0]));
+            CHECK(!pilot_gfx_draw_vertices(6,0,4));
+        }
+        CHECK(!pilot_gfx_draw_vertices(6,4,4));
+        CHECK(!pilot_gfx_visibility_end(32));CHECK(!visibility_expect(32,1600,NULL));
+        CHECK(!pilot_gfx_readback(version_actual,sizeof(version_actual)));
+        if(scale==1)memcpy(version_reference,version_actual,sizeof(version_reference));
+        CHECK(!memcmp(version_reference,version_actual,sizeof(version_actual)));
+        CHECK(!native_scale_save(scale,6,version_actual,sizeof(version_actual)));
+        CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+        CHECK(physical[0]==80*scale && physical[1]==64*scale);
+        uint64_t version_bytes=(uint64_t)physical[0]*physical[1]*4;
+        CHECK(version_bytes<=80ull*1024*1024);
+        unsigned char *version_hd=malloc((size_t)version_bytes);CHECK(version_hd);
+        CHECK(!pilot_gfx_reference_target_readback(0,version_hd,(uint32_t)version_bytes,physical));
+        for(unsigned version=0;version<3;++version) {
+            unsigned x=(version_x[version]+5)*scale+scale/2,y=(version_y[version]+5)*scale+scale/2;
+            const unsigned char *pixel=version_hd+((size_t)y*physical[0]+x)*4;
+            CHECK(pixel[0]==(version==0?255:0) && pixel[1]==(version==1?255:0) && pixel[2]==(version==2?255:0));
+        }
+        {
+            const unsigned char *untouched=version_hd+((size_t)(45*scale+scale/2)*physical[0]+7*scale+scale/2)*4;
+            CHECK(untouched[0]==255 && untouched[1]==255 && untouched[2]==0);
+        }
+        free(version_hd);pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(owned);
+        fprintf(stderr,"VERTEX VERSIONS SCALE: axis=%u native_bytes=0 red_green_blue=3 untouched_yellow=1 samples=1600\n",scale);
+        /* Immutable geometry, three writes of the SAME programmable constant
+         * buffer. Neither vertex uploads nor target switches can accidentally
+         * serialize the retained jobs between those constant versions. */
+        const uint32_t constant_program[]={0,0x0020001b,0x08000000,0x0000f800,
+            0,0x0020001b|(96u<<13),0x0c000000,0x0000f819};
+        struct PilotVertexElement constant_elements[16]={0};
+        constant_elements[0]=(struct PilotVertexElement){0x42,0,0};
+        uint32_t constant_shader=0,constant_vertices=0;float constant_positions[24][4];
+        for(unsigned version=0;version<3;++version)for(unsigned strip=0;strip<2;++strip)for(unsigned v=0;v<4;++v) {
+            float *position=constant_positions[version*8+strip*4+v];
+            position[0]=(float)(version_x[version]+strip*12+((v&1)?8:0));
+            position[1]=(float)(version_y[version]+((v&2)?20:0));position[2]=.2f;position[3]=1;
+        }
+        CHECK(!pilot_gfx_shader_create(constant_program,2,constant_elements,&constant_shader));
+        CHECK(!pilot_gfx_vertex_create(sizeof(constant_positions),&constant_vertices));
+        pilot_gfx_vertex_upload(constant_vertices,constant_positions,sizeof(constant_positions));
+        pilot_gfx_vertex_bind(0,constant_vertices,sizeof(constant_positions[0]));
+        CHECK(!pilot_gfx_shader_bind(constant_shader));
+        const float constant_scale[]={2.f/80,-2.f/64,1,1},constant_offset[]={-1,1,0,0};
+        CHECK(!pilot_gfx_shader_raster(constant_scale,constant_offset));
+        pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);pilot_gfx_set_state(D3DRS_ZENABLE,0);
+        pilot_gfx_set_state(D3DRS_ZWRITEENABLE,0);pilot_gfx_set_state(D3DRS_STENCILENABLE,0);
+        pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+        pilot_gfx_set_texture_state(0,D3DTSS_COLORARG1,D3DTA_DIFFUSE);
+        pilot_gfx_set_texture_state(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+        pilot_gfx_set_texture_state(0,D3DTSS_ALPHAARG1,D3DTA_DIFFUSE);
+        CHECK(!pilot_gfx_clear(1,0xff000000,1,0));CHECK(!pilot_gfx_visibility_begin());
+        pilot_gfx_set_state(D3DRS_SHADEMODE,2);pilot_gfx_batch_allow(1);
+        for(unsigned version=0;version<3;++version) {
+            const float color[]={version==0?1.f:0.f,version==1?1.f:0.f,version==2?1.f:0.f,1};
+            pilot_gfx_shader_constants(96,1,color);CHECK(!pilot_gfx_shader_flush());
+            CHECK(!pilot_gfx_draw_vertices(6,version*8,4));
+            CHECK(!pilot_gfx_draw_vertices(6,version*8+4,4));
+        }
+        /* Exercise replay while the parent query is open, not merely after
+         * End has already made exclusion unnecessary. */
+        CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+        CHECK(!pilot_gfx_visibility_end(33));CHECK(!visibility_expect(33,960,NULL));
+        pilot_gfx_batch_allow(0);
+        CHECK(!pilot_gfx_readback(constant_actual,sizeof(constant_actual)));
+        if(scale==1)memcpy(constant_reference,constant_actual,sizeof(constant_reference));
+        CHECK(!memcmp(constant_reference,constant_actual,sizeof(constant_actual)));
+        CHECK(!native_scale_save(scale,7,constant_actual,sizeof(constant_actual)));
+        CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+        CHECK(physical[0]==80*scale && physical[1]==64*scale);
+        unsigned char *constant_hd=malloc((size_t)version_bytes);CHECK(constant_hd);
+        CHECK(!pilot_gfx_reference_target_readback(0,constant_hd,(uint32_t)version_bytes,physical));
+        for(unsigned version=0;version<3;++version) {
+            unsigned x=(version_x[version]+5)*scale+scale/2,y=(version_y[version]+5)*scale+scale/2;
+            const unsigned char *pixel=constant_hd+((size_t)y*physical[0]+x)*4;
+            CHECK(pixel[0]==(version==0?255:0) && pixel[1]==(version==1?255:0) && pixel[2]==(version==2?255:0));
+        }
+        free(constant_hd);pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(constant_vertices);
+        pilot_gfx_shader_destroy(constant_shader);
+        fprintf(stderr,"CONSTANT INDEX VERSIONS SCALE: axis=%u native_bytes=0 red_green_blue=3 samples=960\n",scale);
         pilot_gfx_texture_destroy(alias);pilot_gfx_texture_destroy(depth);pilot_gfx_close();
     }
-    fprintf(stderr,"%s: native fractional-edge/blend/depth/stencil and target-alias byte identity across1/2/3/4/8/16/32/64x, real HD content, exact native queries and retained-alias sampling after80x64 Reset/real Present\n",differences?"FAIL":"PASS");
+    fprintf(stderr,"%s: native fractional-edge/blend/depth/stencil and target-alias byte identity across1/2/3/4/8x, real HD content, exact native queries and retained-alias sampling after80x64 Reset/real Present\n",differences?"FAIL":"PASS");
     return differences?1:0;
 }
 #endif

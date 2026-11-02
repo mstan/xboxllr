@@ -1,5 +1,6 @@
 #include "graphics_donor.h"
 #include "graphics_backend.h"
+#include "graphics_cb_version_bridge.h"
 #include "pilot_d3d_checks.h"
 #include <d3dcompiler.h>
 #include <stdio.h>
@@ -78,10 +79,11 @@ int32_t pilot_gfx_shader_flush(void)
     if(native_constants_dirty) {
         pilot_gfx_batch_flush();
         ID3D11DeviceContext *context=d3d8_GetD3D11Context();D3D11_MAPPED_SUBRESOURCE mapped;
-        HRESULT result=ID3D11DeviceContext_Map(context,(ID3D11Resource*)native_constants_buffer,0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
+        HRESULT result=PILOT_NATIVE_CB_MAP(context,&native_constants_buffer,D3D11_MAP_WRITE_DISCARD,&mapped);
         if(FAILED(result))return result;
         memcpy(mapped.pData,native_constants,sizeof(native_constants));
         ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)native_constants_buffer,0);
+        PILOT_NATIVE_CB_UNMAPPED(&native_constants_buffer);
         native_constants_dirty=0;++native_constants_uploads;
     }
     return native_shader(native_shader_bound)->current?native_current_flush():S_OK;
@@ -101,6 +103,11 @@ unsigned pilot_gfx_shader_streams(uint32_t extents[16])
         if(end>extents[stream])extents[stream]=end;mask|=1u<<stream;
     }
     return mask;
+}
+unsigned pilot_gfx_shader_prepared_streams(uint32_t extents[16])
+{
+    if(!native_shader_active || !native_shader_bound){memset(extents,0,16*4);return 0;}
+    return pilot_gfx_shader_streams(extents);
 }
 void pilot_gfx_shader_capture_constants(void *data) {memcpy(data,native_constants,sizeof(native_constants));}
 static int32_t native_shader_compile(struct NativeShader *candidate,char *source,
@@ -225,10 +232,10 @@ void pilot_gfx_shaders_close(void)
     if(native_constants_buffer) {
         ID3D11Buffer *empty=NULL;
         ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),1,1,&empty);
-        ID3D11Buffer_Release(native_constants_buffer);native_constants_buffer=NULL;
+        PILOT_NATIVE_CB_RELEASE(native_constants_buffer);native_constants_buffer=NULL;
     }
     memset(native_constants,0,sizeof(native_constants));native_constants_dirty=native_constants_uploads=0;
-    if(native_raster_buffer){ID3D11Buffer *empty=NULL;ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),0,1,&empty);ID3D11Buffer_Release(native_raster_buffer);native_raster_buffer=NULL;}
+    if(native_raster_buffer){ID3D11Buffer *empty=NULL;ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),0,1,&empty);PILOT_NATIVE_CB_RELEASE(native_raster_buffer);native_raster_buffer=NULL;}
     memset(native_raster_values,0,sizeof(native_raster_values));
     pilot_gfx_shader_fixed_binding();
 }
@@ -251,6 +258,7 @@ int32_t pilot_gfx_shader_raster(const float scale[4],const float offset[4])
         if(FAILED(hr))return hr;memcpy(native_raster_values,values,sizeof(values));
     } else if(memcmp(native_raster_values,values,sizeof(values))) {
         pilot_gfx_batch_flush();
+        PILOT_NATIVE_CB_BEFORE_WRITE(&native_raster_buffer);
         ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource*)native_raster_buffer,0,NULL,values,0,0);
         memcpy(native_raster_values,values,sizeof(values));
     }

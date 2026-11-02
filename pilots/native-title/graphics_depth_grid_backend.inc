@@ -13,6 +13,7 @@ static HRESULT pilot_depth_match_color(uint32_t handle,ID3D11Texture2D *color,un
     uint64_t h=((uint64_t)c.Height*texture->height+height/2)/height;
     if(!w || !h || w>16384 || h>16384)return E_INVALIDARG;
     if(d.Width==w && d.Height==h)return S_OK;
+    pilot_native_epoch_flush();
 #ifdef PILOT_D3D_PHOBOS
     unsigned logical_width=texture->width,logical_height=texture->height;
     unsigned pitch=(logical_width*4+63)&~63u,bytes=pitch*logical_height;

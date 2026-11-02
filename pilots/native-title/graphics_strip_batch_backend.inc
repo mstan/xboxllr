@@ -56,8 +56,7 @@ static void pilot_strip_batch_drain(void)
         }
         if(pilot_strip_batch.buffer) {
             D3D11_MAPPED_SUBRESOURCE mapped;
-            HRESULT hr=ID3D11DeviceContext_Map(context,(ID3D11Resource*)pilot_strip_batch.buffer,
-                0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
+            HRESULT hr=PILOT_NATIVE_CB_MAP(context,&pilot_strip_batch.buffer,D3D11_MAP_WRITE_DISCARD,&mapped);
             pilot_d3d_require(hr,__FILE__,__LINE__);
             uint32_t *indices=mapped.pData;unsigned words=0;
             for(unsigned draw=0;draw<count;++draw) {
@@ -66,11 +65,12 @@ static void pilot_strip_batch_drain(void)
                     indices[words++]=pilot_strip_batch.ranges[draw].first+i;
             }
             ID3D11DeviceContext_Unmap(context,(ID3D11Resource*)pilot_strip_batch.buffer,0);
+            PILOT_NATIVE_CB_UNMAPPED(&pilot_strip_batch.buffer);
             ID3D11Buffer *previous=NULL;DXGI_FORMAT format;UINT offset;
             ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
             ID3D11DeviceContext_IASetIndexBuffer(context,pilot_strip_batch.buffer,DXGI_FORMAT_R32_UINT,0);
             pilot_native_draw_indexed(words,0,0);
-            ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);
+            ID3D11DeviceContext_IASetIndexBuffer(context,PILOT_NATIVE_CB_CURRENT(previous),format,offset);
             if(previous)ID3D11Buffer_Release(previous);
             merged=1;
         }
@@ -130,7 +130,7 @@ static void pilot_strip_batch_queue(unsigned first,unsigned count)
 static void pilot_strip_batch_close(void)
 {
     pilot_gfx_batch_flush();
-    if(pilot_strip_batch.buffer)ID3D11Buffer_Release(pilot_strip_batch.buffer);
+    if(pilot_strip_batch.buffer)PILOT_NATIVE_CB_RELEASE(pilot_strip_batch.buffer);
     memset(&pilot_strip_batch,0,sizeof(pilot_strip_batch));
 }
 static void pilot_strip_batch_profile(void)

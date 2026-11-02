@@ -26,6 +26,7 @@ static void pilot_native_attach(struct PilotImageUse *use,ID3D11Texture2D *image
 }
 static void pilot_native_written(ID3D11Texture2D *image,int color)
 {
+    pilot_native_epoch_flush();
     if(!pilot_native_enabled())return;
     struct PilotNativePlane *plane=pilot_native_plane_find((ID3D11Resource*)image);
     if(!plane)return;
@@ -35,6 +36,7 @@ static void pilot_native_written(ID3D11Texture2D *image,int color)
 static void pilot_native_clear(ID3D11RenderTargetView *rtv,ID3D11DepthStencilView *dsv,
     unsigned flags,unsigned color,float depth,unsigned stencil,const D3D11_RECT *rect)
 {
+    pilot_native_epoch_flush();
     if(!pilot_native_enabled())return;
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
     /* Each attachment can have a larger extent. Clear its exact native

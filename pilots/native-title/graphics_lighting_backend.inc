@@ -103,6 +103,7 @@ int32_t pilot_gfx_lighting_publish(const struct PilotLightingSnapshot *snapshot)
         HRESULT result=ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,&initial,&native_lighting_buffer);
         if(FAILED(result))return result;
     } else if(!native_lighting_valid || memcmp(&candidate,&native_lighting_values,sizeof(candidate)))
+        PILOT_NATIVE_CB_BEFORE_WRITE(&native_lighting_buffer);
         ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource*)native_lighting_buffer,0,NULL,&candidate,0,0);
     native_lighting_values=candidate;native_lighting_valid=1;
     ID3D11DeviceContext_VSSetConstantBuffers(context,4,1,&native_lighting_buffer);
@@ -117,7 +118,7 @@ static void native_lighting_close(void)
     if(native_lighting_buffer) {
         ID3D11Buffer *empty=NULL;
         ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),4,1,&empty);
-        ID3D11Buffer_Release(native_lighting_buffer);native_lighting_buffer=NULL;
+        PILOT_NATIVE_CB_RELEASE(native_lighting_buffer);native_lighting_buffer=NULL;
     }
     memset(&native_lighting_values,0,sizeof(native_lighting_values));native_lighting_valid=0;
 #endif

@@ -50,6 +50,7 @@ static ID3D11ShaderResourceView *pilot_depth_texture_argb(uint32_t handle,ID3D11
 {
     struct PilotNativeTexture *texture=&pilot_textures[handle-1];
     if(texture->argb_initialized && texture->argb_serial==texture->content_serial)return texture->argb_srv;
+    pilot_native_epoch_flush();
     ID3D11Device *device=d3d8_GetD3D11Device();
     ID3D11Texture2D *storage=pilot_donor_texture((D3D8Texture*)texture->object);
     D3D11_TEXTURE2D_DESC desc;ID3D11Texture2D_GetDesc(storage,&desc);

@@ -68,7 +68,7 @@ static void pilot_default_depth_close(void)
     if(pilot_default_grid.vertex)ID3D11VertexShader_Release(pilot_default_grid.vertex);
     if(pilot_default_grid.depth)ID3D11PixelShader_Release(pilot_default_grid.depth);
     if(pilot_default_grid.stencil)ID3D11PixelShader_Release(pilot_default_grid.stencil);
-    if(pilot_default_grid.constants)ID3D11Buffer_Release(pilot_default_grid.constants);
+    if(pilot_default_grid.constants)PILOT_NATIVE_CB_RELEASE(pilot_default_grid.constants);
     if(pilot_default_grid.raster)ID3D11RasterizerState_Release(pilot_default_grid.raster);
     for(unsigned i=0;i<9;++i)if(pilot_default_grid.states[i])ID3D11DepthStencilState_Release(pilot_default_grid.states[i]);
     memset(&pilot_default_grid,0,sizeof(pilot_default_grid));
@@ -87,6 +87,8 @@ static HRESULT pilot_default_depth_match_color(ID3D11Texture2D *color,unsigned w
     uint64_t h=((uint64_t)c.Height*pilot_gfx_height()+height/2)/height;
     if(!w || !h || w>16384 || h>16384)return E_INVALIDARG;
     unsigned active=w!=d.Width || h!=d.Height;
+    if(active!=pilot_default_grid.active || (active &&
+       (w!=pilot_default_grid.width || h!=pilot_default_grid.height)))pilot_native_epoch_flush();
     if(active && pilot_default_grid.image && (w!=pilot_default_grid.width || h!=pilot_default_grid.height)) {
         /* Retain contents through the base raster before replacing the cache. */
         ID3D11DepthStencilView *unused;
@@ -128,6 +130,7 @@ static HRESULT pilot_default_depth_match_color(ID3D11Texture2D *color,unsigned w
         uint32_t constants[8]={active?d.Width:pilot_default_grid.width,active?d.Height:pilot_default_grid.height,(unsigned)w,(unsigned)h,0,0,0,0};
         for(unsigned i=0;i<9;++i) {
             constants[4]=i?1u<<(i-1):0;
+            PILOT_NATIVE_CB_BEFORE_WRITE(&pilot_default_grid.constants);
             ID3D11DeviceContext_UpdateSubresource(ctx,(ID3D11Resource*)pilot_default_grid.constants,0,NULL,constants,0,0);
             ID3D11DeviceContext_PSSetShader(ctx,i?pilot_default_grid.stencil:pilot_default_grid.depth,NULL,0);
             ID3D11DeviceContext_OMSetDepthStencilState(ctx,pilot_default_grid.states[i],255);ID3D11DeviceContext_Draw(ctx,3,0);

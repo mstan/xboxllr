@@ -12,7 +12,7 @@ static void native_pretransformed_fog_close(void)
     if(native_pretransformed_fog_buffer) {
         ID3D11Buffer *none=NULL;
         ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),5,1,&none);
-        ID3D11Buffer_Release(native_pretransformed_fog_buffer);native_pretransformed_fog_buffer=NULL;
+        PILOT_NATIVE_CB_RELEASE(native_pretransformed_fog_buffer);native_pretransformed_fog_buffer=NULL;
     }
     memset(native_pretransformed_fog_values,0,sizeof(native_pretransformed_fog_values));
 }
@@ -77,6 +77,7 @@ int32_t pilot_gfx_fvf_fog(uint32_t fvf,const float projection[16],int immediate)
         result=ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&desc,&data,&native_pretransformed_fog_buffer);
         if(FAILED(result))return result;
     } else if(memcmp(values,native_pretransformed_fog_values,sizeof(values)))
+        PILOT_NATIVE_CB_BEFORE_WRITE(&native_pretransformed_fog_buffer);
         ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource*)native_pretransformed_fog_buffer,0,NULL,values,0,0);
     memcpy(native_pretransformed_fog_values,values,sizeof(values));
     if(!mode && !elements[4].type){result=native_current_flush();if(FAILED(result))return result;}

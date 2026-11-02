@@ -17,6 +17,7 @@ static int pilot_native_copy_shapes(ID3D11Texture2D *a,ID3D11Texture2D *b)
 }
 static int pilot_native_copy_completed(ID3D11Resource *destination,ID3D11Resource *source)
 {
+    pilot_native_epoch_flush();
     if(!destination || !source)return 0;
     struct PilotNativePlane *to=pilot_native_plane_find(destination);
     struct PilotNativePlane *from=pilot_native_plane_find(source);
@@ -59,9 +60,12 @@ struct PilotNativeSnapshotOwner {
     struct PilotNativePlane *plane;
     struct PilotNativeMap *map;
 };
+void pilot_native_snapshot_barrier(void)
+{pilot_native_epoch_flush();}
 void pilot_native_snapshot_release(void **token)
 {
     if(!token || !*token)return;
+    pilot_native_epoch_flush();
     struct PilotNativeSnapshotOwner *owner=*token;*token=NULL;
     pilot_native_map_release(owner->map);
     pilot_native_plane_release(owner->plane);
@@ -69,6 +73,7 @@ void pilot_native_snapshot_release(void **token)
 }
 void pilot_native_snapshot_copy(RhiImage *destination,RhiImage *source,void **token)
 {
+    pilot_native_epoch_flush();
     if(!token)return;
     if(!pilot_native_enabled()){pilot_native_snapshot_release(token);return;}
     ID3D11Resource *destination_resource=NULL,*source_resource=NULL;
@@ -103,6 +108,10 @@ void pilot_native_snapshot_copy(RhiImage *destination,RhiImage *source,void **to
     (void)pilot_native_copy_completed(destination_resource,source_resource);
     goto finished;
 failed:
+    /* If a paired output cannot publish its feedback snapshot, a missing
+     * destination map must not masquerade as an ordinary native-only texture
+     * on the next HD draw. Keep that draw and presentation on native output. */
+    if(from)from->valid_aspects=from->coherent=0;
     if(destination_resource) {
         struct PilotNativePlane *stale=pilot_native_plane_find(destination_resource);
         if(stale)stale->valid_aspects=stale->coherent=0;

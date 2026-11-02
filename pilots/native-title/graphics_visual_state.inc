@@ -1,6 +1,7 @@
 /* Presentation passes must leave the immediate context as the guest left it.
  * RhiOutputState deliberately saves outputs only. Save exactly the additional
  * slots touched by resolve/AA/interpolation; no GPU readback or state replay. */
+#include "graphics_cb_version_bridge.h"
 struct PilotVisualState {
     RhiOutputState output;
     ID3D11VertexShader *vertex;ID3D11PixelShader *pixel;ID3D11GeometryShader *geometry;
@@ -25,7 +26,7 @@ static void pilot_visual_state_restore(struct PilotVisualState *s)
     ID3D11DeviceContext_PSSetShaderResources(c,9,2,none);rhi_output_restore(&s->output);
     ID3D11DeviceContext_VSSetShader(c,s->vertex,NULL,0);ID3D11DeviceContext_PSSetShader(c,s->pixel,NULL,0);
     ID3D11DeviceContext_GSSetShader(c,s->geometry,NULL,0);ID3D11DeviceContext_IASetInputLayout(c,s->layout);
-    ID3D11DeviceContext_IASetPrimitiveTopology(c,s->topology);ID3D11DeviceContext_PSSetConstantBuffers(c,7,1,&s->constants);
+    ID3D11DeviceContext_IASetPrimitiveTopology(c,s->topology);ID3D11Buffer *restored_constants=PILOT_NATIVE_CB_CURRENT(s->constants);ID3D11DeviceContext_PSSetConstantBuffers(c,7,1,&restored_constants);
     ID3D11DeviceContext_PSSetShaderResources(c,9,2,s->images);ID3D11DeviceContext_PSSetSamplers(c,9,1,&s->sampler);
     ID3D11DeviceContext_OMSetBlendState(c,s->blend,s->factor,s->mask);ID3D11DeviceContext_OMSetDepthStencilState(c,s->depth,s->stencil);
     ID3D11DeviceContext_RSSetState(c,s->raster);

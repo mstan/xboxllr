@@ -10,6 +10,7 @@ def prepare_feedback(code):
          'static void up_ring_shutdown(void);\nstatic void pilot_feedback_shutdown(void);\n'
          'extern void pilot_native_snapshot_copy(RhiImage *,RhiImage *,void **);\n'
          'extern void pilot_native_snapshot_release(void **);\n'
+         'extern void pilot_native_snapshot_barrier(void);\n'
          'extern void pilot_native_draw_prepared(unsigned,unsigned);\n'
          'static RhiImage *pilot_output_color, *pilot_output_depth;\n'
          'static int pilot_feedback_alias(RhiImage *a,RhiImage *b) {\n'
@@ -32,6 +33,7 @@ def prepare_feedback(code):
     once('!g_cur_textures[stage] || d3d8_base_resource(g_cur_textures[stage]) != target',
          '!g_cur_textures[stage] || !pilot_feedback_alias(d3d8_base_resource(g_cur_textures[stage]),target)')
     code,n=re.subn(r'            if \(!feedback_scratch\(target\) \|\| rhi_image_copy\(g_feedback.img, target\) != 0\) \{.*?\n            \}',
+        '            pilot_native_snapshot_barrier();\n'
         '            if (!feedback_scratch(target) || rhi_image_copy(g_feedback.img, target) != 0)\n'
         '                pilot_d3d_backend_stop("native feedback scratch allocation/copy failed");\n'
         '            pilot_native_snapshot_copy(g_feedback.img,target,&g_feedback.native_plane_owner);',code,flags=re.S)
@@ -99,6 +101,7 @@ void pilot_donor_feedback_stats(uint32_t *copies,uint32_t *allocations) {
 /* Borrowed single-level snapshot. The adapter has proved current target shape,
  * state and single coverage before requesting it; never retain its source. */
 RhiView *pilot_donor_blend_destination(void) {
+    pilot_native_snapshot_barrier();
     RhiImage *target=pilot_output_color;
     if (!target || !pilot_feedback_alias(target,g_device_state.rhi_scene_image) ||
         !feedback_scratch_for(&pilot_blend_destination,target,&pilot_blend_allocations) ||
@@ -128,4 +131,32 @@ static void pilot_feedback_shutdown(void) {
     pilot_output_color=pilot_output_depth=NULL;
 }
 '''
+    return code
+
+
+def prepare_cb_versions(code):
+    """Bridge only the existing opaque RHI buffer owner; no renderer rewrite."""
+    def once(old,new):
+        nonlocal code
+        if code.count(old)!=1:raise ValueError('unreviewed CB version boundary: '+old[:70])
+        code=code.replace(old,new)
+    once('/* ---- buffers ', '#include "graphics_cb_version_owner.inc"\n\n/* ---- buffers ')
+    once('    if (v->v) ID3D11View_Release(v->v);',
+         '    if (v->v) { prepared_state_forget_view(v->v); ID3D11View_Release(v->v); }')
+    once('    b->desc = *d;\n    return b;',
+         '    b->desc = *d;\n    pilot_native_cb_track(&b->b);\n    return b;')
+    once('static void d_buffer_destroy(RhiBuffer *b)\n{',
+         'static void d_buffer_destroy(RhiBuffer *b)\n{\n    pilot_native_cb_forget(&b->b);')
+    once('ID3D11DeviceContext_Map(g_ctx, (ID3D11Resource *)b->b, 0, (D3D11_MAP)mode, 0, &m)',
+         'pilot_native_cb_map(&b->b,g_ctx,(D3D11_MAP)mode,&m)')
+    once('    ID3D11DeviceContext_Unmap(g_ctx, (ID3D11Resource *)b->b, 0);',
+         '    ID3D11DeviceContext_Unmap(g_ctx, (ID3D11Resource *)b->b, 0);\n    pilot_native_cb_unmapped(&b->b);')
+    once('    ID3D11DeviceContext_UpdateSubresource(g_ctx, (ID3D11Resource *)b->b, 0, NULL, data, 0, 0);',
+         '    pilot_native_cb_before_write(&b->b);\n    ID3D11DeviceContext_UpdateSubresource(g_ctx, (ID3D11Resource *)b->b, 0, NULL, data, 0, 0);')
+    # Uniform binds and native-buffer getters already resolve b->b on each call.
+    # Reject preparer drift rather than introduce a second physical-pointer cache.
+    if code.count('        nb[i] = b[i] ? b[i]->b : NULL;')!=1:
+        raise ValueError('unreviewed CB uniform resolver')
+    if code.count('void *rhi_d3d11_native_buffer(const RhiBuffer *b) { return b ? b->b : NULL; }')!=1:
+        raise ValueError('unreviewed CB native resolver')
     return code

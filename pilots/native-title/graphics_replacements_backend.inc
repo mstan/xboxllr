@@ -43,7 +43,7 @@ static void pilot_replacement_close(void)
     for(unsigned i=0;i<pilot_replacement_count;++i){pilot_replacement_release(i);free(pilot_replacements[i].source);}
     for(unsigned i=0;i<pilot_texture_capacity;++i)pilot_replacement_atlas_release(&pilot_textures[i]);
     if(pilot_replacement_upscale)ID3D11ComputeShader_Release(pilot_replacement_upscale);
-    if(pilot_replacement_constants)ID3D11Buffer_Release(pilot_replacement_constants);
+    if(pilot_replacement_constants)PILOT_NATIVE_CB_RELEASE(pilot_replacement_constants);
     pilot_replacement_upscale=NULL;pilot_replacement_constants=NULL;
     free(pilot_replacements);pilot_replacements=NULL;
     pilot_replacement_count=pilot_replacement_initialized=0;

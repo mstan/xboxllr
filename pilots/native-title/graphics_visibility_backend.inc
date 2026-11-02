@@ -16,9 +16,18 @@ static int pilot_visibility_active(void)
 {return pilot_visibility_current && !pilot_visibility_current->ended;}
 static struct PilotVisibilityReport *pilot_visibility_reports;
 static unsigned pilot_visibility_counter_count,pilot_visibility_report_count,pilot_visibility_optional_count;
+static struct PilotVisibilityExclusion *pilot_visibility_optional_idle;
+static unsigned pilot_visibility_optional_allocated;
 static void pilot_visibility_exclusion_release(struct PilotVisibilityCounter *c,struct PilotVisibilityExclusion *e)
 {
-    if(e->optional){--c->optional_exclusions;--pilot_visibility_optional_count;}
+    if(e->optional){
+        --c->optional_exclusions;--pilot_visibility_optional_count;
+        /* ready is published only after every child GetData returned S_OK.
+         * Reusing an ended, completed query preserves exact GPU subtraction
+         * while avoiding driver query creation for every enhanced draw. */
+        if(c->ready){e->next=pilot_visibility_optional_idle;pilot_visibility_optional_idle=e;return;}
+        --pilot_visibility_optional_allocated;
+    }
     ID3D11Query_Release(e->query);free(e);
 }
 static void pilot_visibility_unref(struct PilotVisibilityCounter *c)
@@ -61,9 +70,16 @@ static int pilot_visibility_internal_try_begin(ID3D11Query **out)
     if(pilot_visibility_excluded_scope || pilot_visibility_current->optional_exclusions>=4096 ||
        pilot_visibility_optional_count>=4096)return 0;
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();if(!context)return 0;
-    struct PilotVisibilityExclusion *e=calloc(1,sizeof(*e));if(!e)return 0;
-    HRESULT result=pilot_visibility_query(D3D11_QUERY_OCCLUSION,&e->query);
-    if(result!=S_OK || !e->query) {if(e->query)ID3D11Query_Release(e->query);free(e);return 0;}
+    struct PilotVisibilityExclusion *e=pilot_visibility_optional_idle;
+    if(e)pilot_visibility_optional_idle=e->next;
+    else {
+        /* Count retained completed queries as well as in-flight queries. */
+        if(pilot_visibility_optional_allocated>=4096)return 0;
+        e=calloc(1,sizeof(*e));if(!e)return 0;
+        HRESULT result=pilot_visibility_query(D3D11_QUERY_OCCLUSION,&e->query);
+        if(result!=S_OK || !e->query) {if(e->query)ID3D11Query_Release(e->query);free(e);return 0;}
+        ++pilot_visibility_optional_allocated;
+    }
     e->optional=1;
     e->next=pilot_visibility_current->excluded;pilot_visibility_current->excluded=e;
     ++pilot_visibility_current->optional_exclusions;++pilot_visibility_optional_count;
@@ -87,8 +103,13 @@ int32_t pilot_gfx_visibility_begin(void)
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();
     /* Begin is CLEAR+ENABLE, not a nested query stack. Earlier draws remain
      * submitted; only their discarded measurement loses its ownership. */
-    if(pilot_visibility_current && !pilot_visibility_current->ended)
+    if(pilot_visibility_current && !pilot_visibility_current->ended) {
         ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous*)pilot_visibility_current->query);
+        pilot_visibility_current->ended=1;
+    }
+    /* Keep enhanced work outside both the discarded old counter and the
+     * new native query. This is an execution boundary, not a state flush. */
+    pilot_native_epoch_flush();
     pilot_visibility_unref(pilot_visibility_current);pilot_visibility_current=c;
     ID3D11DeviceContext_Begin(ctx,(ID3D11Asynchronous*)c->query);return S_OK;
 }
@@ -110,6 +131,7 @@ int32_t pilot_gfx_visibility_end(uint32_t index)
     ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous*)r->begin_stamp);
     ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous*)r->end_stamp);
     ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous*)r->clock);
+    pilot_native_epoch_flush();
     struct PilotVisibilityReport **at=&pilot_visibility_reports;
     while(*at && (*at)->index!=index)at=&(*at)->next;
     if(*at){struct PilotVisibilityReport *old=*at;r->next=old->next;*at=r;pilot_visibility_drop(old);}
@@ -165,6 +187,12 @@ static void pilot_visibility_close(void)
         ID3D11DeviceContext_End(d3d8_GetD3D11Context(),(ID3D11Asynchronous*)pilot_visibility_current->query);
     while(pilot_visibility_reports){struct PilotVisibilityReport *r=pilot_visibility_reports;pilot_visibility_reports=r->next;pilot_visibility_drop(r);}
     pilot_visibility_unref(pilot_visibility_current);pilot_visibility_current=NULL;
-    if(pilot_visibility_counter_count || pilot_visibility_report_count || pilot_visibility_optional_count)
+    while(pilot_visibility_optional_idle){
+        struct PilotVisibilityExclusion *e=pilot_visibility_optional_idle;
+        pilot_visibility_optional_idle=e->next;
+        ID3D11Query_Release(e->query);free(e);--pilot_visibility_optional_allocated;
+    }
+    if(pilot_visibility_counter_count || pilot_visibility_report_count || pilot_visibility_optional_count ||
+       pilot_visibility_optional_allocated)
         pilot_d3d_backend_stop("visibility ownership leak");
 }

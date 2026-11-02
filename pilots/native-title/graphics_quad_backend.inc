@@ -29,5 +29,5 @@ static void pilot_quad_draw(unsigned first,unsigned count)
     ID3D11DeviceContext_IAGetIndexBuffer(context,&previous,&format,&offset);
     ID3D11DeviceContext_IASetIndexBuffer(context,pilot_quad_indices,DXGI_FORMAT_R32_UINT,0);
     pilot_native_draw_indexed(quads*6,0,(INT)first);
-    ID3D11DeviceContext_IASetIndexBuffer(context,previous,format,offset);if(previous)ID3D11Buffer_Release(previous);
+    ID3D11DeviceContext_IASetIndexBuffer(context,PILOT_NATIVE_CB_CURRENT(previous),format,offset);if(previous)ID3D11Buffer_Release(previous);
 }

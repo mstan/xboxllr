@@ -54,7 +54,7 @@ int32_t pilot_gfx_points(const uint32_t states[8],unsigned screen)
 static void pilot_point_close(void)
 {
     if(pilot_point_shader)ID3D11GeometryShader_Release(pilot_point_shader);
-    if(pilot_point_buffer)ID3D11Buffer_Release(pilot_point_buffer);
+    if(pilot_point_buffer)PILOT_NATIVE_CB_RELEASE(pilot_point_buffer);
     if(pilot_point_raster)ID3D11RasterizerState_Release(pilot_point_raster);
     pilot_point_shader=NULL;pilot_point_buffer=NULL;pilot_point_raster=NULL;
     memset(&pilot_point,0,sizeof(pilot_point));memset(pilot_point_constants,0,sizeof(pilot_point_constants));
@@ -92,6 +92,7 @@ static HRESULT pilot_point_prepare(struct PilotPointDraw *draw)
         memset(pilot_point_constants,0,sizeof(pilot_point_constants));
     }
     if(memcmp(constants,pilot_point_constants,sizeof(constants))){
+        PILOT_NATIVE_CB_BEFORE_WRITE(&pilot_point_buffer);
         ID3D11DeviceContext_UpdateSubresource(context,(ID3D11Resource*)pilot_point_buffer,0,NULL,constants,0,0);
         memcpy(pilot_point_constants,constants,sizeof(constants));
     }

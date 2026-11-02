@@ -196,6 +196,8 @@ uint32_t pilot_gfx_fvf_float_beta_layout(uint32_t fvf,struct PilotVertexElement 
 int32_t pilot_gfx_fvf_prepare_unblended(uint32_t fvf);
 int32_t pilot_gfx_fvf_prepare(uint32_t fvf,float screen_x,float screen_y);
 unsigned pilot_gfx_shader_streams(uint32_t extents[16]);
+/* Exact extents only when the prepared programmable VS remains active. */
+unsigned pilot_gfx_shader_prepared_streams(uint32_t extents[16]);
 void pilot_gfx_pixel_fixed(void);
 int32_t pilot_gfx_pixel_program(const uint32_t states[57],uint32_t texture_modes);
 /* Diagnostic raw vertex outputs, before rasterization/viewport conversion. */

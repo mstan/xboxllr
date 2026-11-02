@@ -1,7 +1,47 @@
 #ifdef PILOT_D3D_PHOBOS
 #include "graphics_visual_state.inc"
+static int test_radial_native_companion(void)
+{
+    unsigned char reference[64*64*4],native[64*64*4];
+    for(unsigned scale=1;scale<=2;++scale) {
+        struct PilotVisualMods options;pilot_visual_mods_default(&options);options.supersample=scale;
+        CHECK(pilot_gfx_visual_mods(&options));
+        uint32_t pp[17]={64,64,D3DFMT_X8R8G8B8,1,0x11,1,0,0,1,D3DFMT_D24S8,0,60,1};
+        CHECK(!pilot_gfx_create(pp));CHECK(!pilot_gfx_clear(3,0xff000000,1,0));
+        pilot_gfx_set_state(D3DRS_CULLMODE,D3DCULL_NONE);pilot_gfx_set_state(D3DRS_LIGHTING,0);pilot_gfx_set_state(D3DRS_ZENABLE,0);
+        pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_DISABLE);
+        struct {float x,y,z,w;uint32_t color;} edge[]={{8,8,.5f,1,0xffffffff},{24,8,.5f,1,0xffffffff},{8,56,.5f,1,0xffffffff}};
+        CHECK(!pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,edge,sizeof(edge[0]),0x44));
+        uint32_t physical[3];CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
+        CHECK(physical[0]==64*scale && physical[1]==64*scale);
+        unsigned bytes=physical[0]*physical[1]*4;
+        unsigned char *before=malloc(bytes),*after=malloc(bytes);CHECK(before && after);
+        CHECK(!pilot_gfx_reference_target_readback(0,before,bytes,physical));
+        CHECK(!pilot_gfx_visibility_begin());CHECK(pilot_gfx_radial_blur(.06f));
+        CHECK(!pilot_gfx_visibility_end(99));CHECK(!visibility_expect(99,64*64,NULL));
+        CHECK(!pilot_gfx_readback(native,sizeof(native)));
+        uint32_t blurred[3];CHECK(!pilot_gfx_reference_target_readback(0,after,bytes,blurred));
+        CHECK(blurred[0]==physical[0] && blurred[1]==physical[1]);
+        unsigned changed=0,not_nearest=0;
+        for(unsigned y=0;y<physical[1];++y)for(unsigned x=0;x<physical[0];++x) {
+            unsigned at=(y*physical[0]+x)*4;
+            changed+=memcmp(before+at,after+at,4)!=0;
+            unsigned native_at=((y/scale)*64+x/scale)*4;
+            not_nearest+=memcmp(after+at,native+native_at,4)!=0;
+        }
+        CHECK(changed>16); /* A stale coherent companion must fail this. */
+        if(scale==1)memcpy(reference,native,sizeof(reference));
+        else {CHECK(!memcmp(reference,native,sizeof(reference)));CHECK(not_nearest>16);}
+        free(before);free(after);pilot_gfx_close();
+    }
+    fprintf(stderr,"PASS: radial native byte identity, real enhanced edge changes and native-only visibility count\n");return 0;
+}
 static int test_radial_blur(void)
 {
+    /* The backend's compile definition is private to its library. Reuse the
+     * existing explicit runtime qualification control for this paired check. */
+    const char *planes=getenv("XLLE_PILOT_NATIVE_RENDER_PLANES");
+    if(planes && !strcmp(planes,"1"))CHECK(!test_radial_native_companion());
     for(unsigned variant=0;variant<3;++variant) {
         struct PilotVisualMods options;pilot_visual_mods_default(&options);
         options.internal_height=variant==1?1080:variant==2?2160:0;

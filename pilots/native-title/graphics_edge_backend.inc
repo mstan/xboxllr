@@ -88,6 +88,7 @@ static void pilot_edge_draw_release(struct PilotEdgeDraw *draw)
 static HRESULT pilot_edge_begin(struct PilotEdgeDraw *draw)
 {
     memset(draw,0,sizeof(*draw));if(!pilot_edge_requested)return S_OK;
+    pilot_native_epoch_flush();
     /* The replication pass and extra samples must not inflate a guest
      * occlusion report. Qualify their combined counter owner separately. */
     if(pilot_visibility_current && !pilot_visibility_current->ended)return E_NOTIMPL;
@@ -126,8 +127,13 @@ failed:pilot_edge_draw_release(draw);return hr;
 static void pilot_edge_end(struct PilotEdgeDraw *draw)
 {
     if(!draw->target)return;
+    pilot_native_epoch_flush();
     ID3D11DeviceContext *ctx=d3d8_GetD3D11Context();ID3D11DeviceContext_OMSetRenderTargets(ctx,0,NULL,NULL);
     ID3D11DeviceContext_ResolveSubresource(ctx,(ID3D11Resource*)draw->image,0,(ID3D11Resource*)pilot_edge.samples,0,pilot_edge.format);
+    /* This native MSAA scratch path has no admitted enhanced attachment.
+     * Its resolve changes canonical color; the prior companion is stale. */
+    struct PilotNativePlane *plane=pilot_native_plane_find((ID3D11Resource*)draw->image);
+    if(plane){plane->valid_aspects&=~1u;plane->coherent=0;pilot_native_degrade();}
     ID3D11DeviceContext_OMSetRenderTargets(ctx,1,&draw->target,NULL);ID3D11DeviceContext_RSSetState(ctx,draw->previous);
     if(!pilot_edge.observed) {
         pilot_edge.observed=1;fprintf(stderr,"[EDGE COVERAGE] native=4x target=%ux%u format=%u\n",pilot_edge.width,pilot_edge.height,(unsigned)pilot_edge.format);

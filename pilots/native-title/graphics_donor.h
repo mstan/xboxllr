@@ -3,6 +3,7 @@
 void pilot_d3d_program_fog_mode(unsigned program);
 #ifdef PILOT_D3D_PHOBOS
 #include <d3d11.h>
+#include "graphics_prepared_state_owner.h"
 /* Borrowed references owned by the selected renderer. These accessors are
  * added to the pinned private preparation; the guest never sees RHI/COM. */
 ID3D11Device *d3d8_GetD3D11Device(void);

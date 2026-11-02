@@ -55,6 +55,7 @@ static HRESULT native_current_flush(void)
         memcpy(native_current_uploaded,values,sizeof(values));native_current_uploaded_valid=1;
     } else if(!native_current_uploaded_valid || memcmp(values,native_current_uploaded,sizeof(values))) {
         pilot_gfx_batch_flush();
+        PILOT_NATIVE_CB_BEFORE_WRITE(&native_current_buffer);
         ID3D11DeviceContext_UpdateSubresource(ctx,(ID3D11Resource*)native_current_buffer,0,NULL,values,0,0);
         memcpy(native_current_uploaded,values,sizeof(values));native_current_uploaded_valid=1;
     }
@@ -64,7 +65,7 @@ static void native_current_close(void)
 {
     if(native_current_buffer) {
         ID3D11Buffer *none=NULL;ID3D11DeviceContext_VSSetConstantBuffers(d3d8_GetD3D11Context(),3,1,&none);
-        ID3D11Buffer_Release(native_current_buffer);native_current_buffer=NULL;
+        PILOT_NATIVE_CB_RELEASE(native_current_buffer);native_current_buffer=NULL;
     }
     memset(native_current_uploaded,0,sizeof(native_current_uploaded));native_current_uploaded_valid=0;
 #ifndef PILOT_D3D_PHOBOS

@@ -17,7 +17,7 @@ from native_d3d_raster import prepare_raster
 from native_d3d_fvf import prepare_fvf
 from native_d3d_resultarg import prepare_resultarg
 from native_d3d_combiner_bump import prepare_combiner_bump
-from native_d3d_feedback import prepare_feedback
+from native_d3d_feedback import prepare_feedback, prepare_cb_versions
 from native_d3d_explicit_blend import prepare_blend_combiners
 from native_d3d_visual import prepare_visual
 from native_d3d_pipeline import prepare_pipeline
@@ -215,6 +215,7 @@ def prepare(donor, output, reference):
                     '            g_device_state.tss[Stage][D3DTSS_COLOROP] = D3DTOP_MODULATE;','')
                 code=code.replace('        g_device_state.tss[Stage][D3DTSS_COLOROP] = D3DTOP_DISABLE;','')
             if path.name=='rhi_d3d11.c':
+                code=prepare_cb_versions(code)
                 code+='\nID3D11Device *d3d8_GetD3D11Device(void) { return g_dev; }\n'
                 code+='ID3D11DeviceContext *d3d8_GetD3D11Context(void) { return g_ctx; }\n'
                 code+='IDXGISwapChain *d3d8_GetSwapChain(void) { return g_swap; }\n'
@@ -224,6 +225,9 @@ def prepare(donor, output, reference):
                   ' * Original notices below are retained. See ../../MODIFICATIONS.md\n'
                   ' * and the prepared root LICENSE, LICENSE.upstream-MIT and NOTICE. */\n'
                   '#include "pilot_d3d_checks.h"\n'+code)
+        if relative.as_posix()=='src/d3d/d3d8_internal.h':
+            code=once(code,'#include "rhi.h"',
+                '#include "rhi.h"\n#include "graphics_prepared_state_owner.h"')
         if relative.as_posix()=='src/d3d/d3d8_combiners.h':
             code=prepare_combiner_bump(code,header=True)
         destination=output/relative
@@ -234,6 +238,12 @@ def prepare(donor, output, reference):
         hashes[str(relative).replace('\\','/')]=dict(source=hashlib.sha256(path.read_bytes()).hexdigest(),prepared=hashlib.sha256(destination.read_bytes()).hexdigest())
     write_prepared(output/'pilot_d3d_checks.h','#pragma once\n#include <windows.h>\n__declspec(noreturn) void pilot_d3d_backend_stop(const char *reason);\nHRESULT pilot_d3d_require(HRESULT result,const char *file,unsigned line);\n')
     # Reuse the independently pinned decoder already prepared for the pilot.
+    native_support={}
+    for name in ('graphics_cb_version_owner.h','graphics_cb_version_owner.inc',
+                 'graphics_prepared_state_owner.h','graphics_prepared_state_owner.inc'):
+        payload=(Path(__file__).resolve().parents[1]/'pilots/native-title'/name).read_bytes()
+        write_prepared(output/name,payload)
+        native_support[name]=dict(source=hashlib.sha256(payload).hexdigest(),prepared=hashlib.sha256((output/name).read_bytes()).hexdigest())
     manifest=json.loads((reference/'donor.json').read_text())
     if 'nv2a_reference' not in manifest: raise ValueError('missing pinned NV2A decoder')
     dest=output/'nv2a-reference';dest.mkdir(exist_ok=True)
@@ -289,7 +299,7 @@ def prepare(donor, output, reference):
     result=dict(repository='https://github.com/phobos665/xboxrecomp',donor=PIN,backend='PHOBOS',
                 license='GPL-3.0 fork; retained MIT upstream and per-file notices',
                 license_files=[str(p.relative_to(donor)).replace('\\','/') for p in paths if p.relative_to(donor).parts[0].startswith('LICENSE') or p.name=='NOTICE'],
-                scope='private reference pilot',files=hashes,nv2a_reference=manifest['nv2a_reference'])
+                scope='private reference pilot',files=hashes,native_support=native_support,nv2a_reference=manifest['nv2a_reference'])
     write_prepared(output/'donor.json',json.dumps(result,indent=2)+'\n')
     return result
 

@@ -25,14 +25,31 @@ struct PilotNativeDrawState {
     ID3D11Query *excluded_query; /* Borrowed from the guest visibility counter. */
     ID3D11RenderTargetView *outputs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT],*enhanced_color;
     ID3D11DepthStencilView *depth,*enhanced_depth;
+    ID3D11DepthStencilState *prepared_depth;
+    ID3D11BlendState *prepared_blend;
+    D3D11_BLEND_DESC prepared_blend_desc;
+    D3D11_DEPTH_STENCIL_DESC prepared_depth_desc;
     ID3D11ShaderResourceView *inputs[PILOT_NATIVE_DRAW_SRVS],*enhanced_inputs[PILOT_NATIVE_DRAW_SRVS];
     D3D11_VIEWPORT viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
     D3D11_RECT scissors[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+    D3D11_VIEWPORT enhanced_viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+    D3D11_RECT enhanced_scissors[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
     struct PilotNativePlane *color_plane,*depth_plane;
     struct PilotNativeDrawWrites writes;
     UINT viewport_count,scissor_count;
-    unsigned bound,enhanced,depth_required,writes_known;
+    unsigned bound,enhanced,depth_required,writes_known,binding_reuse,input_remap,borrowed_inputs,prepared_bindings;
+    DXGI_FORMAT depth_format;
 };
+
+static int pilot_native_draw_binding_reuse(void)
+{
+    static int enabled=-1;
+    if(enabled<0) {
+        const char *value=getenv("XLLE_PILOT_NATIVE_BINDING_REUSE");
+        enabled=value && !strcmp(value,"1");
+    }
+    return enabled;
+}
 enum PilotNativeDrawReason {
     PILOT_NATIVE_REASON_NO_OUTPUT,PILOT_NATIVE_REASON_MISSING_COLOR,PILOT_NATIVE_REASON_MISSING_DEPTH,
     PILOT_NATIVE_REASON_QUERY,PILOT_NATIVE_REASON_COLOR_MASK,PILOT_NATIVE_REASON_DEPTH_MASK,
@@ -87,10 +104,12 @@ static void pilot_native_draw_release(struct PilotNativeDrawState *draw)
         if(draw->outputs[i])ID3D11RenderTargetView_Release(draw->outputs[i]);
     if(draw->enhanced_color)ID3D11RenderTargetView_Release(draw->enhanced_color);
     if(draw->depth)ID3D11DepthStencilView_Release(draw->depth);
+    if(draw->prepared_depth)ID3D11DepthStencilState_Release(draw->prepared_depth);
+    if(draw->prepared_blend)ID3D11BlendState_Release(draw->prepared_blend);
     if(draw->enhanced_depth)ID3D11DepthStencilView_Release(draw->enhanced_depth);
     for(unsigned i=0;i<PILOT_NATIVE_DRAW_SRVS;++i) {
         if(draw->inputs[i])ID3D11ShaderResourceView_Release(draw->inputs[i]);
-        if(draw->enhanced_inputs[i])ID3D11ShaderResourceView_Release(draw->enhanced_inputs[i]);
+        if(draw->enhanced_inputs[i] && !(draw->borrowed_inputs&(1u<<i)))ID3D11ShaderResourceView_Release(draw->enhanced_inputs[i]);
     }
     memset(draw,0,sizeof(*draw));
 }
@@ -110,8 +129,13 @@ static const struct PilotNativeDrawWrites *pilot_native_draw_write_masks(struct 
      * Cache them so a declined query replay does not inspect OM state twice. */
     D3D11_BLEND_DESC blend={0};ID3D11BlendState *blend_state=NULL;
     blend.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
-    ID3D11DeviceContext_OMGetBlendState(draw->context,&blend_state,NULL,NULL);
-    if(blend_state){ID3D11BlendState_GetDesc(blend_state,&blend);ID3D11BlendState_Release(blend_state);}
+    if(draw->prepared_bindings)blend_state=draw->prepared_blend;
+    else ID3D11DeviceContext_OMGetBlendState(draw->context,&blend_state,NULL,NULL);
+    if(blend_state) {
+        if(draw->prepared_bindings)blend=draw->prepared_blend_desc;
+        else pilot_native_admission_blend_desc(blend_state,&blend);
+        if(!draw->prepared_bindings)ID3D11BlendState_Release(blend_state);
+    }
     for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i)if(draw->outputs[i]) {
         unsigned slot=blend.IndependentBlendEnable?i:0;
         draw->writes.color[i]=blend.RenderTarget[slot].RenderTargetWriteMask?1u:0u;
@@ -121,8 +145,13 @@ static const struct PilotNativeDrawWrites *pilot_native_draw_write_masks(struct 
         D3D11_DEPTH_STENCIL_DESC depth={0};ID3D11DepthStencilState *depth_state=NULL;UINT reference=0;
         /* NULL D3D11 depth state: depth enabled/writeALL, stencil disabled. */
         depth.DepthEnable=TRUE;depth.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;
-        ID3D11DeviceContext_OMGetDepthStencilState(draw->context,&depth_state,&reference);
-        if(depth_state){ID3D11DepthStencilState_GetDesc(depth_state,&depth);ID3D11DepthStencilState_Release(depth_state);}
+        if(draw->prepared_bindings)depth_state=draw->prepared_depth;
+        else ID3D11DeviceContext_OMGetDepthStencilState(draw->context,&depth_state,&reference);
+        if(depth_state) {
+            if(draw->prepared_bindings)depth=draw->prepared_depth_desc;
+            else pilot_native_admission_depth_desc(depth_state,&depth);
+            if(!draw->prepared_bindings)ID3D11DepthStencilState_Release(depth_state);
+        }
         draw->writes.depth_required=(depth.DepthEnable?2u:0u)|(depth.StencilEnable?4u:0u);
         draw->writes.depth=depth.DepthEnable && depth.DepthWriteMask==D3D11_DEPTH_WRITE_MASK_ALL?2u:0u;
         if(depth.StencilEnable && depth.StencilWriteMask &&
@@ -131,8 +160,9 @@ static const struct PilotNativeDrawWrites *pilot_native_draw_write_masks(struct 
             depth.BackFace.StencilDepthFailOp!=D3D11_STENCIL_OP_KEEP || depth.BackFace.StencilPassOp!=D3D11_STENCIL_OP_KEEP))draw->writes.depth|=4;
         /* Read-only DSV flags can only make this more conservative. D16/D32
          * have no stencil aspect; D24S8/D32S8 require both format aspects. */
-        D3D11_DEPTH_STENCIL_VIEW_DESC view;ID3D11DepthStencilView_GetDesc(draw->depth,&view);
-        draw->writes.depth_all=view.Format==DXGI_FORMAT_D16_UNORM || view.Format==DXGI_FORMAT_D32_FLOAT?2u:6u;
+        DXGI_FORMAT format=draw->depth_format;
+        if(format==DXGI_FORMAT_UNKNOWN) {D3D11_DEPTH_STENCIL_VIEW_DESC view;ID3D11DepthStencilView_GetDesc(draw->depth,&view);format=view.Format;}
+        draw->writes.depth_all=format==DXGI_FORMAT_D16_UNORM || format==DXGI_FORMAT_D32_FLOAT?2u:6u;
         draw->writes.any|=draw->writes.depth;
     }
     return &draw->writes;
@@ -181,21 +211,23 @@ static int pilot_native_draw_depth_view(ID3D11DepthStencilView *original,ID3D11D
     return a.ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2DMS ||
         (a.ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2D && !a.Texture2D.MipSlice && !b.Texture2D.MipSlice);
 }
-static unsigned pilot_native_draw_depth_aspects(ID3D11DeviceContext *context)
+static unsigned pilot_native_draw_depth_aspects(struct PilotNativeDrawState *draw)
 {
     ID3D11DepthStencilState *state=NULL;UINT reference=0;
-    ID3D11DeviceContext_OMGetDepthStencilState(context,&state,&reference);
+    if(draw->prepared_bindings)state=draw->prepared_depth;
+    else ID3D11DeviceContext_OMGetDepthStencilState(draw->context,&state,&reference);
     /* D3D11's NULL state enables depth and disables stencil. No dynamic
      * stencil reference or actual bound state is changed by this inspection. */
     if(!state)return 2;
-    D3D11_DEPTH_STENCIL_DESC desc;ID3D11DepthStencilState_GetDesc(state,&desc);
-    ID3D11DepthStencilState_Release(state);
+    D3D11_DEPTH_STENCIL_DESC desc;
+    if(draw->prepared_bindings)desc=draw->prepared_depth_desc;
+    else pilot_native_admission_depth_desc(state,&desc);
+    if(!draw->prepared_bindings)ID3D11DepthStencilState_Release(state);
     return (desc.DepthEnable?2u:0u)|(desc.StencilEnable?4u:0u);
 }
-static unsigned pilot_native_draw_input_aspects(struct PilotNativePlane *plane,ID3D11ShaderResourceView *view)
+static unsigned pilot_native_draw_input_format(struct PilotNativePlane *plane,DXGI_FORMAT format)
 {
-    D3D11_SHADER_RESOURCE_VIEW_DESC desc;ID3D11ShaderResourceView_GetDesc(view,&desc);
-    switch(desc.Format) {
+    switch(format) {
     case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:return 2;
     case DXGI_FORMAT_X24_TYPELESS_G8_UINT:case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:return 4;
     case DXGI_FORMAT_R16_UNORM:case DXGI_FORMAT_R32_FLOAT:
@@ -206,6 +238,11 @@ static unsigned pilot_native_draw_input_aspects(struct PilotNativePlane *plane,I
     default:break;
     }
     return 1;
+}
+static unsigned pilot_native_draw_input_aspects(struct PilotNativePlane *plane,ID3D11ShaderResourceView *view)
+{
+    D3D11_SHADER_RESOURCE_VIEW_DESC desc;ID3D11ShaderResourceView_GetDesc(view,&desc);
+    return pilot_native_draw_input_format(plane,desc.Format);
 }
 static int pilot_native_draw_edge(LONG edge,UINT enhanced,UINT native,int upper,LONG *output)
 {
@@ -219,32 +256,51 @@ static int pilot_native_draw_edge(LONG edge,UINT enhanced,UINT native,int upper,
     *output=(LONG)value;return 1;
 }
 
-static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
+static HRESULT pilot_native_draw_prepare(struct PilotNativeDrawState *draw,int immediate)
 {
     memset(draw,0,sizeof(*draw));
     if(!pilot_native_enabled())return S_FALSE;
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
     if(!context)return E_FAIL;
     draw->context=context;
-    ID3D11DeviceContext_OMGetRenderTargets(context,D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,draw->outputs,&draw->depth);
-    ID3D11DeviceContext_PSGetShaderResources(context,0,PILOT_NATIVE_DRAW_SRVS,draw->inputs);
-    draw->viewport_count=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
-    draw->scissor_count=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
-    ID3D11DeviceContext_RSGetViewports(context,&draw->viewport_count,draw->viewports);
-    ID3D11DeviceContext_RSGetScissorRects(context,&draw->scissor_count,draw->scissors);
+    struct PreparedDrawSubset prepared={0};
+    if(prepared_state_draw_subset(context,&prepared) && !prepared.unsupported) {
+        memcpy(draw->outputs,prepared.outputs,sizeof(draw->outputs));draw->depth=prepared.depth;
+        memcpy(draw->inputs,prepared.inputs,sizeof(draw->inputs));
+        draw->prepared_blend=prepared.blend;draw->prepared_depth=prepared.depth_state;
+        draw->prepared_blend_desc=prepared.blend_desc;draw->prepared_depth_desc=prepared.depth_desc;
+        memcpy(draw->viewports,prepared.viewports,sizeof(draw->viewports));
+        memcpy(draw->scissors,prepared.scissors,sizeof(draw->scissors));
+        draw->viewport_count=prepared.viewport_count;draw->scissor_count=prepared.scissor_count;
+        draw->prepared_bindings=1;memset(&prepared,0,sizeof(prepared)); /* Move owned refs. */
+    } else {
+        prepared_state_draw_release(&prepared);
+        ID3D11DeviceContext_OMGetRenderTargets(context,D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,draw->outputs,&draw->depth);
+        ID3D11DeviceContext_PSGetShaderResources(context,0,PILOT_NATIVE_DRAW_SRVS,draw->inputs);
+        draw->viewport_count=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+        draw->scissor_count=D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+        ID3D11DeviceContext_RSGetViewports(context,&draw->viewport_count,draw->viewports);
+        ID3D11DeviceContext_RSGetScissorRects(context,&draw->scissor_count,draw->scissors);
+    }
     HRESULT result=E_NOTIMPL;
     int query_active=pilot_native_query_active();
     ID3D11Resource *color_resource=NULL,*depth_resource=NULL;
+    unsigned color_owned=0,depth_owned=0;
+    int immutable=pilot_native_admission_enabled();
+    struct PilotNativeAdmissionView *color_facts=NULL,*depth_facts=NULL;
     D3D11_TEXTURE2D_DESC color_shape={0},depth_shape={0};
     UINT native_width=0,native_height=0,enhanced_width=0,enhanced_height=0;
     if(draw->outputs[0]) {
-        ID3D11RenderTargetView_GetResource(draw->outputs[0],&color_resource);
-        draw->color_plane=pilot_native_plane_find(color_resource);
+        if(immutable)color_facts=pilot_native_admission_get((ID3D11View*)draw->outputs[0],PILOT_NATIVE_ADMISSION_RTV,&color_resource,&color_owned);
+        else {ID3D11RenderTargetView_GetResource(draw->outputs[0],&color_resource);color_owned=1;}
+        draw->color_plane=color_facts?color_facts->owner->plane:pilot_native_plane_find(color_resource);
     }
     if(draw->depth) {
-        ID3D11DepthStencilView_GetResource(draw->depth,&depth_resource);
-        draw->depth_plane=pilot_native_plane_find(depth_resource);
-        draw->depth_required=query_active?pilot_native_draw_write_masks(draw)->depth_required:pilot_native_draw_depth_aspects(context);
+        if(immutable)depth_facts=pilot_native_admission_get((ID3D11View*)draw->depth,PILOT_NATIVE_ADMISSION_DSV,&depth_resource,&depth_owned);
+        else {ID3D11DepthStencilView_GetResource(draw->depth,&depth_resource);depth_owned=1;}
+        draw->depth_plane=depth_facts?depth_facts->owner->plane:pilot_native_plane_find(depth_resource);
+        if(depth_facts)draw->depth_format=depth_facts->desc.dsv.Format;
+        draw->depth_required=query_active?pilot_native_draw_write_masks(draw)->depth_required:pilot_native_draw_depth_aspects(draw);
     }
     /* A visibility-only draw has already contributed its native samples and
      * cannot change either image. No extra draw or exclusion query is needed. */
@@ -274,12 +330,14 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
     }
     if(draw->color_plane) {
         struct PilotNativePlane *plane=draw->color_plane;
-        result=pilot_native_draw_shape(color_resource,&color_shape);if(FAILED(result)) {
+        if(color_facts){color_shape=color_facts->shape;result=color_facts->shape_result;}
+        else result=pilot_native_draw_shape(color_resource,&color_shape);
+        if(FAILED(result)) {
             pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_COLOR_SHAPE,-1,NULL,0,result);goto invalid;
         }
         if(!plane->image || !plane->enhanced || plane->image==plane->enhanced || !plane->rtv ||
            plane->native_width!=color_shape.Width || plane->native_height!=color_shape.Height ||
-           !plane->width || !plane->height || !pilot_native_draw_color_view(draw->outputs[0],plane->rtv)) {
+           !plane->width || !plane->height || !(color_facts?color_facts->compatible:pilot_native_draw_color_view(draw->outputs[0],plane->rtv))) {
             result=E_UNEXPECTED;pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_COLOR_VIEW,-1,NULL,0,result);goto invalid;
         }
         native_width=plane->native_width;native_height=plane->native_height;
@@ -290,12 +348,14 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
      * Omit it so an inactive larger native grid cannot veto a color replay. */
     if(draw->depth_plane && draw->depth_required) {
         struct PilotNativePlane *plane=draw->depth_plane;
-        result=pilot_native_draw_shape(depth_resource,&depth_shape);if(FAILED(result)) {
+        if(depth_facts){depth_shape=depth_facts->shape;result=depth_facts->shape_result;}
+        else result=pilot_native_draw_shape(depth_resource,&depth_shape);
+        if(FAILED(result)) {
             pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_DEPTH_SHAPE,-1,NULL,0,result);goto invalid;
         }
         if(!plane->image || !plane->enhanced || plane->image==plane->enhanced || !plane->dsv ||
            plane->native_width!=depth_shape.Width || plane->native_height!=depth_shape.Height ||
-           !plane->width || !plane->height || !pilot_native_draw_depth_view(draw->depth,plane->dsv)) {
+           !plane->width || !plane->height || !(depth_facts?depth_facts->compatible:pilot_native_draw_depth_view(draw->depth,plane->dsv))) {
             result=E_UNEXPECTED;pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_DEPTH_VIEW,-1,NULL,0,result);goto invalid;
         }
         draw->enhanced_depth=plane->dsv;ID3D11DepthStencilView_AddRef(draw->enhanced_depth);
@@ -318,6 +378,43 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
         }
     }
     for(unsigned i=0;i<PILOT_NATIVE_DRAW_SRVS;++i)if(draw->inputs[i]) {
+        if(immutable) {
+            ID3D11Resource *source=NULL;unsigned owned=0;
+            struct PilotNativeAdmissionView *facts=pilot_native_admission_get((ID3D11View*)draw->inputs[i],
+                PILOT_NATIVE_ADMISSION_SRV,&source,&owned);
+            struct PilotNativePlane *plane=facts?facts->owner->plane:pilot_native_plane_find(source);
+            /* The captured input view itself retains this resource. */
+            if(owned)ID3D11Resource_Release(source);
+            ID3D11Resource *sampled=source;
+            if(plane) {
+                unsigned required=facts?pilot_native_draw_input_format(plane,facts->desc.srv.Format):
+                    pilot_native_draw_input_aspects(plane,draw->inputs[i]);
+                if((plane->valid_aspects&required)!=required) {
+                    pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_INPUT_MASK,(int)i,plane,required,S_FALSE);goto skipped;
+                }
+                if(facts) {
+                    result=pilot_native_admission_srv(facts,&draw->enhanced_inputs[i]);
+                    if(SUCCEEDED(result))draw->borrowed_inputs|=1u<<i;
+                } else result=pilot_native_plane_view(plane,draw->inputs[i],&draw->enhanced_inputs[i]);
+                if(FAILED(result)) {
+                    pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_INPUT_VIEW,(int)i,plane,required,result);goto skipped;
+                }
+                if(!draw->enhanced_inputs[i]) {
+                    result=E_UNEXPECTED;pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_INPUT_NULL,(int)i,plane,required,result);goto invalid;
+                }
+                /* The factory/cache constructs this view over this exact
+                 * immutable companion, so its resource need not be re-queried. */
+                sampled=(ID3D11Resource*)plane->enhanced;
+            } else {
+                draw->enhanced_inputs[i]=draw->inputs[i];draw->borrowed_inputs|=1u<<i;
+            }
+            int aliases=(draw->color_plane && sampled==(ID3D11Resource*)draw->color_plane->enhanced) ||
+                (draw->enhanced_depth && sampled==(ID3D11Resource*)draw->depth_plane->enhanced);
+            if(aliases) {
+                pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_ALIAS,(int)i,plane,0,S_FALSE);goto skipped;
+            }
+            continue;
+        }
         ID3D11Resource *resource=NULL;
         ID3D11ShaderResourceView_GetResource(draw->inputs[i],&resource);
         struct PilotNativePlane *plane=pilot_native_plane_find(resource);
@@ -349,9 +446,12 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
             pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_ALIAS,(int)i,plane,0,S_FALSE);goto skipped;
         }
     }
-    D3D11_VIEWPORT viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
-    D3D11_RECT scissors[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
-    memcpy(viewports,draw->viewports,sizeof(viewports));memcpy(scissors,draw->scissors,sizeof(scissors));
+    draw->binding_reuse=(unsigned)pilot_native_draw_binding_reuse();
+    for(unsigned i=0;i<PILOT_NATIVE_DRAW_SRVS;++i)
+        draw->input_remap|=draw->inputs[i]!=draw->enhanced_inputs[i];
+    D3D11_VIEWPORT *viewports=draw->enhanced_viewports;
+    D3D11_RECT *scissors=draw->enhanced_scissors;
+    memcpy(viewports,draw->viewports,sizeof(draw->viewports));memcpy(scissors,draw->scissors,sizeof(draw->scissors));
     for(UINT i=0;i<draw->viewport_count;++i) {
         viewports[i].TopLeftX=(float)((double)viewports[i].TopLeftX*enhanced_width/native_width);
         viewports[i].TopLeftY=(float)((double)viewports[i].TopLeftY*enhanced_height/native_height);
@@ -366,17 +466,30 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
             pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_SCISSOR,(int)i,NULL,0,S_FALSE);goto skipped;
         }
     }
+    if(!immediate) {
+        if(color_resource && color_owned)ID3D11Resource_Release(color_resource);
+        if(depth_resource && depth_owned)ID3D11Resource_Release(depth_resource);
+        draw->enhanced=1;return S_OK;
+    }
     /* All admission is complete before beginning the optional child query.
      * There are no failing/skip paths between Begin and the matching end(). */
     if(!pilot_visibility_internal_try_begin(&draw->excluded_query)) {
         pilot_native_draw_diagnostic(draw,PILOT_NATIVE_REASON_QUERY,-1,NULL,0,S_FALSE);goto skipped;
     }
-    if(color_resource)ID3D11Resource_Release(color_resource);
-    if(depth_resource)ID3D11Resource_Release(depth_resource);
-    ID3D11ShaderResourceView *none[PILOT_NATIVE_DRAW_SRVS]={0};
-    ID3D11DeviceContext_PSSetShaderResources(context,0,PILOT_NATIVE_DRAW_SRVS,none);
+    if(color_resource && color_owned)ID3D11Resource_Release(color_resource);
+    if(depth_resource && depth_owned)ID3D11Resource_Release(depth_resource);
+    /* Native SRVs cannot reference private enhanced outputs. Admitted HD
+     * inputs were also checked against both enhanced attachments above.
+     * Changing OM therefore cannot clear a live PS binding. Avoid the old
+     * NULL/rebind cycle, and leave ordinary resident textures bound when no
+     * render-target input actually needs remapping. */
+    if(!draw->binding_reuse) {
+        ID3D11ShaderResourceView *none[PILOT_NATIVE_DRAW_SRVS]={0};
+        ID3D11DeviceContext_PSSetShaderResources(context,0,PILOT_NATIVE_DRAW_SRVS,none);
+    }
     ID3D11DeviceContext_OMSetRenderTargets(context,draw->enhanced_color?1:0,&draw->enhanced_color,draw->enhanced_depth);
-    ID3D11DeviceContext_PSSetShaderResources(context,0,PILOT_NATIVE_DRAW_SRVS,draw->enhanced_inputs);
+    if(!draw->binding_reuse || draw->input_remap)
+        ID3D11DeviceContext_PSSetShaderResources(context,0,PILOT_NATIVE_DRAW_SRVS,draw->enhanced_inputs);
     ID3D11DeviceContext_RSSetViewports(context,draw->viewport_count,viewports);
     ID3D11DeviceContext_RSSetScissorRects(context,draw->scissor_count,scissors);
     draw->bound=draw->enhanced=1;return S_OK;
@@ -385,8 +498,8 @@ skipped:
 invalid:
     pilot_native_draw_invalidate(draw);
 finished:
-    if(color_resource)ID3D11Resource_Release(color_resource);
-    if(depth_resource)ID3D11Resource_Release(depth_resource);
+    if(color_resource && color_owned)ID3D11Resource_Release(color_resource);
+    if(depth_resource && depth_owned)ID3D11Resource_Release(depth_resource);
     pilot_native_draw_release(draw);return result;
 }
 
@@ -395,36 +508,75 @@ static int pilot_native_draw_end(struct PilotNativeDrawState *draw)
     int enhanced=(int)draw->enhanced;
     pilot_visibility_internal_end(draw->excluded_query);draw->excluded_query=NULL;
     if(draw->bound) {
-        ID3D11ShaderResourceView *none[PILOT_NATIVE_DRAW_SRVS]={0};
-        ID3D11DeviceContext_PSSetShaderResources(draw->context,0,PILOT_NATIVE_DRAW_SRVS,none);
+        /* HD inputs are private companions or unchanged native inputs; none
+         * can alias the original attachments being restored. */
+        if(!draw->binding_reuse) {
+            ID3D11ShaderResourceView *none[PILOT_NATIVE_DRAW_SRVS]={0};
+            ID3D11DeviceContext_PSSetShaderResources(draw->context,0,PILOT_NATIVE_DRAW_SRVS,none);
+        }
         ID3D11DeviceContext_OMSetRenderTargets(draw->context,D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,draw->outputs,draw->depth);
-        ID3D11DeviceContext_PSSetShaderResources(draw->context,0,PILOT_NATIVE_DRAW_SRVS,draw->inputs);
+        if(!draw->binding_reuse || draw->input_remap)
+            ID3D11DeviceContext_PSSetShaderResources(draw->context,0,PILOT_NATIVE_DRAW_SRVS,draw->inputs);
         ID3D11DeviceContext_RSSetViewports(draw->context,draw->viewport_count,draw->viewports);
         ID3D11DeviceContext_RSSetScissorRects(draw->context,draw->scissor_count,draw->scissors);
     }
     pilot_native_draw_release(draw);return enhanced;
 }
+static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
+{return pilot_native_draw_prepare(draw,1);}
+#include "graphics_native_plane_epoch.inc"
+static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexed)
+{
+    if(!pilot_native_enabled()) {memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));return;}
+    if(!pilot_native_epoch_enabled()) {
+        /* Matched opt-out retains the original single-admission immediate
+         * path; it must not pay for a failed deferred capture first. */
+        pilot_native_epoch_flush();
+        struct PilotNativeDrawState direct;
+        if(pilot_native_draw_begin(&direct)==S_OK) {
+            if(indexed)ID3D11DeviceContext_DrawIndexed(direct.context,count,first,base);
+            else ID3D11DeviceContext_Draw(direct.context,count,first);
+            (void)pilot_native_draw_end(&direct);
+        }
+        goto finished;
+    }
+    struct PilotNativeDrawState draw;HRESULT result=pilot_native_draw_prepare(&draw,0);
+    if(result==S_OK) {
+        if(pilot_native_epoch_record(&draw,count,first,base,indexed)) {
+            (void)pilot_native_draw_end(&draw);goto finished;
+        }
+        (void)pilot_native_draw_end(&draw);
+    }
+    /* Earlier HD commands must precede either current immediate fallback or
+     * a declined current replay. Re-admit after flushing in case it degraded
+     * a queued companion following an optional query/device failure. */
+    pilot_native_epoch_flush();
+    if(result==S_OK && pilot_native_draw_begin(&draw)==S_OK) {
+        if(indexed)ID3D11DeviceContext_DrawIndexed(draw.context,count,first,base);
+        else ID3D11DeviceContext_Draw(draw.context,count,first);
+        (void)pilot_native_draw_end(&draw);
+    }
+finished:
+    memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));
+}
 static void pilot_native_draw(UINT count,UINT first)
 {
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
     ID3D11DeviceContext_Draw(context,count,first);
-    struct PilotNativeDrawState draw;HRESULT result=pilot_native_draw_begin(&draw);
-    if(result==S_OK) {
-        ID3D11DeviceContext_Draw(context,count,first);(void)pilot_native_draw_end(&draw);
-    }
+    pilot_native_draw_enhanced(count,first,0,0);
     /* Optional HD failure never changes the already submitted native draw. */
 }
 static void pilot_native_draw_indexed(UINT count,UINT first,INT base)
 {
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();
     ID3D11DeviceContext_DrawIndexed(context,count,first,base);
-    struct PilotNativeDrawState draw;HRESULT result=pilot_native_draw_begin(&draw);
-    if(result==S_OK) {
-        ID3D11DeviceContext_DrawIndexed(context,count,first,base);(void)pilot_native_draw_end(&draw);
-    }
+    pilot_native_draw_enhanced(count,first,base,1);
 }
 #else
 /* Other supported donors retain the original single native GPU submission. */
+static void pilot_native_epoch_flush(void){}
+static void pilot_native_epoch_close(void){}
+static void pilot_native_epoch_vertex_span(unsigned stream,unsigned extent){(void)stream;(void)extent;}
 struct PilotNativeDrawState {unsigned unused;};
 static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
 {memset(draw,0,sizeof(*draw));return S_FALSE;}

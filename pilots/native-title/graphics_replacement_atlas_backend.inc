@@ -84,6 +84,7 @@ static int pilot_replacement_upscale_open(void)
 static void pilot_replacement_dispatch(ID3D11DeviceContext *ctx,ID3D11ShaderResourceView *source,unsigned scale,unsigned w,unsigned h,unsigned x,unsigned y)
 {
     unsigned params[8]={scale,w,h,x,y,0,0,0};
+    PILOT_NATIVE_CB_BEFORE_WRITE(&pilot_replacement_constants);
     ID3D11DeviceContext_UpdateSubresource(ctx,(ID3D11Resource*)pilot_replacement_constants,0,NULL,params,0,0);
     ID3D11DeviceContext_CSSetShaderResources(ctx,0,1,&source);
     ID3D11DeviceContext_Dispatch(ctx,(w+7)/8,(h+7)/8,1);
@@ -100,6 +101,7 @@ static void pilot_replacement_atlas_update(uint32_t handle,const void *data,unsi
         unsigned s=p->record.hd_width/p->record.width;if(s>scale)scale=s;
     }
     if(!count || !pilot_replacement_upscale_open()){pilot_replacement_atlas_release(n);return;}
+    pilot_native_epoch_flush();
     if(n->replacement_atlas_scale!=scale)pilot_replacement_atlas_release(n);
     if(!n->replacement_atlas) {
         uint64_t charge=(uint64_t)t->width*t->height*scale*scale*8;
@@ -148,7 +150,7 @@ static void pilot_replacement_atlas_update(uint32_t handle,const void *data,unsi
     ID3D11DeviceContext_CSSetUnorderedAccessViews(ctx,0,1,&null_uav,NULL);
     ID3D11DeviceContext_GenerateMips(ctx,n->replacement_atlas_view);
     ID3D11DeviceContext_CSSetShader(ctx,old_shader,NULL,0);
-    ID3D11DeviceContext_CSSetConstantBuffers(ctx,0,1,&old_constants);
+    ID3D11Buffer *restored_constants=PILOT_NATIVE_CB_CURRENT(old_constants);ID3D11DeviceContext_CSSetConstantBuffers(ctx,0,1,&restored_constants);
     ID3D11DeviceContext_CSSetShaderResources(ctx,0,1,&old_source);
     ID3D11DeviceContext_CSSetUnorderedAccessViews(ctx,0,1,&old_uav,NULL);
     ID3D11DeviceContext_PSSetShaderResources(ctx,0,4,old_pixel);

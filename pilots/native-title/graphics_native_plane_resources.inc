@@ -12,10 +12,84 @@ struct PilotNativeMap {
     ID3D11Resource *source;
     struct PilotNativePlane *plane;
     unsigned refs;
+    /* Facts belong to this registration generation, not to a raw pointer.
+     * Alias refs share it; final unmap clears it even if GPU jobs retain plane. */
+    struct PilotNativeAdmissionView *admission;
+    unsigned admission_count;
     struct PilotNativeMap *next;
 };
 static struct PilotNativeMap *pilot_native_maps;
 static uint64_t pilot_native_admitted_bytes;
+enum { PILOT_NATIVE_ADMISSION_RTV=1,PILOT_NATIVE_ADMISSION_DSV=2,PILOT_NATIVE_ADMISSION_SRV=3,
+       PILOT_NATIVE_ADMISSION_VIEWS=256,PILOT_NATIVE_ADMISSION_PER_MAP=16,PILOT_NATIVE_ADMISSION_STATES=32 };
+struct PilotNativeAdmissionView {
+    ID3D11View *original,*paired;
+    struct PilotNativeMap *owner;
+    unsigned kind,compatible;
+    union {D3D11_RENDER_TARGET_VIEW_DESC rtv;D3D11_DEPTH_STENCIL_VIEW_DESC dsv;D3D11_SHADER_RESOURCE_VIEW_DESC srv;} desc;
+    D3D11_TEXTURE2D_DESC shape;HRESULT shape_result;
+    ID3D11ShaderResourceView *enhanced;
+    struct PilotNativeAdmissionView *next;
+};
+/* Index refs are weak; the map owns each entry and clears its exact index
+ * pointer before destruction. Owned original views prevent pointer ABA. */
+static struct PilotNativeAdmissionView *pilot_native_admission_index[PILOT_NATIVE_ADMISSION_VIEWS];
+static unsigned pilot_native_admission_count;
+static struct {ID3D11DepthStencilState *state;D3D11_DEPTH_STENCIL_DESC desc;} pilot_native_admission_depth[PILOT_NATIVE_ADMISSION_STATES];
+static struct {ID3D11BlendState *state;D3D11_BLEND_DESC desc;} pilot_native_admission_blend[PILOT_NATIVE_ADMISSION_STATES];
+static unsigned pilot_native_admission_depth_next,pilot_native_admission_blend_next;
+static int pilot_native_admission_enabled(void)
+{
+    static int enabled=-1;
+    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_ADMISSION_CACHE");enabled=value && !strcmp(value,"1");}
+    return enabled;
+}
+static unsigned pilot_native_admission_slot(ID3D11View *view,unsigned kind)
+{
+    uintptr_t key=(uintptr_t)view;return (unsigned)((key>>4)^(key>>12)^(kind*17u))&(PILOT_NATIVE_ADMISSION_VIEWS-1);
+}
+static void pilot_native_admission_clear(struct PilotNativeMap *map)
+{
+    while(map->admission) {
+        struct PilotNativeAdmissionView *view=map->admission;map->admission=view->next;
+        unsigned slot=pilot_native_admission_slot(view->original,view->kind);
+        if(pilot_native_admission_index[slot]==view)pilot_native_admission_index[slot]=NULL;
+        prepared_state_forget_view(view->original);
+        if(view->paired)prepared_state_forget_view(view->paired);
+        if(view->enhanced)prepared_state_forget_view((ID3D11View*)view->enhanced);
+        if(view->enhanced)ID3D11ShaderResourceView_Release(view->enhanced);
+        if(view->paired)ID3D11View_Release(view->paired);
+        ID3D11View_Release(view->original);free(view);--pilot_native_admission_count;
+    }
+    map->admission_count=0;
+    if(!pilot_native_maps) {
+        for(unsigned i=0;i<PILOT_NATIVE_ADMISSION_STATES;++i) {
+            if(pilot_native_admission_depth[i].state)ID3D11DepthStencilState_Release(pilot_native_admission_depth[i].state);
+            if(pilot_native_admission_blend[i].state)ID3D11BlendState_Release(pilot_native_admission_blend[i].state);
+        }
+        memset(pilot_native_admission_depth,0,sizeof(pilot_native_admission_depth));
+        memset(pilot_native_admission_blend,0,sizeof(pilot_native_admission_blend));
+        pilot_native_admission_depth_next=pilot_native_admission_blend_next=0;
+    }
+}
+static void pilot_native_admission_depth_desc(ID3D11DepthStencilState *state,D3D11_DEPTH_STENCIL_DESC *desc)
+{
+    if(!pilot_native_admission_enabled() || !pilot_native_maps){ID3D11DepthStencilState_GetDesc(state,desc);return;}
+    for(unsigned i=0;i<PILOT_NATIVE_ADMISSION_STATES;++i)if(pilot_native_admission_depth[i].state==state){*desc=pilot_native_admission_depth[i].desc;return;}
+    ID3D11DepthStencilState_GetDesc(state,desc);
+    unsigned slot=pilot_native_admission_depth_next++%PILOT_NATIVE_ADMISSION_STATES;
+    if(pilot_native_admission_depth[slot].state)ID3D11DepthStencilState_Release(pilot_native_admission_depth[slot].state);
+    ID3D11DepthStencilState_AddRef(state);pilot_native_admission_depth[slot].state=state;pilot_native_admission_depth[slot].desc=*desc;
+}
+static void pilot_native_admission_blend_desc(ID3D11BlendState *state,D3D11_BLEND_DESC *desc)
+{
+    if(!pilot_native_admission_enabled() || !pilot_native_maps){ID3D11BlendState_GetDesc(state,desc);return;}
+    for(unsigned i=0;i<PILOT_NATIVE_ADMISSION_STATES;++i)if(pilot_native_admission_blend[i].state==state){*desc=pilot_native_admission_blend[i].desc;return;}
+    ID3D11BlendState_GetDesc(state,desc);
+    unsigned slot=pilot_native_admission_blend_next++%PILOT_NATIVE_ADMISSION_STATES;
+    if(pilot_native_admission_blend[slot].state)ID3D11BlendState_Release(pilot_native_admission_blend[slot].state);
+    ID3D11BlendState_AddRef(state);pilot_native_admission_blend[slot].state=state;pilot_native_admission_blend[slot].desc=*desc;
+}
 
 struct PilotNativeBudget {
     uint64_t budget,usage,headroom,estimate;
@@ -95,13 +169,20 @@ static void pilot_native_plane_release(struct PilotNativePlane *plane)
     while(plane->views) {
         struct PilotNativeViewCache *view=plane->views;
         plane->views=view->next;
+        prepared_state_forget_view((ID3D11View*)view->view);
         ID3D11ShaderResourceView_Release(view->view);
         free(view);
     }
     rhi_view_destroy(plane->presentation_view);
     rhi_image_destroy(plane->presentation_image);
-    if(plane->dsv)ID3D11DepthStencilView_Release(plane->dsv);
-    if(plane->rtv)ID3D11RenderTargetView_Release(plane->rtv);
+    if(plane->dsv) {
+        prepared_state_forget_view((ID3D11View*)plane->dsv);
+        ID3D11DepthStencilView_Release(plane->dsv);
+    }
+    if(plane->rtv) {
+        prepared_state_forget_view((ID3D11View*)plane->rtv);
+        ID3D11RenderTargetView_Release(plane->rtv);
+    }
     if(plane->enhanced)ID3D11Texture2D_Release(plane->enhanced);
     if(plane->image)ID3D11Texture2D_Release(plane->image);
     pilot_native_admitted_bytes-=plane->admitted_bytes;
@@ -278,6 +359,7 @@ static void pilot_native_map_release(struct PilotNativeMap *map)
     struct PilotNativeMap **entry=&pilot_native_maps;
     while(*entry && *entry!=map)entry=&(*entry)->next;
     if(*entry)*entry=map->next;
+    pilot_native_admission_clear(map);
     ID3D11Resource_Release(map->source);
     pilot_native_plane_release(map->plane);
     free(map);
@@ -325,5 +407,78 @@ static HRESULT pilot_native_plane_view(struct PilotNativePlane *plane,ID3D11Shad
     }
     *output=view;
     return S_OK;
+}
+static void pilot_native_admission_pair(struct PilotNativeAdmissionView *view)
+{
+    struct PilotNativePlane *plane=view->owner->plane;
+    ID3D11View *paired=view->kind==PILOT_NATIVE_ADMISSION_RTV?(ID3D11View*)plane->rtv:
+        view->kind==PILOT_NATIVE_ADMISSION_DSV?(ID3D11View*)plane->dsv:NULL;
+    if(view->paired==paired)return;
+    if(view->paired)ID3D11View_Release(view->paired);
+    view->paired=paired;view->compatible=0;if(!paired)return;
+    ID3D11View_AddRef(paired);
+    if(view->kind==PILOT_NATIVE_ADMISSION_RTV) {
+        D3D11_RENDER_TARGET_VIEW_DESC b={0},*a=&view->desc.rtv;
+        ID3D11RenderTargetView_GetDesc((ID3D11RenderTargetView*)paired,&b);
+        view->compatible=a->Format==b.Format && a->ViewDimension==b.ViewDimension &&
+            (a->ViewDimension==D3D11_RTV_DIMENSION_TEXTURE2DMS ||
+             (a->ViewDimension==D3D11_RTV_DIMENSION_TEXTURE2D && !a->Texture2D.MipSlice && !b.Texture2D.MipSlice));
+    } else {
+        D3D11_DEPTH_STENCIL_VIEW_DESC b={0},*a=&view->desc.dsv;
+        ID3D11DepthStencilView_GetDesc((ID3D11DepthStencilView*)paired,&b);
+        view->compatible=a->Format==b.Format && a->ViewDimension==b.ViewDimension && a->Flags==b.Flags &&
+            (a->ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2DMS ||
+             (a->ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2D && !a->Texture2D.MipSlice && !b.Texture2D.MipSlice));
+    }
+}
+/* Resource is borrowed on a cache hit, owned on a cold/uncached lookup. No
+ * negative membership is cached: an ordinary SRV may acquire a map later. */
+static struct PilotNativeAdmissionView *pilot_native_admission_get(ID3D11View *original,unsigned kind,
+    ID3D11Resource **resource,unsigned *owned)
+{
+    *resource=NULL;*owned=0;
+    unsigned slot=pilot_native_admission_slot(original,kind);
+    struct PilotNativeAdmissionView *view=pilot_native_admission_index[slot];
+    if(!view || view->original!=original || view->kind!=kind) {
+        view=NULL;
+        for(struct PilotNativeMap *map=pilot_native_maps;map && !view;map=map->next)
+            for(struct PilotNativeAdmissionView *p=map->admission;p;p=p->next)
+                if(p->original==original && p->kind==kind){view=p;break;}
+    }
+    if(view) {
+        pilot_native_admission_index[slot]=view;*resource=view->owner->source;
+        pilot_native_admission_pair(view);return view;
+    }
+    ID3D11View_GetResource(original,resource);*owned=1;
+    struct PilotNativeMap *owner=pilot_native_maps;
+    while(owner && owner->source!=*resource)owner=owner->next;
+    if(!owner || owner->admission_count>=PILOT_NATIVE_ADMISSION_PER_MAP ||
+       pilot_native_admission_count>=PILOT_NATIVE_ADMISSION_VIEWS)return NULL;
+    view=calloc(1,sizeof(*view));if(!view)return NULL;
+    view->original=original;ID3D11View_AddRef(original);view->kind=kind;view->owner=owner;
+    if(kind==PILOT_NATIVE_ADMISSION_SRV)ID3D11ShaderResourceView_GetDesc((ID3D11ShaderResourceView*)original,&view->desc.srv);
+    else {
+        if(kind==PILOT_NATIVE_ADMISSION_RTV)ID3D11RenderTargetView_GetDesc((ID3D11RenderTargetView*)original,&view->desc.rtv);
+        else ID3D11DepthStencilView_GetDesc((ID3D11DepthStencilView*)original,&view->desc.dsv);
+        ID3D11Texture2D *image=NULL;
+        view->shape_result=ID3D11Resource_QueryInterface(*resource,&IID_ID3D11Texture2D,(void**)&image);
+        if(SUCCEEDED(view->shape_result)) {
+            ID3D11Texture2D_GetDesc(image,&view->shape);ID3D11Texture2D_Release(image);
+            if(!view->shape.Width || !view->shape.Height || view->shape.ArraySize!=1 || view->shape.MipLevels!=1)view->shape_result=E_NOTIMPL;
+        }
+        pilot_native_admission_pair(view);
+    }
+    view->next=owner->admission;owner->admission=view;++owner->admission_count;++pilot_native_admission_count;
+    pilot_native_admission_index[slot]=view;return view;
+}
+/* Borrowed only within this graphics-locked submission; the map owns the
+ * view ref. Queued consumers must take their own refs, as they already do. */
+static HRESULT pilot_native_admission_srv(struct PilotNativeAdmissionView *view,ID3D11ShaderResourceView **output)
+{
+    if(!view->enhanced) {
+        HRESULT result=pilot_native_plane_view(view->owner->plane,(ID3D11ShaderResourceView*)view->original,&view->enhanced);
+        if(FAILED(result))return result;
+    }
+    *output=view->enhanced;return S_OK;
 }
 #endif

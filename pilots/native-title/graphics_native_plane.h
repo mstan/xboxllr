@@ -3,6 +3,12 @@
  * aliases share the pair through the existing logical image owner. The
  * graphics lock serializes every call. Enhanced failure never replaces or
  * reconstructs the canonical source image. */
+/* Root calls these at actual resource/visibility boundaries on every donor. */
+static void pilot_native_epoch_flush(void);
+static void pilot_native_epoch_close(void);
+/* Optional per-vertex layout extent proof, consumed by the next raw wrapper.
+ * Unknown/instance-rate layouts must leave extent zero (full-buffer copy). */
+static void pilot_native_epoch_vertex_span(unsigned stream,unsigned extent);
 #ifdef PILOT_D3D_PHOBOS
 struct PilotNativeViewCache;
 struct PilotNativePlane {
@@ -30,6 +36,8 @@ static struct PilotNativePlane *pilot_native_plane_find(ID3D11Resource *);
 static HRESULT pilot_native_plane_view(struct PilotNativePlane *,ID3D11ShaderResourceView *,ID3D11ShaderResourceView **);
 /* Root integrates these policy/guest-query predicates with the existing owner. */
 static int pilot_native_enabled(void);
+/* Exact owned DEFAULT mesh identity; owner flushes before actual writes. */
+static int pilot_native_vertex_borrowable(unsigned stream,ID3D11Buffer *buffer);
 static int pilot_native_frame_valid(void);
 static int pilot_native_dimensions(unsigned,unsigned,unsigned,unsigned,unsigned *,unsigned *);
 static int pilot_native_query_active(void);
