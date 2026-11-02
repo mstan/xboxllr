@@ -2089,3 +2089,66 @@ int pilot_gfx_initializer_consumer(unsigned program,uint32_t primitive,uint32_t 
     if(program==2 && d3d8_GetRenderStates()[D3DRS_LIGHTING] && !pilot_gfx_lighting_ready())return 0;
     return !pilot_initializer.dither || pilot_initializer_target_format();
 }
+
+/* Bounded diagnostic fixture: caller binds the known two-quad scene and
+ * opens its native visibility query. No production draw calls this probe. */
+int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint32_t physical[2])
+{
+#ifdef PILOT_D3D_PHOBOS
+    if(!pilot_native_enabled() || !pilot_native_prepared_jobs_enabled() || !pilot_native_epoch_enabled())return -1;
+#define PACKET_CHECK(c) do { if(!(c)) { fprintf(stderr,"FAIL packet rollback line %d: %s\n",__LINE__,#c); return 1; } } while(0)
+    /* Exhaust only the optional admission budget, without allocating
+     * a large buffer. A real borrowed VB is followed by a real scratch
+     * reservation; the later index reservation must decline. The
+     * earlier draw and the next draw must survive in the same packet. */
+    pilot_native_epoch_poll();
+
+    PACKET_CHECK(!pilot_gfx_draw_vertices(6,0,4));
+    unsigned packet=pilot_native_epoch.recording;PACKET_CHECK(packet);
+    struct PilotNativeEpochGroup *pending=&pilot_native_epoch.groups[packet-1];
+    unsigned count_before=pending->job_count,draws_before=pilot_native_epoch.draws;
+    unsigned bytes_before=pilot_native_epoch.bytes;PACKET_CHECK(count_before && count_before<PILOT_NATIVE_EPOCH_DRAWS);
+    ID3D11DeviceContext *context=d3d8_GetD3D11Context();struct PreparedState saved={0};
+    PACKET_CHECK(pilot_native_epoch_state_capture(&saved,context));
+    void *registered_vertex=NULL;
+    PACKET_CHECK(pilot_native_cb_version_borrow(saved.vertices[0],&registered_vertex));
+    pilot_native_cb_version_release(&registered_vertex);
+    D3D11_BUFFER_DESC scratch_desc={0};scratch_desc.ByteWidth=16;
+    scratch_desc.Usage=D3D11_USAGE_DYNAMIC;scratch_desc.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+    scratch_desc.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+    ID3D11Buffer *scratch_vertex=NULL,*scratch_index=NULL;
+    PACKET_CHECK(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&scratch_desc,NULL,&scratch_vertex)));
+    scratch_desc.Usage=D3D11_USAGE_DEFAULT;scratch_desc.BindFlags=D3D11_BIND_INDEX_BUFFER;scratch_desc.CPUAccessFlags=0;
+    PACKET_CHECK(SUCCEEDED(ID3D11Device_CreateBuffer(d3d8_GetD3D11Device(),&scratch_desc,NULL,&scratch_index)));
+    UINT extra_stride=4,extra_offset=0;
+    ID3D11DeviceContext_IASetVertexBuffers(context,1,1,&scratch_vertex,&extra_stride,&extra_offset);
+    ID3D11DeviceContext_IASetIndexBuffer(context,scratch_index,DXGI_FORMAT_R16_UINT,0);
+    struct PilotNativeDrawState declined;
+    PACKET_CHECK(pilot_native_draw_prepare(&declined,0)==S_OK);
+    PACKET_CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before);
+    pilot_native_epoch.bytes=PILOT_NATIVE_EPOCH_BYTES-256;
+    PACKET_CHECK(!pilot_native_epoch_record(&declined,3,0,0,1));
+    PACKET_CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before && pilot_native_epoch.draws==draws_before);
+    PACKET_CHECK(pilot_native_epoch.bytes==PILOT_NATIVE_EPOCH_BYTES-256 && !pilot_native_epoch.copy_count);
+    PACKET_CHECK(pilot_native_epoch.copies[0].source==scratch_vertex && pilot_native_epoch.copies[0].bytes==16);
+    struct PreparedState empty={0};struct PilotNativeEpochJob *refused=&pending->jobs[count_before];
+    PACKET_CHECK(!memcmp(&refused->state,&empty,sizeof(empty)) && !refused->index_version);
+    for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)PACKET_CHECK(!refused->vertex_versions[i]);
+    for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
+        for(unsigned i=0;i<D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;++i)PACKET_CHECK(!refused->constant_versions[stage][i]);
+    for(struct PilotNativeEpochBuffer *buffer=pilot_native_epoch.buffers;buffer;buffer=buffer->next)
+        PACKET_CHECK(buffer->used!=pilot_native_epoch.serial);
+    pilot_native_epoch.bytes=bytes_before;
+    pilot_native_draw_release(&declined);
+    pilot_native_epoch_state_bind(context,&saved);pilot_native_epoch_state_release(&saved);
+    ID3D11Buffer_Release(scratch_vertex);ID3D11Buffer_Release(scratch_index);
+    PACKET_CHECK(!pilot_gfx_draw_vertices(6,4,4));
+    PACKET_CHECK(pilot_native_epoch.recording==packet && pending->job_count==count_before+1);
+    PACKET_CHECK(!pilot_gfx_reference_target_readback(0,enhanced,capacity,physical));
+    pilot_native_epoch_poll();PACKET_CHECK(pilot_native_cb_version_barrier(pilot_native_cb_epoch_barrier));
+#undef PACKET_CHECK
+    return 0;
+#else
+    (void)enhanced;(void)capacity;(void)physical;return -1;
+#endif
+}
