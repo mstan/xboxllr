@@ -385,7 +385,7 @@ static int test_native_scale_coherence(void)
             CHECK(!pilot_gfx_texture_readback(wide,0,native,bytes));
             CHECK(!pilot_gfx_texture_readback(wide_alias,0,alias_pixels,bytes));
             CHECK(!memcmp(native,alias_pixels,bytes));
-            unsigned red=0;for(unsigned i=0;i<bytes;i+=4)red+=!native[i] && !native[i+1] && native[i+2]==255;
+            unsigned red=0;for(unsigned i=0;i<bytes;i+=4)red+=native[i]==255 && !native[i+1] && !native[i+2];
             CHECK(red>8);free(native);free(alias_pixels);
             CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
             CHECK(physical[0]==width && physical[1]==height);
