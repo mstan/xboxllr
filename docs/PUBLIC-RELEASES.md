@@ -1,9 +1,11 @@
 # Public Windows alpha/beta releases
 
 XboxLLR is beta. Blinx's playable public alpha is tested through World 2;
-end-to-end completion is not guaranteed. Blinx is the only publicly supported
-game. One XboxLLR beta release contains both the Dashboard player ZIP and the build-tool
-ZIP. Blinx keeps its separate game release.
+end-to-end completion is not guaranteed. JSRF also runs on the same engine;
+its beta is private pending owner approval for publication, and has not been
+exhaustively playtested or tested end to end. Game packages have separate title
+releases. XboxLLR releases may contain the Dashboard ZIP, the build-tool ZIP or
+both; retain the existing Dashboard download when only the toolkit changes.
 
 Commit clean source first. Use separate output directories outside checkouts,
 build and validate the native applications, then run the scripts below. They

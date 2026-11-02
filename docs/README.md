@@ -1,10 +1,12 @@
 # XboxLLR documentation
 
-XboxLLR is beta. Blinx is the only publicly supported game; the Dashboard app
-and build tool share one [XboxLLR release](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2).
+XboxLLR is beta. The same engine powers Blinx and JSRF; JSRF's preview remains
+private while its public beta is prepared. See the [main README](../README.md)
+for current downloads and testing limits.
 
 | Guide | Purpose |
 | --- | --- |
+| [Contributing](../CONTRIBUTING.md) | Bug reports, setup and upstream pull requests |
 | [Dashboard](DASHBOARD.md) | Tested features, partial support and unavailable functionality |
 | [Setup](SETUP.md) | User-owned content, local consoles, saves and Dashboard 5960 |
 | [Build tool](BUILD-TOOL.md) | xboxllr.exe and developer prerequisites |

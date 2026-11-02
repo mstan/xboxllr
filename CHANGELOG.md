@@ -1,5 +1,18 @@
 # Changes
 
+## Beta 2026.11.02.1
+
+- Updated Windows build toolkit and matching framework source.
+- The same XboxLLR engine supports Blinx and Jet Set Radio Future. JSRF's beta
+  is currently private while its public release is prepared; it has not been
+  exhaustively playtested or tested end to end.
+- Companion game builds expose higher-resolution rendering and 1x–8x
+  supersampling. Performance depends on the game, scene, settings and hardware.
+- New [contributor guide](CONTRIBUTING.md) and game-admission FAQ explain how to
+  help implement missing functionality and send shared fixes upstream.
+- The Dashboard application remains on its separately validated November 1
+  release; this toolkit update includes no new Dashboard runtime.
+
 ## Beta 2026.10.29.2
 
 - One XboxLLR release contains the playable Dashboard package and developer

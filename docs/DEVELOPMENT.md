@@ -17,8 +17,8 @@ Use the shared native driver and an admitted title definition for that path.
 
 ## Tools and checkout
 
-- **Git**, with access to the private repositories. Keep `xboxllr`, BlinxRecomp
-  and JSRFRecomp private under the current owner policy.
+- **Git**. XboxLLR and BlinxRecomp are public; JSRFRecomp currently requires
+  private repository access while its public beta is being prepared.
 - **Python 3.11+** for `tomllib` and `hashlib.file_digest`; the current Windows
   tooling has been exercised with Python 3.12. The ROM-free checks below use
   the standard library. Translation/binding tools can additionally need
