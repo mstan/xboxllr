@@ -16,14 +16,14 @@ the downloads do not run arbitrary Xbox games.
 
 ## Downloads
 
-**[Download XboxLLR beta](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2)** — one release contains both the
+**[Download XboxLLR beta](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.01.1)** — one release contains both the
 Dashboard app and the developer build tool. Choose the ZIP you need below.
 
 | Download | Who it is for |
 | --- | --- |
-| **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2)** | Player app: download `XboxDashboard-windows-x64-2026.10.29.2.zip`, extract it, then open **Start Game.exe**. Supply your own Dashboard 5960 executable and assets. No compiler required. |
-| **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.10.29.2)** | Developer package: `xboxllr-build-tool-windows-x64-2026.10.29.2.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
-| **[Blinx playable public alpha](https://github.com/mstan/BlinxRecomp/releases/tag/alpha-2026.10.29.1)** | Players: a ready-to-run native game package. No compiler required; supply your own supported NTSC-U game dump. |
+| **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.01.1)** | Player app: download `XboxDashboard-windows-x64-2026.11.01.1.zip`, extract it, then open **Start Game.exe**. Supply your own Dashboard 5960 executable and assets. No compiler required. |
+| **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.01.1)** | Developer package: `xboxllr-build-tool-windows-x64-2026.11.01.1.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
+| **[Blinx playable public alpha](https://github.com/mstan/BlinxRecomp/releases/tag/alpha-2026.11.01.1)** | Players: a ready-to-run native game package. No compiler required; supply your own supported NTSC-U game dump. |
 
 Current playable downloads target **Windows x64 with D3D11**. Linux component
 checks do not establish a working Linux game release. JSRF and other experimental
