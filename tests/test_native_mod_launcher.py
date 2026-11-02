@@ -162,7 +162,7 @@ class LauncherPolicy(unittest.TestCase):
             fresh=ui.Catalog(MANIFESTS,state,defaults=defaults)
             feature=next(f for f in fresh.features if f['id']=='supersampling')
             option=feature['options'][0]
-            self.assertEqual([v for v,_ in option['choices']],['1','2','3','8'])
+            self.assertEqual([v for v,_ in option['choices']],[str(v) for v in range(1,9)])
             self.assertEqual((option['default'],option['value']),('2','2'))
             self.assertEqual(option['label'],'Per-axis multiplier')
             self.assertIn('Original internal resolution',feature['description'])
