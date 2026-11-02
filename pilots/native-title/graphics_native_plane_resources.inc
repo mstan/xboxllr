@@ -41,7 +41,7 @@ static unsigned pilot_native_admission_depth_next,pilot_native_admission_blend_n
 static int pilot_native_admission_enabled(void)
 {
     static int enabled=-1;
-    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_ADMISSION_CACHE");enabled=value && !strcmp(value,"1");}
+    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_ADMISSION_CACHE");enabled=!value || !strcmp(value,"1");}
     return enabled;
 }
 static unsigned pilot_native_admission_slot(ID3D11View *view,unsigned kind)

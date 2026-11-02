@@ -44,11 +44,10 @@ static int pilot_native_epoch_enabled(void)
     static int mode=-1;
     if(mode<0) {
         const char *value=getenv("XLLE_PILOT_NATIVE_RENDER_EPOCH");
-        /* Full-scene snapshots failed the actual-game performance gate. Both
-         * experiments are explicit: 1 records all HD work; 2 records only
-         * while a native visibility query is open. Normal draws keep the
-         * immediate path without snapshotting their already prepared inputs. */
-        mode=value && !strcmp(value,"1")?1:value && !strcmp(value,"2")?2:0;
+        /* The owned prepared pipeline follows elective upscaling. Native1x
+         * and unsupported/budget-declined paths remain outside this queue.
+         * Explicit values are private same-binary qualification controls. */
+        mode=!value || !strcmp(value,"1")?1:!strcmp(value,"2")?2:0;
     }
     return mode && (mode!=2 || pilot_native_query_active()) &&
         !pilot_native_epoch.failed && pilot_native_enabled();
@@ -352,7 +351,7 @@ static int pilot_native_prepared_jobs_enabled(void)
     static int enabled=-1;
     if(enabled<0) {
         const char *value=getenv("XLLE_PILOT_NATIVE_PREPARED_JOBS");
-        enabled=value && !strcmp(value,"1");
+        enabled=!value || !strcmp(value,"1");
     }
     return enabled;
 }

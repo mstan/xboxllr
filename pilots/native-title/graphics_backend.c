@@ -17,7 +17,7 @@
 static int pilot_native_state_owner_enabled(void)
 {
     static int enabled=-1;
-    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_STATE_OWNER");enabled=value && !strcmp(value,"1");}
+    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_STATE_OWNER");enabled=!value || !strcmp(value,"1");}
     return enabled;
 }
 #endif
