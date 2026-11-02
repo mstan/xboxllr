@@ -143,6 +143,75 @@ def prepare_cb_versions(code):
     once('/* ---- buffers ', '#include "graphics_cb_version_owner.inc"\n\n/* ---- buffers ')
     once('    if (v->v) ID3D11View_Release(v->v);',
          '    if (v->v) { prepared_state_forget_view(v->v); ID3D11View_Release(v->v); }')
+    # Private swapchain views bypass d_view_destroy; release their metadata
+    # ownership at the same physical-image boundary.
+    once('        ID3D11View_Release(((struct RhiView *)g_present_view)->v);',
+         '        prepared_state_forget_view(((struct RhiView *)g_present_view)->v);\n        ID3D11View_Release(((struct RhiView *)g_present_view)->v);')
+    once('        ID3D11RenderTargetView_Release(g_present_rtv);',
+         '        prepared_state_forget_view((ID3D11View*)g_present_rtv);\n        ID3D11RenderTargetView_Release(g_present_rtv);')
+    once(
+        '''static int d_swapchain_resize(uint32_t w, uint32_t h)
+{
+    ID3D11RenderTargetView *saved_rtv = NULL;
+    ID3D11DepthStencilView *saved_dsv = NULL;
+    int ok = -1;
+
+    if (!g_swap)
+        return -1;
+    /* ResizeBuffers wants every reference to the old back buffer gone,
+     * including any the context still holds. */
+    ID3D11DeviceContext_OMGetRenderTargets(g_ctx, 1, &saved_rtv, &saved_dsv);
+    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 0, NULL, NULL);
+    release_back_buffer_view();
+    if (SUCCEEDED(IDXGISwapChain_ResizeBuffers(g_swap, 0, w, h, DXGI_FORMAT_UNKNOWN, g_swap_flags)))
+        ok = make_back_buffer_view();
+    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 1, &saved_rtv, saved_dsv);
+    if (saved_rtv) ID3D11RenderTargetView_Release(saved_rtv);
+    if (saved_dsv) ID3D11DepthStencilView_Release(saved_dsv);
+    return ok;
+}''',
+        '''static int d_swapchain_resize(uint32_t w, uint32_t h)
+{
+    ID3D11RenderTargetView *saved[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {0};
+    ID3D11DepthStencilView *saved_dsv = NULL;
+    ID3D11Resource *backbuffer = NULL;
+    unsigned replace_backbuffer = 0;
+    int ok = -1;
+    if (!g_swap) return -1;
+    ID3D11DeviceContext_OMGetRenderTargets(g_ctx, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, saved, &saved_dsv);
+    if (g_present_rtv) ID3D11RenderTargetView_GetResource(g_present_rtv, &backbuffer);
+    for (unsigned i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) if (saved[i]) {
+        ID3D11Resource *resource = NULL;
+        ID3D11RenderTargetView_GetResource(saved[i], &resource);
+        int old_backbuffer = backbuffer && resource == backbuffer;
+        if (resource) ID3D11Resource_Release(resource);
+        if (old_backbuffer) {
+            replace_backbuffer |= 1u << i;
+            ID3D11RenderTargetView_Release(saved[i]); saved[i] = NULL;
+        }
+    }
+    if (backbuffer) ID3D11Resource_Release(backbuffer);
+    /* A private presentation view is an actual owner, too. Drop retained
+     * binding/fact references before DXGI releases the underlying image.
+     * The next snapshot repairs from the restored immediate context once. */
+    prepared_state_invalidate(g_ctx);
+    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, 0, NULL, NULL);
+    release_back_buffer_view();
+    HRESULT resized = IDXGISwapChain_ResizeBuffers(g_swap, 0, w, h, DXGI_FORMAT_UNKNOWN, g_swap_flags);
+    /* A refused resize still owns its old buffer. Recreate its view so a
+     * transient refusal does not permanently suppress future presentation. */
+    int recreated = make_back_buffer_view();
+    if (SUCCEEDED(resized) && recreated == 0) ok = 0;
+    for (unsigned i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) if (replace_backbuffer & (1u << i)) {
+        saved[i] = g_present_rtv;
+        if (saved[i]) ID3D11RenderTargetView_AddRef(saved[i]);
+    }
+    ID3D11DeviceContext_OMSetRenderTargets(g_ctx, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, saved, saved_dsv);
+    for (unsigned i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
+        if (saved[i]) ID3D11RenderTargetView_Release(saved[i]);
+    if (saved_dsv) ID3D11DepthStencilView_Release(saved_dsv);
+    return ok;
+}''')
     once('    b->desc = *d;\n    return b;',
          '    b->desc = *d;\n    pilot_native_cb_track(&b->b);\n    return b;')
     once('static void d_buffer_destroy(RhiBuffer *b)\n{',
