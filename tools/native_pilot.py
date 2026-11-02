@@ -152,6 +152,11 @@ def prepare(args):
     for family in ('input', 'audio', 'startup', 'network'):
         (out / 'gen' / f'pilot_{family}_binding.c').unlink(missing_ok=True)
         (out / 'gen' / f'pilot_{family}_bindings.h').unlink(missing_ok=True)
+    # Translation restores the original bodies. Recreate title wrappers too,
+    # so existing wrappers cannot skip renaming those newly emitted originals.
+    (out / 'gen' / 'pilot_title_binding.c').unlink(missing_ok=True)
+    for wrapper in (out / 'gen').glob('pilot_title_hook_*_binding.c'):
+        wrapper.unlink()
     (out / 'gen' / 'pilot_poll_wait_units.json').unlink(missing_ok=True)
     identity.write_text(json.dumps(image, indent=2) + "\n")
 
