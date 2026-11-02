@@ -2207,6 +2207,21 @@ int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint
 #endif
 }
 
+int pilot_gfx_native_decline_create_probe(uint32_t *handle)
+{
+#ifdef PILOT_D3D_PHOBOS
+    if(!handle || !pilot_native_enabled())return E_INVALIDARG;
+    /* Single-threaded renderer fixture: exhaust accounting, not actual VRAM.
+     * The real companion factory must decline while canonical creation works. */
+    uint64_t admitted=pilot_native_admitted_bytes;pilot_native_admitted_bytes=UINT64_MAX;
+    HRESULT result=pilot_gfx_texture_create_usage(pilot_gfx_width(),pilot_gfx_height(),1,0x12,1,handle);
+    pilot_native_admitted_bytes=admitted;
+    if(SUCCEEDED(result) && pilot_textures[*handle-1].use->native_map)return E_FAIL;
+    return result;
+#else
+    (void)handle;return E_NOTIMPL;
+#endif
+}
 /* Regression fixture for the real private presentation owner. Holding cached
  * view facts and the currently bound backbuffer must not prevent resize. */
 int pilot_gfx_native_present_resize_probe(uint32_t render_width,uint32_t render_height)

@@ -216,4 +216,5 @@ int32_t pilot_gfx_visibility_result(uint32_t index,uint32_t *count,uint64_t *sta
 int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint32_t physical[2]);
 /* Diagnostic fixture only: actual swapchain resize with owned cached/bound views. */
 int pilot_gfx_native_present_resize_probe(uint32_t render_width,uint32_t render_height);
+int pilot_gfx_native_decline_create_probe(uint32_t *handle);
 #endif

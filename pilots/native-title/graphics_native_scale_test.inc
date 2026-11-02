@@ -366,17 +366,18 @@ static int test_native_scale_coherence(void)
         pilot_gfx_vertex_bind(0,0,0);pilot_gfx_vertex_destroy(constant_vertices);
         pilot_gfx_shader_destroy(constant_shader);
         if(scale==8) {
-            /* A small legal native target whose optional width exceeds the
-             * D3D11 limit. Exercise real refusal without memory pressure. */
-            const unsigned width=2049,height=8,bytes=width*height*4;
+            /* Decline only the optional companion budget. The ordinary small
+             * native allocation and its rendering remain real. */
+            const unsigned width=80,height=64,bytes=width*height*4;
             uint32_t wide=0,wide_alias=0;
-            CHECK(!pilot_gfx_texture_create_usage(width,height,1,0x12,1,&wide));
-            CHECK(!pilot_gfx_texture_alias(PILOT_GFX_TEXTURE,wide,0x12,&wide_alias));
+            CHECK(!pilot_gfx_native_decline_create_probe(&wide));
             CHECK(!pilot_gfx_targets(wide,0));
             uint32_t small_view[]={0,0,8,8,0,0x3f800000u};CHECK(!pilot_gfx_viewport(small_view));
             pilot_gfx_set_state(D3DRS_ZENABLE,0);pilot_gfx_set_state(D3DRS_STENCILENABLE,0);
             pilot_gfx_set_state(D3DRS_ALPHABLENDENABLE,0);pilot_gfx_set_state(D3DRS_CULLMODE,1);
+            pilot_gfx_set_state(D3DRS_FOGENABLE,0);pilot_gfx_set_texture_state(0,D3DTSS_COLOROP,D3DTOP_DISABLE);
             CHECK(!pilot_gfx_clear(1,0xff000000,1,0));
+            CHECK(!pilot_gfx_texture_alias(PILOT_GFX_TEXTURE,wide,0x12,&wide_alias));
             struct {float x,y,z,w;uint32_t color;} triangle[]={
                 {0,0,.5f,1,0xffff0000},{8,0,.5f,1,0xffff0000},{0,8,.5f,1,0xffff0000}};
             CHECK(!pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,triangle,sizeof(triangle[0]),0x44));
@@ -392,7 +393,7 @@ static int test_native_scale_coherence(void)
             CHECK(!pilot_gfx_clear(1,0xff000000,1,0));
             CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
             CHECK(physical[0]==80*scale && physical[1]==64*scale);
-            fprintf(stderr,"COMPANION DECLINE: requested=16392x64 native=2049x8 drawn_pixels=%u alias_exact=1 recovered=640x512\n",red);
+            fprintf(stderr,"COMPANION DECLINE: requested=640x512 native=80x64 drawn_pixels=%u alias_exact=1 recovered=640x512\n",red);
         }
         fprintf(stderr,"CONSTANT INDEX VERSIONS SCALE: axis=%u native_bytes=0 red_green_blue=3 samples=960\n",scale);
         pilot_gfx_texture_destroy(alias);pilot_gfx_texture_destroy(depth);pilot_gfx_close();
