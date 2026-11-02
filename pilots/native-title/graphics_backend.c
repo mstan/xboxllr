@@ -2215,6 +2215,9 @@ int pilot_gfx_native_present_resize_probe(uint32_t render_width,uint32_t render_
 #define PRESENT_CHECK(c) do { if(!(c)) { fprintf(stderr,"FAIL present resize line %d: %s\n",__LINE__,#c); return 1; } } while(0)
     RECT before;PRESENT_CHECK(GetClientRect(pilot_window,&before));
     UINT wanted[2][2]={{997,613},{(UINT)(before.right-before.left),(UINT)(before.bottom-before.top)}};
+    /* Capture the resolved image before Present; flip/discard backbuffers do
+     * not retain defined pixels after the swap. */
+    xbox_D3D8KeepPresented(TRUE);
     for(unsigned pass=0;pass<2;++pass) {
         RhiView *view=rhi_swapchain_view();PRESENT_CHECK(view);
         ID3D11RenderTargetView *native=(ID3D11RenderTargetView*)rhi_d3d11_native_view(view);PRESENT_CHECK(native);
@@ -2226,16 +2229,16 @@ int pilot_gfx_native_present_resize_probe(uint32_t render_width,uint32_t render_
         PRESENT_CHECK(SetWindowPos(pilot_window,NULL,0,0,rectangle.right-rectangle.left,rectangle.bottom-rectangle.top,
             SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE));
         PRESENT_CHECK(!pilot_gfx_present());
-        uint32_t width=0,height=0,render[2]={0};
-        PRESENT_CHECK(!rhi_swapchain_readback(NULL,0,&width,&height));
+        UINT width=0,height=0;uint32_t render[2]={0};
+        const unsigned char *pixels=xbox_D3D8Presented(&width,&height);PRESENT_CHECK(pixels);
         PRESENT_CHECK(width==wanted[pass][0] && height==wanted[pass][1]);
         uint64_t bytes=(uint64_t)width*height*4;PRESENT_CHECK(bytes && bytes<=64*1024*1024);
-        unsigned char *pixels=malloc((size_t)bytes);PRESENT_CHECK(pixels);
-        int status=rhi_swapchain_readback(pixels,width*4,&width,&height);unsigned nonblack=0;
-        if(!status)for(uint64_t i=0;i<bytes;i+=4)nonblack+=pixels[i] || pixels[i+1] || pixels[i+2];
-        free(pixels);PRESENT_CHECK(!status && nonblack>128);
+        unsigned nonblack=0;
+        for(uint64_t i=0;i<bytes;i+=4)nonblack+=pixels[i] || pixels[i+1] || pixels[i+2];
+        PRESENT_CHECK(nonblack>128);
         pilot_gfx_render_size(render);PRESENT_CHECK(render[0]==render_width && render[1]==render_height);
     }
+    xbox_D3D8KeepPresented(FALSE);
     fprintf(stderr,"BOUND PRESENT RESIZE: cached_view=1 bound_backbuffer=1 client=997x613 restored=%ux%u enhanced=%ux%u pixels=1\n",
         wanted[1][0],wanted[1][1],render_width,render_height);
 #undef PRESENT_CHECK
