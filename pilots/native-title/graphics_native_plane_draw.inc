@@ -528,6 +528,16 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
 static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexed)
 {
     if(!pilot_native_enabled()) {memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));return;}
+    uint64_t cpu_work=0;
+    if(pilot_native_cpu.active) {
+        /* Random 1/64 sampling avoids both per-draw system calls and fixed
+         * alignment with 256-draw packets. Flush attribution stays exact. */
+        unsigned random=pilot_native_cpu.random;
+        random^=random<<13;random^=random>>17;random^=random<<5;
+        pilot_native_cpu.random=random;++pilot_native_cpu.draws;
+        if(!(random&63)){cpu_work=pilot_native_cpu_clock();++pilot_native_cpu.samples;}
+    }
+    pilot_native_cpu.inside=1;
     if(!pilot_native_epoch_enabled()) {
         /* Matched opt-out retains the original single-admission immediate
          * path; it must not pay for a failed deferred capture first. */
@@ -540,9 +550,14 @@ static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexe
         }
         goto finished;
     }
+    uint64_t cpu_prepare=cpu_work?pilot_native_cpu_clock():0;
     struct PilotNativeDrawState draw;HRESULT result=pilot_native_draw_prepare(&draw,0);
+    if(cpu_work)pilot_native_cpu.prepare+=64*(pilot_native_cpu_clock()-cpu_prepare);
     if(result==S_OK) {
-        if(pilot_native_epoch_record(&draw,count,first,base,indexed)) {
+        uint64_t cpu_record=cpu_work?pilot_native_cpu_clock():0;
+        int recorded=pilot_native_epoch_record(&draw,count,first,base,indexed);
+        if(cpu_work)pilot_native_cpu.record+=64*(pilot_native_cpu_clock()-cpu_record);
+        if(recorded) {
             (void)pilot_native_draw_end(&draw);goto finished;
         }
         (void)pilot_native_draw_end(&draw);
@@ -557,6 +572,8 @@ static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexe
         (void)pilot_native_draw_end(&draw);
     }
 finished:
+    if(cpu_work)pilot_native_cpu.work+=64*(pilot_native_cpu_clock()-cpu_work);
+    pilot_native_cpu.inside=0;
     memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));
 }
 static void pilot_native_draw(UINT count,UINT first)

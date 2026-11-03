@@ -35,6 +35,39 @@ static struct {
     unsigned output_count,draws,allocated,buffer_count,bytes,serial,recording,copy_count,failed,packet_bytes,borrowed_vertices,borrowed_constants,borrowed_indices;
 } pilot_native_epoch;
 static unsigned pilot_native_epoch_extents[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT];
+/* Private bounded attribution; CPU cycles exclude time descheduled in driver waits.
+ * Counters are nested, not additive. No sampling privilege or timing-window I/O. */
+static struct {
+    uint64_t start,work,prepare,record,flush,external_flush,replay,submit,copy_bytes;
+    unsigned active,inside,draws,packets,samples,random;
+} pilot_native_cpu;
+static uint64_t pilot_native_cpu_clock(void)
+{
+#ifdef _WIN32
+    ULONG64 cycles=0;if(pilot_native_cpu.active)QueryThreadCycleTime(GetCurrentThread(),&cycles);
+    return (uint64_t)cycles;
+#else
+    return 0;
+#endif
+}
+static void pilot_native_cpu_begin(void)
+{
+    const char *value=getenv("XLLE_PILOT_NATIVE_RENDER_DIAGNOSTICS");
+    if(pilot_native_cpu.start || !value || strcmp(value,"1"))return;
+    pilot_native_cpu.active=1;pilot_native_cpu.random=1;pilot_native_cpu.start=pilot_native_cpu_clock();
+}
+static void pilot_native_cpu_report(void)
+{
+    if(!pilot_native_cpu.active)return;
+    uint64_t total=pilot_native_cpu_clock()-pilot_native_cpu.start;
+    pilot_native_cpu.active=0;
+    fprintf(stderr,"[NATIVE CPU CYCLES] total=%llu work=%llu prepare=%llu record=%llu flush=%llu external_flush=%llu replay=%llu submit=%llu copy_bytes=%llu draws=%u packets=%u draw_samples=%u draw_weight=64 nested=1\n",
+        (unsigned long long)total,(unsigned long long)pilot_native_cpu.work,
+        (unsigned long long)pilot_native_cpu.prepare,(unsigned long long)pilot_native_cpu.record,
+        (unsigned long long)pilot_native_cpu.flush,(unsigned long long)pilot_native_cpu.external_flush,
+        (unsigned long long)pilot_native_cpu.replay,(unsigned long long)pilot_native_cpu.submit,
+        (unsigned long long)pilot_native_cpu.copy_bytes,pilot_native_cpu.draws,pilot_native_cpu.packets,pilot_native_cpu.samples);
+}
 static void pilot_native_epoch_vertex_span(unsigned stream,unsigned extent)
 {
     if(stream<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT)pilot_native_epoch_extents[stream]=extent;
@@ -109,8 +142,10 @@ static void pilot_native_epoch_cancel_empty(void)
 static void pilot_native_epoch_flush(void)
 {
     if(!pilot_native_epoch.draws)return;
+    uint64_t cpu_begin=pilot_native_cpu_clock(),cpu_replay=cpu_begin;
     struct PilotNativeEpochGroup *group=&pilot_native_epoch.groups[pilot_native_epoch.recording-1];
     int executed=pilot_native_epoch_replay(group);
+    if(cpu_begin)pilot_native_cpu.replay+=pilot_native_cpu_clock()-cpu_replay;
     if(executed) {
         static int reported;
         if(!reported) {
@@ -149,9 +184,16 @@ static void pilot_native_epoch_flush(void)
     /* Also fences capture copies if save/exclusion admission declined. No
      * copied snapshot can become reusable until this real GPU event retires. */
     ID3D11DeviceContext_End(immediate,(ID3D11Asynchronous*)group->done);
+    uint64_t cpu_submit=pilot_native_cpu_clock();
     ID3D11DeviceContext_Flush(immediate);
+    if(cpu_begin)pilot_native_cpu.submit+=pilot_native_cpu_clock()-cpu_submit;
     pilot_native_epoch.recording=pilot_native_epoch.output_count=pilot_native_epoch.draws=pilot_native_epoch.bytes=pilot_native_epoch.borrowed_vertices=pilot_native_epoch.borrowed_constants=pilot_native_epoch.borrowed_indices=0;
     pilot_native_epoch_poll();
+    if(cpu_begin) {
+        uint64_t cycles=pilot_native_cpu_clock()-cpu_begin;
+        pilot_native_cpu.flush+=cycles;if(!pilot_native_cpu.inside)pilot_native_cpu.external_flush+=cycles;
+        ++pilot_native_cpu.packets;
+    }
 }
 static void pilot_native_epoch_close(void)
 {
@@ -525,6 +567,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
      * copies; an earlier failure must not leave untracked GPU writes behind. */
     for(unsigned i=0;i<pilot_native_epoch.copy_count;++i) {
         struct PilotNativeEpochCopy *copy=&pilot_native_epoch.copies[i];
+        if(pilot_native_cpu.active)pilot_native_cpu.copy_bytes+=copy->bytes;
         if(copy->bind==D3D11_BIND_CONSTANT_BUFFER)
             ID3D11DeviceContext_CopyResource(native,(ID3D11Resource*)copy->destination,(ID3D11Resource*)copy->source);
         else {
