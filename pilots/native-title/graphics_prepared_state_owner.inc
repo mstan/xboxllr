@@ -5,6 +5,7 @@
 #if defined(_WIN32) && defined(COBJMACROS)
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 enum { PREPARED_ALL_STAGES=6, PREPARED_FACTS=128, PREPARED_STATE_FACTS=32 };
 struct PreparedExtraStage {
     IUnknown *shader;
@@ -97,8 +98,37 @@ static void prepared_state_refs(struct PreparedState *s,int add)
     PREPARED_REF(s->target_depth);
 #undef PREPARED_REF
 }
+/* Empty snapshots are zeroed once. Copy and clear only live pointer extents:
+ * the 768 class slots and 384 SRV slots are almost entirely unused by Xbox
+ * draws. Touching all of them twice per draw defeats immutable packet reuse.
+ * Holes remain valid; slots above a released extent are already zero. */
+static void prepared_state_copy_live(struct PreparedState *out,const struct PreparedState *s)
+{
+    if(out==s)return;
+    memcpy(out,s,offsetof(struct PreparedState,classes));
+    for(unsigned stage=0;stage<PREPARED_STAGES;++stage) {
+        memcpy(out->classes[stage],s->classes[stage],s->class_count[stage]*sizeof(s->classes[stage][0]));
+        memcpy(out->constants[stage],s->constants[stage],s->constant_count[stage]*sizeof(s->constants[stage][0]));
+        memcpy(out->resources[stage],s->resources[stage],s->resource_count[stage]*sizeof(s->resources[stage][0]));
+        memcpy(out->samplers[stage],s->samplers[stage],s->sampler_count[stage]*sizeof(s->samplers[stage][0]));
+    }
+    memcpy(out->class_count,s->class_count,sizeof(s->class_count));
+    memcpy(&out->raster,&s->raster,sizeof(*s)-offsetof(struct PreparedState,raster));
+}
 void prepared_state_release(struct PreparedState *s)
-{ if(s){prepared_state_refs(s,0);memset(s,0,sizeof(*s));} }
+{
+    if(!s)return;
+    prepared_state_refs(s,0);
+    for(unsigned stage=0;stage<PREPARED_STAGES;++stage) {
+        memset(s->classes[stage],0,s->class_count[stage]*sizeof(s->classes[stage][0]));
+        memset(s->constants[stage],0,s->constant_count[stage]*sizeof(s->constants[stage][0]));
+        memset(s->resources[stage],0,s->resource_count[stage]*sizeof(s->resources[stage][0]));
+        memset(s->samplers[stage],0,s->sampler_count[stage]*sizeof(s->samplers[stage][0]));
+    }
+    memset(s,0,offsetof(struct PreparedState,classes));
+    memset(s->class_count,0,sizeof(s->class_count));
+    memset(&s->raster,0,sizeof(*s)-offsetof(struct PreparedState,raster));
+}
 static void prepared_clear_bindings(void)
 {
     prepared_state_release(&prepared_owner.state);
@@ -376,7 +406,7 @@ int prepared_state_snapshot_borrow(ID3D11DeviceContext *context,struct PreparedS
 {
     if(!out || context!=prepared_owner.context || (!prepared_owner.known && !prepared_resync(context)))return 0;
     if(prepared_unsupported())return 0;
-    *out=prepared_owner.state;return 1;
+    prepared_state_copy_live(out,&prepared_owner.state);return 1;
 }
 int prepared_state_draw_subset(ID3D11DeviceContext *context,struct PreparedDrawSubset *out)
 {
