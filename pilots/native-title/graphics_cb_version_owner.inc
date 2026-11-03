@@ -18,7 +18,7 @@ struct PilotCbOwner {
     ID3D11Buffer **slot;
     struct PilotCbVersion *current,*free;
     D3D11_BUFFER_DESC desc;
-    unsigned used,nodes,mapped,blocked,unsupported;
+    unsigned used,nodes,mapped,blocked,unsupported,append_end;
 };
 static struct PilotCbOwner pilot_cb_owners[PILOT_CB_OWNERS];
 static struct PilotCbVersion pilot_cb_nodes[PILOT_CB_NODES],*pilot_cb_free;
@@ -82,12 +82,13 @@ static struct PilotCbOwner *pilot_cb_owner(ID3D11Buffer **slot,int create)
     int constant=desc.BindFlags==D3D11_BIND_CONSTANT_BUFFER && !(desc.ByteWidth&15) &&
         (desc.Usage==D3D11_USAGE_DEFAULT?desc.CPUAccessFlags==0:
          desc.Usage==D3D11_USAGE_DYNAMIC && desc.CPUAccessFlags==D3D11_CPU_ACCESS_WRITE);
-    int index=desc.BindFlags==D3D11_BIND_INDEX_BUFFER && !(desc.ByteWidth&3) &&
-        desc.Usage==D3D11_USAGE_DYNAMIC && desc.CPUAccessFlags==D3D11_CPU_ACCESS_WRITE;
+    int stream=(desc.BindFlags==D3D11_BIND_INDEX_BUFFER || desc.BindFlags==D3D11_BIND_VERTEX_BUFFER) &&
+        !(desc.ByteWidth&3) && desc.Usage==D3D11_USAGE_DYNAMIC &&
+        desc.CPUAccessFlags==D3D11_CPU_ACCESS_WRITE && desc.ByteWidth<=PILOT_CB_BYTES;
     int vertex=desc.BindFlags==D3D11_BIND_VERTEX_BUFFER && !(desc.ByteWidth&3) &&
         desc.Usage==D3D11_USAGE_DEFAULT && desc.CPUAccessFlags==0 && desc.ByteWidth<=PILOT_CB_BYTES;
     if(!desc.ByteWidth || desc.MiscFlags || desc.StructureByteStride ||
-       (!(constant || index) && !vertex) || (!vertex && desc.ByteWidth>65536))return NULL;
+       (!(constant || stream) && !vertex) || (!(vertex || stream) && desc.ByteWidth>65536))return NULL;
     if(!pilot_cb_initialized) {
         for(unsigned i=0;i<PILOT_CB_NODES;++i){pilot_cb_nodes[i].next=pilot_cb_free;pilot_cb_free=&pilot_cb_nodes[i];}
         pilot_cb_initialized=1;
@@ -183,7 +184,8 @@ void pilot_native_cb_before_write(ID3D11Buffer **slot)
     struct PilotCbOwner *owner=pilot_cb_owner(slot,1);if(!owner)return;
     /* Index ownership admits only WRITE_DISCARD through map(). The original
      * caller still performs any unexpected update, but it cannot publish HD. */
-    if(owner->desc.BindFlags!=D3D11_BIND_CONSTANT_BUFFER && owner->desc.BindFlags!=D3D11_BIND_VERTEX_BUFFER) {
+    if(owner->desc.BindFlags!=D3D11_BIND_CONSTANT_BUFFER &&
+       !(owner->desc.BindFlags==D3D11_BIND_VERTEX_BUFFER && owner->desc.Usage==D3D11_USAGE_DEFAULT)) {
         owner->unsupported=1;
         if(owner->current->pins)pilot_cb_pressure(owner,PILOT_CB_UNSUPPORTED_MAP);
         return;
@@ -200,20 +202,44 @@ void pilot_native_cb_before_write(ID3D11Buffer **slot)
 HRESULT pilot_native_cb_map(ID3D11Buffer **slot,ID3D11DeviceContext *context,D3D11_MAP mode,D3D11_MAPPED_SUBRESOURCE *mapped)
 {
     struct PilotCbOwner *owner=pilot_cb_owner(slot,1);
-    if(owner && (mode!=D3D11_MAP_WRITE_DISCARD || owner->desc.BindFlags==D3D11_BIND_VERTEX_BUFFER)) {
+    if(owner && (mode!=D3D11_MAP_WRITE_DISCARD || owner->desc.Usage!=D3D11_USAGE_DYNAMIC)) {
         owner->unsupported=1;if(owner->current->pins)pilot_cb_pressure(owner,PILOT_CB_UNSUPPORTED_MAP);
     } else if(owner && owner->current->pins) {
         struct PilotCbVersion *next=pilot_cb_available(owner,context);
         if(next) {
             HRESULT result=ID3D11DeviceContext_Map(context,(ID3D11Resource*)next->buffer,0,mode,0,mapped);
-            if(SUCCEEDED(result)){pilot_cb_publish(owner,next,context);owner->mapped=1;return result;}
+            if(SUCCEEDED(result)){pilot_cb_publish(owner,next,context);owner->mapped=1;owner->append_end=owner->desc.ByteWidth;return result;}
             next->next=owner->free;owner->free=next;
         }
         pilot_cb_pressure(owner,PILOT_CB_PRESSURE);
     }
     if(owner)pilot_cb_rebind(context,owner);
     HRESULT result=ID3D11DeviceContext_Map(context,(ID3D11Resource*)*slot,0,mode,0,mapped);
-    if(owner && SUCCEEDED(result))owner->mapped=1;return result;
+    if(owner && SUCCEEDED(result)){owner->mapped=1;owner->append_end=owner->desc.ByteWidth;}return result;
+}
+HRESULT pilot_native_stream_map(ID3D11Buffer **slot,ID3D11DeviceContext *context,D3D11_MAP mode,
+    UINT offset,UINT bytes,D3D11_MAPPED_SUBRESOURCE *mapped)
+{
+    struct PilotCbOwner *owner=pilot_cb_owner(slot,1);
+    int stream=owner && owner->desc.Usage==D3D11_USAGE_DYNAMIC &&
+        (owner->desc.BindFlags==D3D11_BIND_VERTEX_BUFFER || owner->desc.BindFlags==D3D11_BIND_INDEX_BUFFER);
+    int range=stream && bytes && offset<=owner->desc.ByteWidth && bytes<=owner->desc.ByteWidth-offset;
+    if(mode==D3D11_MAP_WRITE_DISCARD) {
+        HRESULT result=pilot_native_cb_map(slot,context,mode,mapped);
+        if(range && SUCCEEDED(result))owner->append_end=offset+bytes;
+        return result;
+    }
+    if(mode==D3D11_MAP_WRITE_NO_OVERWRITE && range && !owner->mapped && !owner->unsupported &&
+       offset>=owner->append_end) {
+        /* Earlier retained draws read only earlier published bytes. Appending
+         * never renames storage or changes any of those immutable inputs. */
+        HRESULT result=ID3D11DeviceContext_Map(context,(ID3D11Resource*)*slot,0,mode,0,mapped);
+        if(SUCCEEDED(result)){owner->mapped=1;owner->append_end=offset+bytes;}
+        return result;
+    }
+    /* Preserve the original call/error contract at an unproved boundary;
+     * the generic route fences retained readers and declines optional HD. */
+    return pilot_native_cb_map(slot,context,mode,mapped);
 }
 void pilot_native_cb_unmapped(ID3D11Buffer **slot)
 {if(pilot_cb_barrier){struct PilotCbOwner *owner=pilot_cb_owner(slot,0);if(owner)owner->mapped=0;}}
