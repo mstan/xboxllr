@@ -2,7 +2,7 @@
  * driver getters: wrapped setters maintain actual bindings, including private
  * passes. Getters below are only the explicit unknown-boundary resync. */
 #include "graphics_prepared_state_owner.h"
-#if defined(_WIN32) && defined(COBJMACROS)
+#if (defined(_WIN32) || defined(PILOT_DXVK_NATIVE)) && defined(COBJMACROS)
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>

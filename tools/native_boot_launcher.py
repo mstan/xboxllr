@@ -291,6 +291,8 @@ def prepare(root, data, choice, *, fallback_kernel=''):
 
 
 def ui_state(root, data, *, fallback_kernel=''):
+    if not data.get('capabilities', {}).get('startup_intro', True):
+        return None
     choice_path = ''
     try:
         choice_path = str(safe_path(root, 'data/boot-choice.txt'))

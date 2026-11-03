@@ -1,4 +1,16 @@
-> **BETA:** XboxLLR is an early Xbox recompiler ecosystem. Expect bugs, incomplete hardware coverage and unsupported software. **Blinx is the only publicly supported game at this time.** Please [file reproducible GitHub issues](https://github.com/mstan/xboxllr/issues).
+> **Want to help?** Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, bug reports and pull requests.
+>
+> **FAQ: Can I use this with my game?**
+>
+> **Yes.** You can use XboxLLR as the foundation for recompiling another Xbox game.
+> **XboxLLR is an early beta**, so your game may reach missing or incomplete
+> implementation that you will need to fix. Contributions are welcome: send
+> improvements to the shared engine upstream as a [pull request](https://github.com/mstan/xboxllr/pulls).
+> This requires preparing and building your title; the player downloads do not run arbitrary games.
+>
+> The same engine powers **Blinx and Jet Set Radio Future**. Blinx is public;
+> JSRF's beta is currently private while its public release is being prepared.
+> Please [file reproducible GitHub issues](https://github.com/mstan/xboxllr/issues).
 
 # XboxLLR
 
@@ -25,9 +37,11 @@ The Dashboard remains on its separately validated release below.
 | **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.02.1)** | Developer package: `xboxllr-build-tool-windows-x64-2026.11.02.1.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
 | **[Blinx playable public alpha](https://github.com/mstan/BlinxRecomp/releases/tag/alpha-2026.11.02.1)** | Players: a ready-to-run native game package. No compiler required; supply your own supported NTSC-U game dump. |
 
-Current playable downloads target **Windows x64 with D3D11**. Linux component
-checks do not establish a working Linux game release. JSRF and other experimental
-titles are not publicly supported in this beta.
+Current playable downloads target **Windows x64 with D3D11**. Matching Linux
+AppImages for the November 2 game releases are still being prepared. JSRF's
+Windows beta is currently a private preview; its links require repository access.
+Native Linux builds use SDL2, DXVK Native/Vulkan and FAudio; see the
+[Linux build and packaging instructions](docs/NATIVE-LINUX.md).
 
 ## Blinx: The Time Sweeper
 
@@ -51,6 +65,17 @@ Those cheats are independent and off by default; heart crystals are preserved.
 The disposable utility cache now stays in RAM, allocated on demand within a
 750 MiB volume. Native in-game saves stay on persistent storage.
 See [Blinx features and mods](https://github.com/mstan/BlinxRecomp#features).
+
+## Jet Set Radio Future
+
+[JSRFRecomp](https://github.com/mstan/JSRFRecomp) runs on **the same XboxLLR engine
+as Blinx**, with adaptive widescreen, higher internal resolutions and local
+custom-graffiti imports. Its Early Test Runs mod lets players unlock an area's
+challenges by collecting its graffiti souls before completing the story.
+
+**Early beta: not exhaustively playtested or tested end to end.** The repository
+and Windows preview are private while the public release is prepared. Once
+available, use the title repository for downloads, setup and game-specific issues.
 
 ## Original Xbox Dashboard
 

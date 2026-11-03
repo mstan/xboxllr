@@ -56,8 +56,21 @@ def package(renderer, ui, dsp, output):
                 add(root, prefix, name)
 
     r = json.loads((renderer/'donor.json').read_text(encoding='utf-8'))
+    linux = None
+    if (renderer/'linux-adapter.json').is_file():
+        from native_phobos_linux import verify
+        linux = verify(renderer)
     for name, hashes in r['files'].items():
-        add(renderer, 'renderer', name, hashes['prepared'])
+        expected = linux['changes'].get(name, hashes)['prepared'] if linux else hashes['prepared']
+        add(renderer, 'renderer', name, expected)
+    for name, hashes in r.get('native_support', {}).items():
+        expected = linux['changes'].get(name, hashes)['prepared'] if linux else hashes['prepared']
+        add(renderer, 'renderer', name, expected)
+    if linux:
+        for name, hashes in linux['changes'].items():
+            if name not in r['files']:
+                add(renderer, 'renderer', name, hashes['prepared'])
+        add(renderer, 'renderer', 'linux-adapter.json')
     for name, expected in r['nv2a_reference']['files'].items():
         add(renderer, 'renderer', 'nv2a-reference/'+name, expected)
     extras(renderer, 'renderer', ['LICENSE','LICENSE.upstream-MIT','NOTICE',
@@ -78,7 +91,7 @@ def package(renderer, ui, dsp, output):
         add(dsp, 'dsp', name, d.get('guarded', {}).get(name, expected))
     extras(dsp, 'dsp', ['third_party','donor.json'])
 
-    files['README-SOURCES.md'] = b'''# Windows native dependency source
+    files['README-SOURCES.md'] = b'''# Native dependency source
 
 This supplement contains the actual prepared renderer, launcher UI and DSP
 source with their retained copyrights, licenses, modification records and

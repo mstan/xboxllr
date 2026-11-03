@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(xlle_native_title_pilot C CXX)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(native_linux.cmake)
+  return()
+endif()
 # Qualified titles may request whole-program optimization without making another
 # host/compiler a build requirement. Keep the normal portable build available;
 # diagnostic/iterative builds retain their existing compilation policy.
@@ -1468,6 +1472,14 @@ set_tests_properties(pilot_input_diagnostic_capture_replay PROPERTIES TIMEOUT 30
 pilot_add_test(NAME pilot_native_debug_transport COMMAND "${Python3_EXECUTABLE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_debug_transport.py" "$<TARGET_FILE:pilot_native_debug_test>")
 set_tests_properties(pilot_native_debug_transport PROPERTIES TIMEOUT 25)
+if(UNIX)
+  foreach(high_fd_mode server client)
+    pilot_add_test(NAME pilot_native_debug_high_${high_fd_mode}_fd COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_native_debug_transport.py"
+      "$<TARGET_FILE:pilot_native_debug_test>" "--high-${high_fd_mode}-fd")
+    set_tests_properties(pilot_native_debug_high_${high_fd_mode}_fd PROPERTIES TIMEOUT 25)
+  endforeach()
+endif()
 add_dependencies(pilot_native_iteration pilot_native_debug_test)
 if(TARGET pilot_input_sdl_host_test)
   add_dependencies(pilot_native_iteration pilot_input_sdl_test pilot_input_sdl_host_test)

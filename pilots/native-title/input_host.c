@@ -58,6 +58,9 @@ static BOOL CALLBACK input_host_initialize(PINIT_ONCE once,PVOID parameter,PVOID
             input_host_invert_x,input_host_invert_y);
     char value[24]={0};
     GetEnvironmentVariableA("XLLE_PILOT_INPUT",value,sizeof(value));
+#ifdef __linux__
+    if(!value[0])strcpy(value,"auto");
+#endif
     input_host_keyboard=!strcmp(value,"keyboard");
     input_host_none=!strcmp(value,"none");
     input_host_tcp=!strcmp(value,"tcp");
@@ -151,10 +154,14 @@ static uint32_t input_host_state_selected(unsigned port,uint8_t gamepad[18])
         XINPUT_GAMEPAD pad;input_host_keyboard_convert(keys,&pad);input_host_convert(&pad,gamepad);
         return ERROR_SUCCESS;
     }
+#ifdef _WIN32
     XINPUT_STATE state;
     DWORD status=XInputGetState(port,&state);
     if (!status) input_host_convert(&state.Gamepad,gamepad);
     return status;
+#else
+    return ERROR_NOT_SUPPORTED;
+#endif
 }
 
 /* The opt-in QA listener owns a virtual Player 1 connection as well as its
@@ -197,6 +204,7 @@ static uint32_t input_host_caps_selected(unsigned port,uint8_t gamepad[18],uint8
         pad.sThumbLX=pad.sThumbLY=pad.sThumbRX=pad.sThumbRY=(SHORT)0xffff;
         input_host_convert(&pad,gamepad);memset(rumble,0,4);return ERROR_SUCCESS;
     }
+#ifdef _WIN32
     XINPUT_CAPABILITIES caps;
     DWORD status=XInputGetCapabilities(port,0,&caps);
     if (status) return status;
@@ -207,6 +215,9 @@ static uint32_t input_host_caps_selected(unsigned port,uint8_t gamepad[18],uint8
     memcpy(rumble,&caps.Vibration.wLeftMotorSpeed,2);
     memcpy(rumble+2,&caps.Vibration.wRightMotorSpeed,2);
     return ERROR_SUCCESS;
+#else
+    return ERROR_NOT_SUPPORTED;
+#endif
 }
 
 static uint32_t input_host_caps_raw(unsigned port,uint8_t gamepad[18],uint8_t rumble[4])
@@ -231,8 +242,12 @@ static uint32_t input_host_rumble_selected(unsigned port,uint16_t left,uint16_t 
         uint8_t state[18];uint32_t status=input_host_state_raw(port,state);
         return status?status:(left || right)?ERROR_NOT_SUPPORTED:ERROR_SUCCESS;
     }
+#ifdef _WIN32
     XINPUT_VIBRATION vibration={left,right};
     return XInputSetState(port,&vibration);
+#else
+    return ERROR_NOT_SUPPORTED;
+#endif
 }
 
 static uint32_t input_host_rumble_raw(unsigned port,uint16_t left,uint16_t right)
