@@ -195,7 +195,8 @@ void pilot_native_cb_before_write(ID3D11Buffer **slot)
     ID3D11Buffer_GetDevice(*slot,&device);ID3D11Device_GetImmediateContext(device,&context);ID3D11Device_Release(device);
     if(owner->current->pins) {
         struct PilotCbVersion *next=pilot_cb_available(owner,context);
-        if(next)pilot_cb_publish(owner,next,context);else pilot_cb_pressure(owner,PILOT_CB_PRESSURE);
+        if(next) {pilot_cb_publish(owner,next,context);ID3D11DeviceContext_Release(context);return;}
+        else pilot_cb_pressure(owner,PILOT_CB_PRESSURE);
     }
     pilot_cb_rebind(context,owner);ID3D11DeviceContext_Release(context);
 }
@@ -300,7 +301,7 @@ ID3D11Buffer *pilot_native_buffer_before_range_write(ID3D11Buffer *buffer,ID3D11
             /* One copy per actual changed resource write, never per draw.
              * Full RHI updates do not need this preservation copy. */
             ID3D11DeviceContext_CopyResource(context,(ID3D11Resource*)next->buffer,(ID3D11Resource*)owner->current->buffer);
-            pilot_cb_publish(owner,next,context);
+            pilot_cb_publish(owner,next,context);return owner->current->buffer;
         } else pilot_cb_pressure(owner,PILOT_CB_PRESSURE);
     }
     pilot_cb_rebind(context,owner);

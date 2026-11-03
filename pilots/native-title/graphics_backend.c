@@ -2101,7 +2101,6 @@ int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint
      * a large buffer. A real borrowed VB is followed by a real scratch
      * reservation; the later index reservation must decline. The
      * earlier draw and the next draw must survive in the same packet. */
-    pilot_native_epoch_poll();
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();struct PreparedState original={0};
     PACKET_CHECK(pilot_native_epoch_state_capture(&original,context));
     PACKET_CHECK(original.vertices[0] && original.constants[0][0]);
@@ -2196,7 +2195,7 @@ int pilot_gfx_native_packet_rollback_probe(void *enhanced,uint32_t capacity,uint
     pilot_native_epoch_state_bind(context,&native_before_probe);
     pilot_native_epoch_state_release(&native_before_probe);
     PACKET_CHECK(!pilot_gfx_reference_target_readback(0,enhanced,capacity,physical));
-    pilot_native_epoch_poll();PACKET_CHECK(pilot_native_cb_version_barrier(pilot_native_cb_epoch_barrier));
+    PACKET_CHECK(pilot_native_cb_version_barrier(pilot_native_cb_epoch_barrier));
     pilot_native_epoch_state_release(&original);
     ID3D11ShaderResourceView_Release(view);ID3D11SamplerState_Release(sampler);ID3D11Texture2D_Release(texture);
     fprintf(stderr,"BINDING EXTENTS: VB31 CB13 SRV127 sampler15 bound_cleared=1 raw_resync=1 replay_tail_clear=1\n");

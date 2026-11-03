@@ -4,7 +4,7 @@
  * unproved IA and all CB data own private snapshots. Replay uses the SAME immediate context;
  * there are no D3D deferred contexts or driver command-list caches. */
 enum { PILOT_NATIVE_EPOCH_BYTES=128*1024*1024,PILOT_NATIVE_EPOCH_DRAWS=256,
-       PILOT_NATIVE_EPOCH_BUFFERS=4096,PILOT_NATIVE_EPOCH_GROUPS=4,
+       PILOT_NATIVE_EPOCH_BUFFERS=4096,PILOT_NATIVE_EPOCH_GROUPS=1,
        PILOT_NATIVE_EPOCH_COPIES=D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT+1+3*D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT,
        PILOT_NATIVE_EPOCH_STAGES=3,PILOT_NATIVE_EPOCH_CLASSES=256 };
 struct PilotNativeEpochBuffer {
@@ -14,11 +14,10 @@ struct PilotNativeEpochBuffer {
 };
 struct PilotNativeEpochJob;
 struct PilotNativeEpochGroup {
-    ID3D11Query *done;
     struct PilotNativeEpochJob *jobs;
     struct PreparedResourceLease resources;
     struct PilotNativePlane *outputs[PILOT_NATIVE_EPOCH_DRAWS*2];
-    unsigned state,output_count,job_count; /* 0 free, 1 collecting, 2 GPU in-flight. */
+    unsigned state,output_count,job_count; /* 0 free, 1 CPU packet collecting. */
 };
 static int pilot_native_epoch_jobs_prepare(struct PilotNativeEpochGroup *);
 static void pilot_native_epoch_jobs_release(struct PilotNativeEpochGroup *);
@@ -100,36 +99,22 @@ static void pilot_native_epoch_group_release(unsigned slot,int completed)
     for(struct PilotNativeEpochBuffer *p=pilot_native_epoch.buffers;p;p=p->next)
         if(p->group==slot+1)p->used=p->group=0;
 }
-static void pilot_native_epoch_poll(void)
-{
-    ID3D11DeviceContext *context=d3d8_GetD3D11Context();if(!context)return;
-    for(unsigned i=0;i<PILOT_NATIVE_EPOCH_GROUPS;++i)if(pilot_native_epoch.groups[i].state==2) {
-        BOOL complete=FALSE;
-        HRESULT result=ID3D11DeviceContext_GetData(context,(ID3D11Asynchronous*)pilot_native_epoch.groups[i].done,
-            &complete,sizeof(complete),D3D11_ASYNC_GETDATA_DONOTFLUSH);
-        if(result==S_OK && complete)pilot_native_epoch_group_release(i,1);
-        else if(FAILED(result)) {
-            pilot_native_epoch.failed=1;pilot_native_degrade();
-            struct PilotNativeEpochGroup *group=&pilot_native_epoch.groups[i];
-            for(unsigned n=0;n<group->output_count;++n)group->outputs[n]->valid_aspects=group->outputs[n]->coherent=0;
-        }
-    }
-}
+/* The CPU queue owns immutable inputs until its final Draw call is issued on
+ * this one immediate context. D3D11 then owns command ordering and resource
+ * lifetime: Copy/Update after Draw cannot overwrite an earlier command's input,
+ * and dynamic WRITE_DISCARD preserves its in-flight allocation. No CPU writes
+ * use NO_OVERWRITE over retained ranges. This is not a native D3D12/Vulkan
+ * command buffer or an application-owned mapped allocation. */
 static int pilot_native_epoch_reserve_group(void)
 {
-    /* An open packet already owns its slot. Poll retirement when reserving a
-     * new packet or submitting, rather than querying all events per draw. */
+    /* A packet is CPU-owned only until replay. Reuse the same bounded storage
+     * after submitting its commands, without waiting for GPU completion. */
     if(pilot_native_prepared_jobs_enabled() && pilot_native_epoch.recording)
         return !pilot_native_epoch.failed;
-    pilot_native_epoch_poll();
     if(pilot_native_epoch.failed)return 0;
     if(pilot_native_epoch.recording)return 1;
     for(unsigned i=0;i<PILOT_NATIVE_EPOCH_GROUPS;++i)if(!pilot_native_epoch.groups[i].state) {
         struct PilotNativeEpochGroup *group=&pilot_native_epoch.groups[i];
-        if(!group->done) {
-            D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};
-            if(FAILED(ID3D11Device_CreateQuery(d3d8_GetD3D11Device(),&desc,&group->done)))return 0;
-        }
         if(!pilot_native_epoch_jobs_prepare(group))return 0;
         group->state=1;pilot_native_epoch.recording=i+1;return 1;
     }
@@ -151,7 +136,7 @@ static void pilot_native_epoch_flush(void)
     if(executed) {
         static int reported;
         if(!reported) {
-            reported=1;fprintf(stderr,"[NATIVE EPOCH] executed draws=%u snapshot_bytes=%u pool_buffers=%u pool_bytes=%u max_inflight_groups=%u host_packet_bytes=%u borrowed_vertex_bindings=%u retirement=gpu-event replay=immediate\n",
+            reported=1;fprintf(stderr,"[NATIVE EPOCH] executed draws=%u snapshot_bytes=%u pool_buffers=%u pool_bytes=%u max_inflight_groups=%u host_packet_bytes=%u borrowed_vertex_bindings=%u retirement=immediate-ordering replay=immediate\n",
                 pilot_native_epoch.draws,pilot_native_epoch.bytes,pilot_native_epoch.buffer_count,
                 pilot_native_epoch.allocated,PILOT_NATIVE_EPOCH_GROUPS,pilot_native_epoch.packet_bytes,pilot_native_epoch.borrowed_vertices);
         }
@@ -181,16 +166,10 @@ static void pilot_native_epoch_flush(void)
     }
     group->output_count=pilot_native_epoch.output_count;
     memcpy(group->outputs,pilot_native_epoch.outputs,group->output_count*sizeof(*group->outputs));
-    group->state=2;
-    ID3D11DeviceContext *immediate=d3d8_GetD3D11Context();
-    /* Also fences capture copies if save/exclusion admission declined. No
-     * copied snapshot can become reusable until this real GPU event retires. */
-    ID3D11DeviceContext_End(immediate,(ID3D11Asynchronous*)group->done);
-    uint64_t cpu_submit=pilot_native_cpu_clock();
-    ID3D11DeviceContext_Flush(immediate);
-    if(cpu_begin)pilot_native_cpu.submit+=pilot_native_cpu_clock()-cpu_submit;
+    /* All replay/copy commands now belong to D3D11. Retain no extra GPU-event
+     * lease, and do not force a driver submission for each tiny CPU packet. */
+    pilot_native_epoch_group_release(pilot_native_epoch.recording-1,executed);
     pilot_native_epoch.recording=pilot_native_epoch.output_count=pilot_native_epoch.draws=pilot_native_epoch.bytes=pilot_native_epoch.borrowed_vertices=pilot_native_epoch.borrowed_constants=pilot_native_epoch.borrowed_indices=0;
-    pilot_native_epoch_poll();
     if(cpu_begin) {
         uint64_t cycles=pilot_native_cpu_clock()-cpu_begin;
         pilot_native_cpu.flush+=cycles;if(!pilot_native_cpu.inside)pilot_native_cpu.external_flush+=cycles;
@@ -200,12 +179,10 @@ static void pilot_native_epoch_flush(void)
 static void pilot_native_epoch_close(void)
 {
     pilot_native_epoch_flush();
-    /* Device teardown does not reuse unfinished resources. Dropping our COM
-     * refs leaves submitted GPU work owned by D3D11; no CPU wait is required. */
+    /* D3D11 owns any already issued commands and their resource references. */
     for(unsigned i=0;i<PILOT_NATIVE_EPOCH_GROUPS;++i) {
         pilot_native_epoch_group_release(i,1);
         free(pilot_native_epoch.groups[i].jobs);
-        if(pilot_native_epoch.groups[i].done)ID3D11Query_Release(pilot_native_epoch.groups[i].done);
     }
     while(pilot_native_epoch.buffers) {
         struct PilotNativeEpochBuffer *p=pilot_native_epoch.buffers;pilot_native_epoch.buffers=p->next;
@@ -626,7 +603,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
         static int reported=0;
         for(unsigned i=0;!reported && i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)
             if(job->vertex_versions[i]) {
-                reported=1;fprintf(stderr,"[NATIVE PREPARED VB] shared_uploaded_versions=1 retirement=gpu-event\n");
+                reported=1;fprintf(stderr,"[NATIVE PREPARED VB] shared_uploaded_versions=1 retirement=immediate-ordering\n");
             }
     }
     if(draw->color_plane){pilot_native_plane_retain(draw->color_plane);pilot_native_epoch.outputs[pilot_native_epoch.output_count++]=draw->color_plane;}

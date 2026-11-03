@@ -325,13 +325,18 @@ static int test_native_scale_coherence(void)
         for(unsigned version=0;version<3;++version) {
             const float color[]={version==0?1.f:0.f,version==1?1.f:0.f,version==2?1.f:0.f,1};
             pilot_gfx_shader_constants(96,1,color);CHECK(!pilot_gfx_shader_flush());
-            CHECK(!pilot_gfx_draw_vertices(6,version*8,4));
-            CHECK(!pilot_gfx_draw_vertices(6,version*8+4,4));
+            /* Cross several CPU packet boundaries before changing the same
+             * constants again, without a readback/GPU-completion wait. Reused
+             * snapshot buffers must preserve every earlier issued Draw. */
+            for(unsigned repeat=0;repeat<(version==0?257u:1u);++repeat) {
+                CHECK(!pilot_gfx_draw_vertices(6,version*8,4));
+                CHECK(!pilot_gfx_draw_vertices(6,version*8+4,4));
+            }
         }
         /* Exercise replay while the parent query is open, not merely after
          * End has already made exclusion unnecessary. */
         CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
-        CHECK(!pilot_gfx_visibility_end(33));CHECK(!visibility_expect(33,960,NULL));
+        CHECK(!pilot_gfx_visibility_end(33));CHECK(!visibility_expect(33,82880,NULL));
         pilot_gfx_batch_allow(0);
         CHECK(!pilot_gfx_readback(constant_actual,sizeof(constant_actual)));
         if(scale==1)memcpy(constant_reference,constant_actual,sizeof(constant_reference));
