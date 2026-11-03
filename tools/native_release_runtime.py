@@ -67,6 +67,11 @@ def descriptor(root, *, verify=True):
     return data
 
 
+def storage_library(root, data=None):
+    default = 'native/xboxllr_storage.dll' if os.name == 'nt' else 'native/libxboxllr_storage.so'
+    return inside(root, (data or {}).get('storage_library', default))
+
+
 def checked_image(data, image):
     image = Path(image).resolve(strict=True)
     if not image.is_file() or image.stat().st_size > 256 * 1024 * 1024:
@@ -200,7 +205,7 @@ def disk_identity(root, disk, kernel=None, eeprom=None, *, prepared=None):
     if disk.is_symlink() or not disk.is_file() or str(disk.resolve()).startswith('\\\\'):
         raise ValueError('Choose an existing local raw or QCOW2 HDD image file.')
     disk = disk.resolve(strict=True)
-    with Storage(inside(root, 'native/xboxllr_storage.dll'), disk) as mounted:
+    with Storage(storage_library(root), disk) as mounted:
         report, identity = mounted.inspect(), mounted.identity()
     # Only metadata/identity lives beside the selected image; game saves stay
     # inside its actual FATX partitions. Never manufacture an image here.
@@ -268,7 +273,9 @@ def verify_profile(root, data):
 
 def message(title, text, flags=0):
     if os.name != 'nt':
-        raise ValueError(text)
+        from native_linux_entry import message as native_message
+        native_message(title, text, error=bool(flags & 0x10))
+        return 1
     return ctypes.windll.user32.MessageBoxW(None, text, title, flags)
 
 
@@ -503,7 +510,7 @@ def image_import_handler(root,catalog_data,choice_path):
         with game_storage(root,data,image,choice_path) as (profile,storage,hdd):
             if hdd:
                 from native_storage import StorageSaves
-                store=StorageSaves(inside(root,'native/xboxllr_storage.dll'),hdd['path'],data['title']['game_id'])
+                store=StorageSaves(storage_library(root,data),hdd['path'],data['title']['game_id'])
             else:store=FolderSaves(storage or inside(root,profile_relative(data)+'/state'),data['title']['game_id'])
             try:
                 used=codec.occupied_slots(store)
@@ -560,7 +567,7 @@ def prepare_image_textures(root,data,profile,state,hdd):
     from native_texture_replacements import prepare
     if hdd:
         from native_storage import StorageSaves
-        store=StorageSaves(inside(root,'native/xboxllr_storage.dll'),hdd['path'],data['title']['game_id'])
+        store=StorageSaves(storage_library(root,data),hdd['path'],data['title']['game_id'])
     else:store=FolderSaves(state,data['title']['game_id'])
     try:return prepare(profile.parent/'presentation-textures',codec.texture_replacements(store))
     finally:

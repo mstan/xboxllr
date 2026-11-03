@@ -58,7 +58,11 @@ int pilot_gfx_deferred_revisions(uint64_t revisions[5])
 #endif
 }
 static HWND pilot_window;
+#ifdef PILOT_DXVK_NATIVE
+#include "linux/window_host_sdl.h"
+#else
 #include "window_host.h"
+#endif
 static struct PilotWindowHost pilot_window_host;
 static WCHAR pilot_window_title[256]=L"Xbox native reference";
 int32_t pilot_gfx_title(const char *utf8)
@@ -165,13 +169,23 @@ static RECT pilot_client_rectangle(uint32_t width,uint32_t height)
         client.right=(LONG)((uint64_t)pilot_window_height*pilot_window_aspect[0]/pilot_window_aspect[1]);
         client.bottom=(LONG)pilot_window_height;
         /* Keep the initial window inside the current desktop work area. */
-        RECT work;if(SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0)) {
+        RECT work;
+#ifdef PILOT_DXVK_NATIVE
+        SDL_Rect display={0};int have_work=SDL_GetDisplayUsableBounds(0,&display)==0;
+        work=(RECT){display.x,display.y,display.x+display.w,display.y+display.h};
+        if(have_work) {
+#else
+        if(SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0)) {
+#endif
             LONG max_width=work.right-work.left-32,max_height=work.bottom-work.top-64;
             if(max_width>0 && client.right>max_width){client.bottom=(LONG)((int64_t)client.bottom*max_width/client.right);client.right=max_width;}
             if(max_height>0 && client.bottom>max_height){client.right=(LONG)((int64_t)client.right*max_height/client.bottom);client.bottom=max_height;}
         }
     }
-    AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);return client;
+#ifndef PILOT_DXVK_NATIVE
+    AdjustWindowRect(&client,WS_OVERLAPPEDWINDOW,FALSE);
+#endif
+    return client;
 }
 static uint32_t pilot_logic_copy,pilot_requested_blend;
 static unsigned char *pilot_saved_display;
@@ -345,6 +359,7 @@ HRESULT pilot_d3d_require(HRESULT result,const char *file,unsigned line)
     }
     return result;
 }
+#ifndef PILOT_DXVK_NATIVE
 static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
 {
     LRESULT handled;
@@ -363,6 +378,7 @@ static LRESULT CALLBACK pilot_window_proc(HWND window,UINT message,WPARAM wparam
     if (message==WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(window,message,wparam,lparam);
 }
+#endif
 void pilot_gfx_close(void)
 {
     pilot_gfx_batch_flush();
@@ -428,6 +444,11 @@ void pilot_gfx_close(void)
 #endif
     if (pilot_device) { pilot_device->lpVtbl->Release(pilot_device); pilot_device=NULL; }
     if (pilot_factory) { pilot_factory->lpVtbl->Release(pilot_factory); pilot_factory=NULL; }
+#ifdef PILOT_DXVK_NATIVE
+    if(pilot_window && !pilot_saved_display && !pilot_window_persistent) {
+        pilot_window_host_save(&pilot_window_host);SDL_DestroyWindow(pilot_window);pilot_window=NULL;pilot_visible=0;
+    }
+#else
     if(pilot_window && (pilot_saved_display || pilot_window_persistent)) {
         if(pilot_saved_display){InvalidateRect(pilot_window,NULL,FALSE);UpdateWindow(pilot_window);}
     }
@@ -436,6 +457,7 @@ void pilot_gfx_close(void)
         pilot_visible=0;
     }
     MSG message; while (PeekMessageW(&message,NULL,WM_QUIT,WM_QUIT,PM_REMOVE)) {}
+#endif
 }
 int32_t pilot_gfx_parameters(const uint32_t p[17])
 {
@@ -453,6 +475,16 @@ int32_t pilot_gfx_parameters(const uint32_t p[17])
 }
 static int32_t pilot_window_open(unsigned width,unsigned height)
 {
+#ifdef PILOT_DXVK_NATIVE
+    if(pilot_window)return S_OK;
+    if(SDL_InitSubSystem(SDL_INIT_VIDEO)!=0)return E_FAIL;
+    char title[1024];if(!WideCharToMultiByte(CP_UTF8,0,pilot_window_title,-1,title,sizeof(title),NULL,NULL))return E_INVALIDARG;
+    RECT client=pilot_client_rectangle(width,height);
+    pilot_window=SDL_CreateWindow(title,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
+        client.right-client.left,client.bottom-client.top,SDL_WINDOW_HIDDEN|SDL_WINDOW_RESIZABLE|SDL_WINDOW_VULKAN);
+    if(!pilot_window){fprintf(stderr,"[WINDOW STOP] %s\n",SDL_GetError());return E_FAIL;}
+    pilot_window_host_init(&pilot_window_host,pilot_window);return S_OK;
+#else
     WNDCLASSW window_class={0};window_class.lpfnWndProc=pilot_window_proc;
     window_class.hCursor=LoadCursor(NULL,IDC_ARROW);
     window_class.hInstance=GetModuleHandleW(NULL);window_class.lpszClassName=L"xlle-native-reference";
@@ -466,6 +498,7 @@ static int32_t pilot_window_open(unsigned width,unsigned height)
     if(!pilot_window)return HRESULT_FROM_WIN32(GetLastError());
     pilot_window_host_init(&pilot_window_host,pilot_window);
     return S_OK;
+#endif
 }
 int32_t pilot_gfx_create(const uint32_t p[17])
 {
@@ -760,11 +793,15 @@ int32_t pilot_gfx_present(void)
 {
     /* This HWND belongs to the rendering thread, not SDL's input/bootstrap
      * thread. Dispatch its ordinary move/resize/close messages every frame. */
+#ifdef PILOT_DXVK_NATIVE
+    uint32_t quit=pilot_window_host_pump(&pilot_window_host);
+#else
     MSG message;uint32_t quit=0;
     while(PeekMessageW(&message,NULL,0,0,PM_REMOVE)) {
         if(message.message==WM_QUIT){quit=1;break;}
         TranslateMessage(&message);DispatchMessageW(&message);
     }
+#endif
     pilot_session_value(PILOT_SESSION_WINDOW,1,&quit,sizeof(quit));
     if(quit){pilot_session_report_stop("window closed",0);ExitProcess(0);}
     pilot_gfx_batch_flush();
@@ -773,12 +810,16 @@ int32_t pilot_gfx_present(void)
     if (!pilot_device) return E_FAIL;
     uint32_t requested_size[2];
     if(pilot_debug_take_client_size(requested_size)) {
+#ifdef PILOT_DXVK_NATIVE
+        SDL_SetWindowSize(pilot_window,(int)requested_size[0],(int)requested_size[1]);
+#else
         RECT rectangle={0,0,(LONG)requested_size[0],(LONG)requested_size[1]};
         DWORD style=(DWORD)GetWindowLongPtrW(pilot_window,GWL_STYLE);
         DWORD extended=(DWORD)GetWindowLongPtrW(pilot_window,GWL_EXSTYLE);
         if(!AdjustWindowRectEx(&rectangle,style,GetMenu(pilot_window)!=NULL,extended) ||
            !SetWindowPos(pilot_window,NULL,0,0,rectangle.right-rectangle.left,rectangle.bottom-rectangle.top,
                 SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE))return HRESULT_FROM_WIN32(GetLastError());
+#endif
     }
     if(pilot_presentation.copy_buffers==2) {
         /* Keep each physical image and its completion owner together, just

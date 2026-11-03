@@ -40,6 +40,8 @@ The Dashboard remains on its separately validated release below.
 Current playable downloads target **Windows x64 with D3D11**. Matching Linux
 AppImages for the November 2 game releases are still being prepared. JSRF's
 Windows beta is currently a private preview; its links require repository access.
+Native Linux builds use SDL2, DXVK Native/Vulkan and FAudio; see the
+[Linux build and packaging instructions](docs/NATIVE-LINUX.md).
 
 ## Blinx: The Time Sweeper
 

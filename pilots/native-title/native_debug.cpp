@@ -25,6 +25,7 @@ std::array<std::array<uint8_t,18>,4> input{};
 std::array<Clock::time_point,4> input_until{};
 std::array<uint64_t,4> input_sequence{},input_delivered{};
 std::atomic<unsigned> connected_mask{1};
+std::atomic<PilotDebugReadMemory> memory_reader{nullptr};
 uint64_t sequence=0,delivered=0,capture_sequence=0,completed=0,capture_frame=0;
 unsigned image_width=0,image_height=0;
 int image_status=0;
@@ -113,7 +114,19 @@ std::string screenshot(const std::string& args) {
     return "{\"ok\":true,\"surface\":\"presented\",\"format\":\"rgba8\",\"width\":"+std::to_string(width)+
         ",\"height\":"+std::to_string(height)+",\"frame\":"+std::to_string(frame)+",\"data\":\""+base64(pixels)+"\"}\n";
 }
+std::string read_memory(const std::string& args) {
+    std::istringstream stream(args);std::string a,n,extra;stream>>a>>n;
+    unsigned address=0,bytes=0;
+    if(stream>>extra || !number(a,address) || !number(n,bytes) || !bytes || bytes>4096 ||
+       address>=0x04000000u || bytes>0x04000000u-address)
+        return failure("read_memory needs a decimal guest address and 1..4096 bytes within 64 MiB");
+    auto reader=memory_reader.load();std::vector<unsigned char> data(bytes);
+    if(!reader || !reader(address,data.data(),bytes))return failure("guest range is not readable");
+    return "{\"ok\":true,\"address\":"+std::to_string(address)+",\"bytes\":"+std::to_string(bytes)+
+        ",\"data\":\""+base64(data)+"\"}\n";
 }
+}
+extern "C" void pilot_debug_memory_reader(PilotDebugReadMemory reader) {memory_reader.store(reader);}
 extern "C" int pilot_debug_start(const char *port_text) {
     if(!port_text || !*port_text)return 0;
     unsigned port=0;if(!number(port_text,port) || !port || port>65535 || active.load())return 1;
@@ -122,6 +135,7 @@ extern "C" int pilot_debug_start(const char *port_text) {
     server->register_command("set_input_port",set_input_port);server->register_command("connect_input",connect_input);
     server->register_command("clear_input",clear_input);server->register_command("screenshot",screenshot);
     server->register_command("resize",resize);
+    server->register_command("read_memory",read_memory);
     if(!server->start(static_cast<uint16_t>(port))) {
         std::fprintf(stderr,"[NATIVE TCP] %s\n",server->last_error().c_str());server.reset();return 1;
     }

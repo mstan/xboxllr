@@ -280,7 +280,7 @@ int pilot_write_watch_native_read_begin(const void *data,size_t bytes){(void)dat
 void pilot_write_watch_native_read_end(void){}
 uint64_t pilot_write_watch_faults(void){return 0;}
 int pilot_write_watch_session_page(const void *data){(void)data;return 0;}
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(PILOT_POSIX_HOST)
 #include "memory_write_watch_win32.h"
 BOOL WINAPI pilot_write_watch_virtual_protect(LPVOID address,SIZE_T bytes,DWORD protect,PDWORD previous)
 {

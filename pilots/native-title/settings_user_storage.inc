@@ -26,7 +26,7 @@ static uint32_t settings_user_persist(const unsigned char candidate[256])
         const WCHAR name[]=L"user-settings.aot-private.bin";
         unsigned char bytes[sizeof(FILE_RENAME_INFO)+sizeof(name)]={0};
         FILE_RENAME_INFO *rename=(FILE_RENAME_INFO*)bytes;
-        rename->ReplaceIfExists=TRUE;rename->RootDirectory=storage_parent;rename->FileNameLength=sizeof(name)-2;
+        rename->ReplaceIfExists=TRUE;rename->RootDirectory=storage_parent;rename->FileNameLength=(sizeof(name)/sizeof(name[0])-1)*2;
         memcpy(rename->FileName,name,sizeof(name));
         status=(uint32_t)media_nt_set(file,&io,rename,sizeof(bytes),10); /* FileRenameInformation, relative handle */
         ok=status==0;error=ok?0:ERROR_WRITE_FAULT;
