@@ -113,6 +113,12 @@ target_include_directories(pilot_d3d_backend PUBLIC "${PILOT_D3D_SOURCE}" "${PIL
   "${PILOT_D3D_SOURCE}/src/d3d" "${PILOT_D3D_SOURCE}/src/config")
 target_include_directories(pilot_d3d_backend BEFORE PRIVATE "${CMAKE_CURRENT_LIST_DIR}/linux")
 target_compile_definitions(pilot_d3d_backend PRIVATE PILOT_D3D_PHOBOS PILOT_DXVK_NATIVE)
+# Match the Windows renderer contract: density changes affect presentation
+# companions while guest images and readbacks keep their native dimensions.
+option(PILOT_NATIVE_RENDER_PLANES "Keep native guest images with separate enhanced rendering companions" ON)
+if(PILOT_NATIVE_RENDER_PLANES)
+  target_compile_definitions(pilot_d3d_backend PRIVATE PILOT_NATIVE_RENDER_PLANES=1)
+endif()
 target_link_libraries(pilot_d3d_backend PUBLIC pilot_host_posix pilot_native_debug pilot_session_replay pilot_resource_mirror
   "${pilot_dxvk_d3d11}" "${pilot_dxvk_dxgi}" pilot_linux_shader pilot_vsh_reference m)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/ApuAdpcm.cmake")
