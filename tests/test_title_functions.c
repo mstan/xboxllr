@@ -31,6 +31,11 @@ static void stop(const char *message,unsigned code){fprintf(stderr,"STOP %s %u\n
 #undef ecx
 #define CHECK(c) do{if(!(c)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);ExitProcess(1);}}while(0)
 static unsigned calls,completed;
+static void original_cdecl(void)
+{
+    ++calls;CHECK(*(uint32_t*)(memory+g_esp+16)==40);
+    *(uint32_t*)(memory+g_esp+4)=99;g_eax=17;g_esp+=4;
+}
 static void original(void)
 {
     ++calls;CHECK(g_ecx==0x1234);g_eax=*(uint32_t*)(memory+g_esp+4)+7;g_esp+=8;
@@ -41,6 +46,12 @@ recomp_func_t pilot_title_original_lookup(unsigned id,unsigned *cleanup)
 {if(id!=5)return NULL;*cleanup=4;return original;}
 static int callback(struct PilotTitleModCall *call)
 {
+    if(call->id==10) {
+        CHECK(call->arguments[0]==10 && call->arguments[1]==20 &&
+              call->arguments[2]==30 && call->arguments[3]==40);
+        if(call->phase){CHECK(call->gpr[0]==17);call->gpr[0]=27;}
+        return 0;
+    }
     CHECK(call->id==5 && call->caller==0xabcd && call->entry[1]==0x1234 && call->arguments[0]==10);
     if(!call->phase) {
         if(completed){call->gpr[0]=35;call->gpr[4]=call->entry[4]+8;return 1;}
@@ -67,5 +78,9 @@ int main(void)
     pilot_title_function(5,original,4);CHECK(calls==2 && g_eax==27 && g_esp==initial[4]+8);
     g_esp=initial[4];completed=1;
     pilot_title_function(5,original,4);CHECK(calls==2 && g_eax==35 && g_esp==initial[4]+8);
+    g_esp=initial[4];
+    for(unsigned i=0;i<4;++i)*(uint32_t*)(memory+g_esp+4+i*4)=10*(i+1);
+    pilot_title_function_with_arguments(10,original_cdecl,0,16);
+    CHECK(calls==3 && g_eax==27 && g_esp==initial[4]+4 && *(uint32_t*)(memory+initial[4]+4)==99);
     CHECK(VirtualFree(memory,0,MEM_RELEASE));puts("PASS: original execution, caller ABI, nested stack/CPU/vector/x87/fenv preservation and unknown-call rejection");return 0;
 }
