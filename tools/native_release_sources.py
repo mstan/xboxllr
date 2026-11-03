@@ -63,6 +63,9 @@ def package(renderer, ui, dsp, output):
     for name, hashes in r['files'].items():
         expected = linux['changes'].get(name, hashes)['prepared'] if linux else hashes['prepared']
         add(renderer, 'renderer', name, expected)
+    for name, hashes in r.get('native_support', {}).items():
+        expected = linux['changes'].get(name, hashes)['prepared'] if linux else hashes['prepared']
+        add(renderer, 'renderer', name, expected)
     if linux:
         for name, hashes in linux['changes'].items():
             if name not in r['files']:

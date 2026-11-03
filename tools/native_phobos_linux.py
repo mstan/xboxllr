@@ -11,6 +11,7 @@ PIN = 'bcccf8cc81d5d2becafe6138dbe81d0f9836b9a0'
 
 def check_files(root, manifest, changes=None):
     records = {name: value['prepared'] for name, value in manifest['files'].items()}
+    records.update({name: value['prepared'] for name, value in manifest.get('native_support', {}).items()})
     records.update({name: value['prepared'] for name, value in (changes or {}).items()})
     for name, expected in records.items():
         path = root / name

@@ -3,7 +3,7 @@
  * Implementation is linked once. Other backends keep their existing path. */
 #ifndef GRAPHICS_PREPARED_STATE_OWNER_H
 #define GRAPHICS_PREPARED_STATE_OWNER_H
-#if defined(_WIN32) && defined(COBJMACROS)
+#if (defined(_WIN32) || defined(PILOT_DXVK_NATIVE)) && defined(COBJMACROS)
 #include <d3d11.h>
 #ifdef __cplusplus
 extern "C" {

@@ -2279,11 +2279,16 @@ int pilot_gfx_native_present_resize_probe(uint32_t render_width,uint32_t render_
         ID3D11RenderTargetView *native=(ID3D11RenderTargetView*)rhi_d3d11_native_view(view);PRESENT_CHECK(native);
         struct PreparedViewFacts facts;PRESENT_CHECK(prepared_state_view_facts((ID3D11View*)native,2,&facts));
         ID3D11DeviceContext_OMSetRenderTargets(d3d8_GetD3D11Context(),1,&native,NULL);
+#ifdef PILOT_DXVK_NATIVE
+        SDL_SetWindowSize(pilot_window,(int)wanted[pass][0],(int)wanted[pass][1]);
+        SDL_PumpEvents();
+#else
         RECT rectangle={0,0,(LONG)wanted[pass][0],(LONG)wanted[pass][1]};
         DWORD style=(DWORD)GetWindowLongPtrW(pilot_window,GWL_STYLE),extended=(DWORD)GetWindowLongPtrW(pilot_window,GWL_EXSTYLE);
         PRESENT_CHECK(AdjustWindowRectEx(&rectangle,style,GetMenu(pilot_window)!=NULL,extended));
         PRESENT_CHECK(SetWindowPos(pilot_window,NULL,0,0,rectangle.right-rectangle.left,rectangle.bottom-rectangle.top,
             SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE));
+#endif
         PRESENT_CHECK(!pilot_gfx_present());
         UINT width=0,height=0;uint32_t render[2]={0};
         const unsigned char *pixels=xbox_D3D8Presented(&width,&height);PRESENT_CHECK(pixels);
