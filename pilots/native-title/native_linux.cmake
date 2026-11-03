@@ -89,6 +89,8 @@ add_library(pilot_memory_write_watch STATIC memory_write_watch.c memory_commit_o
 target_compile_definitions(pilot_memory_write_watch PRIVATE PILOT_POSIX_HOST)
 target_link_libraries(pilot_memory_write_watch PUBLIC pilot_host_posix)
 target_include_directories(pilot_memory_write_watch PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
+add_library(pilot_resource_mirror STATIC resource_mirror.c)
+target_link_libraries(pilot_resource_mirror PUBLIC pilot_memory_write_watch)
 add_library(pilot_graphics_commands STATIC graphics_commands.c)
 add_library(pilot_vsh_reference STATIC
   "${PILOT_D3D_SOURCE}/nv2a-reference/nv2a_vsh_disassembler.c"
@@ -111,7 +113,7 @@ target_include_directories(pilot_d3d_backend PUBLIC "${PILOT_D3D_SOURCE}" "${PIL
   "${PILOT_D3D_SOURCE}/src/d3d" "${PILOT_D3D_SOURCE}/src/config")
 target_include_directories(pilot_d3d_backend BEFORE PRIVATE "${CMAKE_CURRENT_LIST_DIR}/linux")
 target_compile_definitions(pilot_d3d_backend PRIVATE PILOT_D3D_PHOBOS PILOT_DXVK_NATIVE)
-target_link_libraries(pilot_d3d_backend PUBLIC pilot_host_posix pilot_native_debug pilot_session_replay
+target_link_libraries(pilot_d3d_backend PUBLIC pilot_host_posix pilot_native_debug pilot_session_replay pilot_resource_mirror
   "${pilot_dxvk_d3d11}" "${pilot_dxvk_dxgi}" pilot_linux_shader pilot_vsh_reference m)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/ApuAdpcm.cmake")
 add_library(pilot_dsp STATIC audio_dsp.c)
@@ -210,6 +212,9 @@ pilot_notice_tree("${PILOT_GENERATED}/third_party" "third_party")
 pilot_notices_finish()
 add_dependencies(xlle_native_title pilot_notices)
 enable_testing()
+add_executable(pilot_resource_mirror_test ../../tests/test_native_resource_mirror.c)
+target_link_libraries(pilot_resource_mirror_test PRIVATE pilot_resource_mirror)
+add_test(NAME native_resource_mirror_portable COMMAND pilot_resource_mirror_test)
 add_executable(pilot_linux_shader_test ../../tests/test_native_linux_shader.cpp)
 target_link_libraries(pilot_linux_shader_test PRIVATE pilot_linux_shader)
 target_compile_options(pilot_linux_shader_test PRIVATE -UNDEBUG)
