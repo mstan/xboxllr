@@ -1,6 +1,6 @@
 # XboxLLR documentation
 
-XboxLLR is beta. The same engine powers Blinx and JSRF; JSRF's preview remains
+XboxLLR is beta. The same engine powers Blinx and JSRF; JSRF's beta remains
 private while its public beta is prepared. See the [main README](../README.md)
 for current downloads and testing limits.
 
@@ -11,6 +11,7 @@ for current downloads and testing limits.
 | [Setup](SETUP.md) | User-owned content, local consoles, saves and Dashboard 5960 |
 | [Build tool](BUILD-TOOL.md) | xboxllr.exe and developer prerequisites |
 | [Development](DEVELOPMENT.md) | Source checkout, dependencies and builds |
+| [Native Linux release guide](https://github.com/mstan/xboxllr/blob/375d6d1be6938ebcfce24a2d8509d0d88b29353f/docs/NATIVE-LINUX.md) | Pinned Linux integration, dependencies and AppImage packaging |
 | [Architecture](ARCHITECTURE.md) | Native CPU pipeline and low-level console contracts |
 | [Native title driver](NATIVE-TITLE-DRIVER.md) | Preparation/binding/build interface |
 | [Title revisions](NATIVE-TITLE-REVISIONS.md) | Exact-image admission and per-revision data |

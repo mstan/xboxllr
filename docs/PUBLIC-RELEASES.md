@@ -1,6 +1,6 @@
-# Public Windows alpha/beta releases
+# Beta releases
 
-XboxLLR is beta. Blinx's playable public alpha is tested through World 2;
+XboxLLR is beta. Blinx's playable public beta is tested through World 2;
 end-to-end completion is not guaranteed. JSRF also runs on the same engine;
 its beta is private pending owner approval for publication, and has not been
 exhaustively playtested or tested end to end. Game packages have separate title
@@ -12,6 +12,11 @@ build and validate the native applications, then run the scripts below. They
 refuse existing outputs and never package player state. No script changes GitHub
 visibility or publishes automatically. Publish only the verified `assets/`
 contents, never staging/build/QA directories.
+
+Blinx and JSRF also have native Linux AppImages on their current title releases.
+Use their matching Linux source kits and the pinned
+[Linux packaging guide](https://github.com/mstan/xboxllr/blob/375d6d1be6938ebcfce24a2d8509d0d88b29353f/docs/NATIVE-LINUX.md).
+The commands below describe the Windows release components.
 
 ## One XboxLLR release
 

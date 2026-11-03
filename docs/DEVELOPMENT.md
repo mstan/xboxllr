@@ -2,8 +2,12 @@
 
 This guide covers the shared framework. For player inputs, optional console
 imports and the original Dashboard, start with [Setup](SETUP.md).
-Current native title builds target **Windows x64**. Linux component CI does
-not establish a native Linux game host; that port is deferred.
+The instructions below cover **Windows x64**. Native Linux game hosts and
+AppImages are available through the Linux release integration branch and the
+matching source kits attached to each game release. Follow the pinned
+[native Linux guide](https://github.com/mstan/xboxllr/blob/375d6d1be6938ebcfce24a2d8509d0d88b29353f/docs/NATIVE-LINUX.md)
+for its toolchain, dependencies and packaging. This integration is separate
+from the Windows toolkit source on master.
 
 There are two distinct source builds:
 

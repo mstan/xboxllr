@@ -22,7 +22,7 @@ and checkout directories retain that spelling.
 
 XboxLLR establishes console behavior through low-level devices and original-code
 reference paths, then supplies native implementations under those contracts.
-The fast Windows title profiles execute translated CPU code ahead of time.
+The native game profiles execute translated CPU code ahead of time.
 Unresolved targets stop with diagnostics. This is ongoing compatibility work;
 the downloads do not run arbitrary Xbox games.
 
@@ -35,11 +35,13 @@ The Dashboard remains on its separately validated release below.
 | --- | --- |
 | **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.01.1)** | Player app: download `XboxDashboard-windows-x64-2026.11.01.1.zip`, extract it, then open **Start Game.exe**. Supply your own Dashboard 5960 executable and assets. No compiler required. |
 | **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.02.1)** | Developer package: `xboxllr-build-tool-windows-x64-2026.11.02.1.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
-| **[Blinx playable public alpha](https://github.com/mstan/BlinxRecomp/releases/tag/alpha-2026.11.02.1)** | Players: a ready-to-run native game package. No compiler required; supply your own supported NTSC-U game dump. |
+| **[Blinx public beta — Windows and Linux](https://github.com/mstan/BlinxRecomp/releases/latest)** | Players: Windows ZIP and native Linux AppImage. No compiler required; supply your own supported NTSC-U game files. |
+| **[JSRF private beta — Windows and Linux](https://github.com/mstan/JSRFRecomp/releases/latest)** | Both supported NTSC-U revisions are included. Repository access is required while the public release is prepared. |
 
-Current playable downloads target **Windows x64 with D3D11**. Matching Linux
-AppImages for the November 2 game releases are still being prepared. JSRF's
-Windows beta is currently a private preview; its links require repository access.
+Blinx and JSRF offer **Windows x64 ZIPs and native Linux x86_64 AppImages**.
+The current AppImages include the November 2 rendering changes and were checked
+in WSL, including brief gameplay and external settings. Linux targets an
+Ubuntu 24.04/glibc baseline and Vulkan 1.3. JSRF remains private pending approval.
 
 ## Blinx: The Time Sweeper
 
@@ -72,7 +74,7 @@ custom-graffiti imports. Its Early Test Runs mod lets players unlock an area's
 challenges by collecting its graffiti souls before completing the story.
 
 **Early beta: not exhaustively playtested or tested end to end.** The repository
-and Windows preview are private while the public release is prepared. Once
+and Windows/Linux beta are private while the public release is prepared. Once
 available, use the title repository for downloads, setup and game-specific issues.
 
 ## Original Xbox Dashboard
