@@ -54,7 +54,7 @@ struct PreparedDrawSubset {
     D3D11_VIEWPORT viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
     D3D11_RECT scissors[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
     UINT viewport_count,scissor_count;
-    unsigned unsupported;
+    unsigned unsupported,borrowed;
 };
 /* One registered immediate context, under the existing graphics lock. Attach
  * with default_state=1 ONLY immediately after device creation/ClearState.
@@ -66,10 +66,15 @@ int prepared_state_attach(ID3D11DeviceContext *,int default_state);
 void prepared_state_invalidate(ID3D11DeviceContext *);
 void prepared_state_detach(ID3D11DeviceContext *);
 int prepared_state_snapshot(ID3D11DeviceContext *,struct PreparedState *);
+/* Borrow only under the graphics lock until the next binding mutation. The
+ * caller must retain the final remapped state before publishing queued work. */
+int prepared_state_snapshot_borrow(ID3D11DeviceContext *,struct PreparedState *);
+void prepared_state_retain(struct PreparedState *);
 void prepared_state_release(struct PreparedState *);
 /* Raw unknown-boundary capture derives bounds from complete slot arrays. */
 void prepared_state_derive_extents(struct PreparedState *);
 int prepared_state_draw_subset(ID3D11DeviceContext *,struct PreparedDrawSubset *);
+int prepared_state_draw_subset_borrow(ID3D11DeviceContext *,struct PreparedDrawSubset *);
 void prepared_state_draw_release(struct PreparedDrawSubset *);
 int prepared_state_view_facts(ID3D11View *,unsigned kind,struct PreparedViewFacts *);
 void prepared_state_forget_view(ID3D11View *);

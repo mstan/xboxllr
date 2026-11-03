@@ -367,18 +367,32 @@ static int prepared_resync(ID3D11DeviceContext *c)
 }
 int prepared_state_snapshot(ID3D11DeviceContext *context,struct PreparedState *out)
 {
+    if(!prepared_state_snapshot_borrow(context,out))return 0;
+    prepared_state_retain(out);return 1;
+}
+void prepared_state_retain(struct PreparedState *s)
+{prepared_state_refs(s,1);}
+int prepared_state_snapshot_borrow(ID3D11DeviceContext *context,struct PreparedState *out)
+{
     if(!out || context!=prepared_owner.context || (!prepared_owner.known && !prepared_resync(context)))return 0;
     if(prepared_unsupported())return 0;
-    *out=prepared_owner.state;prepared_state_refs(out,1);return 1;
+    *out=prepared_owner.state;return 1;
 }
 int prepared_state_draw_subset(ID3D11DeviceContext *context,struct PreparedDrawSubset *out)
 {
+    if(!prepared_state_draw_subset_borrow(context,out))return 0;
+    for(unsigned i=0;i<8;++i)prepared_add(out->outputs[i]);prepared_add(out->depth);
+    for(unsigned i=0;i<5;++i)prepared_add(out->inputs[i]);
+    prepared_add(out->blend);prepared_add(out->depth_state);out->borrowed=0;return 1;
+}
+int prepared_state_draw_subset_borrow(ID3D11DeviceContext *context,struct PreparedDrawSubset *out)
+{
     if(!out || context!=prepared_owner.context || (!prepared_owner.known && !prepared_resync(context)))return 0;
     struct PreparedState *s=&prepared_owner.state;memset(out,0,sizeof(*out));
-    for(unsigned i=0;i<8;++i){out->outputs[i]=s->outputs[i];prepared_add(out->outputs[i]);}
-    out->depth=s->target_depth;prepared_add(out->depth);
-    for(unsigned i=0;i<5;++i){out->inputs[i]=s->resources[2][i];prepared_add(out->inputs[i]);}
-    out->blend=s->blend;prepared_add(out->blend);out->depth_state=s->depth;prepared_add(out->depth_state);
+    for(unsigned i=0;i<8;++i)out->outputs[i]=s->outputs[i];
+    out->depth=s->target_depth;
+    for(unsigned i=0;i<5;++i)out->inputs[i]=s->resources[2][i];
+    out->blend=s->blend;out->depth_state=s->depth;out->borrowed=1;
     out->blend_desc=prepared_owner.blend_desc;out->depth_desc=prepared_owner.depth_desc;
     memcpy(out->factors,s->factors,sizeof(out->factors));out->sample_mask=s->sample_mask;out->stencil=s->stencil;
     out->viewport_count=s->viewport_count;out->scissor_count=s->scissor_count;
@@ -388,6 +402,7 @@ int prepared_state_draw_subset(ID3D11DeviceContext *context,struct PreparedDrawS
 void prepared_state_draw_release(struct PreparedDrawSubset *s)
 {
     if(!s)return;
+    if(s->borrowed){memset(s,0,sizeof(*s));return;}
     for(unsigned i=0;i<8;++i)prepared_drop(s->outputs[i]);prepared_drop(s->depth);
     for(unsigned i=0;i<5;++i)prepared_drop(s->inputs[i]);prepared_drop(s->blend);prepared_drop(s->depth_state);
     memset(s,0,sizeof(*s));

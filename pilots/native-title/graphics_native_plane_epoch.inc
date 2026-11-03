@@ -271,7 +271,7 @@ static int pilot_native_epoch_jobs_prepare(struct PilotNativeEpochGroup *group)
     }
     return group->jobs!=NULL;
 }
-static void pilot_native_epoch_job_release(struct PilotNativeEpochJob *job)
+static void pilot_native_epoch_job_release(struct PilotNativeEpochJob *job,int retained)
 {
     for(unsigned slot=0;slot<job->state.vertex_count;++slot)
         pilot_native_cb_version_release(&job->vertex_versions[slot]);
@@ -279,11 +279,12 @@ static void pilot_native_epoch_job_release(struct PilotNativeEpochJob *job)
     for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
         for(unsigned slot=0;slot<job->state.constant_count[stage];++slot)
             pilot_native_cb_version_release(&job->constant_versions[stage][slot]);
-    pilot_native_epoch_state_release(&job->state);
+    if(retained)pilot_native_epoch_state_release(&job->state);
+    else memset(&job->state,0,sizeof(job->state));
 }
 static void pilot_native_epoch_jobs_release(struct PilotNativeEpochGroup *group)
 {
-    for(unsigned i=0;i<group->job_count;++i)pilot_native_epoch_job_release(&group->jobs[i]);
+    for(unsigned i=0;i<group->job_count;++i)pilot_native_epoch_job_release(&group->jobs[i],1);
     /* The destructors clear every owned field. Draw parameters are overwritten
      * at admission; do not clear the large binding snapshots a second time. */
     group->job_count=0;
@@ -510,8 +511,9 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
     UINT copy_offsets[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT]={0};
     unsigned before_bytes=pilot_native_epoch.bytes,serial=++pilot_native_epoch.serial;
     if(!serial)serial=++pilot_native_epoch.serial;
-    int admitted=0;unsigned borrowed=0,borrowed_constants=0;
-    if(!pilot_native_epoch_state_capture(s,native))goto finished;
+    int admitted=0,borrowed_state=prepared_state_snapshot_borrow(native,s);
+    unsigned borrowed=0,borrowed_constants=0;
+    if(!borrowed_state && !pilot_native_epoch_state_capture(s,native))goto finished;
     uint32_t prepared_extents[16]={0};unsigned prepared_streams=pilot_gfx_shader_prepared_streams(prepared_extents);
     for(unsigned i=0;i<s->vertex_count;++i)if(s->vertices[i]) {
         if(pilot_native_prepared_jobs_enabled() &&
@@ -581,37 +583,41 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
      * bindings keep their captured refs and original byte offsets. */
     for(unsigned i=0;i<s->vertex_count;++i)if(s->vertices[i]) {
         if(s->vertices[i]!=vertex_copies[i]) {
-            ID3D11Buffer_Release(s->vertices[i]);s->vertices[i]=vertex_copies[i];ID3D11Buffer_AddRef(s->vertices[i]);
+            if(!borrowed_state)ID3D11Buffer_Release(s->vertices[i]);s->vertices[i]=vertex_copies[i];
+            if(!borrowed_state)ID3D11Buffer_AddRef(s->vertices[i]);
         }
         s->offsets[i]=copy_offsets[i];
     }
     ID3D11Buffer *replayed_index=indexed?index_copy:NULL;
     if(s->index!=replayed_index) {
-        if(s->index)ID3D11Buffer_Release(s->index);
-        s->index=replayed_index;if(s->index)ID3D11Buffer_AddRef(s->index);
+        if(s->index && !borrowed_state)ID3D11Buffer_Release(s->index);
+        s->index=replayed_index;if(s->index && !borrowed_state)ID3D11Buffer_AddRef(s->index);
     }
     for(unsigned stage=0;stage<PILOT_NATIVE_EPOCH_STAGES;++stage)
         for(unsigned i=0;i<s->constant_count[stage];++i)if(s->constants[stage][i]) {
             if(s->constants[stage][i]!=constant_copies[stage][i]) {
-                ID3D11Buffer_Release(s->constants[stage][i]);s->constants[stage][i]=constant_copies[stage][i];
-                ID3D11Buffer_AddRef(s->constants[stage][i]);
+                if(!borrowed_state)ID3D11Buffer_Release(s->constants[stage][i]);s->constants[stage][i]=constant_copies[stage][i];
+                if(!borrowed_state)ID3D11Buffer_AddRef(s->constants[stage][i]);
             }
         }
     for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i) {
-        if(s->outputs[i])ID3D11RenderTargetView_Release(s->outputs[i]);s->outputs[i]=NULL;
+        if(s->outputs[i] && !borrowed_state)ID3D11RenderTargetView_Release(s->outputs[i]);s->outputs[i]=NULL;
     }
-    s->outputs[0]=draw->enhanced_color;if(s->outputs[0])ID3D11RenderTargetView_AddRef(s->outputs[0]);
-    if(s->target_depth)ID3D11DepthStencilView_Release(s->target_depth);
-    s->target_depth=draw->enhanced_depth;if(s->target_depth)ID3D11DepthStencilView_AddRef(s->target_depth);
+    s->outputs[0]=draw->enhanced_color;if(s->outputs[0] && !borrowed_state)ID3D11RenderTargetView_AddRef(s->outputs[0]);
+    if(s->target_depth && !borrowed_state)ID3D11DepthStencilView_Release(s->target_depth);
+    s->target_depth=draw->enhanced_depth;if(s->target_depth && !borrowed_state)ID3D11DepthStencilView_AddRef(s->target_depth);
     for(unsigned i=0;i<PILOT_NATIVE_DRAW_SRVS;++i) {
-        if(s->resources[2][i])ID3D11ShaderResourceView_Release(s->resources[2][i]);
+        if(s->resources[2][i] && !borrowed_state)ID3D11ShaderResourceView_Release(s->resources[2][i]);
         s->resources[2][i]=draw->enhanced_inputs[i];
-        if(s->resources[2][i])ID3D11ShaderResourceView_AddRef(s->resources[2][i]);
+        if(s->resources[2][i] && !borrowed_state)ID3D11ShaderResourceView_AddRef(s->resources[2][i]);
     }
     s->viewport_count=draw->viewport_count;s->scissor_count=draw->scissor_count;
     memcpy(s->viewports,draw->enhanced_viewports,sizeof(s->viewports));
     memcpy(s->scissors,draw->enhanced_scissors,sizeof(s->scissors));
     job->count=count;job->first=first;job->base=base;job->indexed=(unsigned)indexed;
+    /* Admission changes no native bindings. Retain only the final remapped
+     * packet state, rather than owning and dropping the discarded native views. */
+    if(borrowed_state)prepared_state_retain(s);
     ++group->job_count; /* This packet now owns the complete immutable draw. */
     if(pilot_native_prepared_jobs_enabled()) {
         static int reported=0;
@@ -627,7 +633,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
     if(job->index_version)++pilot_native_epoch.borrowed_indices;
 finished:
     if(!admitted) {
-        pilot_native_epoch_job_release(job);
+        pilot_native_epoch_job_release(job,!borrowed_state);
         for(struct PilotNativeEpochBuffer *p=pilot_native_epoch.buffers;p;p=p->next)if(p->used==serial)p->used=p->group=0;
         pilot_native_epoch.bytes=before_bytes;
         pilot_native_epoch_cancel_empty();
