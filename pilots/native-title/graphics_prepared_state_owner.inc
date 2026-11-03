@@ -81,23 +81,58 @@ void prepared_state_derive_extents(struct PreparedState *s)
         s->sampler_count[stage]=prepared_live_extent(s->samplers[stage],D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT);
     }
 }
-static void prepared_state_refs(struct PreparedState *s,int add)
+#define PREPARED_EACH_REF(OP) \
+    OP(s->layout);OP(s->index); \
+    for(unsigned i=0;i<s->vertex_count;++i)OP(s->vertices[i]); \
+    OP(s->vertex);OP(s->geometry);OP(s->pixel); \
+    for(unsigned stage=0;stage<3;++stage) { \
+        for(unsigned i=0;i<s->class_count[stage];++i)OP(s->classes[stage][i]); \
+        for(unsigned i=0;i<s->constant_count[stage];++i)OP(s->constants[stage][i]); \
+        for(unsigned i=0;i<s->resource_count[stage];++i)OP(s->resources[stage][i]); \
+        for(unsigned i=0;i<s->sampler_count[stage];++i)OP(s->samplers[stage][i]); \
+    } \
+    OP(s->raster);OP(s->blend);OP(s->depth);OP(s->predicate); \
+    for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i)OP(s->outputs[i]); \
+    OP(s->target_depth)
+static void prepared_state_refs(const struct PreparedState *s,int add)
 {
 #define PREPARED_REF(p) do {if(add)prepared_add(p);else prepared_drop(p);}while(0)
-    PREPARED_REF(s->layout);PREPARED_REF(s->index);
-    for(unsigned i=0;i<s->vertex_count;++i)PREPARED_REF(s->vertices[i]);
-    PREPARED_REF(s->vertex);PREPARED_REF(s->geometry);PREPARED_REF(s->pixel);
-    for(unsigned stage=0;stage<3;++stage) {
-        for(unsigned i=0;i<s->class_count[stage];++i)PREPARED_REF(s->classes[stage][i]);
-        for(unsigned i=0;i<s->constant_count[stage];++i)PREPARED_REF(s->constants[stage][i]);
-        for(unsigned i=0;i<s->resource_count[stage];++i)PREPARED_REF(s->resources[stage][i]);
-        for(unsigned i=0;i<s->sampler_count[stage];++i)PREPARED_REF(s->samplers[stage][i]);
-    }
-    PREPARED_REF(s->raster);PREPARED_REF(s->blend);PREPARED_REF(s->depth);PREPARED_REF(s->predicate);
-    for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i)PREPARED_REF(s->outputs[i]);
-    PREPARED_REF(s->target_depth);
+    PREPARED_EACH_REF(PREPARED_REF);
 #undef PREPARED_REF
 }
+static void prepared_lease_rollback(struct PreparedResourceLease *lease,UINT before)
+{
+    /* Reverse insertion order keeps every surviving open-addressed probe
+     * chain intact. No tombstones or allocation are needed on this path. */
+    while(lease->count>before) {
+        UINT slot=lease->slots[--lease->count];IUnknown *object=lease->objects[slot];
+        lease->objects[slot]=NULL;prepared_drop(object);
+    }
+}
+static int prepared_lease_add(struct PreparedResourceLease *lease,void *object)
+{
+    if(!object)return 1;
+    uintptr_t key=(uintptr_t)object>>4;key^=key>>17;
+    UINT slot=(UINT)key&(PREPARED_LEASE_SLOTS-1);
+    while(lease->objects[slot]) {
+        if(lease->objects[slot]==object)return 1;
+        slot=(slot+1)&(PREPARED_LEASE_SLOTS-1);
+    }
+    if(lease->count==PREPARED_LEASE_OBJECTS)return 0;
+    prepared_add(object);lease->objects[slot]=(IUnknown*)object;
+    lease->slots[lease->count++]=slot;return 1;
+}
+int prepared_state_lease_retain(struct PreparedResourceLease *lease,const struct PreparedState *s)
+{
+    UINT before=lease->count;
+#define PREPARED_REF(p) do {if(!prepared_lease_add(lease,p)){prepared_lease_rollback(lease,before);return 0;}}while(0)
+    PREPARED_EACH_REF(PREPARED_REF);
+#undef PREPARED_REF
+    return 1;
+}
+void prepared_state_lease_clear(struct PreparedResourceLease *lease)
+{prepared_lease_rollback(lease,0);}
+#undef PREPARED_EACH_REF
 /* Empty snapshots are zeroed once. Copy and clear only live pointer extents:
  * the 768 class slots and 384 SRV slots are almost entirely unused by Xbox
  * draws. Touching all of them twice per draw defeats immutable packet reuse.
@@ -119,6 +154,13 @@ void prepared_state_release(struct PreparedState *s)
 {
     if(!s)return;
     prepared_state_refs(s,0);
+    prepared_state_clear(s);
+}
+void prepared_state_drop_refs(struct PreparedState *s)
+{prepared_state_refs(s,0);}
+void prepared_state_clear(struct PreparedState *s)
+{
+    if(!s)return;
     for(unsigned stage=0;stage<PREPARED_STAGES;++stage) {
         memset(s->classes[stage],0,s->class_count[stage]*sizeof(s->classes[stage][0]));
         memset(s->constants[stage],0,s->constant_count[stage]*sizeof(s->constants[stage][0]));

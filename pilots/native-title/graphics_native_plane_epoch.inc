@@ -16,6 +16,7 @@ struct PilotNativeEpochJob;
 struct PilotNativeEpochGroup {
     ID3D11Query *done;
     struct PilotNativeEpochJob *jobs;
+    struct PreparedResourceLease resources;
     struct PilotNativePlane *outputs[PILOT_NATIVE_EPOCH_DRAWS*2];
     unsigned state,output_count,job_count; /* 0 free, 1 collecting, 2 GPU in-flight. */
 };
@@ -94,6 +95,7 @@ static void pilot_native_epoch_group_release(unsigned slot,int completed)
         pilot_native_plane_release(plane);
     }
     pilot_native_epoch_jobs_release(group);
+    prepared_state_lease_clear(&group->resources);
     group->output_count=group->state=0;
     for(struct PilotNativeEpochBuffer *p=pilot_native_epoch.buffers;p;p=p->next)
         if(p->group==slot+1)p->used=p->group=0;
@@ -280,11 +282,11 @@ static void pilot_native_epoch_job_release(struct PilotNativeEpochJob *job,int r
         for(unsigned slot=0;slot<job->state.constant_count[stage];++slot)
             pilot_native_cb_version_release(&job->constant_versions[stage][slot]);
     if(retained)pilot_native_epoch_state_release(&job->state);
-    else memset(&job->state,0,sizeof(job->state));
+    else prepared_state_clear(&job->state);
 }
 static void pilot_native_epoch_jobs_release(struct PilotNativeEpochGroup *group)
 {
-    for(unsigned i=0;i<group->job_count;++i)pilot_native_epoch_job_release(&group->jobs[i],1);
+    for(unsigned i=0;i<group->job_count;++i)pilot_native_epoch_job_release(&group->jobs[i],0);
     /* The destructors clear every owned field. Draw parameters are overwritten
      * at admission; do not clear the large binding snapshots a second time. */
     group->job_count=0;
@@ -360,34 +362,37 @@ static int pilot_native_epoch_state_capture(struct PreparedState *s,ID3D11Device
     ID3D11DeviceContext_RSGetScissorRects(native,&s->scissor_count,s->scissors);
     prepared_state_derive_extents(s);return 1;
 }
+/* Private replay is a balanced raw-context scope: the serialized native
+ * binding authority stays frozen, and the complete saved context is restored
+ * before any owner lookup, source mutation, publication or retirement. */
 static void pilot_native_epoch_state_bind(ID3D11DeviceContext *context,const struct PreparedState *s)
 {
     ID3D11ShaderResourceView *none[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT]={0};
     /* OM transitions may implicitly unbind aliased SRVs. Restore/bind from the
      * owned packet, never from state reread after an output transition. */
-    ID3D11DeviceContext_VSSetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,none);
-    ID3D11DeviceContext_GSSetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,none);
-    ID3D11DeviceContext_PSSetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,none);
-    ID3D11DeviceContext_OMSetRenderTargets(context,D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,s->outputs,s->target_depth);
-    ID3D11DeviceContext_IASetInputLayout(context,s->layout);
-    ID3D11DeviceContext_IASetVertexBuffers(context,0,D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT,s->vertices,s->strides,s->offsets);
-    ID3D11DeviceContext_IASetIndexBuffer(context,s->index,s->index_format,s->index_offset);
-    ID3D11DeviceContext_IASetPrimitiveTopology(context,s->topology);
-    ID3D11DeviceContext_VSSetShader(context,s->vertex,s->classes[0],s->class_count[0]);
-    ID3D11DeviceContext_GSSetShader(context,s->geometry,s->classes[1],s->class_count[1]);
-    ID3D11DeviceContext_PSSetShader(context,s->pixel,s->classes[2],s->class_count[2]);
+    context->lpVtbl->VSSetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,none);
+    context->lpVtbl->GSSetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,none);
+    context->lpVtbl->PSSetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,none);
+    context->lpVtbl->OMSetRenderTargets(context,D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,s->outputs,s->target_depth);
+    context->lpVtbl->IASetInputLayout(context,s->layout);
+    context->lpVtbl->IASetVertexBuffers(context,0,D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT,s->vertices,s->strides,s->offsets);
+    context->lpVtbl->IASetIndexBuffer(context,s->index,s->index_format,s->index_offset);
+    context->lpVtbl->IASetPrimitiveTopology(context,s->topology);
+    context->lpVtbl->VSSetShader(context,s->vertex,s->classes[0],s->class_count[0]);
+    context->lpVtbl->GSSetShader(context,s->geometry,s->classes[1],s->class_count[1]);
+    context->lpVtbl->PSSetShader(context,s->pixel,s->classes[2],s->class_count[2]);
 #define EPOCH_BIND(stage,n) \
-    ID3D11DeviceContext_##stage##SetConstantBuffers(context,0,D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT,s->constants[n]); \
-    ID3D11DeviceContext_##stage##SetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,s->resources[n]); \
-    ID3D11DeviceContext_##stage##SetSamplers(context,0,D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT,s->samplers[n])
+    context->lpVtbl->stage##SetConstantBuffers(context,0,D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT,s->constants[n]); \
+    context->lpVtbl->stage##SetShaderResources(context,0,D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT,s->resources[n]); \
+    context->lpVtbl->stage##SetSamplers(context,0,D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT,s->samplers[n])
     EPOCH_BIND(VS,0);EPOCH_BIND(GS,1);EPOCH_BIND(PS,2);
 #undef EPOCH_BIND
-    ID3D11DeviceContext_RSSetState(context,s->raster);
-    ID3D11DeviceContext_RSSetViewports(context,s->viewport_count,s->viewports);
-    ID3D11DeviceContext_RSSetScissorRects(context,s->scissor_count,s->scissors);
-    ID3D11DeviceContext_OMSetBlendState(context,s->blend,s->factors,s->sample_mask);
-    ID3D11DeviceContext_OMSetDepthStencilState(context,s->depth,s->stencil);
-    ID3D11DeviceContext_SetPredication(context,s->predicate,s->predicate_value);
+    context->lpVtbl->RSSetState(context,s->raster);
+    context->lpVtbl->RSSetViewports(context,s->viewport_count,s->viewports);
+    context->lpVtbl->RSSetScissorRects(context,s->scissor_count,s->scissors);
+    context->lpVtbl->OMSetBlendState(context,s->blend,s->factors,s->sample_mask);
+    context->lpVtbl->OMSetDepthStencilState(context,s->depth,s->stencil);
+    context->lpVtbl->SetPredication(context,s->predicate,s->predicate_value);
 }
 static int pilot_native_prepared_jobs_enabled(void)
 {
@@ -422,7 +427,7 @@ static void pilot_native_epoch_state_bind_changes(ID3D11DeviceContext *context,
        memcmp(before->outputs,s->outputs,sizeof(s->outputs))) {
         pilot_native_epoch_state_bind(context,s);return;
     }
-    if(before->layout!=s->layout)ID3D11DeviceContext_IASetInputLayout(context,s->layout);
+    if(before->layout!=s->layout)context->lpVtbl->IASetInputLayout(context,s->layout);
     unsigned first=D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT,last=0;
     for(unsigned i=0;i<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;++i)
         if(before->vertices[i]!=s->vertices[i] || before->strides[i]!=s->strides[i] ||
@@ -430,22 +435,22 @@ static void pilot_native_epoch_state_bind_changes(ID3D11DeviceContext *context,
             if(first==D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT)first=i;
             last=i+1;
         }
-    if(last)ID3D11DeviceContext_IASetVertexBuffers(context,first,last-first,
+    if(last)context->lpVtbl->IASetVertexBuffers(context,first,last-first,
         s->vertices+first,s->strides+first,s->offsets+first);
     if(before->index!=s->index || before->index_format!=s->index_format || before->index_offset!=s->index_offset)
-        ID3D11DeviceContext_IASetIndexBuffer(context,s->index,s->index_format,s->index_offset);
-    if(before->topology!=s->topology)ID3D11DeviceContext_IASetPrimitiveTopology(context,s->topology);
+        context->lpVtbl->IASetIndexBuffer(context,s->index,s->index_format,s->index_offset);
+    if(before->topology!=s->topology)context->lpVtbl->IASetPrimitiveTopology(context,s->topology);
 #define EPOCH_SHADER_CHANGED(field,n) (before->field!=s->field || before->class_count[n]!=s->class_count[n] || \
     memcmp(before->classes[n],s->classes[n],s->class_count[n]*sizeof(s->classes[n][0])))
-    if(EPOCH_SHADER_CHANGED(vertex,0))ID3D11DeviceContext_VSSetShader(context,s->vertex,s->classes[0],s->class_count[0]);
-    if(EPOCH_SHADER_CHANGED(geometry,1))ID3D11DeviceContext_GSSetShader(context,s->geometry,s->classes[1],s->class_count[1]);
-    if(EPOCH_SHADER_CHANGED(pixel,2))ID3D11DeviceContext_PSSetShader(context,s->pixel,s->classes[2],s->class_count[2]);
+    if(EPOCH_SHADER_CHANGED(vertex,0))context->lpVtbl->VSSetShader(context,s->vertex,s->classes[0],s->class_count[0]);
+    if(EPOCH_SHADER_CHANGED(geometry,1))context->lpVtbl->GSSetShader(context,s->geometry,s->classes[1],s->class_count[1]);
+    if(EPOCH_SHADER_CHANGED(pixel,2))context->lpVtbl->PSSetShader(context,s->pixel,s->classes[2],s->class_count[2]);
 #undef EPOCH_SHADER_CHANGED
 #define EPOCH_CHANGED_RANGE(stage,n,field,bound,setter) do { \
     unsigned limit=before->bound[n]>s->bound[n]?before->bound[n]:s->bound[n]; \
     unsigned a=limit,b=0; \
     for(unsigned i=0;i<(limit);++i)if(before->field[n][i]!=s->field[n][i]) {if(a==(limit))a=i;b=i+1;} \
-    if(b)ID3D11DeviceContext_##stage##setter(context,a,b-a,s->field[n]+a); \
+    if(b)context->lpVtbl->stage##setter(context,a,b-a,s->field[n]+a); \
 }while(0)
 #define EPOCH_CHANGED_STAGE(stage,n) \
     EPOCH_CHANGED_RANGE(stage,n,constants,constant_count,SetConstantBuffers); \
@@ -454,20 +459,20 @@ static void pilot_native_epoch_state_bind_changes(ID3D11DeviceContext *context,
     EPOCH_CHANGED_STAGE(VS,0);EPOCH_CHANGED_STAGE(GS,1);EPOCH_CHANGED_STAGE(PS,2);
 #undef EPOCH_CHANGED_STAGE
 #undef EPOCH_CHANGED_RANGE
-    if(before->raster!=s->raster)ID3D11DeviceContext_RSSetState(context,s->raster);
+    if(before->raster!=s->raster)context->lpVtbl->RSSetState(context,s->raster);
     if(before->viewport_count!=s->viewport_count ||
        memcmp(before->viewports,s->viewports,s->viewport_count*sizeof(s->viewports[0])))
-        ID3D11DeviceContext_RSSetViewports(context,s->viewport_count,s->viewports);
+        context->lpVtbl->RSSetViewports(context,s->viewport_count,s->viewports);
     if(before->scissor_count!=s->scissor_count ||
        memcmp(before->scissors,s->scissors,s->scissor_count*sizeof(s->scissors[0])))
-        ID3D11DeviceContext_RSSetScissorRects(context,s->scissor_count,s->scissors);
+        context->lpVtbl->RSSetScissorRects(context,s->scissor_count,s->scissors);
     if(before->blend!=s->blend || before->sample_mask!=s->sample_mask ||
        memcmp(before->factors,s->factors,sizeof(s->factors)))
-        ID3D11DeviceContext_OMSetBlendState(context,s->blend,s->factors,s->sample_mask);
+        context->lpVtbl->OMSetBlendState(context,s->blend,s->factors,s->sample_mask);
     if(before->depth!=s->depth || before->stencil!=s->stencil)
-        ID3D11DeviceContext_OMSetDepthStencilState(context,s->depth,s->stencil);
+        context->lpVtbl->OMSetDepthStencilState(context,s->depth,s->stencil);
     if(before->predicate!=s->predicate || before->predicate_value!=s->predicate_value)
-        ID3D11DeviceContext_SetPredication(context,s->predicate,s->predicate_value);
+        context->lpVtbl->SetPredication(context,s->predicate,s->predicate_value);
 }
 static int pilot_native_epoch_replay(struct PilotNativeEpochGroup *group)
 {
@@ -565,20 +570,6 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
             ID3D11Buffer *copy=pilot_native_epoch_buffer(s->constants[stage][i],0,desc.ByteWidth,0,desc.ByteWidth,D3D11_BIND_CONSTANT_BUFFER,serial);
             if(!copy)goto finished;constant_copies[stage][i]=copy;
         }
-    /* Admission and ALL reservations succeeded. Only now issue source-version
-     * copies; an earlier failure must not leave untracked GPU writes behind. */
-    for(unsigned i=0;i<pilot_native_epoch.copy_count;++i) {
-        struct PilotNativeEpochCopy *copy=&pilot_native_epoch.copies[i];
-        if(pilot_native_cpu.active)pilot_native_cpu.copy_bytes+=copy->bytes;
-        if(copy->bind==D3D11_BIND_CONSTANT_BUFFER)
-            ID3D11DeviceContext_CopyResource(native,(ID3D11Resource*)copy->destination,(ID3D11Resource*)copy->source);
-        else {
-            D3D11_BOX box={copy->offset,0,0,copy->offset+copy->bytes,1,1};
-            ID3D11DeviceContext_CopySubresourceRegion(native,(ID3D11Resource*)copy->destination,
-                0,copy->target,0,0,(ID3D11Resource*)copy->source,0,&box);
-        }
-    }
-    pilot_native_epoch.copy_count=0;
     /* Snapshot bindings replace unproved mutable sources; known owned mesh
      * bindings keep their captured refs and original byte offsets. */
     for(unsigned i=0;i<s->vertex_count;++i)if(s->vertices[i]) {
@@ -615,9 +606,21 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
     memcpy(s->viewports,draw->enhanced_viewports,sizeof(s->viewports));
     memcpy(s->scissors,draw->enhanced_scissors,sizeof(s->scissors));
     job->count=count;job->first=first;job->base=base;job->indexed=(unsigned)indexed;
-    /* Admission changes no native bindings. Retain only the final remapped
-     * packet state, rather than owning and dropping the discarded native views. */
-    if(borrowed_state)prepared_state_retain(s);
+    if(!prepared_state_lease_retain(&group->resources,s))goto finished;
+    if(!borrowed_state){prepared_state_drop_refs(s);borrowed_state=1;}
+    /* All reservations, including packet-wide leases, succeeded before any
+     * copy command. Admission failure can still roll back without GPU writes. */
+    for(unsigned i=0;i<pilot_native_epoch.copy_count;++i) {
+        struct PilotNativeEpochCopy *copy=&pilot_native_epoch.copies[i];
+        if(pilot_native_cpu.active)pilot_native_cpu.copy_bytes+=copy->bytes;
+        if(copy->bind==D3D11_BIND_CONSTANT_BUFFER)
+            ID3D11DeviceContext_CopyResource(native,(ID3D11Resource*)copy->destination,(ID3D11Resource*)copy->source);
+        else {
+            D3D11_BOX box={copy->offset,0,0,copy->offset+copy->bytes,1,1};
+            ID3D11DeviceContext_CopySubresourceRegion(native,(ID3D11Resource*)copy->destination,
+                0,copy->target,0,0,(ID3D11Resource*)copy->source,0,&box);
+        }
+    }
     ++group->job_count; /* This packet now owns the complete immutable draw. */
     if(pilot_native_prepared_jobs_enabled()) {
         static int reported=0;

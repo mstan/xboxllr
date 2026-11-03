@@ -70,6 +70,17 @@ int prepared_state_snapshot(ID3D11DeviceContext *,struct PreparedState *);
  * caller must retain the final remapped state before publishing queued work. */
 int prepared_state_snapshot_borrow(ID3D11DeviceContext *,struct PreparedState *);
 void prepared_state_retain(struct PreparedState *);
+void prepared_state_drop_refs(struct PreparedState *);
+void prepared_state_clear(struct PreparedState *);
+/* One completion-scoped resource owner for an immutable GPU packet. Every
+ * snapshot can reference the same resident objects without per-draw COM refs. */
+enum { PREPARED_LEASE_SLOTS=8192,PREPARED_LEASE_OBJECTS=4096 };
+struct PreparedResourceLease {
+    IUnknown *objects[PREPARED_LEASE_SLOTS];
+    UINT slots[PREPARED_LEASE_OBJECTS],count;
+};
+int prepared_state_lease_retain(struct PreparedResourceLease *,const struct PreparedState *);
+void prepared_state_lease_clear(struct PreparedResourceLease *);
 void prepared_state_release(struct PreparedState *);
 /* Raw unknown-boundary capture derives bounds from complete slot arrays. */
 void prepared_state_derive_extents(struct PreparedState *);
