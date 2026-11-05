@@ -1,0 +1,72 @@
+{
+  "schema": "xboxllr.xpp-registration-qualification.v1",
+  "donor": "63f18f0334fbd8c00313c4bb565accf00627a4fd",
+  "extension_sha256": "5f9621a375173f02afba2896daefd4374c62082f3cdcf470a7e9802da9d59056",
+  "synthetic_tests": 19,
+  "symbol_seeds": false,
+  "scope": "full-pipeline static function discovery; not gameplay or performance",
+  "cases": [
+    {
+      "archive": 18,
+      "image": "cache.xbe",
+      "image_sha256": "4d62cff2c1d7c52b36271599660105fb20abae1c154818ab683b30c5b768be62",
+      "mode": "xpp",
+      "baseline_count": 9401,
+      "candidate_count": 9404,
+      "seed_count": 0,
+      "seeds_retained": 0,
+      "extension_sha256": "6b56f5b8cb28458702d1d0d106cb29c21fe083a299463d0c6302231ade6b352a",
+      "added_count": 3,
+      "lost_count": 0,
+      "changed_extent_count": 0
+    },
+    {
+      "archive": 33,
+      "image": "default.xbe",
+      "image_sha256": "71c820f972cf0182a1632a272b849464eaad7440e0e3782837e0e651933c705f",
+      "mode": "xpp",
+      "baseline_count": 7830,
+      "candidate_count": 7835,
+      "seed_count": 0,
+      "seeds_retained": 0,
+      "extension_sha256": "6b56f5b8cb28458702d1d0d106cb29c21fe083a299463d0c6302231ade6b352a",
+      "added_count": 5,
+      "lost_count": 0,
+      "changed_extent_count": 0
+    },
+    {
+      "archive": 1,
+      "image": "Default.xbe",
+      "image_sha256": "b1ae378d25002f1b6f6e1b3f30274800c51d5e82f5a37fbf6686b991c0270b35",
+      "mode": "xpp",
+      "baseline_count": 7472,
+      "candidate_count": 7474,
+      "seed_count": 0,
+      "seeds_retained": 0,
+      "extension_sha256": "6b56f5b8cb28458702d1d0d106cb29c21fe083a299463d0c6302231ade6b352a",
+      "added_count": 2,
+      "lost_count": 0,
+      "changed_extent_count": 0
+    },
+    {
+      "title": "blinx",
+      "xbe_sha256": "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249",
+      "baseline_count": 8865,
+      "candidate_count": 8870,
+      "added_count": 5,
+      "lost_count": 0,
+      "changed_extent_count": 0,
+      "scope": "current-title static discovery; no independent symbol reference"
+    },
+    {
+      "title": "jsrf-rev4",
+      "xbe_sha256": "f4441696fdd007c31a712815cdde967836fbc3ab97fcb2f58e1db56974644219",
+      "baseline_count": 8875,
+      "candidate_count": 8878,
+      "added_count": 3,
+      "lost_count": 0,
+      "changed_extent_count": 0,
+      "scope": "current-title static discovery; no independent symbol reference"
+    }
+  ]
+}
