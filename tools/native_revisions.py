@@ -32,7 +32,7 @@ def hashes(data):
     return [entry['title']['xbe_sha256'] for entry in entries(data)]
 
 
-def select(data, digest, *, image=None):
+def select(data, digest, *, image=None, raw=None):
     data = data.get('_catalog', data)
     for entry in entries(data):
         if entry['title']['xbe_sha256'] == digest:
@@ -47,11 +47,23 @@ def select(data, digest, *, image=None):
             # Preserve the original catalog when selecting again after a UI switch.
             selected['_catalog'] = data.get('_catalog', data)
             return selected
+    from native_experimental_xbe import inspect
+    report = inspect(data, digest, image=image, raw=raw)
+    if report is not None:
+        selected = deepcopy(data)
+        selected['_catalog'] = data
+        selected['_experimental_input_sha256'] = digest
+        selected['_experimental_xbe_report'] = report
+        selected['_revision'] = ''
+        return selected
     raise ValueError(unsupported_image_message(image, data['title']) if image is not None else
                      'This Xbox executable is not a supported original revision')
 
 
 def profile_relative(data):
+    if '_experimental_input_sha256' in data:
+        from native_experimental_xbe import input_sha256
+        return 'data/experimental-xbe/' + input_sha256(data)
     key = data.get('_revision', '')
     if key and not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', key):
         raise ValueError('Invalid native revision profile')

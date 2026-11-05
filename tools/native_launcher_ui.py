@@ -153,6 +153,13 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
             raise ValueError('Unreviewed controller handoff boundary: '+old)
         code=code.replace(old,new)
     replacements = {
+        '        else if (verified)     snprintf(line, sizeof(line), "%s verified", noun);':
+            '        else if (xboxllr_experimental_xbe) snprintf(line, sizeof(line), "Experimental XBE - unverified");\n'
+            '        else if (verified)     snprintf(line, sizeof(line), "%s verified", noun);',
+        '        state_mark(verified, th);':
+            '        state_mark(verified && !xboxllr_experimental_xbe, th);',
+        '        ImGui::TextColored(verified ? col(th.good) : col(th.warn), "%s", line);':
+            '        ImGui::TextColored(verified && !xboxllr_experimental_xbe ? col(th.good) : col(th.warn), "%s", line);',
         '        float reserve = px(198.0f);':
             '        float reserve = px(198.0f);\n        if (xboxllr_xbe_identity.valid) reserve += px(56.0f);',
         '        else                   snprintf(line, sizeof(line), "%s not recognized", noun);':
@@ -318,6 +325,7 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
             m->crc_match = m->has_expected_crc && crc == m->expected_crc;
             for (size_t k=0;k<m->num_known_sha256;++k)
                 if (!memcmp(digest,m->known_sha256[k],32)) {m->sha_match=true;break;}
+            if (!m->sha_match && xboxllr_xbe_allow_experimental()) m->sha_match=true;
             free(body);
         }
     }
@@ -358,7 +366,7 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
         raise ValueError('Changed controller photograph')
     inventory = {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'xboxlle-ui.json'}
-    manifest = dict(version=1, adapter_version=17, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
+    manifest = dict(version=1, adapter_version=18, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
                     adapter='Xbox native host: mod provider, console storage and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
     (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
@@ -368,7 +376,7 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
 def verify(output):
     output = Path(output).resolve()
     manifest = json.loads((output / 'xboxlle-ui.json').read_text(encoding='utf-8'))
-    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 17:
+    if manifest.get('revision') != REVISION or manifest.get('adapter_version') != 18:
         raise ValueError('Unreviewed prepared UI profile')
     if manifest.get('controller_photo') != dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256):
         raise ValueError('Unreviewed controller photograph provenance')

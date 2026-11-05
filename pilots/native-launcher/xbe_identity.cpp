@@ -12,6 +12,7 @@
 XboxllrXbeIdentity xboxllr_xbe_identity = {};
 uint32_t xboxllr_expected_title_id = 0;
 int xboxllr_has_expected_title_id = 0;
+int xboxllr_experimental_xbe = 0;
 
 static uint32_t word(const unsigned char *p) {
     return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
@@ -74,7 +75,17 @@ XboxllrXbeIdentity xboxllr_read_xbe_identity(const char *path) {
     }
     return result;
 }
-void xboxllr_xbe_select(const char *path) { xboxllr_xbe_identity = xboxllr_read_xbe_identity(path); }
+void xboxllr_xbe_select(const char *path) {
+    xboxllr_experimental_xbe=0;
+    xboxllr_xbe_identity = xboxllr_read_xbe_identity(path);
+}
+int xboxllr_xbe_allow_experimental(void) {
+    const char *request=std::getenv("XLLE_LAUNCHER_EXPERIMENTAL_XBE");
+    xboxllr_experimental_xbe=request && !std::strcmp(request,"1") &&
+        xboxllr_xbe_identity.valid && xboxllr_has_expected_title_id &&
+        xboxllr_xbe_identity.title_id==xboxllr_expected_title_id;
+    return xboxllr_experimental_xbe;
+}
 int xboxllr_read_game_image(const char *path,unsigned char **data,size_t *size,uint64_t *source_size) {
     if(!data || !size || !source_size)return 0;
     *data=nullptr;*size=0;*source_size=0;

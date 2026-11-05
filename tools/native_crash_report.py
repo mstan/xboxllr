@@ -16,13 +16,13 @@ import zipfile
 from native_diagnostics import bounded_json, inspect_inputs, safe_relative
 
 LOG_LIMIT = 8 * 1024 * 1024
-MARKERS = {'PILOT STOP', 'D3D BACKEND STOP', 'PILOT AUDIO STOP', 'PILOT DSP STOP',
+MARKERS = {'EXPERIMENTAL XBE', 'IMAGE', 'PILOT STOP', 'D3D BACKEND STOP', 'PILOT AUDIO STOP', 'PILOT DSP STOP',
            'PILOT INPUT STOP', 'NATIVE STOP CONTEXT', 'NATIVE STOP RECENT',
            'NATIVE EXCEPTION', 'NATIVE EXCEPTION STACK', 'NATIVE EXCEPTION RECENT',
            'DIAGNOSTIC INPUTS FINAL', 'DIAGNOSTIC INPUTS INCOMPLETE',
            'TEXTURE CREATE', 'TEXTURE UPLOAD', 'D3D STATE', 'D3D TEXTURE STATE',
            'FAULT', 'FAULT GUEST', 'HOST LANGUAGE EXCEPTION'}
-PUBLIC_KEYS = ('schema', 'started_utc', 'finished_utc', 'state', 'title', 'xbe_sha256',
+PUBLIC_KEYS = ('experimental_xbe', 'schema', 'started_utc', 'finished_utc', 'state', 'title', 'xbe_sha256',
     'executable_sha256', 'framework_revision', 'framework_dirty', 'package_manifest_sha256',
     'system', 'exit_code', 'exit_reason', 'stop', 'input_delivery_complete', 'inputs')
 

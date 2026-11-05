@@ -76,6 +76,8 @@ static uint64_t kernel_clock_tsc_counter(void);
 #endif
 static unsigned char *memory, *image_bytes;
 static size_t image_size;
+static char loaded_image_sha256[65] = PILOT_XBE_SHA256;
+#define PILOT_LOADED_XBE_SHA256 loaded_image_sha256
 static uint32_t image_base, header_bytes, section_table, section_count;
 static RECOMP_TLS uint32_t next_kernel_ordinal;
 static RECOMP_TLS unsigned current_thread_slot;
@@ -737,10 +739,10 @@ static const char *installed_media_component(uint32_t entry,uint32_t regs[8])
 #ifdef PILOT_FILES_LLE
     /* Each original thread leases its own stack workspace. All actual file,
      * VM and close calls may yield through the existing original scheduler. */
-    regs[0]=files_verify(PILOT_XBE_SHA256);
+    regs[0]=files_verify(PILOT_LOADED_XBE_SHA256);
     fprintf(stderr,"[MEDIA VERIFY CPU LLE FILES] actual installed HDD XBE status=%08x\n",regs[0]);
 #else
-    AcquireSRWLockExclusive(&media_lock);regs[0]=media_verify(PILOT_XBE_SHA256);
+    AcquireSRWLockExclusive(&media_lock);regs[0]=media_verify(PILOT_LOADED_XBE_SHA256);
     ReleaseSRWLockExclusive(&media_lock);
     fprintf(stderr,"[MEDIA VERIFY CPU] installed default.xbe identity/status=%08x\n",regs[0]);
 #endif
@@ -1264,6 +1266,9 @@ static unsigned load_image_sections(void)
     }
     return preloaded;
 }
+#ifdef PILOT_EXPERIMENTAL_XBE_TITLE_ID
+#include "experimental_xbe.h"
+#endif
 static void load_image(const char *path)
 {
     FILE *file = fopen(path, "rb");
@@ -1278,9 +1283,19 @@ static void load_image(const char *path)
     if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, image_bytes, (ULONG)image_size, hash, 32) < 0)
         stop("SHA256 failed", 0);
     for (unsigned i=0;i<32;++i) sprintf(hex+i*2,"%02x",hash[i]);
-    if (strcmp(hex, PILOT_XBE_SHA256)) stop("XBE differs from generated artifact", 0);
+    if (strcmp(hex, PILOT_XBE_SHA256)) {
+#ifdef PILOT_EXPERIMENTAL_XBE_TITLE_ID
+        const char *error=pilot_experimental_xbe_check(image_bytes,image_size,hex,
+            getenv("XLLE_PILOT_EXPERIMENTAL_XBE"),PILOT_EXPERIMENTAL_XBE_TITLE_ID);
+        if(error)stop(error,0);
+        memcpy(loaded_image_sha256,hex,sizeof(loaded_image_sha256));
+        fprintf(stderr,"[EXPERIMENTAL XBE] actual=%s compiled=%s compatibility=unverified\n",hex,PILOT_XBE_SHA256);
+#else
+        stop("XBE differs from generated artifact", 0);
+#endif
+    }
     fprintf(stderr, "[IMAGE] sha256=%s entry=%08x\n", hex, PILOT_ENTRY);
-    image_mod_initialize(hex);
+    image_mod_initialize(PILOT_XBE_SHA256);
     memory = VirtualAlloc(NULL, (SIZE_T)0x100000000ull, MEM_RESERVE, PAGE_NOACCESS);
     if (!memory) stop("cannot reserve guest address space", 0);
     native_commit_owner_initialize();
@@ -1512,7 +1527,7 @@ int main(int argc,char **argv)
     if (argc==5) {storage_mount(argv[4]);settings_user_storage_bind();}
     fsc_ensure();
 #ifdef PILOT_MEDIA_HOST
-    uint32_t content_status=media_verify(PILOT_XBE_SHA256);
+    uint32_t content_status=media_verify(PILOT_LOADED_XBE_SHA256);
     if(content_status)stop("native title content identity/mount failed",content_status);
     media_resident_prepare();
     if(!strcmp(PILOT_TITLE_DRIVE_OWNER,"HOST")) {

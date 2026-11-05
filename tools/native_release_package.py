@@ -18,7 +18,7 @@ from windows_dependencies import inventory
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('native_content_import', 'native_texture_replacements', 'native_release_runtime', 'native_revisions', 'native_boot_launcher', 'native_boot_assets', 'native_diagnostics', 'native_crash_report', 'replay_native_diagnostic', 'native_session_diagnostics', 'replay_native_session', 'native_session_mods', 'native_mod_launcher', 'native_visual_mods', 'native_input_mods', 'native_title_switches',
            'native_save_keys', 'native_console_settings', 'create_eeprom', 'aot_inventory', 'native_storage', 'xbe_identity',
-           'native_disc', 'native_disc_progress')
+           'native_disc', 'native_disc_progress', 'native_experimental_xbe')
 # Narrow native VP build closure. No machine/CPU executable, original input,
 # generated title body or private fixture is part of the startup source kit.
 BOOT_SHARED_SOURCES = (
@@ -351,6 +351,28 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
         distribution='windows-prerelease; original content supplied by user')
     if content_import is not None:
         record['launcher']['image_import'] = {'codec': 'tools/title_image_import.py'}
+    experiment = source.get('experimental_xbe')
+    if experiment is not None:
+        from native_experimental_xbe import MODE
+        if experiment.get('mode') != MODE or options.get('PILOT_EXPERIMENTAL_XBE_TITLE_ID') != title['game_id']:
+            raise ValueError('Experimental XBE policy requires its matching experimental runtime build')
+        reference_path = (definition.parent / experiment['reference']).resolve(strict=True)
+        if not reference_path.is_relative_to(definition.parent.resolve()):
+            raise ValueError('Experimental reference leaves the title checkout')
+        reference = json.loads(reference_path.read_text(encoding='utf-8'))
+        if reference['sha256'] != title['xbe_sha256'] or reference['title_id'] != title['game_id']:
+            raise ValueError('Experimental reference does not match the compiled title')
+        record['experimental_xbe'] = dict(mode=MODE, reference=reference)
+        record['version'] = experiment['version']
+        with (output / 'README-FIRST.txt').open('a', encoding='utf-8') as readme:
+            readme.write('\nEXPERIMENTAL XBE COMPATIBILITY TEST ' + experiment['version'] + '\n'
+                'This prerelease attempts other executables for this game. Compatibility is unverified.\n'
+                'Extract into a separate folder and open Start Game.exe. Select your ISO/XISO or default.xbe normally.\n'
+                'Unknown executables show Experimental XBE - unverified and use separate test saves.\n'
+                'Your normal saves, shared save folders and HDD images are not used by experimental attempts.\n'
+                'After testing, use the crash report window to copy the diagnostic ZIP, or find it under\n'
+                'data/diagnostics/crash-reports. It contains executable metadata and hashes, not game files or keys.\n')
+        record['files']['README-FIRST.txt'] = sha(output / 'README-FIRST.txt')
     if source.get('launcher', {}).get('sharp_presentation'):
         record['launcher']['sharp_presentation'] = True
     (output / 'release.json').write_text(json.dumps(record, indent=2)+'\n', encoding='utf-8')

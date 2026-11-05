@@ -27,6 +27,7 @@ from native_console_settings import prepare as prepare_settings
 from create_eeprom import generate_eeprom, read_eeprom_file, validate_eeprom
 from native_revisions import hashes as revision_hashes, select as select_revision, profile_relative
 from native_disc import prepare_game, image_digest, ImportCancelled
+from native_experimental_xbe import enabled as experimental_xbe_enabled, input_sha256
 
 
 def sha(path):
@@ -83,7 +84,7 @@ def checked_image(data, image):
 def prepare_profile(root, data, image, kernel=None, imported_eeprom=None, *, virtual_root=None):
     """Publish only a complete new profile. Existing saves/identity are untouched."""
     image = checked_image(data, prepare_game(root, data, image))
-    data = select_revision(data.get('_catalog', data), sha(image))
+    data = select_revision(data.get('_catalog', data), sha(image), image=image)
     destination = inside(root, profile_relative(data) + '/console')
     if destination.exists() or destination.is_symlink():
         raise ValueError('A console profile already exists; keep it and its saves')
@@ -116,7 +117,7 @@ def prepare_profile(root, data, image, kernel=None, imported_eeprom=None, *, vir
         signing = 'virtual-local-v1'
     prepare_settings(eeprom, candidate / 'console-settings.bin')
     atomic_json(candidate / 'profile.json', dict(schema='xboxllr.console-preview.v1',
-        xbe_sha256=data['title']['xbe_sha256'], eeprom_sha256=hashlib.sha256(eeprom).hexdigest(),
+        xbe_sha256=input_sha256(data), eeprom_sha256=hashlib.sha256(eeprom).hexdigest(),
         eeprom_source='imported' if imported_eeprom else 'generated-r2',
         signing=signing, save_keys_sha256=sha(candidate / 'save-keys.bin')))
     # No recursive replacement, migration, regeneration or save deletion.
@@ -256,7 +257,7 @@ def verify_profile(root, data):
     profile = inside(root, profile_relative(data) + '/console')
     record = json.loads((profile / 'profile.json').read_text(encoding='utf-8'))
     if (record.get('schema') != 'xboxllr.console-preview.v1' or
-            record.get('xbe_sha256') != data['title']['xbe_sha256'] or
+            record.get('xbe_sha256') != input_sha256(data) or
             sha(profile / 'eeprom.bin') != record['eeprom_sha256'] or
             sha(profile / 'save-keys.bin') != record['save_keys_sha256']):
         raise ValueError('Console identity changed; preserve this profile and select its matching files')
@@ -333,7 +334,7 @@ def choose_eeprom():
 
 def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, storage=None, hdd=None):
     image = checked_image(data, image)
-    data = select_revision(data.get('_catalog', data), sha(image))
+    data = select_revision(data.get('_catalog', data), sha(image), image=image)
     if profile != verify_profile(root, data):
         raise ValueError('Selected native revision does not match its console profile')
     state = Path(storage) if storage is not None else inside(root, profile_relative(data) + '/state')
@@ -341,6 +342,8 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
     # Developer probe/replay/state overrides must not leak into an owner run.
     env = {key: value for key, value in os.environ.items() if not key.startswith('XLLE_PILOT_')}
     env.update(data['runtime'])
+    if '_experimental_input_sha256' in data:
+        env['XLLE_PILOT_EXPERIMENTAL_XBE'] = input_sha256(data)
     try:replacement_index=prepare_image_textures(root,data,profile,state,hdd)
     except (OSError,ValueError) as error:
         print('[HD TEXTURES] Native artwork fallback: '+str(error),flush=True)
@@ -424,9 +427,16 @@ def launch_game(root, data, image, profile, catalog, *, automated_seconds=None, 
             session.finish(code)
     # Close the log and all startup windows before showing crash feedback.
     # Unattended runs must never block on a dialog or alter the clipboard.
+    report = None
+    if '_experimental_input_sha256' in data:
+        from native_crash_report import export_report
+        report = export_report(session.path)
     if code and automated_seconds is None:
         from native_crash_report import show
         show(session)
+    elif report is not None:
+        if automated_seconds is None:
+            message('Blinx experimental XBE test', 'Test finished. Please attach this diagnostic ZIP to your report:\n\n' + str(report))
     return code
 
 
@@ -451,7 +461,7 @@ def main():
             parser.error('--prepare-only requires --image')
         with session_lock(writable):
             prepare_profile(root, data, args.image, args.kernel, args.eeprom)
-            verify_profile(root, select_revision(data, image_digest(args.image)))
+            verify_profile(root, select_revision(data, image_digest(args.image), image=args.image))
         return 0
     with session_lock(writable):
         return interactive(root, data, writable, args.start_minimized)
@@ -469,6 +479,14 @@ def launcher_manifests(root, data):
 @contextmanager
 def game_storage(root,data,image,choice_path):
     """One admission/writer lease path for gameplay and native content tools."""
+    if '_experimental_input_sha256' in data:
+        # Never point unqualified execution at a player's existing save folder
+        # or HDD. Test identities are persistent and keyed by the actual XBE.
+        profile = inside(root, profile_relative(data) + '/console')
+        if not profile.exists():
+            prepare_profile(root, data, image)
+        yield verify_profile(root, data), None, None
+        return
     ready=inside(root,profile_relative(data)+'/console').exists()
     choice=read_console_choice(choice_path)
     binding=inside(root,profile_relative(data)+'/console/storage.json')
@@ -585,7 +603,7 @@ def interactive(root, data, writable, minimized):
         data = catalog_data
         if config.get('image'):
             try:
-                data = select_revision(catalog_data, image_digest(config['image']))
+                data = select_revision(catalog_data, image_digest(config['image']), image=config['image'])
             except (ValueError, OSError):
                 pass  # Keep the launcher available to choose another supported XBE.
         ready = inside(root, profile_relative(data) + '/console').exists()
@@ -605,10 +623,14 @@ def interactive(root, data, writable, minimized):
             setup=dict(required=False, kernel=choice['kernel'], acknowledged=choice['acknowledged'],
                        eeprom=choice['eeprom'], storage=choice['storage'], hdd=choice.get('hdd',''), locked=ready, choice_path=str(choice_path)))
         run = writable / 'launcher' / uuid.uuid4().hex
+        launcher_env = dict(os.environ)
+        launcher_env.pop('XLLE_LAUNCHER_EXPERIMENTAL_XBE', None)
+        if experimental_xbe_enabled(catalog_data):
+            launcher_env['XLLE_LAUNCHER_EXPERIMENTAL_XBE'] = '1'
         result, image = catalog.run(inside(root, data['launcher_executable']), run,
             title=data['title']['name'], region=data['title'].get('region', ''),
             sha=revision_hashes(catalog_data), image=config.get('image', ''), game_id=data['title'].get('game_id'),
-            content_handler=image_import_handler(root,catalog_data,choice_path))
+            content_handler=image_import_handler(root,catalog_data,choice_path), env=launcher_env)
         # Closing/canceling the frontend can return no image. Retain the last
         # selected game so reopening does not require browsing for it again.
         image = image or config.get('image', '')
@@ -626,7 +648,11 @@ def interactive(root, data, writable, minimized):
         try:
             image = prepare_game(root, catalog_data, image)
             checked_image(data, image)
-            data = select_revision(catalog_data, sha(Path(image)))
+            data = select_revision(catalog_data, sha(Path(image)), image=image)
+            if data.get('_experimental_xbe_report'):
+                report_folder = inside(root, 'data/diagnostics')
+                report_folder.mkdir(parents=True, exist_ok=True)
+                atomic_json(report_folder / 'experimental-xbe-last.json', data['_experimental_xbe_report'])
             with game_storage(root,data,image,choice_path) as (profile,storage,hdd):
                 return launch_game(root, data, image, profile, catalog, storage=storage or None,hdd=hdd)
         except ImportCancelled:

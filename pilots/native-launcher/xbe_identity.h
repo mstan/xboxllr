@@ -15,6 +15,8 @@ typedef struct XboxllrXbeIdentity {
 extern XboxllrXbeIdentity xboxllr_xbe_identity;
 extern uint32_t xboxllr_expected_title_id;
 extern int xboxllr_has_expected_title_id;
+extern int xboxllr_experimental_xbe;
+int xboxllr_xbe_allow_experimental(void);
 XboxllrXbeIdentity xboxllr_read_xbe_identity(const char *path);
 void xboxllr_xbe_select(const char *path);
 const char *xboxllr_xbe_rejection(void);

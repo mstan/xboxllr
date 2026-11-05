@@ -227,7 +227,7 @@ def prepare_game(root, data, image, progress=None):
     with Disc(image) as disc, ExitStack() as leases:
         catalog = data.get('_catalog', data)
         try:
-            select(catalog, disc.digest)
+            select(catalog, disc.digest, raw=disc.xbe)
         except ValueError:
             raise ValueError(unsupported_identity_message(parse_identity(disc.xbe), catalog['title'])) from None
         from native_release_runtime import inside, session_lock

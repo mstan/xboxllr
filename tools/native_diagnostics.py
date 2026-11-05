@@ -177,6 +177,9 @@ class Session:
             selection=selection, diagnostic_requested=enabled, replay_available=False, limitation=LIMITATION,
             privacy='Share report.json by default. PRIVATE-DO-NOT-SHARE contains logs, saves and console signing secrets.')
         self.replay = None
+        if data.get('_experimental_xbe_report'):
+            self.report['experimental_xbe'] = data['_experimental_xbe_report']
+            self.report['xbe_sha256'] = data['_experimental_input_sha256']
         if enabled:
             try:
                 if hdd:

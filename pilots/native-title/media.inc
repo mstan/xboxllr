@@ -4,6 +4,9 @@
  * Xbox ABI: nxdk. Host-file design reference: sp00nznet 1409a7d kernel_file.c
  * and kernel_path.c. Service bodies use the host NT API, not donor code. */
 #define MEDIA_INVALID 0xc000000du
+#ifndef PILOT_LOADED_XBE_SHA256
+#define PILOT_LOADED_XBE_SHA256 PILOT_XBE_SHA256
+#endif
 #define MEDIA_BAD_HANDLE 0xc0000008u
 #define MEDIA_WRONG_VOLUME 0xc0000012u
 #define MEDIA_NO_MEDIA 0xc0000013u
@@ -243,9 +246,9 @@ static void media_verify_abi(const char *expected)
 }
 #ifdef PILOT_FILES_LLE
 static void files_verify_abi(const char *expected);
-void pilot_verify_installed_media(void) { files_verify_abi(PILOT_XBE_SHA256); }
+void pilot_verify_installed_media(void) { files_verify_abi(PILOT_LOADED_XBE_SHA256); }
 #else
-void pilot_verify_installed_media(void) { media_verify_abi(PILOT_XBE_SHA256); }
+void pilot_verify_installed_media(void) { media_verify_abi(PILOT_LOADED_XBE_SHA256); }
 #endif
 static struct MediaFile *media_owned(uint32_t id)
 {
