@@ -76,6 +76,22 @@ research, not a live memory inspector. Bit positions, enum values and location
 expressions are not decoded; do not treat every member location as a byte offset.
 Compiler-only PDBs can contain useful types without any linked addresses.
 
+Query an exact type name, type ID, or static global name with `describe`:
+
+```powershell
+python tools/native_guest_symbols.py describe `
+  --types G:/Research/title-types.aot-private.json `
+  --xbe-sha256 <complete-XBE-SHA256> --type-name Actor
+```
+
+Use `--type-id 1234` or `--object-name g_actor` in place of `--type-name`.
+The result preserves every matching definition, its owned members and referenced
+type records. Globals include their guest addresses and mapped span; that span
+is not an object-size claim. `byte_offset` is supplied only for a regular
+instance-relative member. Bitfields, constants, static members and virtual
+bases require their own location interpretation. Missing names return an empty
+list; the reader does not substitute a similarly named type or another build.
+
 ## Discovery use
 
 Normal discovery never reads these manifests. A private experiment supplying

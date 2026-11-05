@@ -8,7 +8,7 @@ import unittest
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
-from native_guest_symbols import Symbols, SCHEMA, import_dia, import_map, codeview_identities
+from native_guest_symbols import Symbols, SCHEMA, import_dia, import_map, codeview_identities, describe_layout
 from test_aot_inventory import xbe
 
 
@@ -153,6 +153,42 @@ class GuestSymbols(unittest.TestCase):
                '[FAULT SITE] pc=00011001 module=host.exe rva=00011000\n')
         found = names.annotate_log(log)
         self.assertEqual([r['address'] for r in found], [0x11001, 0x11000, 0x11001])
+
+    def layouts(self):
+        return dict(schema='xboxllr.guest-types.v1', xbe_sha256='a'*64, types={
+            '10': dict(id=10, parent=0, tag=11, name='Actor', length=16, type=0),
+            '11': dict(id=11, parent=10, tag=7, name='health', location=4,
+                       field_offset=12, type=20),
+            '12': dict(id=12, parent=10, tag=7, name='bits', location=6,
+                       field_offset=4, type=20),
+            '13': dict(id=13, parent=0, tag=11, name='Actor', length=24, type=0),
+            '20': dict(id=20, parent=0, tag=16, name='', length=4, type=0),
+            '30': dict(id=30, parent=0, tag=17, name='Entity', length=16, type=10),
+        }, objects=[dict(name='g_actor', address=0x12000, type=10, mapped_bytes=64)])
+
+    def test_layout_lookup_keeps_ambiguous_type_names_and_owner_links(self):
+        found = describe_layout(self.layouts(), 'a'*64, type_name='Actor')
+        self.assertEqual([r['type']['length'] for r in found], [16, 24])
+        fields = found[0]['members']
+        self.assertEqual(fields[0]['byte_offset'], 12)
+        self.assertEqual(fields[0]['type_info']['length'], 4)
+        self.assertIsNone(fields[1]['byte_offset'])
+        self.assertFalse(found[1]['members'])
+
+    def test_layout_alias_and_static_object_retain_referenced_types(self):
+        alias = describe_layout(self.layouts(), 'a'*64, type_id=30)[0]
+        self.assertEqual(alias['target_type']['name'], 'Actor')
+        obj = describe_layout(self.layouts(), 'a'*64, object_name='g_actor')[0]
+        self.assertEqual(obj['address'], 0x12000)
+        self.assertEqual(obj['type_info']['id'], 10)
+        self.assertEqual(obj['mapped_bytes'], 64)
+        self.assertFalse(describe_layout(self.layouts(), 'a'*64, type_name='Missing'))
+
+    def test_layout_lookup_rejects_wrong_build_and_ambiguous_queries(self):
+        with self.assertRaisesRegex(ValueError, 'different XBE'):
+            describe_layout(self.layouts(), 'b'*64, type_id=10)
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            describe_layout(self.layouts(), 'a'*64, type_id=10, type_name='Actor')
 
 
 if __name__ == '__main__':

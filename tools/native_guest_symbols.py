@@ -18,6 +18,7 @@ from aot_inventory import parse_xbe
 
 SCHEMA = 'xboxllr.guest-symbols.v1'
 LIMIT = 32 * 1024 * 1024
+TYPE_LIMIT = 128 * 1024 * 1024
 
 
 def codeview_identities(data):
@@ -208,6 +209,44 @@ class Symbols:
         return observations
 
 
+def describe_layout(document, expected_xbe_sha256, *, type_name=None, type_id=None,
+                    object_name=None):
+    """Return exact local type/global matches without interpreting guest memory."""
+    if (document.get('schema') != 'xboxllr.guest-types.v1' or
+        document.get('xbe_sha256') != expected_xbe_sha256):
+        raise ValueError('guest type map belongs to a different XBE or schema')
+    if sum(value is not None for value in (type_name, type_id, object_name)) != 1:
+        raise ValueError('select exactly one type name, type ID or object name')
+    types, objects = document['types'], document['objects']
+    if not isinstance(types, dict) or not isinstance(objects, list):
+        raise ValueError('invalid guest type or object table')
+    def info(identifier):
+        return types.get(str(identifier))
+    if object_name is not None:
+        return [dict(obj, type_info=info(obj['type'])) for obj in objects
+                if obj['name'] == object_name]
+    matches = ([info(type_id)] if type_id is not None else
+               [row for row in types.values() if row.get('tag') in (11, 12, 17)
+                and row['name'] == type_name])
+    owners = {row['id']: [] for row in matches if row is not None}
+    for member in types.values():
+        if member.get('parent') in owners:
+            owners[member['parent']].append(member)
+    results = []
+    for row in matches:
+        if row is None:
+            continue
+        members = []
+        for member in owners[row['id']]:
+            # A bitfield, constant, static member or virtual base cannot be
+            # treated as a plain byte offset from an instance's address.
+            offset = (member.get('field_offset') if member.get('tag') == 7 and
+                      member.get('location') == 4 else None)  # LocIsThisRel
+            members.append(dict(member, byte_offset=offset, type_info=info(member.get('type'))))
+        results.append(dict(type=row, target_type=info(row.get('type')), members=members))
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
@@ -225,6 +264,13 @@ def main():
     lookup.add_argument('--xbe-sha256', required=True)
     lookup.add_argument('--address', type=lambda v: int(v, 0))
     lookup.add_argument('--log', type=Path)
+    describe = sub.add_parser('describe', help='Look up an exact private type or static global')
+    describe.add_argument('--types', type=Path, required=True)
+    describe.add_argument('--xbe-sha256', required=True)
+    query = describe.add_mutually_exclusive_group(required=True)
+    query.add_argument('--type-name')
+    query.add_argument('--type-id', type=lambda value: int(value, 0))
+    query.add_argument('--object-name')
     args = parser.parse_args()
     if args.action in ('import-dia', 'import-map'):
         targets = [p.resolve() for p in (args.output, getattr(args, 'types_output', None)) if p is not None]
@@ -244,6 +290,13 @@ def main():
             args.types_output.write_text(json.dumps(types, separators=(',', ':'))+'\n', encoding='utf-8', newline='\n')
         print(json.dumps(dict(functions=len(symbols['functions']), type_records=len(types['types']),
                              objects=len(types['objects']), xbe_sha256=symbols['xbe_sha256'])))
+    elif args.action == 'describe':
+        with args.types.open('rb') as source:
+            raw = source.read(TYPE_LIMIT + 1)
+        if len(raw) > TYPE_LIMIT:
+            raise ValueError('guest type map exceeds diagnostic size limit')
+        print(json.dumps(describe_layout(json.loads(raw), args.xbe_sha256,
+              type_name=args.type_name, type_id=args.type_id, object_name=args.object_name)))
     else:
         symbols = Symbols.load(args.symbols, args.xbe_sha256)
         if (args.address is None) == (args.log is None):
