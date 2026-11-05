@@ -8,8 +8,8 @@
 > improvements to the shared engine upstream as a [pull request](https://github.com/mstan/xboxllr/pulls).
 > This requires preparing and building your title; the player downloads do not run arbitrary games.
 >
-> The same engine powers **Blinx and Jet Set Radio Future**. Blinx is public;
-> JSRF's beta is currently private while its public release is being prepared.
+> The same engine powers **Blinx and Jet Set Radio Future**. Both public betas
+> are available for Windows and Linux.
 > Please [file reproducible GitHub issues](https://github.com/mstan/xboxllr/issues).
 
 # XboxLLR
@@ -36,12 +36,12 @@ The Dashboard remains on its separately validated release below.
 | **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.01.1)** | Player app: download `XboxDashboard-windows-x64-2026.11.01.1.zip`, extract it, then open **Start Game.exe**. Supply your own Dashboard 5960 executable and assets. No compiler required. |
 | **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.02.1)** | Developer package: `xboxllr-build-tool-windows-x64-2026.11.02.1.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
 | **[Blinx public beta — Windows and Linux](https://github.com/mstan/BlinxRecomp/releases/latest)** | Players: Windows ZIP and native Linux AppImage. No compiler required; supply your own supported NTSC-U game files. |
-| **[JSRF private beta — Windows and Linux](https://github.com/mstan/JSRFRecomp/releases/latest)** | Both supported NTSC-U revisions are included. Repository access is required while the public release is prepared. |
+| **[JSRF public beta — Windows and Linux](https://github.com/mstan/JSRFRecomp/releases/latest)** | Players: Windows ZIP and native Linux AppImage. No compiler required; supply your own supported NTSC-U game files (USA standalone or certificate revision 4). |
 
 Blinx and JSRF offer **Windows x64 ZIPs and native Linux x86_64 AppImages**.
 The current AppImages include the November 2 rendering changes and were checked
 in WSL, including brief gameplay and external settings. Linux targets an
-Ubuntu 24.04/glibc baseline and Vulkan 1.3. JSRF remains private pending approval.
+Ubuntu 24.04/glibc baseline and Vulkan 1.3.
 
 ## Blinx: The Time Sweeper
 
@@ -73,9 +73,9 @@ as Blinx**, with adaptive widescreen, higher internal resolutions and local
 custom-graffiti imports. Its Early Test Runs mod lets players unlock an area's
 challenges by collecting its graffiti souls before completing the story.
 
-**Early beta: not exhaustively playtested or tested end to end.** The repository
-and Windows/Linux beta are private while the public release is prepared. Once
-available, use the title repository for downloads, setup and game-specific issues.
+**Early beta: not exhaustively playtested or tested end to end.** Use the
+[title repository](https://github.com/mstan/JSRFRecomp) for downloads, setup and
+[game-specific issues](https://github.com/mstan/JSRFRecomp/issues).
 
 ## Original Xbox Dashboard
 
@@ -169,7 +169,7 @@ containing private console material.
 Development and integration: **Matthew Stanley**. Thanks to
 [sp00nz / sp00nznet](https://github.com/sp00nznet/xboxrecomp),
 [Phobos](https://github.com/phobos665/DirectXbox-Recomp),
-[NoRain](https://github.com/NoRain211/doaxbv-re),
+[NoRain](https://github.com/NoRain211/doaxvb-re),
 [xemu contributors](https://github.com/xemu-project/xemu) and
 [apexJCL](https://github.com/apexJCL/blinx1-recomp).
 The RAM-cache design was inspired by apexJCL's Blinx work; the implementation

@@ -9,7 +9,7 @@ Special thanks to the authors whose work this project draws from:
 | [apexJCL — blinx1-recomp](https://github.com/apexJCL/blinx1-recomp) | The RAM-backed disposable game-cache approach, independently implemented using our shared FATX storage service. |
 | [sp00nz / sp00nznet — xboxrecomp](https://github.com/sp00nznet/xboxrecomp) | Xbox static recompilation foundations, native services and the starting point for related recompiler projects. |
 | [Phobos — DirectXbox-Recomp](https://github.com/phobos665/DirectXbox-Recomp) | Native CPU translation, runtime, D3D11/RHI renderer and audio work. Its documented reference title is Burnout 3: Takedown; older provenance records use the xboxrecomp repository name. |
-| [NoRain — doaxbv-re](https://github.com/NoRain211/doaxbv-re) | Dead or Alive Xtreme Beach Volleyball recompilation, audio and texture work carried through the recorded fork/component history. |
+| [NoRain — doaxvb-re](https://github.com/NoRain211/doaxvb-re) | Dead or Alive Xtreme Beach Volleyball recompilation, audio and texture work carried through the recorded fork/component history. |
 | [xemu contributors](https://github.com/xemu-project/xemu) | Hardware, GPU and audio knowledge, behavioral reference execution and attributed components. |
 | [Cxbx-Reloaded contributors](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) | Xbox high-level compatibility and behavioral references. |
 | [nxdk contributors](https://github.com/XboxDev/nxdk) | Open Xbox development tools and hardware-probe support. |
