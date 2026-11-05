@@ -172,7 +172,7 @@ def prepare(args):
     analysis_path = out / "analysis.aot-private.json"
     run("parse", ["-m", "tools.xbe_parser", xbe, "--json", str(analysis_path)])
     if not args.reuse_discovery:
-        cmd = ["-m", "tools.disasm", xbe, "--analysis-json", str(analysis_path),
+        cmd = [str(ROOT/'tools/native_discovery.py'), str(donor), xbe, "--analysis-json", str(analysis_path),
                "-o", str(out / "disasm")]
         if args.data_sections:
             cmd += ["--data-sections", args.data_sections]
