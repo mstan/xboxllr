@@ -21,6 +21,13 @@ LIMIT = 32 * 1024 * 1024
 TYPE_LIMIT = 128 * 1024 * 1024
 
 
+def _matches_image(document, expected):
+    actual = document.get('xbe_sha256')
+    return (isinstance(actual, str) and isinstance(expected, str) and
+            re.fullmatch(r'[0-9a-fA-F]{64}', expected) is not None and
+            actual.lower() == expected.lower())
+
+
 def codeview_identities(data):
     identities = set()
     for magic, size in ((b'NB10', 16), (b'RSDS', 24)):
@@ -150,7 +157,7 @@ def import_map(data, text, source_sha256):
 
 class Symbols:
     def __init__(self, data, expected_xbe_sha256):
-        if data.get('schema') != SCHEMA or data.get('xbe_sha256') != expected_xbe_sha256:
+        if data.get('schema') != SCHEMA or not _matches_image(data, expected_xbe_sha256):
             raise ValueError('guest symbol map belongs to a different XBE or schema')
         functions = data.get('functions')
         if not isinstance(functions, list) or len(functions) > 500000:
@@ -213,7 +220,7 @@ def describe_layout(document, expected_xbe_sha256, *, type_name=None, type_id=No
                     object_name=None):
     """Return exact local type/global matches without interpreting guest memory."""
     if (document.get('schema') != 'xboxllr.guest-types.v1' or
-        document.get('xbe_sha256') != expected_xbe_sha256):
+        not _matches_image(document, expected_xbe_sha256)):
         raise ValueError('guest type map belongs to a different XBE or schema')
     if sum(value is not None for value in (type_name, type_id, object_name)) != 1:
         raise ValueError('select exactly one type name, type ID or object name')

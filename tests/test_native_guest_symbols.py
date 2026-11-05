@@ -125,6 +125,7 @@ class GuestSymbols(unittest.TestCase):
 
     def test_wrong_build_cannot_load_a_symbol_map(self):
         symbols, _ = import_dia(image(), metadata(), '0'*64)
+        self.assertIsNotNone(Symbols(symbols, symbols['xbe_sha256'].upper()).lookup(0x11000))
         with self.assertRaisesRegex(ValueError, 'different XBE'):
             Symbols(symbols, 'f'*64)
 
@@ -185,6 +186,7 @@ class GuestSymbols(unittest.TestCase):
         self.assertFalse(describe_layout(self.layouts(), 'a'*64, type_name='Missing'))
 
     def test_layout_lookup_rejects_wrong_build_and_ambiguous_queries(self):
+        self.assertTrue(describe_layout(self.layouts(), 'A'*64, type_id=10))
         with self.assertRaisesRegex(ValueError, 'different XBE'):
             describe_layout(self.layouts(), 'b'*64, type_id=10)
         with self.assertRaisesRegex(ValueError, 'exactly one'):

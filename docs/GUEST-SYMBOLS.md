@@ -14,7 +14,8 @@ MAP imports validate the converted entry point and executable section layout,
 including truncated section names and discarded COMDAT offsets. This is
 structural corroboration, weaker than PDB identity: a same-layout patched binary
 cannot be distinguished from these checks alone. MAP function flags provide
-entry names, not lengths. Consequently MAP lookup matches exact entries only.
+entry names, not lengths, and can include compiler-local assembly labels.
+Consequently MAP lookup matches exact entries only.
 It never guesses which function contains an arbitrary following address.
 
 Both forms produce JSON bound to the complete XBE SHA-256. Keep original files,
