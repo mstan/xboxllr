@@ -18,6 +18,7 @@ static int close_sock(socket_t s) { return closesocket(s); }
 #include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <cerrno>
 using socket_t = int;
 static const socket_t kInvalid = -1;
@@ -45,10 +46,18 @@ std::string trim(const std::string& s) {
     return s.substr(a, b - a + 1);
 }
 bool socket_ready(socket_t fd, bool writing, long milliseconds) {
+#if defined(_WIN32)
     fd_set set; FD_ZERO(&set); FD_SET(fd, &set);
     timeval timeout{milliseconds / 1000, (milliseconds % 1000) * 1000};
     return ::select(static_cast<int>(fd) + 1, writing ? nullptr : &set,
                     writing ? &set : nullptr, nullptr, &timeout) > 0;
+#else
+    // Native title preloads may keep more than FD_SETSIZE files open. POSIX
+    // fd_set indexes by descriptor value; poll has no such 1024-fd ceiling.
+    pollfd event{fd, static_cast<short>(writing ? POLLOUT : POLLIN), 0};
+    return ::poll(&event, 1, static_cast<int>(milliseconds)) > 0 &&
+        (event.revents & (event.events | POLLERR | POLLHUP | POLLNVAL));
+#endif
 }
 bool nonblocking(socket_t fd) {
 #if defined(_WIN32)

@@ -7,11 +7,40 @@
 #include <string>
 #include <thread>
 #include <vector>
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/select.h>
+#include <unistd.h>
+struct HighDescriptors {
+    std::vector<int> held;
+    bool reserve() {
+        while(held.empty() || held.back()<FD_SETSIZE+16) {
+            int fd=open("/dev/null",O_RDONLY|O_CLOEXEC);
+            if(fd<0)return false;
+            held.push_back(fd);
+        }
+        return true;
+    }
+    ~HighDescriptors() {for(int fd:held)close(fd);}
+};
+#endif
 int main(int argc,char **argv) {
-    if(argc!=2 || pilot_debug_active() || pilot_debug_capture_requested())return 1;
+    if((argc!=2 && argc!=3) || pilot_debug_active() || pilot_debug_capture_requested())return 1;
+    bool high_server=argc==3 && std::strcmp(argv[2],"--high-server-fd")==0;
+    bool high_client=argc==3 && std::strcmp(argv[2],"--high-client-fd")==0;
+    if(argc==3 && !high_server && !high_client)return 1;
+#if !defined(_WIN32)
+    HighDescriptors descriptors;
+    if(high_server && !descriptors.reserve())return 1;
+#else
+    if(high_server || high_client)return 1;
+#endif
     std::array<uint8_t,18> pad{};if(pilot_debug_input(pad.data()))return 1;
     if(!pilot_debug_start("invalid") || pilot_debug_active())return 1;
     if(pilot_debug_start(nullptr) || pilot_debug_active() || pilot_debug_start(argv[1]))return 1;
+#if !defined(_WIN32)
+    if(high_client && !descriptors.reserve())return 1;
+#endif
     std::atomic<bool> running{true},observed{false},resized{false},second{false};
     std::thread producer([&] {
         const std::array<uint8_t,18> expected={1,0,255,0,0,0,0,0,0,0,0xc7,0xcf,0x39,0x30,0,0,0,0};
