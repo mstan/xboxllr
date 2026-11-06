@@ -30,6 +30,20 @@ def metadata():
 
 
 class GuestSymbols(unittest.TestCase):
+    def test_import_preserves_constant_precision_and_zero_bit_position(self):
+        records=metadata()+[
+            dict(id=10,parent=0,tag=16,section=0,name='',type=0,length=8,basic=7),
+            dict(id=11,parent=0,tag=12,section=0,name='AuthoredEnum',type=10,length=8),
+            dict(id=12,parent=11,tag=7,section=0,name='All',type=10,length=0,location=10,
+                 constant=dict(kind='integer',bits=64,signed=False,value='18446744073709551615')),
+            dict(id=13,parent=20,tag=7,section=0,name='Bits',type=10,length=9,location=6,
+                 field_offset=1,storage_offset=1,bit_position=0,bit_width=9)]
+        _,types=import_dia(image(),records,'0'*64)
+        self.assertEqual(types['types']['12']['constant']['value'],'18446744073709551615')
+        self.assertEqual(types['types']['13']['bit_position'],0)
+        self.assertEqual(types['types']['13']['bit_width'],9)
+        self.assertEqual(types['types']['13']['storage_offset'],1)
+
     def map_text(self):
         return ('entry point at 0001:00000000\n'
                 ' 0001:00000000 00001000H .text CODE\n'

@@ -3,6 +3,7 @@
 // No DIA dependency is needed by portable JSON lookup or normal title builds.
 #include <cstdio>
 #include <dia2.h>
+#include <cvconst.h>
 #include <map>
 #include <set>
 #include <string>
@@ -12,6 +13,33 @@
 static std::set<DWORD> seen;
 static std::map<DWORD, unsigned> counts;
 static std::vector<DWORD> type_refs;
+static void constant_value(const VARIANT &value) {
+  long long signed_value = 0;
+  unsigned long long unsigned_value = 0;
+  unsigned bits = 0;
+  bool is_signed = false;
+  switch (value.vt) {
+  case VT_I1: signed_value = (signed char)value.cVal; bits = 8; is_signed = true; break;
+  case VT_I2: signed_value = value.iVal; bits = 16; is_signed = true; break;
+  case VT_I4: signed_value = value.lVal; bits = 32; is_signed = true; break;
+  case VT_INT: signed_value = value.intVal; bits = 32; is_signed = true; break;
+  case VT_I8: signed_value = value.llVal; bits = 64; is_signed = true; break;
+  case VT_UI1: unsigned_value = value.bVal; bits = 8; break;
+  case VT_UI2: unsigned_value = value.uiVal; bits = 16; break;
+  case VT_UI4: unsigned_value = value.ulVal; bits = 32; break;
+  case VT_UINT: unsigned_value = value.uintVal; bits = 32; break;
+  case VT_UI8: unsigned_value = value.ullVal; bits = 64; break;
+  default:
+    printf(",\"constant\":{\"kind\":\"unavailable\",\"variant_type\":%u}", value.vt);
+    return;
+  }
+  // Decimal strings retain all 64 bits through JSON consumers with doubles.
+  printf(",\"constant\":{\"kind\":\"integer\",\"bits\":%u,\"signed\":%s,\"value\":\"",
+         bits, is_signed ? "true" : "false");
+  if (is_signed) printf("%lld", signed_value);
+  else printf("%llu", unsigned_value);
+  printf("\"}");
+}
 static void quoted(const wchar_t *value) {
   std::string utf8;
   if (value) {
@@ -47,9 +75,9 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
   symbol->get_addressSection(&section);
   symbol->get_addressOffset(&offset);
   symbol->get_relativeVirtualAddress(&rva);
-  symbol->get_length(&length);
+  HRESULT length_hr = symbol->get_length(&length);
   symbol->get_dataKind(&kind);
-  symbol->get_offset(&field_offset);
+  HRESULT offset_hr = symbol->get_offset(&field_offset);
   symbol->get_locationType(&location);
   IDiaSymbol *type = nullptr;
   if (SUCCEEDED(symbol->get_type(&type)) && type) {
@@ -72,6 +100,25 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
   quoted(name);
   printf(",\"undecorated\":");
   quoted(pretty);
+  if (location == LocIsBitField) {
+    DWORD position = 0;
+    // S_FALSE is missing metadata, distinct from a real bit position of zero.
+    if (symbol->get_bitPosition(&position) == S_OK)
+      printf(",\"bit_position\":%lu", position);
+    if (length_hr == S_OK)
+      printf(",\"bit_width\":%llu", length);
+    if (offset_hr == S_OK)
+      printf(",\"storage_offset\":%ld", field_offset);
+  }
+  if (location == LocIsConstant) {
+    VARIANT value;
+    VariantInit(&value);
+    if (symbol->get_value(&value) == S_OK)
+      constant_value(value);
+    else
+      printf(",\"constant\":{\"kind\":\"unavailable\"}");
+    VariantClear(&value);
+  }
   printf("}\n");
   SysFreeString(name);
   SysFreeString(pretty);

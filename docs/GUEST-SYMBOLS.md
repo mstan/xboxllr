@@ -73,8 +73,14 @@ the original PDB, DIA and a compiler are unnecessary.
 The separate type manifest retains type IDs, UDT/member ownership, offsets,
 array counts, pointer and function type links, calling conventions and addressed
 static objects. IDs are local to one source PDB. This is layout metadata for
-research, not a live memory inspector. Bit positions, enum values and location
-expressions are not decoded; do not treat every member location as a byte offset.
+research, not a live memory inspector. Enum constants retain their exact signed
+or unsigned value as a decimal string, including 64-bit values. Bitfield members
+retain storage byte offset, bit position and bit width only when DIA supplies
+them. A real bit position of zero differs from missing metadata. DIA reports a
+bitfield's length in bits; other type lengths are bytes. See Microsoft's
+[location properties](https://learn.microsoft.com/en-us/visualstudio/debugger/debug-interface-access/symbol-locations)
+and [length units](https://learn.microsoft.com/en-us/visualstudio/debugger/debug-interface-access/idiasymbol-get-length).
+Do not treat every member location as a byte offset.
 Compiler-only PDBs can contain useful types without any linked addresses.
 
 Query an exact type name, type ID, or static global name with `describe`:
@@ -92,6 +98,16 @@ is not an object-size claim. `byte_offset` is supplied only for a regular
 instance-relative member. Bitfields, constants, static members and virtual
 bases require their own location interpretation. Missing names return an empty
 list; the reader does not substitute a similarly named type or another build.
+
+`native_guest_types.TypeDecoder(document, xbe_sha256)` decodes supplied known
+bytes through `scalar(type_id, raw)` and `bitfield(member_id, instance_bytes)`.
+Integer results use decimal strings to preserve precision. Enum results retain
+all matching names; unknown values retain their number. Signed bitfields use
+their declared integer storage type and width, including fields crossing byte
+boundaries. Wrong-image documents are rejected; missing layouts, short reads and
+invalid bit ranges return explicit unavailable results. These APIs interpret
+bytes provided by the caller; live memory transport and scoped-variable location
+resolution are separate features.
 
 ## Discovery use
 

@@ -96,7 +96,8 @@ def import_dia(data, records, source_sha256):
         if tag in (7, 11, 12, 13, 14, 15, 16, 17, 18, 20) and not record['section']:
             types[str(record['id'])] = {key: record[key] for key in
                 ('id', 'parent', 'tag', 'name', 'type', 'length', 'field_offset',
-                 'data_kind', 'location', 'basic', 'count', 'calling') if key in record}
+                 'data_kind', 'location', 'basic', 'count', 'calling',
+                 'constant', 'bit_position', 'bit_width', 'storage_offset') if key in record}
     common = dict(xbe_sha256=image['sha256'], source_sha256=source_sha256)
     symbols = dict(schema=SCHEMA, **common, identity='matching-codeview',
                    functions=sorted(functions.values(), key=lambda f: f['address']),

@@ -899,6 +899,8 @@ if(Python3_Interpreter_FOUND)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_symbol_discovery.py")
   add_test(NAME native_guest_symbols COMMAND ${Python3_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_guest_symbols.py")
+  add_test(NAME native_guest_types COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_guest_types.py")
   add_test(NAME native_poll_waits COMMAND ${Python3_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_poll_waits.py")
   if(XLLE_TEST_NATIVE_CONTINUATIONS)
