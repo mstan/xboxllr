@@ -83,6 +83,7 @@ def import_dia(data, records, source_sha256):
     if len(stored) != 1 or not stored.intersection(possible):
         raise ValueError('PDB CodeView identity does not match this XBE uniquely')
     functions, types, objects, scopes, variables, frames = {}, {}, [], {}, {}, []
+    compilands, compilers, function_owners, function_addresses = {}, {}, {}, {}
     def section_address(section_number, offset, length=0):
         if type(section_number) is not int or not 1 <= section_number <= len(image['sections']):
             return None
@@ -93,6 +94,15 @@ def import_dia(data, records, source_sha256):
     rejected = 0
     for record in records:
         tag = record['tag']
+        if record.get('kind') == 'compiland_function':
+            function_owners.setdefault(record['id'],set()).add(record['parent'])
+        if tag == 2:
+            compilands[str(record['id'])] = dict(name=record['name'])
+        if tag == 3:
+            compilers.setdefault(str(record['parent']), []).append({
+                key: record[key] for key in ('compiler_name','platform','language',
+                    'frontend_major','frontend_minor','frontend_build','frontend_qfe',
+                    'backend_major','backend_minor','backend_build','backend_qfe') if key in record})
         if record.get('kind')=='frame':
             frame = {key:record[key] for key in ('length','prolog_length','locals_length',
                      'params_length','saved_registers_length','frame_type','program') if key in record}
@@ -145,6 +155,10 @@ def import_dia(data, records, source_sha256):
                 function['size'] = max(function['size'], size)
                 if name not in function['names']:
                     function['names'].append(name)
+                if tag == 5:
+                    function_addresses[record['id']] = address
+                    if record.get('lexical_parent'):
+                        function_owners.setdefault(record['id'],set()).add(record['lexical_parent'])
             else:
                 if record.get('location') == 1:  # LocIsStatic, including zero-filled BSS.
                     objects.append(dict(address=address, name=name, type=record['type'],
@@ -156,9 +170,15 @@ def import_dia(data, records, source_sha256):
                  'data_kind', 'location', 'basic', 'count', 'calling',
                  'constant', 'bit_position', 'bit_width', 'storage_offset','location_offset') if key in record}
     common = dict(xbe_sha256=image['sha256'], source_sha256=source_sha256)
+    for function_id,address in function_addresses.items():
+        owners = {owner for owner in function_owners.get(function_id,()) if str(owner) in compilands}
+        if owners:
+            function = functions[address]
+            function['compiland_ids'] = sorted(set(function.get('compiland_ids',())) | owners)
     symbols = dict(schema=SCHEMA, **common, identity='matching-codeview',
                    functions=sorted(functions.values(), key=lambda f: f['address']),
-                   rejected_unbacked_records=rejected)
+                   rejected_unbacked_records=rejected,
+                   compilands=compilands, compilers=compilers)
     for marker in scopes.values():
         if marker['tag'] in (21,22) and 'address' in marker:
             owner = scopes.get(str(marker.get('parent')))

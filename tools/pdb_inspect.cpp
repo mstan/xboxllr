@@ -150,6 +150,32 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
     if (symbol->get_paramBasePointerRegisterId(&reg) == S_OK)
       printf(",\"parameter_base_register\":%lu", reg);
   }
+  if (tag == SymTagFunction || tag == SymTagData) {
+    DWORD lexical_parent = 0;
+    if (symbol->get_lexicalParentId(&lexical_parent) == S_OK)
+      printf(",\"lexical_parent\":%lu", lexical_parent);
+  }
+  if (tag == SymTagCompilandDetails) {
+    DWORD value = 0;
+    BSTR compiler = nullptr;
+    if (symbol->get_compilerName(&compiler) == S_OK && compiler) {
+      printf(",\"compiler_name\":"); quoted(compiler);
+    }
+    SysFreeString(compiler);
+#define COMPILER_PROPERTY(method, key) \
+    if (symbol->method(&value) == S_OK) printf(",\"" key "\":%lu", value)
+    COMPILER_PROPERTY(get_platform, "platform");
+    COMPILER_PROPERTY(get_language, "language");
+    COMPILER_PROPERTY(get_frontEndMajor, "frontend_major");
+    COMPILER_PROPERTY(get_frontEndMinor, "frontend_minor");
+    COMPILER_PROPERTY(get_frontEndBuild, "frontend_build");
+    COMPILER_PROPERTY(get_frontEndQFE, "frontend_qfe");
+    COMPILER_PROPERTY(get_backEndMajor, "backend_major");
+    COMPILER_PROPERTY(get_backEndMinor, "backend_minor");
+    COMPILER_PROPERTY(get_backEndBuild, "backend_build");
+    COMPILER_PROPERTY(get_backEndQFE, "backend_qfe");
+#undef COMPILER_PROPERTY
+  }
   printf("}\n");
   SysFreeString(name);
   SysFreeString(pretty);
@@ -158,8 +184,9 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
 static void scope_children(IDiaSymbol *scope, unsigned depth = 0);
 static void children(IDiaSymbol *parent, enum SymTagEnum tag,
                      bool fields = false) {
-  DWORD parent_id = 0;
+  DWORD parent_id = 0, parent_tag = 0;
   parent->get_symIndexId(&parent_id);
+  parent->get_symTag(&parent_tag);
   IDiaEnumSymbols *items = nullptr;
   if (FAILED(parent->findChildren(tag, nullptr, nsNone, &items)) || !items)
     return;
@@ -167,6 +194,14 @@ static void children(IDiaSymbol *parent, enum SymTagEnum tag,
   ULONG got = 0;
   while (items->Next(1, &item, &got) == S_OK && got) {
     record(item, parent_id);
+    if (tag == SymTagFunction && parent_tag == SymTagCompiland) {
+      DWORD function_id = 0;
+      item->get_symIndexId(&function_id);
+      // Global enumeration may already have emitted this function. Its DIA
+      // lexical parent can be global scope, so preserve the actual module edge.
+      printf("{\"tag\":-2,\"kind\":\"compiland_function\",\"id\":%lu,\"parent\":%lu}\n",
+             function_id, parent_id);
+    }
     if (tag == SymTagFunction)
       scope_children(item);
     if (fields) {
@@ -309,6 +344,8 @@ int wmain(int argc, wchar_t **argv) {
     IDiaSymbol *item = nullptr;
     ULONG got = 0;
     while (compilands->Next(1, &item, &got) == S_OK && got) {
+      record(item);
+      children(item, SymTagCompilandDetails);
       children(item, SymTagFunction);
       children(item, SymTagData);
       item->Release();

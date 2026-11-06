@@ -164,6 +164,44 @@ only PDB ingestion requires Windows DIA.
 
 ## Discovery use
 
+`tools/native_sdk_symbols.py` builds a private SDK attribution atlas from
+explicitly supplied exact-PDB images. A source list contains `xbe`, `symbols`
+and optional `types` paths. Generate an atlas, then apply it to another image's
+discovered extents:
+
+```powershell
+python tools/native_sdk_symbols.py atlas --sources G:/Research/sources.json `
+  --output G:/Research/sdk-atlas.aot-private.json
+python tools/native_sdk_symbols.py match --atlas G:/Research/sdk-atlas.aot-private.json `
+  --xbe G:/Research/title.xbe --functions G:/Research/disasm/functions.json `
+  --output G:/Research/title-sdk.aot-private.json
+```
+
+Matching compares complete decoded bodies in identified SDK library sections.
+It retains numeric literals, register/stack/member offsets and branch topology;
+kernel ordinals and fully qualified callee bodies provide relocation evidence.
+Absolute read-only scalar loads may relocate only with identical bytes and
+alignment. Unresolved indirect transfers, mutable or indexed globals, embedded
+data, recursive/unqualified callees and tiny bodies remain unknown. A name must
+have unanimous source aliases from at least two independent title IDs. Transfers
+across SDK revisions additionally require matching source bodies from multiple
+SDK builds. Debug/retail library context must agree.
+
+The DIA importer retains actual compiland compiler versions where available.
+Missing compiler identity stays explicit; complete-body matching does not infer
+a compiler, calling convention, type layout or service implementation. An atlas
+source cannot also be a held-out target, and target names never enter matching.
+Qualification must compare accepted predictions against independent exact labels;
+an index count alone does not establish precision.
+
+Named data attribution has a separate narrow gate: decoded operand xrefs must
+identify the same complete read-only scalar in independently named source
+objects, with consistent names, size, bytes and target address evidence. Other
+globals remain unnamed. No source PDB type IDs or layouts transfer with a name.
+Outputs bind to the target hash and record their source proof; they can be read
+by the existing diagnostic symbol lookup but cannot seed exact-PDB discovery or
+authorize HLE replacements. Keep the atlas and all derived datasets private.
+
 Discovery treats Bink's `BINKDATA` section as data even when the XBE marks it
 executable. Its callable tables feed the existing guarded pointer pass; the
 other Bink and SDK code sections retain their code classification. Coefficient

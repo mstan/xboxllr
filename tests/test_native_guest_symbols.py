@@ -30,6 +30,19 @@ def metadata():
 
 
 class GuestSymbols(unittest.TestCase):
+    def test_compiler_context_keeps_actual_compiland_ownership(self):
+        records=metadata()
+        records[1]['lexical_parent']=1
+        records += [dict(id=40,tag=2,section=0,name='authored.obj'),
+                    dict(id=2,parent=40,tag=-2,kind='compiland_function'),
+                    dict(id=41,parent=40,tag=3,section=0,name='',compiler_name='Authored compiler',
+                         frontend_major=12,frontend_minor=1,frontend_build=1234,backend_major=12,platform=3)]
+        symbols,_=import_dia(image(),records,'0'*64)
+        self.assertEqual(symbols['functions'][0]['compiland_ids'],[40])
+        self.assertEqual(symbols['compilers']['40'][0]['frontend_build'],1234)
+        self.assertEqual(symbols['compilands']['40']['name'],'authored.obj')
+        self.assertNotIn('backend_build',symbols['compilers']['40'][0])
+
     def test_scopes_liveness_frames_and_tls_bind_to_guest_coordinates(self):
         blob=bytearray(image())
         struct.pack_into('<I',blob,0x12c,0x101a0)
