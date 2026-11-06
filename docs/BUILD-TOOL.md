@@ -48,6 +48,12 @@ interpreter. `prepare` exposes the lower-level original-XBE translation driver,
 and `dependencies` packages the exact prepared renderer/UI/DSP source closure.
 Run each command with `--help` for its options. Errors return a nonzero exit.
 
+The [private guest-symbol reader](GUEST-SYMBOLS.md) can use the same bundled
+interpreter: `xboxllr.exe python D:\Dev\xboxllr\tools\native_guest_symbols.py --help`.
+It provides build-bound guest-address and type/global queries from a current
+source checkout. PDB ingestion uses the separate optional Windows DIA frontend;
+portable JSON lookup needs neither DIA nor the original PDB.
+
 ## Rebuild the EXE and package
 
 ```powershell

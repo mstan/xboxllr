@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from native_discovery import aligned_boundary_entry, install
+from native_discovery import aligned_boundary_entry, install, xpp_registration_entries
 from native_pilot import DONOR_PIN
 
 
@@ -116,6 +116,57 @@ class NativeDiscovery(unittest.TestCase):
         method = self.module.FunctionDetector._is_padded_entry
         install(self.module)
         self.assertIs(self.module.FunctionDetector._is_padded_entry, method)
+
+    def xpp(self, *, body=b'\x31\xc0\xc3', prefix=b'\xc3', mate=True, name='XPP'):
+        det, text = self.detector(address=0x10051, body=body, prefix=prefix, pointer=False)
+        text.name = name
+        det.functions[0x10040] = SimpleNamespace(start=0x10040, end=0x10041,
+                                                detection_method='call_target')
+        metadata = (0x10040 if mate else 0x10061).to_bytes(4, 'little')
+        metadata += (0x10051).to_bytes(4, 'little')
+        det.image.raw_data = metadata + det.image.raw_data[len(metadata):]
+        return det, text
+
+    def test_xpp_registration_recovers_unaligned_callback(self):
+        det, section = self.xpp()
+        self.assertTrue(xpp_registration_entries(det, [section]))
+        self.assertEqual(det._alias_entries, {0x10051: 0x10054})
+        self.assertEqual(det.functions[0x10040].end, 0x10041)
+
+    def test_xpp_requires_a_known_mate_and_the_registration_section(self):
+        for kwargs in ({'mate': False}, {'name': '.text'}):
+            det, section = self.xpp(**kwargs)
+            self.assertFalse(xpp_registration_entries(det, [section]))
+
+    def test_xpp_does_not_treat_metadata_pointers_as_code(self):
+        det, section = self.xpp()
+        det.image.raw_data = (0x10040).to_bytes(4, 'little') + (0x10020).to_bytes(4, 'little') + det.image.raw_data[8:]
+        self.assertFalse(xpp_registration_entries(det, [section]))
+
+    def test_xpp_rejects_fallthrough_and_unsaved_pops(self):
+        for kwargs in ({'prefix': b'\x31\xc0'}, {'prefix': bytes.fromhex('b800000090')},
+                       {'body': b'\x5e\xc3'}):
+            det, section = self.xpp(**kwargs)
+            self.assertFalse(xpp_registration_entries(det, [section]))
+
+    def test_xpp_cannot_split_a_body_or_borrow_a_known_entry(self):
+        det, section = self.xpp()
+        det.functions[0x10048] = SimpleNamespace(start=0x10048, end=0x10054,
+                                                detection_method='gap_prologue')
+        self.assertFalse(xpp_registration_entries(det, [section]))
+        det, section = self.xpp(body=bytes.fromhex('b80100000050c3'))
+        det.functions[0x10056] = SimpleNamespace(start=0x10056, end=0x10058,
+                                                detection_method='call_target')
+        self.assertFalse(xpp_registration_entries(det, [section]))
+
+    def test_xpp_tail_call_must_have_a_known_destination(self):
+        det, section = self.xpp(body=bytes.fromhex('e9aaffffff'))  # jmp 0x10000
+        self.assertFalse(xpp_registration_entries(det, [section]))
+        det.functions[0x10000] = SimpleNamespace(start=0x10000, end=0x10001,
+                                                detection_method='call_target')
+        # Retain a metadata prefix by marking the tail target as an alias.
+        det.functions[0x10000].detection_method = 'alias'
+        self.assertTrue(xpp_registration_entries(det, [section]))
 
 
 if __name__ == '__main__':
