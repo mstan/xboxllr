@@ -7,6 +7,9 @@ executables, the comparison runner and raw results remain in private research
 storage. Source-only identities and counts are in
 [`accuracy/symbol_reference_results.json`](../accuracy/symbol_reference_results.json).
 
+The [archive-wide survey](XBOX-SYMBOL-CORPUS.md) records all 47 sources and their
+metadata dispositions, separately from the initial two-pair experiment below.
+
 ## Accepted correction
 
 A referenced, 16-byte-aligned entry can follow a decoded return directly when
@@ -110,7 +113,8 @@ python tests/test_native_discovery.py
 python tests/test_native_function_extent.py
 ```
 
-The donor's 68 unittest cases and 49 standalone checks pass with the extension.
+The donor's 68 unittest cases, 50 standalone function checks and additional
+immediate-reference script pass with the extension.
 One standalone expectation is deliberately updated: its aligned referenced
 target immediately after a return is now accepted. The original fallthrough,
 unaligned target and tail-to-non-start rejection cases remain in force.

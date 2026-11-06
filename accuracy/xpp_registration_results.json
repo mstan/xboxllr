@@ -68,5 +68,21 @@
       "changed_extent_count": 0,
       "scope": "current-title static discovery; no independent symbol reference"
     }
-  ]
+  ],
+  "earlier_extension_equivalence": {
+    "sha256": "6b56f5b8cb28458702d1d0d106cb29c21fe083a299463d0c6302231ade6b352a",
+    "difference": "module docstring only; identical non-docstring AST",
+    "reproducible_from": "replace the module docstring with the initial aligned-boundary description"
+  },
+  "donor_regression_checks": {
+    "unittest_cases": 68,
+    "unittest_success": true,
+    "standalone_function_checks": 50,
+    "updated_expectations": [
+      "tools.disasm.test_imm_ref_padded.test_a_target_after_code_is_not"
+    ],
+    "extra_main_scripts": [
+      "tools.disasm.test_imm_refs"
+    ]
+  }
 }
