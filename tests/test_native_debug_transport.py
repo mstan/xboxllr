@@ -79,6 +79,28 @@ def main():
         for x, y in ((0, 0), (639, 479), (255, 256)):
             assert pixels[(y*640+x)*4:(y*640+x)*4+4] == bytes((x&255, y&255, 0x65, 255))
         request(port, "clear_input")
+        request(port,'pause 69632')
+        snapshot=request(port,'guest_snapshot');epoch=snapshot['snapshot']
+        assert snapshot['pc']==0x11000 and snapshot['registers']['eax']==42
+        assert snapshot['xbe_sha256']=='a'*64 and snapshot['entry_sp']==0x20000
+        assert snapshot['xmm'][0].startswith('0000803e')
+        before=request(port,'status')['frames']
+        assert request(port,f'read_guest {epoch} 73728 4')['data']=='2a000000'
+        assert request(port,'guest_snapshot')==snapshot
+        assert request(port,'status')['frames']==before
+        for command in (f'read_guest {epoch} 73728 4097',f'read_guest {epoch} 4294967295 4',
+                        f'read_guest {epoch} 4244635648 4',f'read_guest {epoch+1} 73728 4','pause 70000'):
+            try:
+                request(port,command);raise AssertionError('invalid/unsafe guest read accepted')
+            except ValueError:pass
+        request(port,'resume')
+        try:
+            request(port,f'read_guest {epoch} 73728 4');raise AssertionError('expired snapshot accepted')
+        except ValueError:pass
+        # A second pause immediately after resume must establish a new epoch,
+        # rather than stranding the owner in the previous pause wait.
+        request(port,'pause');assert request(port,'guest_snapshot')['snapshot']!=epoch
+        request(port,'resume')
         # Keep an idle client connected during destruction: server stop must
         # join promptly instead of hanging in a blocking receive.
         with socket.create_connection(("127.0.0.1", port), 5):
@@ -89,6 +111,25 @@ def main():
         if child.poll() is None:
             child.kill()
             child.communicate()
+    with socket.socket() as temporary:
+        temporary.bind(('127.0.0.1',0));port=temporary.getsockname()[1]
+    child=subprocess.Popen([sys.argv[1],str(port),'incoherent'],stdin=subprocess.PIPE,
+                           stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+    try:
+        deadline=time.monotonic()+5
+        while True:
+            try:request(port,'status');break
+            except OSError:
+                if time.monotonic()>deadline or child.poll() is not None:raise
+                time.sleep(.02)
+        try:
+            request(port,'pause');raise AssertionError('uncertified runtime snapshot accepted')
+        except ValueError as error:assert 'coherent' in str(error)
+        _,errors=child.communicate(b'quit\n',timeout=5)
+        assert child.returncode==0,errors.decode(errors='replace')
+        print('PASS guest inspection transport: coherent frozen epoch, bounded reads, stale-token/MMIO rejection, resume/re-pause and unsafe-profile refusal')
+    finally:
+        if child.poll() is None:child.kill();child.communicate()
 
 
 if __name__ == "__main__":

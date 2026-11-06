@@ -1431,6 +1431,12 @@ if(TARGET pilot_shader_test)
 endif()
 add_executable(pilot_native_debug_test native_debug_test.cpp)
 target_link_libraries(pilot_native_debug_test PRIVATE pilot_native_debug)
+# Foreign native bindings/mods may own asynchronous guest-memory writers.
+# They need a qualified quiescence provider before exposing coherent snapshots.
+file(GLOB pilot_inspection_bindings "${PILOT_GENERATED}/*binding.c")
+if(pilot_inspection_bindings OR PILOT_TITLE_MOD_SOURCE OR PILOT_SECTION_MOD_SOURCE)
+  set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS PILOT_INSPECTION_EXTERNAL_OWNERS)
+endif()
 pilot_add_test(NAME pilot_session_replay_transport COMMAND "${CMAKE_COMMAND}" -E env
   "XBOXLLR_SESSION_REPLAY_TEST_EXE=$<TARGET_FILE:pilot_session_replay_test>"
   "XBOXLLR_SESSION_REPLAY_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/session-replay-tests"

@@ -1,4 +1,5 @@
-"""Portable, image-bound integer, enum and bitfield value decoding."""
+"""Portable, image-bound scalar, enum and bitfield value decoding."""
+import struct
 from native_guest_symbols import _matches_image
 
 
@@ -32,6 +33,20 @@ class TypeDecoder:
         return None
 
     def scalar(self, type_id, raw):
+        row = self.types.get(str(type_id))
+        seen = set()
+        while row and row.get('tag') == 17 and row['id'] not in seen:
+            seen.add(row['id']);row = self.types.get(str(row.get('type')))
+        if row and row.get('tag')==14 and row.get('length')==4:
+            if len(raw)!=4:
+                return dict(status='unavailable',reason='incomplete or oversized pointer read')
+            return dict(status='available',kind='pointer',address=int.from_bytes(raw,'little'),bits=32)
+        if row and row.get('tag')==16 and row.get('basic')==8 and row.get('length') in (4,8):
+            size=row['length']
+            if len(raw)!=size:
+                return dict(status='unavailable',reason='incomplete or oversized floating-point read')
+            value=struct.unpack('<f' if size==4 else '<d',raw)[0]
+            return dict(status='available',kind='float',value=str(value),bits=size*8)
         layout = self.integer_layout(type_id)
         if layout is None:
             return dict(status='unavailable', reason='integer width or signedness unavailable')
@@ -39,10 +54,6 @@ class TypeDecoder:
             return dict(status='unavailable', reason='incomplete or oversized scalar read')
         value = int.from_bytes(raw, 'little', signed=layout['signed'])
         result = dict(status='available', kind='integer', value=str(value), **layout)
-        row = self.types.get(str(type_id))
-        seen = set()
-        while row and row.get('tag') == 17 and row['id'] not in seen:
-            seen.add(row['id']);row = self.types.get(str(row.get('type')))
         if row and row.get('tag') == 12:
             result['kind'] = 'enum'
             result['names'] = []
@@ -69,7 +80,19 @@ class TypeDecoder:
             return dict(status='unavailable', reason='invalid or unavailable bitfield storage metadata')
         if offset+layout['bytes'] > len(instance_bytes):
             return dict(status='unavailable', reason='incomplete bitfield storage read')
-        raw = instance_bytes[offset:offset+layout['bytes']]
+        return self.bitfield_storage(member_id, instance_bytes[offset:offset+layout['bytes']])
+
+    def bitfield_storage(self, member_id, raw):
+        """Decode only the field's storage, without allocating its enclosing object."""
+        member = self.types.get(str(member_id), {})
+        layout = self.integer_layout(member.get('type'))
+        offset, position, width = (member.get(key) for key in
+                                   ('storage_offset', 'bit_position', 'bit_width'))
+        if (member.get('tag') != 7 or member.get('location') != 6 or layout is None or
+                any(type(n) is not int for n in (offset, position, width)) or
+                offset < 0 or position < 0 or width <= 0 or position+width > layout['bits'] or
+                len(raw) != layout['bytes']):
+            return dict(status='unavailable', reason='invalid or unavailable bitfield storage metadata')
         value = (int.from_bytes(raw, 'little') >> position) & ((1 << width)-1)
         if layout['signed'] and value & (1 << (width-1)):
             value -= 1 << width

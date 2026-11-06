@@ -13,6 +13,7 @@
 static std::set<DWORD> seen;
 static std::map<DWORD, unsigned> counts;
 static std::vector<DWORD> type_refs;
+static std::set<DWORD> visited_scopes;
 static void constant_value(const VARIANT &value) {
   long long signed_value = 0;
   unsigned long long unsigned_value = 0;
@@ -119,11 +120,42 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
       printf(",\"constant\":{\"kind\":\"unavailable\"}");
     VariantClear(&value);
   }
+  if (tag == SymTagData) {
+    DWORD reg = 0, live_section = 0, live_offset = 0, live_count = 0;
+    ULONGLONG live_length = 0;
+    BOOL optimized = FALSE;
+    if (symbol->get_registerId(&reg) == S_OK)
+      printf(",\"register_id\":%lu", reg);
+    if (offset_hr == S_OK)
+      printf(",\"location_offset\":%ld", field_offset);
+    if (symbol->get_isOptimizedAway(&optimized) == S_OK)
+      printf(",\"optimized_away\":%s", optimized ? "true" : "false");
+    if (symbol->get_isLocationControlFlowDependent(&optimized) == S_OK)
+      printf(",\"control_flow_dependent\":%s", optimized ? "true" : "false");
+    if (symbol->get_countLiveRanges(&live_count) == S_OK)
+      printf(",\"live_range_count\":%lu", live_count);
+    if (symbol->get_liveRangeStartAddressSection(&live_section) == S_OK &&
+        symbol->get_liveRangeStartAddressOffset(&live_offset) == S_OK &&
+        symbol->get_liveRangeLength(&live_length) == S_OK)
+      printf(",\"live_section\":%lu,\"live_offset\":%lu,\"live_length\":%llu",
+             live_section, live_offset, live_length);
+  }
+  if (tag == SymTagFunction) {
+    DWORD reg = 0;
+    BOOL present = FALSE;
+    if (symbol->get_framePointerPresent(&present) == S_OK)
+      printf(",\"frame_pointer_present\":%s", present ? "true" : "false");
+    if (symbol->get_localBasePointerRegisterId(&reg) == S_OK)
+      printf(",\"local_base_register\":%lu", reg);
+    if (symbol->get_paramBasePointerRegisterId(&reg) == S_OK)
+      printf(",\"parameter_base_register\":%lu", reg);
+  }
   printf("}\n");
   SysFreeString(name);
   SysFreeString(pretty);
   counts[tag]++;
 }
+static void scope_children(IDiaSymbol *scope, unsigned depth = 0);
 static void children(IDiaSymbol *parent, enum SymTagEnum tag,
                      bool fields = false) {
   DWORD parent_id = 0;
@@ -135,6 +167,8 @@ static void children(IDiaSymbol *parent, enum SymTagEnum tag,
   ULONG got = 0;
   while (items->Next(1, &item, &got) == S_OK && got) {
     record(item, parent_id);
+    if (tag == SymTagFunction)
+      scope_children(item);
     if (fields) {
       children(item, SymTagData);
       children(item, SymTagBaseClass);
@@ -143,6 +177,67 @@ static void children(IDiaSymbol *parent, enum SymTagEnum tag,
     item = nullptr;
   }
   items->Release();
+}
+static void scope_children(IDiaSymbol *scope, unsigned depth) {
+  DWORD id = 0;
+  scope->get_symIndexId(&id);
+  if (!visited_scopes.insert(id).second)
+    return;
+  if (depth >= 128) {
+    fprintf(stderr, "lexical scope nesting exceeds limit\n");
+    exit(4);
+  }
+  children(scope, SymTagData);
+  children(scope, SymTagFuncDebugStart);
+  children(scope, SymTagFuncDebugEnd);
+  IDiaEnumSymbols *blocks = nullptr;
+  if (FAILED(scope->findChildren(SymTagBlock, nullptr, nsNone, &blocks)) || !blocks)
+    return;
+  IDiaSymbol *block = nullptr;
+  ULONG got = 0;
+  while (blocks->Next(1, &block, &got) == S_OK && got) {
+    record(block, id);
+    scope_children(block, depth + 1);
+    block->Release();
+    block = nullptr;
+  }
+  blocks->Release();
+}
+static void frame_records(IDiaSession *session) {
+  IDiaEnumTables *tables = nullptr;
+  if (FAILED(session->getEnumTables(&tables)) || !tables)
+    return;
+  IDiaTable *table = nullptr;
+  ULONG got = 0;
+  while (tables->Next(1, &table, &got) == S_OK && got) {
+    IDiaEnumFrameData *frames = nullptr;
+    if (table->QueryInterface(__uuidof(IDiaEnumFrameData), (void **)&frames) == S_OK) {
+      IDiaFrameData *frame = nullptr;
+      while (frames->Next(1, &frame, &got) == S_OK && got) {
+        DWORD number = 0;
+        printf("{\"tag\":-1,\"kind\":\"frame\"");
+        if (frame->get_addressSection(&number) == S_OK) printf(",\"section\":%lu",number);
+        if (frame->get_addressOffset(&number) == S_OK) printf(",\"offset\":%lu",number);
+        if (frame->get_relativeVirtualAddress(&number) == S_OK) printf(",\"rva\":%lu",number);
+        if (frame->get_lengthBlock(&number) == S_OK) printf(",\"length\":%lu",number);
+        if (frame->get_lengthProlog(&number) == S_OK) printf(",\"prolog_length\":%lu",number);
+        if (frame->get_lengthLocals(&number) == S_OK) printf(",\"locals_length\":%lu",number);
+        if (frame->get_lengthParams(&number) == S_OK) printf(",\"params_length\":%lu",number);
+        if (frame->get_lengthSavedRegisters(&number) == S_OK) printf(",\"saved_registers_length\":%lu",number);
+        if (frame->get_type(&number) == S_OK) printf(",\"frame_type\":%lu",number);
+        BSTR program = nullptr;
+        if (frame->get_program(&program) == S_OK && program) {
+          printf(",\"program\":");quoted(program);
+        }
+        SysFreeString(program);
+        printf("}\n");
+        frame->Release();frame = nullptr;
+      }
+      frames->Release();
+    }
+    table->Release();table = nullptr;
+  }
+  tables->Release();
 }
 int wmain(int argc, wchar_t **argv) {
   if (argc != 3) {
@@ -238,6 +333,7 @@ int wmain(int argc, wchar_t **argv) {
       type->Release();
     }
   }
+  frame_records(session);
   fprintf(stderr, "PDB read:");
   for (auto pair : counts)
     fprintf(stderr, " tag%lu=%u", pair.first, pair.second);

@@ -128,6 +128,7 @@ struct PilotThread {
 };
 static struct PilotThread threads[64];
 static unsigned thread_count;
+static unsigned guest_services_started;
 static uint32_t thread_identity_sequence;
 static unsigned char eeprom[256];
 static int have_eeprom;
@@ -413,9 +414,53 @@ void pilot_native_poll_wait(void)
 {
     scheduler_poll_wait();
 }
+static int inspect_guest_read(uint32_t address,uint32_t bytes,unsigned char *output)
+{
+    if(!memory || !output || !bytes || bytes>4096 || (uint64_t)address+bytes>0x80000000ull)return 0;
+    /* Never dispatch through a device bus. Only committed private host RAM
+     * inside this runtime's guest reservation is eligible for a read. */
+    uintptr_t cursor=(uintptr_t)(memory+address),end=cursor+bytes;
+    while(cursor<end) {
+        MEMORY_BASIC_INFORMATION info;
+        if(!VirtualQuery((void*)cursor,&info,sizeof(info)) || info.State!=MEM_COMMIT || info.Type!=MEM_PRIVATE ||
+           (info.Protect&(PAGE_GUARD|PAGE_NOACCESS)) ||
+           !(info.Protect&(PAGE_READONLY|PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)))return 0;
+        uintptr_t next=(uintptr_t)info.BaseAddress+info.RegionSize;
+        if(next<=cursor)return 0;
+        cursor=next;
+    }
+    memcpy(output,memory+address,bytes);return 1;
+}
+static void inspect_guest_entry(uint32_t va)
+{
+    if(!pilot_debug_guest_requested(va))return;
+    PilotDebugGuest state={0};state.pc=va;state.xbe_sha256=PILOT_XBE_SHA256;
+#if !defined(PILOT_IO_DEVICE_LLE) && !defined(PILOT_USB_LLE) && !defined(PILOT_GPU_LLE) && \
+    !defined(PILOT_D3D_NATIVE) && !defined(PILOT_AUDIO_DEVICE_LLE) && !defined(PILOT_AUDIO_NATIVE) && !defined(PILOT_AUDIO_REFERENCE) && \
+    !defined(PILOT_INSPECTION_EXTERNAL_OWNERS)
+    /* The initial pure-CPU profile has one memory writer. Host services and
+     * asynchronous device profiles need a qualified quiescence owner first. */
+    state.coherent=!thread_count && !guest_services_started;
+#endif
+    state.registers[0]=g_eax;state.registers[1]=g_ecx;state.registers[2]=g_edx;state.registers[3]=g_ebx;
+    state.registers[4]=g_esp;state.registers[6]=g_esi;state.registers[7]=g_edi;
+    /* EBP and EFLAGS can be function-local in this lowering profile. Do not
+     * substitute a stale global or host exception context for those values. */
+    state.register_mask=0xdfu;state.fs_base=g_fs_base;state.thread_slot=current_thread_slot;
+    memcpy(state.xmm[0],&g_xmm0,16);memcpy(state.xmm[1],&g_xmm1,16);
+    memcpy(state.xmm[2],&g_xmm2,16);memcpy(state.xmm[3],&g_xmm3,16);
+    memcpy(state.xmm[4],&g_xmm4,16);memcpy(state.xmm[5],&g_xmm5,16);
+    memcpy(state.xmm[6],&g_xmm6,16);memcpy(state.xmm[7],&g_xmm7,16);
+    uint32_t thread=0;
+    if(state.coherent && g_fs_base && g_fs_base<=0x7fffffd4u &&
+       inspect_guest_read(g_fs_base+0x28,4,(unsigned char*)&thread) && thread && thread<=0x7fffffd4u &&
+       inspect_guest_read(thread+0x28,4,(unsigned char*)&state.tls_base))state.has_tls=state.tls_base!=0;
+    pilot_debug_guest_checkpoint(&state);
+}
 void recomp_trace_enter(const char *name, uint32_t va)
 {
     PILOT_THREAD_CHECKPOINT();
+    inspect_guest_entry(va);
 #ifdef PILOT_USB_LLE
     if(trace_original_usb && trace_original_usb_count<128 &&
        (va==0x188247u || va==0x188de9u || va==0x188f41u || va==0x188fc8u || va==0x1890a2u)) {
@@ -894,6 +939,7 @@ static void native_audio_components_bind(void)
 
 static void kernel_dispatch_impl(void)
 {
+    guest_services_started=1;
 #ifdef PILOT_FILES_LLE
     if(files_lle_kernel(next_kernel_ordinal))return;
 #endif
@@ -1459,6 +1505,7 @@ int main(int argc,char **argv)
     }
     settings_region_bind_boot();
     load_image(argv[1]);
+    pilot_debug_bind_guest(inspect_guest_read);
 #ifdef PILOT_OPTICAL_EMPTY_NATIVE
     kernel_optical_initialize();
 #endif

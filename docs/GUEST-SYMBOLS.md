@@ -73,7 +73,7 @@ the original PDB, DIA and a compiler are unnecessary.
 The separate type manifest retains type IDs, UDT/member ownership, offsets,
 array counts, pointer and function type links, calling conventions and addressed
 static objects. IDs are local to one source PDB. This is layout metadata for
-research, not a live memory inspector. Enum constants retain their exact signed
+research and the bounded live inspector described below. Enum constants retain their exact signed
 or unsigned value as a decimal string, including 64-bit values. Bitfield members
 retain storage byte offset, bit position and bit width only when DIA supplies
 them. A real bit position of zero differs from missing metadata. DIA reports a
@@ -108,6 +108,59 @@ boundaries. Wrong-image documents are rejected; missing layouts, short reads and
 invalid bit ranges return explicit unavailable results. These APIs interpret
 bytes provided by the caller; live memory transport and scoped-variable location
 resolution are separate features.
+
+## Scoped variables and live inspection
+
+The DIA frontend retains lexical/function scopes, function debug boundaries,
+register locations, signed byte offsets, available liveness flags/ranges and
+frame programs. `native_guest_variables.Variables` consumes this JSON with an
+explicit guest PC/register context and read callback. It distinguishes
+out-of-scope, optimized-away and unavailable locations. Register IDs follow
+CodeView x86 numbering; host exception registers are never substituted.
+Stack/virtual-frame bases need certified guest context or an evaluable DIA
+program. Return-address search input must be certified by the caller; it is
+never inferred by scanning pointer-looking stack words. TLS additionally needs
+the matched image template and the paused guest thread's TLS base.
+
+An opt-in native TCP endpoint provides `pause [decimal-entry-address]`,
+`guest_snapshot`, `read_guest <snapshot> <decimal-address> <bytes>` and `resume`.
+Pause waits at an original function entry. The execution owner remains stopped
+until resume. Reads require the current snapshot token and are limited to 4096
+bytes of committed readable guest RAM per request; device reads are rejected.
+Resume invalidates the token. The runtime verifies the loaded XBE hash before
+binding its provider.
+
+The initial runtime provider can certify only the pure CPU profile before any
+guest kernel service or guest-thread creation. Device/audio/graphics owners,
+generated service bindings and title mods prevent certification. These profiles
+return an explicit unavailable response; ordinary running game profiles still
+need a qualified quiescence owner. EBP and flags are omitted because this CPU
+lowering can keep them local to a generated function. Missing context stays
+unavailable. A function-entry pause does not make a source variable live before
+its PDB debug range begins.
+
+With a compatible runtime already paused, query an exact static object or
+in-scope variable through the same endpoint:
+
+```powershell
+python tools/native_debug.py --port 8080 pause --address 0x11020
+python tools/native_guest_inspect.py --port 8080 `
+  --types G:/Research/title-types.aot-private.json --object g_actor --path 'items[2].mode'
+python tools/native_guest_inspect.py --port 8080 `
+  --types G:/Research/title-types.aot-private.json --variable 1234
+python tools/native_debug.py --port 8080 resume
+```
+
+Member paths support declared array indices and `pointer->member` traversal.
+`--follow 1` expands pointer targets, with an explicit limit of eight levels;
+cycles, null pointers and unreadable targets have distinct results. Queries
+bound total reads to 64 KiB, aggregate/array expansion to 64 members/elements,
+nesting to eight and visited nodes to 128. Select a member/index when a complete
+object exceeds an expansion limit. Missing offsets or array bounds are never
+guessed. The client checks image identity before reads and checks that the same
+snapshot remains paused after the query. It sends no guest-memory writes and
+does not resume execution automatically. Python consumption remains portable;
+only PDB ingestion requires Windows DIA.
 
 ## Discovery use
 
