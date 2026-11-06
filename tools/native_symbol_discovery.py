@@ -51,15 +51,19 @@ class QualifiedFunctions:
         qualified.metadata_sha256 = hashlib.sha256(raw).hexdigest()
         return qualified
 
-    def containing_end(self, address):
+    def containing_start(self, address):
         """The innermost declared extent; folded/nested entries may overlap."""
         index = bisect_right(self.starts, address) - 1
         while index >= 0 and self.prefix_ends[index] > address:
             start = self.starts[index]
             if address < self.ends[start]:
-                return self.ends[start]
+                return start
             index -= 1
         return None
+
+    def containing_end(self, address):
+        start = self.containing_start(address)
+        return self.ends[start] if start is not None else None
 
 
 def bind(detector, qualified):
@@ -114,6 +118,7 @@ def install(module, qualified):
     original_detect = detector.detect_all
     original_end = detector._find_function_end
     original_aliases = detector._build_alias_entries
+    original_alias_tails = detector._pass_alias_tail_jumps
 
     def detect(self, sections=None):
         bind(self, qualified)
@@ -140,7 +145,27 @@ def install(module, qualified):
                 sec_end = min(sec_end, owner_end) if sec_end else owner_end
         return original_end(self, start, next_func, sec_end)
 
+    def prune_data(self):
+        ranges = getattr(self, '_xboxllr_pdb_ranges', None)
+        if ranges is not None:
+            data_bounds = {}
+            for start in sorted(self.functions.keys() | self._alias_entries.keys()):
+                if start in ranges.ends:
+                    continue
+                owner = ranges.containing_start(start)
+                if owner is None:
+                    continue
+                if owner not in data_bounds:
+                    data_bounds[owner] = code_upper_bound(self, owner, ranges.ends[owner])
+                if data_bounds[owner] <= start < ranges.ends[owner]:
+                    # A decoded pointer/index table can manufacture an alias
+                    # just as it manufactures ordinary instructions. It is not
+                    # a second callable body. Explicit PDB entries stay intact.
+                    self._alias_entries.pop(start, None)
+                    self.functions.pop(start, None)
+                    self._candidates.pop(start, None)
     def aliases(self):
+        prune_data(self)
         ranges = getattr(self, '_xboxllr_pdb_ranges', None)
         if ranges is not None:
             for start, end in self._alias_entries.items():
@@ -149,7 +174,14 @@ def install(module, qualified):
                     self._alias_entries[start] = min(end, owner_end)
         original_aliases(self)
 
+    def alias_tails(self, sections):
+        # Do not follow branches hallucinated inside index bytes into more
+        # fabricated callable roots before rejecting the original false alias.
+        prune_data(self)
+        return original_alias_tails(self, sections)
+
     detector.detect_all = detect
     detector._find_function_end = function_end
     detector._build_alias_entries = aliases
+    detector._pass_alias_tail_jumps = alias_tails
     detector._xboxllr_symbol_extension = True

@@ -101,7 +101,9 @@ with `--discovery-symbols` to `native_pilot.py` (or the private title path key
 PDB bounds constrain body formation without letting interior entries truncate
 their parent. Branch and switch-table handling still determines executable body
 ends; a declared extent can also contain trailing data. Independently callable
-aliases remain separate entries. The metadata identity is retained in generation
+aliases remain separate entries. Entries manufactured by decoding proven trailing
+switch/index data are removed before following their apparent branches.
+The metadata identity is retained in generation
 proofs and cache keys; changed or removed metadata cannot reuse an old discovery.
 This path is under corpus and built-runtime qualification in the symbol burndown;
 it does not establish that every supplied body can execute natively.

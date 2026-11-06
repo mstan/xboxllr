@@ -96,6 +96,21 @@ class QualifiedDiscovery(unittest.TestCase):
         det._build_functions([text])
         self.assertEqual(det.functions[0x11000].end, 0x1100d)
 
+    def test_alias_in_trailing_switch_data_is_removed_without_cutting_code(self):
+        code = bytes.fromhex('ff248510100100b801000000c3cccccc')
+        code += (0x11007).to_bytes(4, 'little') + b'\xb8\x01'
+        blob, document = self.fixture(code)
+        det, text = self.detector(blob, document)
+        det.engine.instructions[0x11000].jump_table = 0x11010
+        det.engine.jump_tables[0x11010] = 0x11014
+        det._build_functions([text])
+        det._alias_entries[0x11014] = 0x11016
+        det._pass_alias_tail_jumps([text])
+        self.assertNotIn(0x11014,det._alias_entries)
+        det._build_alias_entries()
+        self.assertNotIn(0x11014,det.functions)
+        self.assertEqual(det.functions[0x11000].end,0x1100d)
+
     def test_overlapping_declared_ranges_find_enclosing_owner(self):
         blob, document = self.fixture(b'\x90'*20+b'\xc3')
         document['functions'].append(dict(address=0x11004, size=2,
