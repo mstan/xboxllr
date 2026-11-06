@@ -1,6 +1,6 @@
 # Xbox debug-symbol corpus survey
 
-Status: archive inspection and identity qualification are complete; the full executable discovery sweep is still running.
+Status: all archives inspected, all distinct XBEs analyzed, and discovery/diagnostic candidates qualified or rejected as described below.
 
 The November 5, 2026 survey inspected all 47 archives listed at [debugging.games/Xbox](https://debugging.games/Xbox). Original archives and all 316 extracted files were hashed in private research storage on G:. Original executables, MAP/PDB contents, type layouts and bulk address tables stay outside the source repository.
 
@@ -82,8 +82,23 @@ Compiler-only PDBs retain type information without linked function addresses. Th
 
 The Hail to the Chimp executable identifies that title and XDK5849. Its attached logs are dated 2001 and include game-state sizes and initialization diagnostics. They are historical research evidence; they are not bound to that executable merely by sharing an archive. Two source notes document archive provenance.
 
-## Validation still in progress
+## Completed validation
 
-The frozen 85b73e0 discovery baseline runs without symbols on all 103 distinct XBEs. A separate XPP-only screen uses those outputs to test the callback rule against independent references. Three Xbox PE builds lacking a qualifying XBE/MAP pair (both Crusty builds and Xyanide) have completed static discovery at their original PE addresses. The remaining full-corpus results and source-only per-file disposition manifest will be recorded after the live sweep finishes.
+The frozen 85b73e0 discovery baseline completed without symbol seeds on all 103 distinct XBEs. The separate XPP-only screen also completed on all 103. Three Xbox PE builds lacking a qualifying XBE/MAP pair (both Crusty builds and Xyanide) completed static discovery at their original PE addresses. The [source-only result manifest](../accuracy/xbox_symbol_corpus_results.json) records every archive/member identity, disposition and per-image reference count.
+
+The following counts use each image hash once. MAP function flags are entry labels and may include compiler-local labels; PDB function records have independently declared extents. Entries missing inside a discovered range are distinct from linked bodies outside those ranges. These counts measure reference-entry recall, not precision.
+
+| Reference | Distinct XBEs | Entries | Matching unaided starts | Missing inside discovered ranges | Missing outside discovered ranges |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| MAP | 72 | 2,294,753 | 2,175,578 | 1,205 | 117,970 |
+| Exact PDB | 36 | 1,171,824 | 1,140,501 | 405 | 30,918 |
+
+The XPP-only screen proposes 300 entries across the 78 independently referenced images; 300 have an independent reference label. The other 25 images have 82 screen proposals without independent symbol-reference qualification. The five full-pipeline representative comparisons remain the qualification for preserving previous starts and extents; the screen is not 103 full candidate comparisons.
+
+A separate raw E8 gap check covers all 78 referenced images. Of 17 byte-pattern hits, 4 lie inside other decoded instructions and 13 lack a verified containing body/reachable call. No raw-opcode seeding rule was accepted. This does not prove that unclaimed code is invalid or exhaust indirect calls.
+
+The guest-symbol reader passes 18 authored tests; the discovery corrections pass 19 synthetic tests. Existing extent/crash-report checks and the pinned donor gate (68 unittest cases, 50 standalone checks, plus its immediate-reference script) pass. All 108 qualified diagnostic imports and 36 concrete UDT/static-object manifest queries pass. The optional DIA frontend was built and exercised against both PDB2 and PDB7.
+
+Analysis used Windows and Linux with the same frozen donor/extension. The Capstone bindings report 5.0.7 on both hosts. The Windows runtime files and original frozen SERVER vendor bundle match the released toolkit's 5.0.9 wheel byte for byte; Linux used the 5.0.7 wheel. Both wheel identities are recorded. A portable qualification reproduced all 7,472 function records, extents and call links identically for its held-out input before dispatching the Linux batch. Host counts and the exact qualification identity are retained in the manifest. These are static-analysis runs, not cross-host performance comparisons.
 
 Reference recall does not establish complete precision, callable body extents, gameplay correctness or runtime speed. Unreferenced linked code, internal/shared entries and callbacks without sufficient corroboration can remain undiscovered. Cross-build library attribution and interpreting live memory through debug types require separate evidence.
