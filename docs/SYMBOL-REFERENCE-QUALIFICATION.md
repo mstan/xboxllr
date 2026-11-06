@@ -81,6 +81,17 @@ Source identities and counts are in
 The full archive survey separately screens the XPP rule across the corpus;
 that screen is distinct from these full-pipeline comparisons.
 
+The 82 proposals without exact symbol references have since passed a separate
+static callability check across their 20 affected images. Original initializer
+loops directly call 20 proposed entries; original class lookup, device-field
+assignment and add/remove dispatch support the other 62. Independent matched
+PDB declarations corroborate the callback ABI, and all 82 proposed bodies decode
+through a `RET 4` matching the caller's four-byte argument. Checked libraries and
+wide zero-padded pointer lists are included. The admission function is unchanged
+from the merged base. This establishes callable entries; it does not transfer
+target names/types or establish execution, performance or final-bundle corpus
+qualification. The aggregate result is retained in the same qualification file.
+
 ## Rejected broad rule and remaining inputs
 
 An initial rule accepted any complete-looking terminator after an aligned,

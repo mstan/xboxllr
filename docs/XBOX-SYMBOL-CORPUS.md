@@ -93,7 +93,7 @@ The following counts use each image hash once. MAP function flags are entry labe
 | MAP | 72 | 2,294,753 | 2,175,578 | 1,205 | 117,970 |
 | Exact PDB | 36 | 1,171,824 | 1,140,501 | 405 | 30,918 |
 
-The XPP-only screen proposes 300 entries across the 78 independently referenced images; 300 have an independent reference label. The other 25 images have 82 screen proposals without independent symbol-reference qualification. The five full-pipeline representative comparisons remain the qualification for preserving previous starts and extents; the screen is not 103 full candidate comparisons.
+The XPP-only screen proposes 300 entries across the 78 independently referenced images; 300 have an independent reference label. The other 25 images have 82 proposals across 20 affected images without exact symbol references. All 82 now have independent original-code callback and ABI evidence: 20 through initializer consumers and 62 through class lookup, assignment and add/remove dispatch. Each proposed range decodes completely and returns with four-byte argument cleanup, matching its caller. These are static callability decisions; no target names or full types transfer with them. The five full-pipeline representative comparisons remain separate evidence for preserving previous starts and extents. The screen and callback audit are not 103 final-bundle pipeline comparisons or runtime execution checks.
 
 A separate raw E8 gap check covers all 78 referenced images. Of 17 byte-pattern hits, 4 lie inside other decoded instructions and 13 lack a verified containing body/reachable call. No raw-opcode seeding rule was accepted. This does not prove that unclaimed code is invalid or exhaust indirect calls.
 
