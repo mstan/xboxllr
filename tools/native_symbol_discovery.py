@@ -28,9 +28,10 @@ class QualifiedFunctions:
             if row.get('extent_kind') != 'pdb-length':
                 raise ValueError('entry-only symbols cannot supply body bounds')
             if not any(s['executable_candidate'] and
-                       s['address'] <= start < end <= s['address'] + s['raw_size']
+                       s['address'] <= start < s['address'] + s['raw_size'] and
+                       start < end <= s['address'] + min(s['size'], s['raw_size']+15)
                        for s in image['sections']):
-                raise ValueError('PDB function has no executable file-backed extent')
+                raise ValueError('PDB function has no executable file-backed entry or bounded image extent')
             self.ends[start] = end
         self.starts = sorted(self.ends)
         self.prefix_ends = []

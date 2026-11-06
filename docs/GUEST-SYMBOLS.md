@@ -171,6 +171,15 @@ words that resemble pointers into an existing body need a separately qualified
 entry or padded function boundary before they can supply an alias. This analysis
 view preserves the image bytes.
 
+Discovery and normal CPU lowering read instructions from the loaded-image view:
+file bytes followed by the section's declared zero-fill, bounded by its virtual
+extent. They never borrow file padding or a neighbouring raw section. The sweep
+materializes at most 15 tail bytes to complete an instruction; it does not sweep
+an arbitrary BSS allocation. A PDB entry must still begin in file-backed code,
+but its declared body can include this bounded zero tail. Callee cleanup queries
+use the same instruction bytes as the generated body. Cache identity includes
+the shared image reader.
+
 Discovery reads a matching-CodeView PDB manifest only when explicitly supplied
 with `--discovery-symbols` to `native_pilot.py` (or the private title path key
 `discovery_symbols`). MAP entry-only manifests are rejected for body discovery.

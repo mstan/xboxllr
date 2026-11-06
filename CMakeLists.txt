@@ -901,6 +901,8 @@ if(Python3_Interpreter_FOUND)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_guest_symbols.py")
   add_test(NAME native_guest_types COMMAND ${Python3_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_guest_types.py")
+  add_test(NAME native_image_reads COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_image_reads.py")
   add_test(NAME native_guest_variables COMMAND ${Python3_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_guest_variables.py")
   add_test(NAME native_guest_inspect COMMAND ${Python3_EXECUTABLE}

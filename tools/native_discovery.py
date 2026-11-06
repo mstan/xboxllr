@@ -14,6 +14,8 @@ import runpy
 import struct
 import sys
 
+from native_image_reads import install_discovery as install_image_reads
+
 
 class _TableDataView:
     """Preserve image bytes while constraining weak Bink coefficient pointers."""
@@ -156,6 +158,7 @@ def install(module):
     # the existing data-pointer pass instead of disassembling them as opcodes.
     loader = importlib.import_module(module.__package__ + '.loader')
     config = importlib.import_module(module.__package__ + '.config')
+    install_image_reads(loader)
     loader.DATA_SECTION_NAMES = loader.DATA_SECTION_NAMES | {'BINKDATA'}
     config._DATA_SECTION_NAMES = config._DATA_SECTION_NAMES | {'BINKDATA'}
     original = detector._is_padded_entry
@@ -183,6 +186,7 @@ def install_cache_key(module, metadata_sha256=None):
     """Keep unaided and supplied-symbol outputs in distinct cache identities."""
     original = module.AnalysisCache._opts_key
     identity = hashlib.sha256(Path(__file__).read_bytes())
+    identity.update(Path(__file__).with_name('native_image_reads.py').read_bytes())
     if metadata_sha256 is not None:
         identity.update(Path(__file__).with_name('native_symbol_discovery.py').read_bytes())
         identity.update(metadata_sha256.encode('ascii'))

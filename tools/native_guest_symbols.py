@@ -127,8 +127,9 @@ def import_dia(data, records, source_sha256):
                 rejected += 1
                 continue
             section = image['sections'][index]
-            limit = section['raw_size'] if tag in (5, 27) else section['size']
-            if offset < 0 or size < 0 or offset + max(1, size) > limit:
+            limit = min(section['size'], section['raw_size']+15) if tag in (5, 27) else section['size']
+            if (offset < 0 or size < 0 or offset + max(1, size) > limit or
+                    (tag in (5, 27) and offset >= section['raw_size'])):
                 rejected += 1
                 continue
             address = section['address'] + offset
