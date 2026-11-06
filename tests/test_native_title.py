@@ -13,6 +13,12 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_explicit_discovery_metadata_is_passed_to_normal_preparation(self):
+        symbols=self.root/'pdb.aot-private.json'
+        command=n.prepare_command(self.source,self.data,
+            dict(cpu_donor=self.root,xbe=self.xbe,xdk_symbols=self.root/'sdk',discovery_symbols=symbols),self.output)
+        self.assertEqual(command[command.index('--discovery-symbols')+1],str(symbols))
+
     def test_adpcm_comparison_input_is_optional_and_clears_cached_selection(self):
         command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Ninja', 4)
         self.assertIn('-DPILOT_ADPCM_SOURCE=', command)

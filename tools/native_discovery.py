@@ -7,6 +7,7 @@ records in XPP's metadata prefix also corroborate callbacks which ordinary data
 section scans cannot see. Neither correction supplies symbol-derived seeds.
 """
 from pathlib import Path
+import hashlib
 import runpy
 import struct
 import sys
@@ -134,14 +135,41 @@ def install(module):
     detector._xboxllr_boundary_extension = True
 
 
+def install_cache_key(module, metadata_sha256=None):
+    """Keep unaided and supplied-symbol outputs in distinct cache identities."""
+    original = module.AnalysisCache._opts_key
+    identity = hashlib.sha256(Path(__file__).read_bytes())
+    if metadata_sha256 is not None:
+        identity.update(Path(__file__).with_name('native_symbol_discovery.py').read_bytes())
+        identity.update(metadata_sha256.encode('ascii'))
+    suffix = identity.hexdigest()
+
+    def options(*args, **kwargs):
+        return hashlib.sha256((original(*args, **kwargs) + suffix).encode('ascii')).hexdigest()
+
+    module.AnalysisCache._opts_key = staticmethod(options)
+
+
 def main():
+    import argparse
     donor = Path(sys.argv[1]).resolve()
     sys.path.insert(0, str(donor))
     from tools.disasm import functions
     if not Path(functions.__file__).resolve().is_relative_to(donor):
         raise ValueError('discovery module resolved outside selected donor')
     install(functions)
-    sys.argv = ['tools.disasm', *sys.argv[2:]]
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--discovery-symbols', type=Path)
+    options, remaining = parser.parse_known_args(sys.argv[2:])
+    metadata_sha256 = None
+    if options.discovery_symbols:
+        from native_symbol_discovery import QualifiedFunctions, install as install_symbols
+        qualified = QualifiedFunctions.load(options.discovery_symbols, Path(remaining[0]).read_bytes())
+        install_symbols(functions, qualified)
+        metadata_sha256 = qualified.metadata_sha256
+    from tools.disasm import cache
+    install_cache_key(cache, metadata_sha256)
+    sys.argv = ['tools.disasm', *remaining]
     runpy.run_module('tools.disasm', run_name='__main__')
 
 

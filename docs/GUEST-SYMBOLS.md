@@ -95,11 +95,22 @@ list; the reader does not substitute a similarly named type or another build.
 
 ## Discovery use
 
-Normal discovery never reads these manifests. A private experiment supplying
+Discovery reads a matching-CodeView PDB manifest only when explicitly supplied
+with `--discovery-symbols` to `native_pilot.py` (or the private title path key
+`discovery_symbols`). MAP entry-only manifests are rejected for body discovery.
+PDB bounds constrain body formation without letting interior entries truncate
+their parent. Branch and switch-table handling still determines executable body
+ends; a declared extent can also contain trailing data. Independently callable
+aliases remain separate entries. The metadata identity is retained in generation
+proofs and cache keys; changed or removed metadata cannot reuse an old discovery.
+This path is under corpus and built-runtime qualification in the symbol burndown;
+it does not establish that every supplied body can execute natively.
+
+The earlier private experiment supplying
 6,729 PDB roots through the existing seed interface recovers 185 additional MAP
 entries in ATV3 without losing a MAP entry. It also changes 47 old extents and
 removes four unlabelled aliases. Those changes have not been qualified as correct
-generated bodies, so bulk seed export is excluded from this feature. Exact
+generated bodies, so bare-address bulk seed export is excluded. Exact
 symbol identity does not prove that the current discovery/lifting pipeline
 handles every supplied body correctly. Names remain diagnostic metadata.
 

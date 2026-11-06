@@ -895,6 +895,8 @@ if(Python3_Interpreter_FOUND)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_dispatch.py")
   add_test(NAME native_discovery COMMAND ${Python3_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_discovery.py")
+  add_test(NAME native_symbol_discovery COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_symbol_discovery.py")
   add_test(NAME native_guest_symbols COMMAND ${Python3_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_guest_symbols.py")
   add_test(NAME native_poll_waits COMMAND ${Python3_EXECUTABLE}

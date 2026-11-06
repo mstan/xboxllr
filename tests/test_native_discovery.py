@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from native_discovery import aligned_boundary_entry, install, xpp_registration_entries
+from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries
 from native_pilot import DONOR_PIN
 
 
@@ -116,6 +116,16 @@ class NativeDiscovery(unittest.TestCase):
         method = self.module.FunctionDetector._is_padded_entry
         install(self.module)
         self.assertIs(self.module.FunctionDetector._is_padded_entry, method)
+
+    def test_cache_distinguishes_unaided_and_changed_supplied_metadata(self):
+        def configured(metadata):
+            cache = SimpleNamespace(AnalysisCache=type('AuthoredCache', (), {
+                '_opts_key': staticmethod(lambda *args, **kwargs: 'donor-options')}))
+            install_cache_key(cache, metadata)
+            return cache.AnalysisCache._opts_key(False, None, [])
+        unaided, first, changed = configured(None), configured('a'*64), configured('b'*64)
+        self.assertEqual(len({unaided, first, changed}), 3)
+        self.assertEqual(first, configured('a'*64))
 
     def xpp(self, *, body=b'\x31\xc0\xc3', prefix=b'\xc3', mate=True, name='XPP'):
         det, text = self.detector(address=0x10051, body=body, prefix=prefix, pointer=False)

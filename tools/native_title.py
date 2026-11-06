@@ -208,6 +208,8 @@ def prepare_command(source, data, paths, output):
         command += ["--seed-functions", str((source.parent / seed).resolve())]
     if paths.get("seed_functions"):
         command += ["--seed-functions", str(paths["seed_functions"])]
+    if paths.get("discovery_symbols"):
+        command += ["--discovery-symbols", str(paths["discovery_symbols"])]
     return command
 
 
