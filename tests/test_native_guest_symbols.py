@@ -30,6 +30,16 @@ def metadata():
 
 
 class GuestSymbols(unittest.TestCase):
+    def test_packing_false_true_and_missing_are_distinct(self):
+        records=metadata()+[dict(id=40,tag=11,section=0,name='UnsetFlag',length=12,dia_packed=False,unmodified_type=42),
+                            dict(id=41,tag=11,section=0,name='SetFlag',length=12,dia_packed=True),
+                            dict(id=42,tag=11,section=0,name='Unknown',length=12)]
+        _,types=import_dia(image(),records,'0'*64)
+        self.assertIs(types['types']['40']['dia_packed'],False)
+        self.assertEqual(types['types']['40']['unmodified_type'],42)
+        self.assertIs(types['types']['41']['dia_packed'],True)
+        self.assertNotIn('dia_packed',types['types']['42'])
+
     def test_compiler_context_keeps_actual_compiland_ownership(self):
         records=metadata()
         records[1]['lexical_parent']=1

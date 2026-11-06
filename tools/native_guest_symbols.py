@@ -167,7 +167,7 @@ def import_dia(data, records, source_sha256):
                 (tag!=7 or record.get('data_kind') not in (1,2,3,4))):
             types[str(record['id'])] = {key: record[key] for key in
                 ('id', 'parent', 'tag', 'name', 'type', 'length', 'field_offset',
-                 'data_kind', 'location', 'basic', 'count', 'calling',
+                 'data_kind', 'location', 'basic', 'count', 'calling', 'dia_packed', 'unmodified_type',
                  'constant', 'bit_position', 'bit_width', 'storage_offset','location_offset') if key in record}
     common = dict(xbe_sha256=image['sha256'], source_sha256=source_sha256)
     for function_id,address in function_addresses.items():

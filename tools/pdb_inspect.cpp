@@ -101,6 +101,16 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
   quoted(name);
   printf(",\"undecorated\":");
   quoted(pretty);
+  if (tag == SymTagUDT) {
+    BOOL packed = FALSE;
+    if (symbol->get_packed(&packed) == S_OK)
+      printf(",\"dia_packed\":%s", packed ? "true" : "false");
+    DWORD unmodified = 0;
+    if (symbol->get_unmodifiedTypeId(&unmodified) == S_OK && unmodified && unmodified != id) {
+      printf(",\"unmodified_type\":%lu", unmodified);
+      type_refs.push_back(unmodified);
+    }
+  }
   if (location == LocIsBitField) {
     DWORD position = 0;
     // S_FALSE is missing metadata, distinct from a real bit position of zero.

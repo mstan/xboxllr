@@ -164,6 +164,48 @@ only PDB ingestion requires Windows DIA.
 
 ## Discovery use
 
+`tools/native_sdk_layouts.py` validates SDK layout transfer separately from
+function names. Supply independent compiled declaration facts and at least two
+exact-PDB source titles. Applying the atlas also requires independent target
+PDB/ABI witnesses; a qualified function-name map alone is rejected:
+
+```powershell
+python tools/native_sdk_layouts.py atlas --reference G:/Research/layout-reference.aot-private.json `
+  --sources G:/Research/layout-sources.json --output G:/Research/layout-atlas.aot-private.json
+python tools/native_sdk_layouts.py transfer --atlas G:/Research/layout-atlas.aot-private.json `
+  --xbe G:/Research/target.xbe --symbols G:/Research/target-symbols.aot-private.json `
+  --types G:/Research/target-types.aot-private.json --output G:/Research/qualified-types.aot-private.json
+```
+
+Reference profiles record the machine, pointer width, endian model, SDK library
+and API version, complete member/scalar/array/bitfield shapes and measured
+packing/alignment facts. PDB witnesses must belong to the exact source/target
+images and retain actual SDK compiler contexts. The atlas compares sizes,
+offsets, signedness and bitfield storage; incompatible or ambiguous complete
+definitions stay unavailable. Export allocates a fresh type-ID namespace and
+binds the result to the target image. Static objects require separate matching
+target-PDB type/address evidence and a mapped extent; arbitrary pointers are
+never reinterpreted as inline objects. The object's concrete type needs its own
+layout witness; qualifier records may follow DIA's explicit unmodified-type
+edge, but a matching type name alone cannot bind an object.
+
+Fixed records whose odd size forces alignment one in the supported MSVC IA-32
+model can use that fact together with independent compiled declarations. This
+qualifies the measured standard USB descriptor profiles across the tested SDK
+builds. Other cases require an independent compiler-measurement proof bound to
+the exact target image, PDB, compiler record, declaration and artifact hashes.
+Pass it with `--abi-proof` (or a source list's `abi_proof` path). Its measured
+shape, packing and alignment must match the reference; contradictory or missing
+facts remain unavailable. The tool reads and verifies the artifact/declaration
+files and requires the artifact's CodeView identity to match the target.
+Compiled fixtures cover alignments 1, 2, 4 and 16,
+including equal-sized/member layouts whose alignment differs.
+DIA's raw `dia_packed` flag is preserved when present, but a false flag does not
+prove natural packing: compiled packed fixtures can also report false. No target
+SDK/game layout or object is inferred merely from a name or library revision.
+Stripped titles without independent witnesses remain unavailable on this path.
+All references, atlases and exported types stay private and outside packages.
+
 `tools/native_sdk_symbols.py` builds a private SDK attribution atlas from
 explicitly supplied exact-PDB images. A source list contains `xbe`, `symbols`
 and optional `types` paths. Generate an atlas, then apply it to another image's
