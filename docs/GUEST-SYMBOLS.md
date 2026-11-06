@@ -164,6 +164,13 @@ only PDB ingestion requires Windows DIA.
 
 ## Discovery use
 
+Discovery treats Bink's `BINKDATA` section as data even when the XBE marks it
+executable. Its callable tables feed the existing guarded pointer pass; the
+other Bink and SDK code sections retain their code classification. Coefficient
+words that resemble pointers into an existing body need a separately qualified
+entry or padded function boundary before they can supply an alias. This analysis
+view preserves the image bytes.
+
 Discovery reads a matching-CodeView PDB manifest only when explicitly supplied
 with `--discovery-symbols` to `native_pilot.py` (or the private title path key
 `discovery_symbols`). MAP entry-only manifests are rejected for body discovery.

@@ -49,6 +49,41 @@ class NativeDiscovery(unittest.TestCase):
         self.assertTrue(det._pass_data_ptr_targets([text]))
         self.assertIn(0x10020, det._alias_entries)
 
+    def test_executable_flagged_bink_data_supplies_callable_table_entries(self):
+        det, text = self.detector()
+        storage = det.image.sections[1]
+        storage.name, storage.executable = 'BINKDATA', True
+        sections = det.image.get_code_sections()
+        self.assertEqual(sections, [text])
+        self.assertTrue(det._pass_data_ptr_targets(sections))
+        self.assertIn(0x10020, det._alias_entries)
+
+    def test_other_bink_and_sdk_sections_keep_their_code(self):
+        det, text = self.detector()
+        peer = det.image.sections[1]
+        peer.executable = True
+        for name in ('BINK', 'BINK32', 'BINK16MX', 'BINKDATA2', 'D3D_RD'):
+            peer.name = name
+            self.assertEqual(det.image.get_code_sections(), [text, peer])
+
+    def test_bink_numeric_pair_does_not_create_interior_callable_entries(self):
+        det, text = self.detector(prefix=bytes.fromhex('31c0'),
+                                  body=bytes.fromhex('8b4c240464890d0000000083c410c20400'))
+        storage = det.image.sections[1]
+        storage.name, storage.executable = 'BINKDATA', True
+        # Two consecutive coefficient words happen to equal code addresses.
+        det.image.raw_data += (0x10024).to_bytes(4, 'little')
+        storage.raw_size += 4
+        storage.virtual_size += 4
+        det.functions[0x10010] = SimpleNamespace(start=0x10010, end=0x10030)
+        original_image, original_bytes = det.image, det.image.raw_data
+        # The first target is aligned but has no independently saved frame;
+        # the second is an unaligned instruction in the same epilogue.
+        self.assertFalse(det._pass_data_ptr_targets([text]))
+        self.assertFalse(det._alias_entries)
+        self.assertIs(det.image, original_image)
+        self.assertEqual(det.image.raw_data, original_bytes)
+
     def test_factory_without_a_standard_prologue_is_recovered(self):
         # Authored factory shape: allocation arguments, call, cleanup, result.
         body = bytes.fromhex('6a006820000000e81000000083c40885c0c3')

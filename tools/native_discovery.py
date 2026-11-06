@@ -7,10 +7,41 @@ records in XPP's metadata prefix also corroborate callbacks which ordinary data
 section scans cannot see. Neither correction supplies symbol-derived seeds.
 """
 from pathlib import Path
+import bisect
 import hashlib
+import importlib
 import runpy
 import struct
 import sys
+
+
+class _TableDataView:
+    """Preserve image bytes while constraining weak Bink coefficient pointers."""
+    def __init__(self, detector):
+        self.image = detector.image
+        self.detector = detector
+        self.starts = sorted(detector.functions)
+
+    def __getattr__(self, name):
+        return getattr(self.image, name)
+
+    def get_section_data(self, section):
+        data = self.image.get_section_data(section)
+        if section.name != 'BINKDATA':
+            return data
+        data = bytearray(data)
+        for offset in range(0, len(data)-3, 4):
+            target = struct.unpack_from('<I', data, offset)[0]
+            if target in self.detector.functions or target in self.detector._alias_entries:
+                continue
+            index = bisect.bisect_right(self.starts, target)-1
+            if (index >= 0 and target < self.detector.functions[self.starts[index]].end and
+                    not self.detector._is_padded_entry(target)):
+                # Numeric coefficient pairs can resemble pointers into existing
+                # bodies. They do not establish a fresh callable ABI. Real
+                # padded entries and already-qualified aliases remain eligible.
+                struct.pack_into('<I', data, offset, 0)
+        return bytes(data)
 
 
 def aligned_boundary_entry(detector, address):
@@ -119,6 +150,14 @@ def install(module):
     detector = module.FunctionDetector
     if getattr(detector, '_xboxllr_boundary_extension', False):
         return
+    # Bink's constant/dispatch tables use a library-specific DATA section.
+    # Xbox headers still mark it executable. Keep real BINK* code sections;
+    # classifying this exact data section also exposes its callable tables to
+    # the existing data-pointer pass instead of disassembling them as opcodes.
+    loader = importlib.import_module(module.__package__ + '.loader')
+    config = importlib.import_module(module.__package__ + '.config')
+    loader.DATA_SECTION_NAMES = loader.DATA_SECTION_NAMES | {'BINKDATA'}
+    config._DATA_SECTION_NAMES = config._DATA_SECTION_NAMES | {'BINKDATA'}
     original = detector._is_padded_entry
     original_tables = detector._pass_data_ptr_targets
 
@@ -128,7 +167,12 @@ def install(module):
     detector._is_padded_entry = aligned_entry
 
     def data_tables(self, sections):
-        original_added = original_tables(self, sections)
+        image = self.image
+        self.image = _TableDataView(self)
+        try:
+            original_added = original_tables(self, sections)
+        finally:
+            self.image = image
         return xpp_registration_entries(self, sections) or original_added
 
     detector._pass_data_ptr_targets = data_tables
