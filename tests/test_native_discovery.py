@@ -112,6 +112,34 @@ class NativeDiscovery(unittest.TestCase):
         self.assertFalse(det._pass_data_ptr_targets([text]))
         self.assertNotIn(0x10020, det._alias_entries)
 
+    def test_unaided_unresolved_virtual_continuation_keeps_its_conservative_extent(self):
+        code = bytes.fromhex('83f801770fff2485180001008b01ff6008909090c2040090')
+        code += struct.pack('<2I', 0x1000c, 0x10014) + b'\xb8\x01'
+        det, _ = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+        det.engine.instructions[0x10005].jump_table = 0x10018
+        det.engine.jump_tables[0x10018] = 0x10020
+        original = det.image.raw_data
+        self.assertGreaterEqual(det._find_function_end(0x10000, 0x10022, 0x10022), 0x10020)
+        self.assertEqual(det.image.raw_data, original)
+
+    def test_unaided_direct_tail_cannot_hide_a_shared_return_before_a_table(self):
+        code = bytes.fromhex('83f801770fff248518000100eb06909090909090c2040090')
+        code += struct.pack('<2I', 0x1000c, 0x10014) + b'\xb8\x01'
+        det, _ = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+        det.engine.instructions[0x10005].jump_table = 0x10018
+        det.engine.jump_tables[0x10018] = 0x10020
+        self.assertEqual(det._find_function_end(0x10000, 0x10022, 0x10022), 0x10017)
+        # The interior view does not contain its owner's table dispatch.
+        self.assertEqual(det._find_function_end(0x1000c, 0x10022, 0x10022), 0x10017)
+
+    def test_unaided_dispatch_still_reaches_cases_after_an_interleaved_table(self):
+        code = bytes.fromhex('ff24850800010090') + struct.pack('<2I', 0x10010, 0x10010)
+        code += bytes.fromhex('b801000000c20400')
+        det, _ = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+        det.engine.instructions[0x10000].jump_table = 0x10008
+        det.engine.jump_tables[0x10008] = 0x10010
+        self.assertEqual(det._find_function_end(0x10000, 0x10018, 0x10018), 0x10018)
+
     def test_decoded_multibyte_alignment_recovers_a_lone_table_entry(self):
         for prefix in (bytes.fromhex('c38da424000000008bff'),
                        bytes.fromhex('c20c008d9b00000000'),
@@ -319,10 +347,13 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x1003a)
 
     def test_unaided_extent_does_not_assume_an_unknown_call_is_noreturn(self):
-        body=bytes.fromhex('ff248530000100c3e800000000cccccc')
+        # The unknown call is reached by the switch and has a real postlude.
+        # Returning from it must execute MOV EAX,2 and the following RET.
+        body=bytes.fromhex('ff248534000100e800000000b802000000c3cccc')
         body+=(0x10027).to_bytes(4,'little')+b'\xb8\x01'
-        det,text=self.switch_detector(body,0x10030,0x10027)
-        self.assertGreaterEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x10034)
+        det,text=self.switch_detector(body,0x10034,0x10027)
+        self.assertEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x10032)
+        self.assertEqual(det.engine.instructions[0x1002c].op_str,'eax, 2')
 
     def test_unaided_extent_preserves_an_unresolved_computed_continuation(self):
         body=bytes.fromhex('ff248530000100ffe0c3cccccccccccc')

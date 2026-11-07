@@ -213,6 +213,27 @@ def xpp_registration_entries(detector, sections):
     return added
 
 
+def _bounded_table_after(self, address, upper):
+    # A nearby table does not make intervening instructions alignment.
+    # In particular a virtual tail jump can precede a shared RET and then
+    # the trailing switch tables. Skipping that RET walks index bytes as
+    # code, even past an exact PDB length. Keep real interleaved tables,
+    # but require the bounded alignment which the donor only assumes.
+    dispatches = [i for i in self.engine.get_instructions_in_range(address - 15, address)
+                  if i.end_address == address and i.is_jump and i.jump_table is not None]
+    # A backwards/direct or virtual tail jump can also end immediately
+    # before a table used elsewhere in this body. It does not dispatch
+    # through that table and must still terminate once its targets are
+    # covered. In particular, index bytes may resemble more code pointers.
+    tables = {self.engine._jt_by_disp.get(i.jump_table, i.jump_table) for i in dispatches}
+    for table in range(address, address + 16):
+        end = self.engine.jump_tables.get(table)
+        if (table in tables and end is not None and end <= upper and
+                _alignment_padding(self, address, table)):
+            return end
+    return None
+
+
 def _unwind_context_entries(detector, sections):
     """Retain frame-dependent actions referenced by bounded MSVC metadata.
 
@@ -274,6 +295,7 @@ def install(module):
     original = detector._is_padded_entry
     original_tables = detector._pass_data_ptr_targets
     original_end = detector._find_function_end
+    original_table_after = detector._table_after
 
     def aligned_entry(self, address):
         return original(self, address) or aligned_boundary_entry(self, address)
@@ -319,6 +341,18 @@ def install(module):
             set(self._alias_entries) - previous_aliases)
 
     detector._pass_data_ptr_targets = data_tables
+
+    def table_after(self, address, upper):
+        ending = [i for i in self.engine.get_instructions_in_range(address-15, address)
+                  if i.end_address == address and i.is_jump]
+        if any(i.jump_table is None and i.jump_target is None for i in ending):
+            # An unresolved computed continuation has no declared owner here.
+            # Keep the donor's conservative extent instead of assuming a tail
+            # call; the supplied-PDB path has its own certified body bound.
+            return original_table_after(self, address, upper)
+        return _bounded_table_after(self, address, upper)
+
+    detector._table_after = table_after
     detector._xboxllr_boundary_extension = True
 
 

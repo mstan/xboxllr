@@ -12,7 +12,7 @@ import re
 
 from aot_inventory import parse_xbe
 from native_guest_symbols import LIMIT, Symbols
-from native_discovery import _alignment_padding, code_upper_bound
+from native_discovery import _bounded_table_after, code_upper_bound
 
 
 class QualifiedFunctions:
@@ -182,26 +182,6 @@ def install(module, qualified):
     original_aliases = detector._build_alias_entries
     original_alias_tails = detector._pass_alias_tail_jumps
 
-    def table_after(self, address, upper):
-        # A nearby table does not make intervening instructions alignment.
-        # In particular a virtual tail jump can precede a shared RET and then
-        # the trailing switch tables. Skipping that RET walks index bytes as
-        # code, even past an exact PDB length. Keep real interleaved tables,
-        # but require the bounded alignment which the donor only assumes.
-        dispatches = [i for i in self.engine.get_instructions_in_range(address - 15, address)
-                      if i.end_address == address and i.is_jump and i.jump_table is not None]
-        # A backwards/direct or virtual tail jump can also end immediately
-        # before a table used elsewhere in this body. It does not dispatch
-        # through that table and must still terminate once its targets are
-        # covered. In particular, index bytes may resemble more code pointers.
-        tables = {self.engine._jt_by_disp.get(i.jump_table, i.jump_table) for i in dispatches}
-        for table in range(address, address + 16):
-            end = self.engine.jump_tables.get(table)
-            if (table in tables and end is not None and end <= upper and
-                    _alignment_padding(self, address, table)):
-                return end
-        return None
-
     def detect(self, sections=None):
         bind(self, qualified)
         result = original_detect(self, sections)
@@ -271,5 +251,5 @@ def install(module, qualified):
     detector._find_function_end = function_end
     detector._build_alias_entries = aliases
     detector._pass_alias_tail_jumps = alias_tails
-    detector._table_after = table_after
+    detector._table_after = _bounded_table_after
     detector._xboxllr_symbol_extension = True

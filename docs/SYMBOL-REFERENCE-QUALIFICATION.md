@@ -58,6 +58,12 @@ corrected, added and removed bodies. The 15 executed Bink kernel sources remain
 identical; the new callback lowers without unsupported operations, with its
 gameplay/runtime check still separate.
 
+Direct control flow into a shared return also keeps that return before a nearby
+table, including interior views whose dispatch belongs to the enclosing body.
+Actual table dispatches still skip decoded alignment into interleaved tables.
+Unaided unresolved computed transfers retain conservative extents. The supplied
+PDB path uses the same bounded table helper under its certified body limit.
+
 A bounded audit of the retained MAP references also ties 43,413 historical
 per-build missing labels to validated C++ unwind records and explicit accesses
 through the enclosing frame. These are compiler-local cleanup labels, not
