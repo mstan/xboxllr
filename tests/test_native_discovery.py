@@ -111,6 +111,48 @@ class NativeDiscovery(unittest.TestCase):
         self.assertFalse(det._pass_data_ptr_targets([text]))
         self.assertNotIn(0x10020, det._alias_entries)
 
+    def test_decoded_multibyte_alignment_recovers_a_lone_table_entry(self):
+        for prefix in (bytes.fromhex('c38da424000000008bff'),
+                       bytes.fromhex('c20c008d9b00000000'),
+                       bytes.fromhex('c30f1f000f1f00')):
+            det, text = self.detector(prefix=prefix)
+            self.assertTrue(det._pass_data_ptr_targets([text]))
+            self.assertEqual(det._alias_entries, {0x10020:0x10023})
+
+    def test_alignment_cannot_hide_side_effects_or_fallthrough(self):
+        for prefix in (bytes.fromhex('c389c3'), bytes.fromhex('c38d642404'),
+                       bytes.fromhex('c383c000'), bytes.fromhex('31c08d642400'),
+                       bytes.fromhex('b8000000c38d642400')):
+            det, _ = self.detector(prefix=prefix)
+            self.assertFalse(aligned_boundary_entry(det, 0x10020))
+
+    def test_bink_unreachable_zero_alignment_has_a_decoded_terminal(self):
+        for prefix, expected in ((b'\xc3'+bytes(6),True),
+                                 (b'\xc3'+bytes(7),False),
+                                 (b'\x31\xc0'+bytes(7),False),
+                                 (b'\xc3'+bytes(16),False)):
+            det, text = self.detector(prefix=prefix)
+            text.name='BINK32'
+            self.assertEqual(aligned_boundary_entry(det, 0x10020),expected)
+        det, _ = self.detector(prefix=b'\xc3'+bytes(6))
+        self.assertFalse(aligned_boundary_entry(det, 0x10020))
+
+    def test_bink_code_section_start_needs_a_reference_and_complete_body(self):
+        det,text=self.detector(address=0x10000,prefix=b'')
+        text.name='BINK32'
+        self.assertTrue(det._pass_data_ptr_targets([text]))
+        self.assertEqual(det._alias_entries,{0x10000:0x10003})
+        det,text=self.detector(address=0x10000,prefix=b'',pointer=False)
+        text.name='BINK32'
+        self.assertFalse(det._pass_data_ptr_targets([text]))
+        det,text=self.detector(address=0x10000,prefix=b'',body=b'\x5e\xc3')
+        text.name='BINK32'
+        self.assertFalse(aligned_boundary_entry(det,0x10000))
+        for name in ('.text','XPP','BINKDATA','BINKDATA2'):
+            det,text=self.detector(address=0x10000,prefix=b'')
+            text.name=name
+            self.assertFalse(aligned_boundary_entry(det,0x10000))
+
     def test_fallthrough_and_ret_byte_in_an_immediate_are_rejected(self):
         for prefix in (bytes.fromhex('b8000000c3'), bytes.fromhex('31c0')):
             det, _ = self.detector(prefix=prefix)

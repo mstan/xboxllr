@@ -4,7 +4,8 @@ An address-taken entry may follow a return directly, with no alignment padding
 when the preceding body already ends on the compiler's alignment boundary.
 Keep the donor's pointer, gap, decode, and stack-unwind checks. USB registration
 records in XPP's metadata prefix also corroborate callbacks which ordinary data
-section scans cannot see. Neither correction supplies symbol-derived seeds.
+section scans cannot see. Bink assembly also uses multi-byte/zero alignment
+and standalone code sections. These corrections do not supply symbol seeds.
 """
 from pathlib import Path
 import bisect
@@ -46,19 +47,51 @@ class _TableDataView:
         return bytes(data)
 
 
+def _alignment_padding(detector, start, end, *, zero=False):
+    """Unreachable alignment bytes after a decoded terminal, at most 15 bytes."""
+    if not 0 <= end-start <= 15:
+        return False
+    registers = {'eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp'}
+    while start < end:
+        insn = detector.engine.instructions.get(start)
+        if insn is not None and insn.end_address <= end:
+            mnemonic = insn.mnemonic.lower()
+            operands = [value.strip() for value in insn.op_str.split(',')]
+            neutral = (mnemonic in ('nop', 'int3') or
+                       (len(operands) == 2 and operands[0] in registers and
+                        ((mnemonic == 'mov' and operands[1] == operands[0]) or
+                         (mnemonic == 'lea' and operands[1] == '['+operands[0]+']'))))
+            if neutral:
+                start = insn.end_address
+                continue
+        # Bink assembly sections also use zero-filled unreachable alignment.
+        if zero and detector.image.read_bytes_at_va(start, 1) == b'\0':
+            start += 1
+            continue
+        return False
+    return True
+
+
 def aligned_boundary_entry(detector, address):
     if address % 16 or address not in detector.engine.instructions:
         return False
     if detector.engine.instruction_covering(address) is not None:
         return False
-    # Inspect decoded instruction ends, not a raw C3/E9 byte which might be
-    # part of an immediate. Falling through from another instruction is not
-    # evidence of an entry, even if an unrelated data word names the address.
-    boundary = any(
-        insn is not None and insn.end_address == address and
-        (insn.is_ret or (insn.is_jump and not insn.is_cond_jump))
-        for insn in (detector.engine.instructions.get(previous)
-                     for previous in range(address - 15, address)))
+    # Inspect decoded terminal ends, not a raw C3/E9 byte in an immediate.
+    # Multi-byte neutral alignment can separate a terminal from the entry.
+    # Bink also starts standalone assembly kernels at code-section boundaries.
+    section = detector.image.get_section_at_va(address)
+    bink = (section is not None and section.name.startswith('BINK') and
+            not section.name.startswith('BINKDATA'))
+    boundary = bink and address == section.virtual_addr
+    if not boundary:
+        boundary = any(
+            insn is not None and insn.end_address <= address and
+            (insn.is_ret or (insn.is_jump and not insn.is_cond_jump)) and
+            detector.image.get_section_at_va(insn.address) is section and
+            _alignment_padding(detector, insn.end_address, address, zero=bink)
+            for insn in (detector.engine.instructions.get(previous)
+                         for previous in range(address - 30, address)))
     if not boundary or detector.engine.entry_pops_unsaved(address):
         return False
     first = detector.engine.instructions[address]

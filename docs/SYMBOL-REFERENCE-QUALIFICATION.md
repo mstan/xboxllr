@@ -23,6 +23,21 @@ also requires a decoded terminal boundary, no overlapping instruction stream,
 no unsaved register restoration, and a complete body which does not cross an
 existing entry. A tail jump must name an existing function start.
 
+A further correction recognizes decoded multi-byte alignment after a terminal,
+bounded to 15 bytes. Bink assembly code sections may also use unreachable zero
+alignment or start a kernel at the section boundary. These cases still require
+a supplied code reference, a decoded instruction boundary, a complete body,
+saved-register consistency and no intervening known entry. Bink data sections
+do not receive the assembly-section exception.
+
+On Getting Up, this recovers 15 independently MAP-labelled Bink kernels:
+46,125 entries become 46,140, with no removed starts or changed existing records.
+All 15 complete bodies return with the original four-byte argument cleanup.
+Their generated shared-helper C matches actual original x86 execution for 300
+constructed input/state cases and 2,467,200 output/state bytes, including stack
+and preserved-register checks. This is body correctness evidence for that input;
+the final corpus, gameplay and runtime-performance gates remain separate.
+
 | Independent reference | Named entries | Baseline matched | Corrected matched |
 | --- | ---: | ---: | ---: |
 | Sphinx and the Cursed Mummy | 7,689 | 7,668 | 7,671 |
@@ -115,7 +130,7 @@ The correction takes effect when a title is regenerated.
 
 ## Regression checks
 
-`tests/test_native_discovery.py` contains 19 authored positive and rejection
+`tests/test_native_discovery.py` contains 27 authored positive and rejection
 cases and is registered as `native_discovery` in CTest. Set `XLLE_CPU_DONOR` to
 the clean donor revision recorded in `tools/native_pilot.py`, then run:
 
