@@ -339,6 +339,143 @@ def _original_entry_contexts(detector, sections):
     return entries
 
 
+def _parameter_data_windows(detector):
+    """Prove minimum byte-table spans from a guarded parameter clamp loop.
+
+    The counter is zero-extended from an equality-validated byte. A pointer
+    and its negated initial value form indices 0..count-1 into readonly
+    default/minimum/maximum tables. Validate the whole loop and its entries;
+    table bytes are not CALL instructions merely because a sweep decodes E8.
+    No names, library versions or inferred next-symbol sizes participate.
+    """
+    from capstone.x86 import X86_OP_REG, X86_OP_MEM, X86_OP_IMM
+    engine = detector.engine
+    instructions = list(engine.instructions.values())
+    previous = {i.end_address: i for i in instructions}
+    incoming = {}
+    for i in instructions:
+        target = i.call_target if i.is_call else i.jump_target if i.is_branch else None
+        if target is not None:
+            incoming.setdefault(target, []).append(i)
+    decoded = {}
+    def cs(i):
+        if i.address not in decoded:
+            raw = detector.image.read_bytes_at_va(i.address, i.size)
+            decoded[i.address] = next(engine._cs.disasm(raw or b'', i.address, count=1), None)
+        return decoded[i.address]
+    def reg(i, n, value, size=None):
+        return len(i.operands)>n and i.operands[n].type==X86_OP_REG and i.operands[n].reg==value and (size is None or i.operands[n].size==size)
+    def memory(op):
+        m=op.mem
+        return (m.segment,m.base,m.index,m.scale,m.disp,op.size)
+    def at(i, target):
+        return len(i.operands)==1 and i.operands[0].type==X86_OP_IMM and i.operands[0].imm==target
+    def cell(r):
+        name=engine._cs.reg_name(r)
+        for full, aliases in {'eax':('ax','al','ah'),'ebx':('bx','bl','bh'),'ecx':('cx','cl','ch'),'edx':('dx','dl','dh'),'esi':('si',),'edi':('di',),'ebp':('bp',),'esp':('sp',)}.items():
+            if name==full or name in aliases:return full
+        return name
+    windows=set()
+    pattern=['mov','mov','test','jne','mov','jmp','mov','cmp','jae','mov','jmp','mov','cmp','ja','mov','inc','inc','dec','jne']
+    for back in instructions:
+        if back.mnemonic!='jne' or back.jump_target is None or not 0<back.address-back.jump_target<=192:
+            continue
+        own=engine.get_instructions_in_range(back.jump_target,back.end_address)
+        if len(own)!=len(pattern) or [i.mnemonic for i in own]!=pattern:
+            continue
+        loop=[cs(i) for i in own]
+        if any(i is None for i in loop) or any(a.address+a.size!=b.address for a,b in zip(loop,loop[1:])):
+            continue
+        if loop[16].operands[0].type!=X86_OP_REG or loop[17].operands[0].type!=X86_OP_REG:
+            continue
+        index,counter=loop[16].operands[0].reg,loop[17].operands[0].reg
+        if not reg(loop[16],0,index,4) or not reg(loop[17],0,counter,4) or index==counter:
+            continue
+        if loop[0].operands[0].type!=X86_OP_REG or loop[0].operands[1].type!=X86_OP_MEM or loop[1].operands[0].type!=X86_OP_REG:
+            continue
+        pointer,byte=loop[0].operands[0].reg,loop[1].operands[0].reg
+        if not reg(loop[1],0,byte,1) or loop[1].operands[1].type!=X86_OP_MEM:
+            continue
+        m=loop[1].operands[1].mem
+        if m.segment or m.base!=pointer or m.index or m.disp or loop[1].operands[1].size!=1:
+            continue
+        if not(reg(loop[2],0,byte) and reg(loop[2],1,byte)) or loop[6].operands[0].type!=X86_OP_REG:
+            continue
+        limit=loop[6].operands[0].reg
+        if not all(reg(loop[k],0,byte) and reg(loop[k],1,limit) for k in (7,12)):
+            continue
+        if not all(at(loop[k],loop[t].address) for k,t in ((3,6),(5,14),(8,11),(10,15),(13,9),(18,0))):
+            continue
+        stores=[loop[k].operands for k in (9,14)]
+        if any(len(o)!=2 or o[0].type!=X86_OP_MEM or o[0].size!=1 or o[0].mem.segment or o[0].mem.base!=index or o[0].mem.index or o[0].mem.disp for o in stores):
+            continue
+        if not reg(loop[9],1,limit,1) or not reg(loop[14],1,byte,1) or loop[15].operands[0].type!=X86_OP_MEM or memory(loop[15].operands[0])!=memory(loop[0].operands[1]):
+            continue
+        before=engine.get_instructions_in_range(loop[0].address-64,loop[0].address)
+        if len(before)<7:continue
+        init=[cs(i) for i in before[-7:]]
+        if any(i is None for i in init) or [i.mnemonic for i in init]!=['movzx','dec','mov','js','mov','neg','inc'] or any(a.address+a.size!=b.address for a,b in zip(init,init[1:])) or init[-1].address+init[-1].size!=loop[0].address:
+            continue
+        if not(reg(init[0],0,counter,4) and reg(init[0],1,byte,1) and reg(init[1],0,counter) and reg(init[2],0,index) and init[2].operands[1].type==X86_OP_REG and init[4].operands[0].type==X86_OP_REG):
+            continue
+        base,bias=init[2].operands[1].reg,init[4].operands[0].reg
+        if len({index,bias,counter})!=3 or not(reg(init[4],1,base) and reg(init[5],0,bias) and reg(init[6],0,counter)) or not at(init[3],back.end_address):
+            continue
+        cells={cell(index),cell(bias),cell(counter)}
+        if any(cells & {cell(r) for r in i.regs_access()[1]} for i in loop[:16]):
+            continue
+        entries=[init[0].address]
+        p=previous.get(init[0].address)
+        if p is not None:
+            p=cs(p)
+            if p is not None and p.mnemonic=='mov' and len(p.operands)==2 and p.operands[0].type==X86_OP_MEM and p.operands[1].type==X86_OP_REG:
+                entries.append(p.address)
+        bound=None
+        for entry in entries:
+            p=previous.get(entry)
+            if p is None or p.mnemonic not in ('jmp','ret','retf'):continue
+            if entry<=detector.image.entry_point<back.end_address or any(entry<=a<back.end_address for a in detector._candidates):continue
+            values=[];valid=True
+            for target,sources in incoming.items():
+                if not entry<=target<back.end_address:continue
+                for source in sources:
+                    if entry<=source.address<back.end_address:continue
+                    compare=previous.get(source.address)
+                    compare=cs(compare) if compare is not None else None
+                    if target!=entry or source.mnemonic!='je' or compare is None or compare.mnemonic!='cmp' or not reg(compare,0,byte,1) or len(compare.operands)!=2 or compare.operands[1].type!=X86_OP_IMM or not 8<=compare.operands[1].imm<=255:
+                        valid=False;break
+                    values.append(compare.operands[1].imm)
+                if not valid:break
+            if valid and values:
+                bound=min(values);break
+        if bound is None:continue
+        reads=[loop[k] for k in (4,6,11)]
+        if not reg(reads[0],0,byte,1) or not all(reg(i,0,limit,1) for i in reads[1:]):continue
+        if any(len(i.operands)!=2 or i.operands[1].type!=X86_OP_MEM or i.operands[1].size!=1 or i.operands[1].mem.segment or {i.operands[1].mem.base,i.operands[1].mem.index}!={index,bias} or i.operands[1].mem.scale!=1 for i in reads):
+            continue
+        starts={i.operands[1].mem.disp for i in reads}
+        if len(starts)!=3:continue
+        for start in starts:
+            end=start+bound;section=detector.image.get_section_at_va(start)
+            if section is None or section.writable or detector.image.get_section_at_va(end-1) is not section or not (end<=entries[-1] or start>=back.end_address):continue
+            if any(start<=a<end for a in detector._candidates) or start<=detector.image.entry_point<end:continue
+            if any(start<=target<end and any(not start<=s.address<end for s in sources) for target,sources in incoming.items()):continue
+            raw=detector.image.read_bytes_at_va(start,bound)
+            if raw is not None and len(raw)==bound:windows.add((start,end))
+    return sorted(windows)
+
+
+class _CallSourceView:
+    def __init__(self, engine, targets):
+        self.engine,self.targets=engine,targets
+
+    def __getattr__(self, name):
+        return getattr(self.engine,name)
+
+    def get_call_targets(self):
+        return self.targets
+
+
 def install(module):
     detector = module.FunctionDetector
     if getattr(detector, '_xboxllr_boundary_extension', False):
@@ -357,6 +494,21 @@ def install(module):
     original_end = detector._find_function_end
     original_table_after = detector._table_after
     original_add = detector._add_candidate
+    original_calls = detector._pass_call_targets
+
+    def call_targets(self, sections):
+        windows=_parameter_data_windows(self)
+        if not windows:return original_calls(self,sections)
+        engine=self.engine;inside=set();outside=set()
+        for i in engine.instructions.values():
+            if i.is_call and i.call_target is not None:
+                (inside if any(a<=i.address<b for a,b in windows) else outside).add(i.call_target)
+        targets=engine.get_call_targets()-(inside-outside)
+        self.engine=_CallSourceView(engine,targets)
+        try:return original_calls(self,sections)
+        finally:self.engine=engine
+
+    detector._pass_call_targets = call_targets
 
     def add_candidate(self, address, confidence, method):
         if method in ('cc_boundary', 'after_switch_table', 'imm_ref_target') and _text_literal_prefix(self, address):

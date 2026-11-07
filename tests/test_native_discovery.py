@@ -179,6 +179,83 @@ class NativeDiscovery(unittest.TestCase):
                 det._add_candidate(0x10020, 1.0, method)
                 self.assertIn(0x10020, det._candidates)
 
+    def parameter_tables(self, *, real_call=False, bound=16, code_entry=False):
+        # Authored byte-parameter clamp, with different registers/locations
+        # from any binary input. An E8 byte inside its limits is scalar data.
+        entry, default, minimum, maximum, target = 0x10020, 0x10120, 0x10140, 0x10160, 0x10200
+        code = bytearray(); labels = {}; fixups = []
+        def label(name): labels[name] = entry + len(code)
+        def emit(value): code.extend(bytes.fromhex(value))
+        def branch(opcode, name):
+            emit(opcode); fixups.append((len(code), name)); code.append(0)
+        emit('558bec8a08')
+        emit('80f9' + bytes([bound]).hex()); branch('74', 'init')
+        emit('80f920'); branch('74', 'init'); branch('eb', 'done')
+        label('init'); emit('8945f00fb6d14a8bf3'); branch('78', 'done')
+        emit('8bfbf7df42')
+        label('loop'); emit('8b45f08a0884c9'); branch('75', 'min')
+        emit('8a8c37'); code.extend(struct.pack('<I', default))
+        branch('eb', 'store')
+        label('min'); emit('8a8437'); code.extend(struct.pack('<I', minimum))
+        emit('3ac8'); branch('73', 'max')
+        label('limit'); emit('8806'); branch('eb', 'next')
+        label('max'); emit('8a8437'); code.extend(struct.pack('<I', maximum))
+        emit('3ac8'); branch('77', 'limit')
+        label('store'); emit('880e')
+        label('next'); emit('ff45f0464a'); branch('75', 'loop')
+        label('done'); emit('c9c3')
+        for at, name in fixups:
+            distance = labels[name] - (entry + at + 1)
+            code[at] = distance & 255
+        code.extend(b'\xcc'*(default-entry-len(code)))
+        code.extend(b'\x2a'*32 + b'\0'*32 + b'\x90'*32)
+        source = maximum + 6
+        code[source-entry:source-entry+5] = b'\xe8' + struct.pack('<i', target-source-5)
+        if real_call:
+            code.extend(b'\xcc'*(0x10300-entry-len(code)))
+            destination = source if code_entry else target
+            code.extend(b'\xe8' + struct.pack('<i', destination-0x10305) + b'\xc3')
+        det, text = self.detector(body=bytes(code), pointer=False)
+        return det, text, source, target
+
+    def test_parameter_bytes_do_not_admit_a_spurious_call_target(self):
+        det, text, source, target = self.parameter_tables()
+        self.assertTrue(det.engine.instructions[source].is_call)
+        det._pass_call_targets([text])
+        self.assertNotIn(target, det._candidates)
+        det._add_candidate(target, 1.0, 'seed')
+        self.assertIn(target, det._candidates)
+
+    def test_parameter_data_filter_preserves_a_real_call_to_the_same_target(self):
+        det, text, _, target = self.parameter_tables(real_call=True)
+        det._pass_call_targets([text])
+        self.assertIn(target, det._candidates)
+
+    def test_parameter_data_filter_keeps_dual_code_and_data_entries(self):
+        det, text, source, target = self.parameter_tables(real_call=True, code_entry=True)
+        det._pass_call_targets([text])
+        self.assertIn(source, det._candidates)
+        self.assertIn(target, det._candidates)
+
+    def test_parameter_data_filter_requires_validated_bounds_and_readonly_storage(self):
+        for invalid in ('short_bound', 'writable'):
+            with self.subTest(invalid=invalid):
+                det, text, _, target = self.parameter_tables(bound=2 if invalid=='short_bound' else 16)
+                if invalid=='writable': text.writable = True
+                det._pass_call_targets([text])
+                self.assertIn(target, det._candidates)
+
+    def test_parameter_data_filter_rejects_entries_bypassing_initialization(self):
+        for entry in ('image', 'seed'):
+            with self.subTest(entry=entry):
+                det, text, _, target = self.parameter_tables()
+                loop = next(i.jump_target for i in det.engine.instructions.values()
+                            if i.mnemonic=='jne' and i.jump_target is not None and i.jump_target<i.address)
+                if entry=='image':det.image.entry_point=loop
+                else:det._add_candidate(loop,1.0,'seed')
+                det._pass_call_targets([text])
+                self.assertIn(target,det._candidates)
+
     def test_sparse_switch_pointer_tail_is_not_a_following_function(self):
         table, end, entry = 0x10010, 0x10020, 0x10028
         prefix = b'\xc3' + b'\xcc'*15 + struct.pack('<4I', *([0x10000]*4)) + b'\0'*8
