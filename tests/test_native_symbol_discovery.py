@@ -167,6 +167,72 @@ class QualifiedDiscovery(unittest.TestCase):
         det._build_functions([text])
         self.assertEqual(det.functions[0x11000].end, 0x1101a)
 
+    def bounded_switch(self):
+        code = bytes.fromhex('558bec90909083f808f30f100580100100f30f114dfc77240fb6804c100100ff248540100100')
+        code += bytes.fromhex('b801000000eb0fb802000000eb08b8030000009090905dc20100')
+        self.assertEqual(len(code), 64)
+        code += b''.join(a.to_bytes(4, 'little') for a in (0x11026, 0x1102d, 0x11034))
+        code += bytes.fromhex('000102000100020201')
+        declared_length = len(code)
+        code += b'\xcc' * (0x20100 - 0x11000 - len(code)) + b'\xc3'
+        blob, document = self.fixture(code, length=declared_length)
+        blob = bytearray(blob)
+        struct.pack_into('<I', blob, 0x308, len(blob) - 0x400)
+        struct.pack_into('<I', blob, 0x10c, 0x1000 + len(blob) - 0x400)
+        blob = bytes(blob)
+        document['xbe_sha256'] = hashlib.sha256(blob).hexdigest()
+        return blob, document
+
+    def test_bounded_byte_index_cannot_turn_a_return_into_a_table_entry(self):
+        blob, document = self.bounded_switch()
+        det, text = self.detector(blob, document)
+        det.engine.resync_jump_tables()
+        self.assertEqual(det.engine._jt_by_disp[0x11040], 0x1103c)
+        self.assertIsNone(det.engine.get_instruction(0x1103d))
+        bind(det, QualifiedFunctions(document, blob))
+        det._build_functions([text])
+        self.assertEqual(det.functions[0x11000].end, 0x11040)
+        self.assertEqual(det.engine.get_instruction(0x1103d).mnemonic, 'ret')
+        self.assertEqual(det.engine._jt_by_disp[0x11040], 0x11040)
+        self.assertEqual(det.engine.jump_tables[0x11040], 0x1104c)
+        self.assertNotIn(0x20100, det.engine.jump_table_entries(0x11040))
+        self.assertEqual(det.image.raw_data, blob)
+
+    def test_unproved_switch_bounds_do_not_override_the_boundary_rejection(self):
+        for variant in ('wrong-condition', 'flags-changed', 'bad-index', 'bypassed-guard'):
+            with self.subTest(variant=variant):
+                blob, document = self.bounded_switch()
+                blob = bytearray(blob)
+                if variant == 'wrong-condition':
+                    blob[0x400+22] = 0x76  # JBE does not bound the lookup's fallthrough.
+                elif variant == 'flags-changed':
+                    blob[0x400+9:0x400+17] = bytes.fromhex('0f2f058010010090')
+                elif variant == 'bad-index':
+                    blob[0x400+64+12+8] = 3
+                else:
+                    document['functions'].append(dict(address=0x11018, size=14,
+                                                      names=['LookupEntry'], extent_kind='pdb-length'))
+                blob = bytes(blob)
+                document['xbe_sha256'] = hashlib.sha256(blob).hexdigest()
+                det, text = self.detector(blob, document)
+                det.engine.resync_jump_tables()
+                bind(det, QualifiedFunctions(document, blob))
+                with self.assertRaisesRegex(ValueError, 'crosses PDB boundary'):
+                    det._find_function_end(0x11000, 0x11055, 0x11055)
+
+    def test_negative_index_table_retains_its_entries_before_the_displacement(self):
+        code = bytes.fromhex('b8ffffffffff248518100100') + b'\x90'*4
+        code += b''.join(a.to_bytes(4, 'little') for a in (0x1101c, 0x11024, 0x1102c))
+        code += bytes.fromhex('b801000000c39090b802000000c39090b803000000c3')
+        blob, document = self.fixture(code)
+        det, text = self.detector(blob, document)
+        det.engine.resync_jump_tables()
+        bind(det, QualifiedFunctions(document, blob))
+        det._build_functions([text])
+        self.assertEqual(det.engine._jt_by_disp[0x11018], 0x11010)
+        self.assertEqual(det.engine.jump_table_entries(0x11018), [0x1101c, 0x11024, 0x1102c])
+        self.assertEqual(det.functions[0x11000].end, 0x11032)
+
     def test_cli_applies_metadata_and_separates_its_cache_from_unaided(self):
         framework = Path(__file__).resolve().parents[1]
         donor = Path(os.environ.get('XLLE_CPU_DONOR', framework.parent/'refs/xboxrecomp-phobos665-review-20261006'))

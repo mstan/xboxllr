@@ -68,6 +68,96 @@ class QualifiedFunctions:
         return self.ends[start] if start is not None else None
 
 
+def _repair_switch_tables(detector, qualified):
+    """Use a bounded byte-index consumer to correct a pointer-shaped table tail.
+
+    Reading the byte indices as more pointers can widen a table's backwards
+    scan enough to consume a real epilogue. Only a complete CMP/JA/MOVZX/JMP
+    chain, its actual indices and its owning PDB extent establish these bounds.
+    Other tables, including negative-index dispatches, keep their original map.
+    """
+    engine = detector.engine
+    consumers = {}
+    entries = set(qualified.starts)
+    for insn in engine.instructions.values():
+        entries.update(t for t in (insn.call_target, insn.jump_target) if t is not None)
+        if insn.jump_table is not None:
+            table = engine._jt_by_disp.get(insn.jump_table, insn.jump_table)
+            if table in engine.jump_tables:
+                consumers.setdefault(table, []).append(insn)
+    entries = sorted(entries)
+    register = r'e(?:[abcd]x|[sd]i|[bs]p)'
+
+    def previous(address):
+        matches = [i for i in engine.get_instructions_in_range(address-15, address)
+                   if i.end_address == address]
+        return matches[0] if len(matches) == 1 else None
+
+    def bounds(dispatch):
+        load = previous(dispatch.address)
+        guard = previous(load.address) if load is not None else None
+        compare = previous(guard.address) if guard is not None else None
+        # Scheduled SSE loads/stores change neither EFLAGS nor the integer
+        # index. Keep the search bounded and reject entries into this chain.
+        for _ in range(8):
+            if compare is None or compare.mnemonic != 'movss':
+                break
+            compare = previous(compare.address)
+        if (compare is None or compare.mnemonic != 'cmp' or guard.mnemonic != 'ja' or
+                load.mnemonic != 'movzx'):
+            return None
+        jump = re.fullmatch(r'dword ptr \[('+register+r')\*4 \+ (0x[0-9a-f]+)\]', dispatch.op_str)
+        lookup = re.fullmatch(r'('+register+r'), byte ptr \[('+register+r') \+ (0x[0-9a-f]+)\]', load.op_str)
+        limit = re.fullmatch(r'('+register+r'), (0x[0-9a-f]+|[0-9]+)', compare.op_str)
+        if (jump is None or lookup is None or limit is None or
+                jump[1] != lookup[1] or lookup[2] != limit[1]):
+            return None
+        first = bisect_right(entries, compare.address)
+        if first < len(entries) and entries[first] < dispatch.end_address:
+            return None  # Another entry can bypass the range check.
+        table, byte_table, count = int(jump[2], 16), int(lookup[3], 16), int(limit[2], 0)+1
+        owner = qualified.containing_start(compare.address)
+        if (owner is None or table != dispatch.jump_table or
+                not owner <= compare.address < dispatch.end_address <= table < byte_table or
+                not 0 < count <= 4096 or byte_table+count > qualified.ends[owner] or
+                (byte_table-table) % 4 or not 0 < (byte_table-table)//4 <= 256):
+            return None
+        indices = detector.image.read_bytes_at_va(byte_table, count)
+        targets = [detector.image.read_u32_at_va(a) for a in range(table, byte_table, 4)]
+        if (indices is None or len(indices) != count or max(indices) >= len(targets) or
+                any(t is None or not owner <= t < table or engine.get_instruction(t) is None
+                    for t in targets)):
+            return None
+        return table, byte_table, owner
+
+    for old_start, dispatches in consumers.items():
+        proofs = [bounds(i) for i in dispatches]
+        if not proofs or proofs[0] is None or any(p != proofs[0] for p in proofs):
+            continue
+        table, end, owner = proofs[0]
+        if (old_start == table and engine.jump_tables[old_start] == end or
+                not owner <= old_start <= table or
+                table != old_start and table in engine.jump_tables or
+                any(d != table and s == old_start for d, s in engine._jt_by_disp.items())):
+            continue
+        restored = []
+        if old_start < table:
+            # Restore the original stream from its certified entry, including
+            # an instruction whose first bytes the backwards scan overlapped.
+            prefix = list(engine._cs.disasm(detector.image.read_bytes_at_va(owner, table-owner) or b'', owner))
+            if (not prefix or prefix[-1].address+prefix[-1].size != table or
+                    not engine._classify_instruction(prefix[-1]).is_terminator):
+                continue
+            restored = [engine._classify_instruction(i) for i in prefix if i.address+i.size > old_start]
+        del engine.jump_tables[old_start]
+        engine.jump_tables[table] = end
+        engine._jt_by_disp[table] = table
+        for insn in restored:
+            engine.instructions[insn.address] = insn
+        if restored:
+            engine._sorted_addrs = None
+
+
 def bind(detector, qualified):
     if hashlib.sha256(detector.image.raw_data).hexdigest() != qualified.xbe_sha256:
         raise ValueError('PDB discovery metadata belongs to another image')
@@ -80,6 +170,7 @@ def bind(detector, qualified):
         if detector.engine.get_instruction(start) is None:
             raise ValueError(f'PDB entry does not decode: {start:#x}')
         detector._add_candidate(start, 1.0, 'matching_pdb')
+    _repair_switch_tables(detector, qualified)
 
 
 def install(module, qualified):
