@@ -30,12 +30,15 @@ a supplied code reference, a decoded instruction boundary, a complete body,
 saved-register consistency and no intervening known entry. Bink data sections
 do not receive the assembly-section exception.
 
-A short return path in an otherwise unclaimed gap also needs a consistent
-saved frame. Numeric table words cannot establish a standalone entry that
-restores registers it never saved. This check preserves previously qualified
-aliases, entries within known bodies, actual branch or jump-table targets, and
-decoded entry boundaries. Authored regression fixtures exercise both rejection
-and preservation cases; original image bytes remain unchanged.
+A data word cannot establish a callable entry that restores registers it never
+saved, including entries inside known bodies. Previously qualified aliases,
+decoded entry boundaries, original call/branch/jump-table targets, and bounded
+MSVC unwind contexts remain eligible. The unwind check follows an original
+metadata-reference thunk and validates its header, bounded state array and code
+actions; it preserves context entries without supplying new symbol seeds.
+Redundant loop views may disappear while their control flow remains in the
+unchanged parent. Authored fixtures exercise rejection and context preservation;
+original image bytes remain unchanged.
 
 On Getting Up, this recovers 15 independently MAP-labelled Bink kernels:
 46,125 entries become 46,140, with no removed starts or changed existing records.

@@ -213,6 +213,51 @@ def xpp_registration_entries(detector, sections):
     return added
 
 
+def _unwind_context_entries(detector, sections):
+    """Retain frame-dependent actions referenced by bounded MSVC metadata.
+
+    A decoded mov-EAX/near-jump thunk references FuncInfo. Its recognized magic,
+    bounded unwind array, decreasing states and code-backed actions establish
+    context entries, without treating them as ordinary callable functions.
+    This only preserves candidates; it does not seed entries from metadata.
+    """
+    actions, seen = set(), set()
+    for instruction in list(detector.engine.instructions.values()):
+        if instruction.mnemonic != 'mov' or not instruction.op_str.startswith('eax, 0x'):
+            continue
+        following = detector.engine.instructions.get(instruction.end_address)
+        if (following is None or not following.is_jump or following.is_cond_jump or
+                following.jump_target is None):
+            continue
+        try:
+            address = int(instruction.op_str[5:], 16)
+        except ValueError:
+            continue
+        if address in seen:
+            continue
+        seen.add(address)
+        header = detector.image.read_bytes_at_va(address, 28)
+        if header is None or len(header) != 28:
+            continue
+        magic, count, table, _, _, _, _ = struct.unpack('<7I', header)
+        if magic & 0x1fffffff not in (0x19930520, 0x19930521, 0x19930522) or not 0 < count <= 4096:
+            continue
+        data = detector.image.read_bytes_at_va(table, count * 8)
+        if data is None or len(data) != count * 8:
+            continue
+        entries = set()
+        for state in range(count):
+            previous, action = struct.unpack_from('<iI', data, state * 8)
+            section = detector.image.get_section_at_va(action) if action else None
+            if not -1 <= previous < state or (action and section not in sections):
+                break
+            if action:
+                entries.add(action)
+        else:
+            actions.update(entries)
+    return actions
+
+
 def install(module):
     detector = module.FunctionDetector
     if getattr(detector, '_xboxllr_boundary_extension', False):
@@ -252,25 +297,24 @@ def install(module):
             original_tables(self, sections)
         finally:
             self.image = image
-        # A numeric pair can land on a short returning epilogue before its
-        # enclosing assembly body is discovered. The donor's short gap probe
-        # checks reachability of a return, but not the required saved frame.
-        # Preserve existing/context aliases and actual branch continuations.
+        # Pointer-looking coefficients can land inside a known body or in a
+        # gap before that body is discovered. Reaching a return does not prove
+        # the saved frame exists. Keep qualified aliases and original context
+        # consumers; otherwise a data word cannot establish that frame.
         new_aliases = set(self._alias_entries) - previous_aliases
-        if new_aliases:
+        unframed = {address for address in new_aliases
+                    if not self._starts_after_boundary(address) and
+                    self.engine.entry_pops_unsaved(address)}
+        if unframed:
             branches = {i.jump_target for i in self.engine.instructions.values()
                         if i.is_branch and i.jump_target is not None}
+            branches.update(i.call_target for i in self.engine.instructions.values()
+                            if i.is_call and i.call_target is not None)
             for table in self.engine.jump_tables:
                 branches.update(self.engine.jump_table_entries(table))
-            starts = sorted(self.functions)
-            for address in new_aliases:
-                index = bisect.bisect_right(starts, address) - 1
-                interior = (index >= 0 and starts[index] < address <
-                            self.functions[starts[index]].end)
-                if (not interior and address not in branches and
-                        not self._starts_after_boundary(address) and
-                        self.engine.entry_pops_unsaved(address)):
-                    del self._alias_entries[address]
+            contexts = _unwind_context_entries(self, sections)
+            for address in unframed - branches - contexts:
+                del self._alias_entries[address]
         return xpp_registration_entries(self, sections) or bool(
             set(self._alias_entries) - previous_aliases)
 

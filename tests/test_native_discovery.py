@@ -2,13 +2,14 @@
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries
+from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries
 from native_pilot import DONOR_PIN
 
 
@@ -195,11 +196,62 @@ class NativeDiscovery(unittest.TestCase):
         self.assertTrue(det._pass_data_ptr_targets([text]))
         self.assertEqual(det._alias_entries[0x10022], 0x10026)
 
-    def test_enclosing_body_preserves_an_address_taken_shared_epilogue(self):
+    def test_numeric_pair_inside_a_known_body_does_not_establish_a_caller_frame(self):
         det, text = self.gap_epilogue()
+        det.functions[0x10010].end = 0x10026
+        self.assertFalse(det._pass_data_ptr_targets([text]))
+        self.assertNotIn(0x10022, det._alias_entries)
+        self.assertEqual(det.functions[0x10010].end, 0x10026)
+
+    def test_original_branch_preserves_an_interior_shared_epilogue(self):
+        det, text = self.gap_epilogue(prefix=bytes.fromhex('567500'))
+        det.functions[0x1001f] = SimpleNamespace(start=0x1001f, end=0x10026)
+        self.assertTrue(det._pass_data_ptr_targets([text]))
+        self.assertEqual(det._alias_entries[0x10022], 0x10026)
+
+    def test_original_call_preserves_a_context_dependent_entry(self):
+        det, text = self.gap_epilogue(prefix=bytes.fromhex('e800000000'))
         det.functions[0x10010].end = 0x10026
         self.assertTrue(det._pass_data_ptr_targets([text]))
         self.assertEqual(det._alias_entries[0x10022], 0x10026)
+
+    def unwind_epilogue(self, *, magic=0x19930522, previous=-1, action=0x10022,
+                        count=1, jump=True):
+        det, text = self.gap_epilogue()
+        det.functions[0x10010].end = 0x10026
+        storage = det.image.sections[1]
+        storage.virtual_addr = 0x30000
+        info, table = 0x30008, 0x30024
+        metadata = struct.pack('<7I', magic, count, table, 0, 0, 0, 0)
+        metadata += struct.pack('<iI', previous, action)
+        raw = bytearray(det.image.raw_data)
+        raw[:10] = b'\xb8'+struct.pack('<I', info)+(b'\xe9' if jump else b'\xe8')+struct.pack('<i', 6)
+        det.image.raw_data = bytes(raw)+metadata
+        storage.raw_size += len(metadata)
+        storage.virtual_size += len(metadata)
+        for address in list(det.engine.instructions):
+            if 0x10000 <= address < 0x1000a:
+                del det.engine.instructions[address]
+        det.engine.decode_at(0x10000)
+        det.engine.decode_at(0x10005)
+        return det, text
+
+    def test_original_unwind_context_preserves_an_unframed_action(self):
+        for magic in (0x19930520, 0x19930521, 0x19930522):
+            det, text = self.unwind_epilogue(magic=magic)
+            original = det.image.raw_data
+            self.assertEqual(_unwind_context_entries(det, [text]), {0x10022})
+            self.assertTrue(det._pass_data_ptr_targets([text]))
+            self.assertEqual(det._alias_entries[0x10022], 0x10026)
+            self.assertEqual(det.image.raw_data, original)
+
+    def test_malformed_unwind_metadata_cannot_establish_a_frame(self):
+        for options in (dict(magic=0), dict(previous=0), dict(action=0x30000),
+                        dict(count=4097), dict(count=2), dict(jump=False)):
+            det, text = self.unwind_epilogue(**options)
+            self.assertFalse(_unwind_context_entries(det, [text]))
+            self.assertFalse(det._pass_data_ptr_targets([text]))
+            self.assertNotIn(0x10022, det._alias_entries)
 
     def test_data_pointer_pass_preserves_previously_qualified_aliases(self):
         det, text = self.gap_epilogue()
