@@ -135,6 +135,15 @@ target_compile_definitions(pilot_input_sdl PRIVATE PILOT_HAVE_SDL2 SDL_MAIN_HAND
 target_link_libraries(pilot_input_sdl PUBLIC pilot_host_posix pilot_native_debug pilot_session_replay SDL2::SDL2)
 file(GLOB generated CONFIGURE_DEPENDS "${PILOT_GENERATED}/*.c")
 add_executable(xlle_native_title runtime.c input_host.c ${generated})
+set(PILOT_SAVE_KEYS_FILE "${PILOT_GENERATED}/save-keys.aot-private.bin" CACHE FILEPATH
+  "Private original-derived title/console signing inputs")
+set(PILOT_CONSOLE_SETTINGS_FILE "${PILOT_GENERATED}/console-settings.aot-private.bin" CACHE FILEPATH
+  "Private authenticated boot settings")
+file(TO_CMAKE_PATH "${PILOT_SAVE_KEYS_FILE}" pilot_save_keys_path)
+file(TO_CMAKE_PATH "${PILOT_CONSOLE_SETTINGS_FILE}" pilot_console_settings_path)
+set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS
+  "PILOT_SAVE_KEYS_FILE=\"${pilot_save_keys_path}\""
+  "PILOT_CONSOLE_SETTINGS_FILE=\"${pilot_console_settings_path}\"")
 set_target_properties(xlle_native_title PROPERTIES OUTPUT_NAME "${PILOT_EXECUTABLE_NAME}" BUILD_RPATH
   "${PILOT_DXVK_NATIVE}/lib;${PILOT_VKD3D}/lib;${PILOT_FAUDIO}/lib;${PILOT_FAUDIO}/lib/x86_64-linux-gnu" INSTALL_RPATH "$ORIGIN/../lib")
 target_include_directories(xlle_native_title PRIVATE "${PILOT_GENERATED}")
