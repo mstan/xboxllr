@@ -37,7 +37,7 @@ struct PilotNativeDrawState {
     struct PilotNativePlane *color_plane,*depth_plane;
     struct PilotNativeDrawWrites writes;
     UINT viewport_count,scissor_count;
-    unsigned bound,enhanced,depth_required,writes_known,binding_reuse,input_remap,borrowed_inputs,prepared_bindings;
+    unsigned bound,enhanced,depth_required,writes_known,binding_reuse,input_remap,borrowed_inputs,prepared_bindings,borrowed_bindings;
     DXGI_FORMAT depth_format;
 };
 
@@ -101,14 +101,14 @@ static void pilot_native_draw_diagnostic(struct PilotNativeDrawState *draw,enum 
 static void pilot_native_draw_release(struct PilotNativeDrawState *draw)
 {
     for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i)
-        if(draw->outputs[i])ID3D11RenderTargetView_Release(draw->outputs[i]);
+        if(draw->outputs[i] && !draw->borrowed_bindings)ID3D11RenderTargetView_Release(draw->outputs[i]);
     if(draw->enhanced_color)ID3D11RenderTargetView_Release(draw->enhanced_color);
-    if(draw->depth)ID3D11DepthStencilView_Release(draw->depth);
-    if(draw->prepared_depth)ID3D11DepthStencilState_Release(draw->prepared_depth);
-    if(draw->prepared_blend)ID3D11BlendState_Release(draw->prepared_blend);
+    if(draw->depth && !draw->borrowed_bindings)ID3D11DepthStencilView_Release(draw->depth);
+    if(draw->prepared_depth && !draw->borrowed_bindings)ID3D11DepthStencilState_Release(draw->prepared_depth);
+    if(draw->prepared_blend && !draw->borrowed_bindings)ID3D11BlendState_Release(draw->prepared_blend);
     if(draw->enhanced_depth)ID3D11DepthStencilView_Release(draw->enhanced_depth);
     for(unsigned i=0;i<PILOT_NATIVE_DRAW_SRVS;++i) {
-        if(draw->inputs[i])ID3D11ShaderResourceView_Release(draw->inputs[i]);
+        if(draw->inputs[i] && !draw->borrowed_bindings)ID3D11ShaderResourceView_Release(draw->inputs[i]);
         if(draw->enhanced_inputs[i] && !(draw->borrowed_inputs&(1u<<i)))ID3D11ShaderResourceView_Release(draw->enhanced_inputs[i]);
     }
     memset(draw,0,sizeof(*draw));
@@ -264,7 +264,8 @@ static HRESULT pilot_native_draw_prepare(struct PilotNativeDrawState *draw,int i
     if(!context)return E_FAIL;
     draw->context=context;
     struct PreparedDrawSubset prepared={0};
-    if(prepared_state_draw_subset(context,&prepared) && !prepared.unsupported) {
+    int captured=immediate?prepared_state_draw_subset(context,&prepared):prepared_state_draw_subset_borrow(context,&prepared);
+    if(captured && !prepared.unsupported) {
         memcpy(draw->outputs,prepared.outputs,sizeof(draw->outputs));draw->depth=prepared.depth;
         memcpy(draw->inputs,prepared.inputs,sizeof(draw->inputs));
         draw->prepared_blend=prepared.blend;draw->prepared_depth=prepared.depth_state;
@@ -272,7 +273,8 @@ static HRESULT pilot_native_draw_prepare(struct PilotNativeDrawState *draw,int i
         memcpy(draw->viewports,prepared.viewports,sizeof(draw->viewports));
         memcpy(draw->scissors,prepared.scissors,sizeof(draw->scissors));
         draw->viewport_count=prepared.viewport_count;draw->scissor_count=prepared.scissor_count;
-        draw->prepared_bindings=1;memset(&prepared,0,sizeof(prepared)); /* Move owned refs. */
+        draw->prepared_bindings=1;draw->borrowed_bindings=prepared.borrowed;
+        memset(&prepared,0,sizeof(prepared)); /* Move owned refs or the bounded borrow. */
     } else {
         prepared_state_draw_release(&prepared);
         ID3D11DeviceContext_OMGetRenderTargets(context,D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,draw->outputs,&draw->depth);
@@ -528,6 +530,16 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
 static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexed)
 {
     if(!pilot_native_enabled()) {memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));return;}
+    uint64_t cpu_work=0;
+    if(pilot_native_cpu.active) {
+        /* Random 1/64 sampling avoids both per-draw system calls and fixed
+         * alignment with 256-draw packets. Flush attribution stays exact. */
+        unsigned random=pilot_native_cpu.random;
+        random^=random<<13;random^=random>>17;random^=random<<5;
+        pilot_native_cpu.random=random;++pilot_native_cpu.draws;
+        if(!(random&63)){cpu_work=pilot_native_cpu_clock();++pilot_native_cpu.samples;}
+    }
+    pilot_native_cpu.inside=1;
     if(!pilot_native_epoch_enabled()) {
         /* Matched opt-out retains the original single-admission immediate
          * path; it must not pay for a failed deferred capture first. */
@@ -540,9 +552,14 @@ static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexe
         }
         goto finished;
     }
+    uint64_t cpu_prepare=cpu_work?pilot_native_cpu_clock():0;
     struct PilotNativeDrawState draw;HRESULT result=pilot_native_draw_prepare(&draw,0);
+    if(cpu_work)pilot_native_cpu.prepare+=64*(pilot_native_cpu_clock()-cpu_prepare);
     if(result==S_OK) {
-        if(pilot_native_epoch_record(&draw,count,first,base,indexed)) {
+        uint64_t cpu_record=cpu_work?pilot_native_cpu_clock():0;
+        int recorded=pilot_native_epoch_record(&draw,count,first,base,indexed);
+        if(cpu_work)pilot_native_cpu.record+=64*(pilot_native_cpu_clock()-cpu_record);
+        if(recorded) {
             (void)pilot_native_draw_end(&draw);goto finished;
         }
         (void)pilot_native_draw_end(&draw);
@@ -557,6 +574,8 @@ static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexe
         (void)pilot_native_draw_end(&draw);
     }
 finished:
+    if(cpu_work)pilot_native_cpu.work+=64*(pilot_native_cpu_clock()-cpu_work);
+    pilot_native_cpu.inside=0;
     memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));
 }
 static void pilot_native_draw(UINT count,UINT first)

@@ -17,11 +17,14 @@ def bind(xbe, output, symbols, profile=None):
         raise ValueError('invalid static title function list')
     verified = []
     for row in entries:
-        if (not isinstance(row, dict) or set(row)-{'callers'} != {'id', 'address', 'bytes', 'sha256', 'stack_bytes'} or
+        if (not isinstance(row, dict) or set(row)-{'callers', 'argument_bytes'} != {'id', 'address', 'bytes', 'sha256', 'stack_bytes'} or
                 type(row['id']) is not int or not 1 <= row['id'] <= 255 or
                 type(row['address']) is not int or type(row['stack_bytes']) is not int or
                 not 0 <= row['stack_bytes'] <= 64 or row['stack_bytes'] % 4):
             raise ValueError('invalid static title function contract')
+        if 'argument_bytes' in row and (type(row['argument_bytes']) is not int or
+                not row['stack_bytes'] <= row['argument_bytes'] <= 64 or row['argument_bytes'] % 4):
+            raise ValueError('invalid static title argument extent')
         found = [f for f in context.functions if int(f['start'], 16) == row['address']]
         if len(found) != 1 or not context.matches_body(found[0], row):
             raise ValueError('unreviewed static title function body')
@@ -47,10 +50,13 @@ def bind(xbe, output, symbols, profile=None):
         if 'callers' in row:
             allowed=' && '.join(f'MEM32(g_esp)!=0x{c:08x}u' for c in row['callers'])
             guard=f'if({allowed}){{{original}();return;}}'
+        entry = 'pilot_title_function_with_arguments' if 'argument_bytes' in row else 'pilot_title_function'
+        extra = f', {row["argument_bytes"]}' if 'argument_bytes' in row else ''
+        parameter = ',unsigned' if 'argument_bytes' in row else ''
         code = ('#include "recomp_types.h"\n'
-                'extern void pilot_title_function(unsigned,recomp_func_t,unsigned);\n'
+                f'extern void {entry}(unsigned,recomp_func_t,unsigned{parameter});\n'
                 f'extern void {original}(void);\n'
-                f'void {function["name"]}(void) {{{guard}pilot_title_function({row["id"]},{original},{row["stack_bytes"]});}}\n')
+                f'void {function["name"]}(void) {{{guard}{entry}({row["id"]},{original},{row["stack_bytes"]}{extra});}}\n')
         context.emit(f'title_hook_{row["id"]}', function, original, row, code)
     registry = '#include "recomp_types.h"\n'
     for row, _ in verified:

@@ -44,7 +44,7 @@ def build_launcher(source, data, paths, build, cmake, generator, jobs):
     config = data.get('launcher', {})
     if config.get('ui_revision') != native_launcher_ui.REVISION:
         raise ValueError('Declare the reviewed launcher UI revision')
-    for key in ('launcher_ui', 'sdl2_dir'):
+    for key in ('launcher_ui', *(['sdl2_dir'] if os.name == 'nt' or 'sdl2_dir' in paths else [])):
         if key not in paths or not paths[key].is_dir():
             raise ValueError('Missing private launcher dependency: ' + key)
     git = 'C:/Program Files/Git/cmd/git.exe' if os.name == 'nt' else 'git'
@@ -52,9 +52,11 @@ def build_launcher(source, data, paths, build, cmake, generator, jobs):
     native_launcher_ui.prepare(paths['launcher_ui'], prepared, git)
     directory = Path(build) / 'launcher'
     command = [str(cmake), '-S', str(ROOT / 'pilots/native-launcher'), '-B', str(directory), '-G', generator,
-               '-DXLLE_UI_SOURCE=' + str(prepared), '-DSDL2_DIR=' + str(paths['sdl2_dir']),
+               '-DXLLE_UI_SOURCE=' + str(prepared),
                '-DPython3_EXECUTABLE=' + sys.executable,
                '-DXLLE_LAUNCHER_BOXART=', '-DXLLE_LAUNCHER_ARTWORK_NOTICE=']
+    if 'sdl2_dir' in paths:
+        command.append('-DSDL2_DIR=' + str(paths['sdl2_dir']))
     if generator.startswith('Visual Studio'):
         command += ['-A', 'x64']
     else:

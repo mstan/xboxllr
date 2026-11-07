@@ -79,6 +79,9 @@ def main():
     resize = commands.add_parser('resize')
     resize.add_argument('width', type=int)
     resize.add_argument('height', type=int)
+    read = commands.add_parser('read_memory', help='Live read-only guest RAM, up to 4096 bytes')
+    read.add_argument('address', type=lambda value:int(value,0))
+    read.add_argument('bytes', type=int)
     press = commands.add_parser("press")
     press.add_argument("buttons", help="Comma-separated Xbox names, e.g. a,down")
     press.add_argument("--ms", type=int, default=150)
@@ -101,6 +104,8 @@ def main():
         result=request(args.port,'connect_input '+str(args.mask))
     elif args.command == 'resize':
         result = request(args.port, f'resize {args.width} {args.height}')
+    elif args.command == 'read_memory':
+        result = request(args.port, f'read_memory {args.address} {args.bytes}')
     else:
         result = request(args.port, args.command)
         if args.command == "screenshot":

@@ -30,6 +30,7 @@ INCOMPLETE_RECOVERY = "native-title-recovery-incomplete.json"
 DEPENDENCIES = {
     "PILOT_D3D_SOURCE": "d3d_source", "PILOT_DSP_SOURCE": "dsp_source",
     "PILOT_DSP_LIBRARY": "dsp_library", "PILOT_ADPCM_SOURCE": "adpcm_source",
+    "PILOT_DXVK_NATIVE": "dxvk_native", "PILOT_VKD3D": "vkd3d", "PILOT_FAUDIO": "faudio",
     "PILOT_SDL2_DIR": "sdl2_dir",
     "PILOT_SAVE_KEYS_FILE": "save_keys",
     "PILOT_CONSOLE_SETTINGS_FILE": "console_settings",

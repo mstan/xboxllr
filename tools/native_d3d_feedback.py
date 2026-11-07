@@ -231,6 +231,15 @@ def prepare_cb_versions(code):
          'pilot_native_cb_map(&b->b,g_ctx,(D3D11_MAP)mode,&m)')
     once('    ID3D11DeviceContext_Unmap(g_ctx, (ID3D11Resource *)b->b, 0);',
          '    ID3D11DeviceContext_Unmap(g_ctx, (ID3D11Resource *)b->b, 0);\n    pilot_native_cb_unmapped(&b->b);')
+    once('static void d_buffer_unmap(RhiBuffer *b)',
+         '''void *pilot_d3d_up_ring_map(RhiBuffer *b,uint32_t mode,uint32_t offset,uint32_t bytes)
+{
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if(FAILED(pilot_native_stream_map(&b->b,g_ctx,(D3D11_MAP)mode,offset,bytes,&mapped)))return NULL;
+    return mapped.pData;
+}
+
+static void d_buffer_unmap(RhiBuffer *b)''')
     once('    ID3D11DeviceContext_UpdateSubresource(g_ctx, (ID3D11Resource *)b->b, 0, NULL, data, 0, 0);',
          '    pilot_native_cb_before_write(&b->b);\n    ID3D11DeviceContext_UpdateSubresource(g_ctx, (ID3D11Resource *)b->b, 0, NULL, data, 0, 0);')
     # Uniform binds and native-buffer getters already resolve b->b on each call.

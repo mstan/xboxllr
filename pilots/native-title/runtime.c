@@ -3,6 +3,13 @@
  * kernel, device acknowledgement thread or missing-call success is linked.
  * Unsupported operations terminate before returning to the title.
  */
+#ifdef __linux__
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
 #include <windows.h>
 #include <winternl.h>
 #include <bcrypt.h>
@@ -408,6 +415,9 @@ static void thread_finished(void)
     AcquireSRWLockExclusive(&thread_lock);
     threads[current_thread_slot].finished=1;
     native_apc_thread_retire_locked(current_thread_slot);
+#ifdef __linux__
+    WakeAllConditionVariable(&thread_condition);
+#endif
     ReleaseSRWLockExclusive(&thread_lock);
 }
 void pilot_native_poll_wait(void)
@@ -1194,6 +1204,9 @@ recomp_func_t recomp_lookup_kernel(uint32_t va)
     return NULL;
 }
 
+#ifdef __linux__
+#include "linux/native_fault.inc"
+#else
 #include "native_exception_diagnostic.inc"
 
 static LONG CALLBACK fault_handler(EXCEPTION_POINTERS *exception)
@@ -1270,6 +1283,7 @@ static void install_fault_handler(void)
 #endif
     install_native_language_exception_observer();
 }
+#endif
 
 static unsigned load_image_sections(void)
 {
@@ -1439,8 +1453,24 @@ static void load_image(const char *path)
 #endif
 }
 
+static int debug_read_memory(uint32_t address,void *data,uint32_t bytes)
+{
+    if(!memory || !data || !bytes || bytes>4096 || address>=0x04000000u || bytes>0x04000000u-address)return 0;
+#ifdef __linux__
+    struct iovec local={data,bytes},remote={memory+address,bytes};
+    return process_vm_readv(getpid(),&local,1,&remote,1,0)==bytes;
+#else
+    SIZE_T copied=0;
+    return ReadProcessMemory(GetCurrentProcess(),memory+address,data,bytes,&copied) && copied==bytes;
+#endif
+}
 int main(int argc,char **argv)
 {
+#ifdef __linux__
+    /* HWND is an SDL_Window* in this port; choose its matching DXVK ABI before
+     * starting any title, device, or audio threads. */
+    if(setenv("DXVK_WSI_DRIVER","SDL2",1))stop("cannot select the SDL2 Vulkan window transport",0);
+#endif
     pilot_session_bind_terminal(session_terminal);
     const char *session_record=getenv("XLLE_PILOT_SESSION_RECORD"),*session_replay=getenv("XLLE_PILOT_SESSION_REPLAY");
     if((session_record && *session_record) || (session_replay && *session_replay)) {
@@ -1493,6 +1523,7 @@ int main(int argc,char **argv)
     trace_function_trigger=getenv("XLLE_PILOT_TRACE_FUNCTION_TRIGGER");
     install_fault_handler();
     if (argc<2 || argc>5) { fprintf(stderr,"usage: xlle_native_title <matching.xbe> [eeprom] [installed-content-directory] [local-storage-directory]\n"); return 1; }
+    pilot_debug_memory_reader(debug_read_memory);
     if(pilot_debug_start(getenv("XLLE_PILOT_DEBUG_PORT")))stop("native TCP listener configuration/bind failed",0);
     if (argc>=3) {
         FILE *input=fopen(argv[2],"rb");
@@ -1678,5 +1709,22 @@ int main(int argc,char **argv)
     ReleaseSRWLockShared(&thread_lock);
     if (!launched) stop("bootstrap returned without a running title thread",PILOT_ENTRY);
     fprintf(stderr,"[BOOTSTRAP] returned; native title threads own execution\n");
+#ifdef __linux__
+    /* Linux removes /proc/self/exe and other process metadata once the initial
+     * pthread exits. DXVK and native driver discovery still need those files.
+     * Retire its guest scheduler actor, then park the initial host thread until
+     * the actual title workers have finished. */
+    AcquireSRWLockExclusive(&thread_lock);
+    for(;;) {
+        unsigned active=0;
+        for(unsigned i=1;i<=thread_count;++i)active+=threads[i].object && !threads[i].finished;
+        if(!active)break;
+        if(!SleepConditionVariableSRW(&thread_condition,&thread_lock,INFINITE,0))
+            stop("native title lifetime wait failed",GetLastError());
+    }
+    ReleaseSRWLockExclusive(&thread_lock);
+    return 0;
+#else
     ExitThread(0);
+#endif
 }

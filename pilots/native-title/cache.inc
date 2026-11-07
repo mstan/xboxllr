@@ -79,7 +79,9 @@ static uint32_t cache_clear_children(HANDLE directory,unsigned depth)
         uint32_t attributes,length;
         memcpy(&attributes,entry.bytes+56,4); memcpy(&length,entry.bytes+60,4);
         if (!length || length%2 || length>510 || length>io.Information-64) return CACHE_CORRUPT;
-        WCHAR name[256]; memcpy(name,entry.bytes+64,length); name[length/2]=0;
+        WCHAR name[256]; const uint16_t *wire=(const uint16_t*)(entry.bytes+64);
+        for(unsigned i=0;i<length/2;++i)name[i]=(WCHAR)wire[i];
+        name[length/2]=0;
         if (!wcscmp(name,L".") || !wcscmp(name,L"..")) continue;
         if (wcslen(name)!=length/2 || wcschr(name,L'\\') || wcschr(name,L'/') || wcschr(name,L':')) return CACHE_CORRUPT;
         if (attributes&FILE_ATTRIBUTE_REPARSE_POINT) return 0xc000050bu; /* never follow junctions */
@@ -115,7 +117,12 @@ static uint32_t cache_format(unsigned partition)
     }
     if (swprintf(expected,32768,L"%ls\\Partition%u",storage_path,partition)<0) return MEDIA_INVALID;
     DWORD count=GetFinalPathNameByHandleW(storage_roots[partition],actual,32768,FILE_NAME_NORMALIZED);
+#ifndef _WIN32
+    for(WCHAR *part=expected;*part;++part)if(*part==L'\\')*part=L'/';
+    if (!count || count>=32768 || wcscmp(actual,expected)) return 0xc0000022u;
+#else
     if (!count || count>=32768 || _wcsicmp(actual,expected)) return 0xc0000022u;
+#endif
     for (unsigned i=0;i<256;++i) if (media_files[i].host && media_files[i].partition==partition) return 0xc0000043u;
     return cache_clear_children(storage_roots[partition],0);
 }

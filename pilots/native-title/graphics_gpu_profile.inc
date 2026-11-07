@@ -39,6 +39,9 @@ static void pilot_gpu_measure_write(int closing)
     if(!pilot_gpu_measure.output || pilot_gpu_measure.done)return;
     unsigned pending=pilot_gpu_profile_pending(pilot_gpu_measure.gpu);
     if(!closing && pending)return;
+#ifdef PILOT_D3D_PHOBOS
+    pilot_native_cpu_report();
+#endif
     uint64_t dropped=pilot_gpu_profile_dropped(pilot_gpu_measure.gpu);
     int complete=pilot_gpu_measure.gpu && pilot_gpu_measure.count>0 &&
         pilot_gpu_measure.count==pilot_gpu_measure.admitted && !pending && !dropped && !pilot_gpu_measure.query_errors &&
@@ -73,6 +76,9 @@ static void pilot_gpu_measure_begin(void)
     if(pilot_gpu_measure.start) {
         if(GetFileAttributesA(pilot_gpu_measure.start)==INVALID_FILE_ATTRIBUTES)return;
         pilot_gpu_measure.start=NULL; /* External setup has finished; start once. */
+#ifdef PILOT_D3D_PHOBOS
+        pilot_native_cpu_begin();
+#endif
     }
     if(pilot_gpu_measure.attempts==PILOT_GPU_MEASURE_CAPACITY){
         ++pilot_gpu_measure.overflows;pilot_gpu_measure.stopping=1;return;

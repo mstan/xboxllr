@@ -80,11 +80,15 @@ static void pilot_completion_events_init(void)
 {
     if(pilot_completion_events_checked)return;
     pilot_completion_events_checked=1;
+#ifndef PILOT_DXVK_NATIVE
     const char *setting=getenv("XLLE_PILOT_GPU_EVENTS");
     if(!(setting && !strcmp(setting,"0"))) {
         HRESULT hr=ID3D11DeviceContext_QueryInterface(d3d8_GetD3D11Context(),&IID_ID3D11DeviceContext3,(void**)&pilot_completion_context);
         if(hr!=E_NOINTERFACE)pilot_d3d_require(hr,__FILE__,__LINE__);
     }
+#endif
+    /* DXVK Native's event ABI is not a POSIX host wait handle. Retain the
+     * existing real GPU-query completion path on this platform. */
     fprintf(stderr,"[GPU COMPLETION] native_events=%u\n",pilot_completion_context!=NULL);
 }
 static int pilot_completion_event_ready_raw(HANDLE event)

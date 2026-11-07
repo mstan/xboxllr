@@ -1,13 +1,18 @@
 /* Opt-in observation of the selected implementation, never duplicate work.
  * Per-thread totals keep the display/DPC worker out of the drawing thread's
  * elapsed-time accounting. Timings include service waits and profiling cost. */
+#ifdef _MSC_VER
+#define PILOT_GRAPHICS_TLS __declspec(thread)
+#else
+#define PILOT_GRAPHICS_TLS _Thread_local
+#endif
 static int graphics_service_profile_enabled(void)
 {
-    static __declspec(thread) int enabled=-1;
+    static PILOT_GRAPHICS_TLS int enabled=-1;
     if(enabled<0) {const char *value=getenv("XLLE_PILOT_SERVICE_PROFILE");enabled=value && !strcmp(value,"1");}
     return enabled;
 }
-static __declspec(thread) struct {
+static PILOT_GRAPHICS_TLS struct {
     uint64_t start,ticks[PILOT_D3D_COUNT];
     uint64_t draw_ticks[7];
     unsigned draw_calls;

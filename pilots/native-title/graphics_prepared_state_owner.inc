@@ -2,9 +2,10 @@
  * driver getters: wrapped setters maintain actual bindings, including private
  * passes. Getters below are only the explicit unknown-boundary resync. */
 #include "graphics_prepared_state_owner.h"
-#if defined(_WIN32) && defined(COBJMACROS)
+#if (defined(_WIN32) || defined(PILOT_DXVK_NATIVE)) && defined(COBJMACROS)
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 enum { PREPARED_ALL_STAGES=6, PREPARED_FACTS=128, PREPARED_STATE_FACTS=32 };
 struct PreparedExtraStage {
     IUnknown *shader;
@@ -80,25 +81,96 @@ void prepared_state_derive_extents(struct PreparedState *s)
         s->sampler_count[stage]=prepared_live_extent(s->samplers[stage],D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT);
     }
 }
-static void prepared_state_refs(struct PreparedState *s,int add)
+#define PREPARED_EACH_REF(OP) \
+    OP(s->layout);OP(s->index); \
+    for(unsigned i=0;i<s->vertex_count;++i)OP(s->vertices[i]); \
+    OP(s->vertex);OP(s->geometry);OP(s->pixel); \
+    for(unsigned stage=0;stage<3;++stage) { \
+        for(unsigned i=0;i<s->class_count[stage];++i)OP(s->classes[stage][i]); \
+        for(unsigned i=0;i<s->constant_count[stage];++i)OP(s->constants[stage][i]); \
+        for(unsigned i=0;i<s->resource_count[stage];++i)OP(s->resources[stage][i]); \
+        for(unsigned i=0;i<s->sampler_count[stage];++i)OP(s->samplers[stage][i]); \
+    } \
+    OP(s->raster);OP(s->blend);OP(s->depth);OP(s->predicate); \
+    for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i)OP(s->outputs[i]); \
+    OP(s->target_depth)
+static void prepared_state_refs(const struct PreparedState *s,int add)
 {
 #define PREPARED_REF(p) do {if(add)prepared_add(p);else prepared_drop(p);}while(0)
-    PREPARED_REF(s->layout);PREPARED_REF(s->index);
-    for(unsigned i=0;i<s->vertex_count;++i)PREPARED_REF(s->vertices[i]);
-    PREPARED_REF(s->vertex);PREPARED_REF(s->geometry);PREPARED_REF(s->pixel);
-    for(unsigned stage=0;stage<3;++stage) {
-        for(unsigned i=0;i<s->class_count[stage];++i)PREPARED_REF(s->classes[stage][i]);
-        for(unsigned i=0;i<s->constant_count[stage];++i)PREPARED_REF(s->constants[stage][i]);
-        for(unsigned i=0;i<s->resource_count[stage];++i)PREPARED_REF(s->resources[stage][i]);
-        for(unsigned i=0;i<s->sampler_count[stage];++i)PREPARED_REF(s->samplers[stage][i]);
-    }
-    PREPARED_REF(s->raster);PREPARED_REF(s->blend);PREPARED_REF(s->depth);PREPARED_REF(s->predicate);
-    for(unsigned i=0;i<D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT;++i)PREPARED_REF(s->outputs[i]);
-    PREPARED_REF(s->target_depth);
+    PREPARED_EACH_REF(PREPARED_REF);
 #undef PREPARED_REF
 }
+static void prepared_lease_rollback(struct PreparedResourceLease *lease,UINT before)
+{
+    /* Reverse insertion order keeps every surviving open-addressed probe
+     * chain intact. No tombstones or allocation are needed on this path. */
+    while(lease->count>before) {
+        UINT slot=lease->slots[--lease->count];IUnknown *object=lease->objects[slot];
+        lease->objects[slot]=NULL;prepared_drop(object);
+    }
+}
+static int prepared_lease_add(struct PreparedResourceLease *lease,void *object)
+{
+    if(!object)return 1;
+    uintptr_t key=(uintptr_t)object>>4;key^=key>>17;
+    UINT slot=(UINT)key&(PREPARED_LEASE_SLOTS-1);
+    while(lease->objects[slot]) {
+        if(lease->objects[slot]==object)return 1;
+        slot=(slot+1)&(PREPARED_LEASE_SLOTS-1);
+    }
+    if(lease->count==PREPARED_LEASE_OBJECTS)return 0;
+    prepared_add(object);lease->objects[slot]=(IUnknown*)object;
+    lease->slots[lease->count++]=slot;return 1;
+}
+int prepared_state_lease_retain(struct PreparedResourceLease *lease,const struct PreparedState *s)
+{
+    UINT before=lease->count;
+#define PREPARED_REF(p) do {if(!prepared_lease_add(lease,p)){prepared_lease_rollback(lease,before);return 0;}}while(0)
+    PREPARED_EACH_REF(PREPARED_REF);
+#undef PREPARED_REF
+    return 1;
+}
+void prepared_state_lease_clear(struct PreparedResourceLease *lease)
+{prepared_lease_rollback(lease,0);}
+#undef PREPARED_EACH_REF
+/* Empty snapshots are zeroed once. Copy and clear only live pointer extents:
+ * the 768 class slots and 384 SRV slots are almost entirely unused by Xbox
+ * draws. Touching all of them twice per draw defeats immutable packet reuse.
+ * Holes remain valid; slots above a released extent are already zero. */
+static void prepared_state_copy_live(struct PreparedState *out,const struct PreparedState *s)
+{
+    if(out==s)return;
+    memcpy(out,s,offsetof(struct PreparedState,classes));
+    for(unsigned stage=0;stage<PREPARED_STAGES;++stage) {
+        memcpy(out->classes[stage],s->classes[stage],s->class_count[stage]*sizeof(s->classes[stage][0]));
+        memcpy(out->constants[stage],s->constants[stage],s->constant_count[stage]*sizeof(s->constants[stage][0]));
+        memcpy(out->resources[stage],s->resources[stage],s->resource_count[stage]*sizeof(s->resources[stage][0]));
+        memcpy(out->samplers[stage],s->samplers[stage],s->sampler_count[stage]*sizeof(s->samplers[stage][0]));
+    }
+    memcpy(out->class_count,s->class_count,sizeof(s->class_count));
+    memcpy(&out->raster,&s->raster,sizeof(*s)-offsetof(struct PreparedState,raster));
+}
 void prepared_state_release(struct PreparedState *s)
-{ if(s){prepared_state_refs(s,0);memset(s,0,sizeof(*s));} }
+{
+    if(!s)return;
+    prepared_state_refs(s,0);
+    prepared_state_clear(s);
+}
+void prepared_state_drop_refs(struct PreparedState *s)
+{prepared_state_refs(s,0);}
+void prepared_state_clear(struct PreparedState *s)
+{
+    if(!s)return;
+    for(unsigned stage=0;stage<PREPARED_STAGES;++stage) {
+        memset(s->classes[stage],0,s->class_count[stage]*sizeof(s->classes[stage][0]));
+        memset(s->constants[stage],0,s->constant_count[stage]*sizeof(s->constants[stage][0]));
+        memset(s->resources[stage],0,s->resource_count[stage]*sizeof(s->resources[stage][0]));
+        memset(s->samplers[stage],0,s->sampler_count[stage]*sizeof(s->samplers[stage][0]));
+    }
+    memset(s,0,offsetof(struct PreparedState,classes));
+    memset(s->class_count,0,sizeof(s->class_count));
+    memset(&s->raster,0,sizeof(*s)-offsetof(struct PreparedState,raster));
+}
 static void prepared_clear_bindings(void)
 {
     prepared_state_release(&prepared_owner.state);
@@ -367,18 +439,32 @@ static int prepared_resync(ID3D11DeviceContext *c)
 }
 int prepared_state_snapshot(ID3D11DeviceContext *context,struct PreparedState *out)
 {
+    if(!prepared_state_snapshot_borrow(context,out))return 0;
+    prepared_state_retain(out);return 1;
+}
+void prepared_state_retain(struct PreparedState *s)
+{prepared_state_refs(s,1);}
+int prepared_state_snapshot_borrow(ID3D11DeviceContext *context,struct PreparedState *out)
+{
     if(!out || context!=prepared_owner.context || (!prepared_owner.known && !prepared_resync(context)))return 0;
     if(prepared_unsupported())return 0;
-    *out=prepared_owner.state;prepared_state_refs(out,1);return 1;
+    prepared_state_copy_live(out,&prepared_owner.state);return 1;
 }
 int prepared_state_draw_subset(ID3D11DeviceContext *context,struct PreparedDrawSubset *out)
 {
+    if(!prepared_state_draw_subset_borrow(context,out))return 0;
+    for(unsigned i=0;i<8;++i)prepared_add(out->outputs[i]);prepared_add(out->depth);
+    for(unsigned i=0;i<5;++i)prepared_add(out->inputs[i]);
+    prepared_add(out->blend);prepared_add(out->depth_state);out->borrowed=0;return 1;
+}
+int prepared_state_draw_subset_borrow(ID3D11DeviceContext *context,struct PreparedDrawSubset *out)
+{
     if(!out || context!=prepared_owner.context || (!prepared_owner.known && !prepared_resync(context)))return 0;
     struct PreparedState *s=&prepared_owner.state;memset(out,0,sizeof(*out));
-    for(unsigned i=0;i<8;++i){out->outputs[i]=s->outputs[i];prepared_add(out->outputs[i]);}
-    out->depth=s->target_depth;prepared_add(out->depth);
-    for(unsigned i=0;i<5;++i){out->inputs[i]=s->resources[2][i];prepared_add(out->inputs[i]);}
-    out->blend=s->blend;prepared_add(out->blend);out->depth_state=s->depth;prepared_add(out->depth_state);
+    for(unsigned i=0;i<8;++i)out->outputs[i]=s->outputs[i];
+    out->depth=s->target_depth;
+    for(unsigned i=0;i<5;++i)out->inputs[i]=s->resources[2][i];
+    out->blend=s->blend;out->depth_state=s->depth;out->borrowed=1;
     out->blend_desc=prepared_owner.blend_desc;out->depth_desc=prepared_owner.depth_desc;
     memcpy(out->factors,s->factors,sizeof(out->factors));out->sample_mask=s->sample_mask;out->stencil=s->stencil;
     out->viewport_count=s->viewport_count;out->scissor_count=s->scissor_count;
@@ -388,6 +474,7 @@ int prepared_state_draw_subset(ID3D11DeviceContext *context,struct PreparedDrawS
 void prepared_state_draw_release(struct PreparedDrawSubset *s)
 {
     if(!s)return;
+    if(s->borrowed){memset(s,0,sizeof(*s));return;}
     for(unsigned i=0;i<8;++i)prepared_drop(s->outputs[i]);prepared_drop(s->depth);
     for(unsigned i=0;i<5;++i)prepared_drop(s->inputs[i]);prepared_drop(s->blend);prepared_drop(s->depth_state);
     memset(s,0,sizeof(*s));

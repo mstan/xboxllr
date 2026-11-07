@@ -18,16 +18,22 @@ void pilot_native_cb_binding_owner(int (*rebind)(ID3D11DeviceContext *,UINT requ
 /* Teardown abandons logical ownership before in-flight packet pins retire;
  * those physical backings are released, never returned to a reuse pool. */
 void pilot_native_cb_discard_owners(void);
-/* Register CBs, DYNAMIC/CPU_WRITE/INDEX-only buffers (<=65536 bytes), or
+/* Register CBs, DYNAMIC/CPU_WRITE vertex/index streams (<=32MiB), or
  * DEFAULT/CPU0/VERTEX-only buffers (<=32MiB), each with its native alignment.
  * Native allocations are not charged against the32MiB EXTRA-backing budget.
- * No dynamic-VB, DEFAULT-index, mixed-bind or arbitrary partial-map support. */
+ * Stream append maps must use the checked range API below. No DEFAULT-index,
+ * mixed-bind or arbitrary partial-map support. */
 void pilot_native_cb_track(ID3D11Buffer **owner);
 /* CB/DEFAULT-VB whole updates: call before the existing UpdateSubresource.
  * Dynamic WRITE_DISCARD callers use map() below, including its Map-failure
  * rollback. Untracked/unsupported buffers retain their original native path. */
 void pilot_native_cb_before_write(ID3D11Buffer **owner);
 HRESULT pilot_native_cb_map(ID3D11Buffer **owner,ID3D11DeviceContext *,D3D11_MAP,D3D11_MAPPED_SUBRESOURCE *);
+/* A retained dynamic version permits only monotonic non-overlapping appends.
+ * DISCARD publishes a new backing and starts a new written extent. Generic
+ * DISCARD maps conservatively declare the entire backing written. */
+HRESULT pilot_native_stream_map(ID3D11Buffer **owner,ID3D11DeviceContext *,D3D11_MAP,
+    UINT offset,UINT bytes,D3D11_MAPPED_SUBRESOURCE *);
 void pilot_native_cb_unmapped(ID3D11Buffer **owner);
 /* Call before the logical owner's existing Release, while its slot is valid.
  * Borrowed versions survive owner destruction until their last event retires. */

@@ -2,12 +2,8 @@
 
 This guide covers the shared framework. For player inputs, optional console
 imports and the original Dashboard, start with [Setup](SETUP.md).
-The instructions below cover **Windows x64**. Native Linux game hosts and
-AppImages are available through the Linux release integration branch and the
-matching source kits attached to each game release. Follow the pinned
-[native Linux guide](https://github.com/mstan/xboxllr/blob/375d6d1be6938ebcfce24a2d8509d0d88b29353f/docs/NATIVE-LINUX.md)
-for its toolchain, dependencies and packaging. This integration is separate
-from the Windows toolkit source on master.
+Native title builds support **Windows x64** and **Linux x86_64**. For Linux
+dependencies, builds and AppImage staging, see [the Linux guide](NATIVE-LINUX.md).
 
 There are two distinct source builds:
 
@@ -21,8 +17,7 @@ Use the shared native driver and an admitted title definition for that path.
 
 ## Tools and checkout
 
-- **Git**. XboxLLR and BlinxRecomp are public; JSRFRecomp currently requires
-  private repository access while its public beta is being prepared.
+- **Git**. XboxLLR, BlinxRecomp and JSRFRecomp are public.
 - **Python 3.11+** for `tomllib` and `hashlib.file_digest`; the current Windows
   tooling has been exercised with Python 3.12. The ROM-free checks below use
   the standard library. Translation/binding tools can additionally need

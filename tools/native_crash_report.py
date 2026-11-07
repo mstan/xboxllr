@@ -196,6 +196,9 @@ def dialog_template(title):
 
 def show(session):
     if os.name != 'nt':
+        from native_linux_entry import message
+        message(session.report.get('title', 'The game') + ' stopped unexpectedly',
+                failure_text(session.report) + '\n\nLocal diagnostic report: ' + str(session.path))
         return
     user = c.WinDLL('user32', use_last_error=True)
     user.SetDlgItemTextW.argtypes = [c.c_void_p, c.c_int, c.c_wchar_p]

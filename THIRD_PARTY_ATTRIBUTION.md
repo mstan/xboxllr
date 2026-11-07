@@ -1927,3 +1927,19 @@ Native session journals use unmodified zlib 1.3.2, statically linked from the
 SHA-256-pinned official source archive in `pilots/native-title/session_zlib.cmake`.
 The zlib license is retained in `LICENSES/zlib.txt`. Offline builds can supply
 `FETCHCONTENT_SOURCE_DIR_XBOXLLR_ZLIB`.
+
+## Native Linux title host
+
+The Linux host uses [DXVK Native 2.6.2](https://github.com/Joshua-Ashton/dxvk-native)
+(zlib), [vkd3d 2.1](https://gitlab.winehq.org/wine/vkd3d) (LGPL-2.1-or-later),
+and [FAudio 24.02](https://github.com/FNA-XNA/FAudio) (zlib), with SDL2 and
+OpenSSL. These are native ELF libraries; no Wine or Proton runtime is used.
+The authored shader bridge converts vkd3d's Microsoft x64 compiler/blob ABI
+to DXVK Native's System V interfaces and supplies IEEE-754 HLSL classification.
+The authored FAudio adapters preserve the shared DSP/effect graph.
+
+AppImages retain the exact dependency notices and source package identities
+under `notices/native-dependencies`, plus bundled CPython/dependency notices.
+Matching project and prepared renderer/UI/DSP source archives are included
+under `sources`. The Linux renderer preparation tool records every adapted
+file and retains its original copyright and modification notices.
