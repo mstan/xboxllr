@@ -268,8 +268,9 @@ their parent. Branch and switch-table handling still determines executable body
 ends; a declared extent can also contain trailing data. Independently callable
 aliases remain separate entries. Entries manufactured by decoding proven trailing
 switch/index data are removed before following their apparent branches.
-The supplied-PDB body walker skips a nearby embedded table only across decoded
-alignment. Real instructions, including a shared return after a virtual tail
+The supplied-PDB body walker skips a nearby embedded table only when the jump
+addresses that table and the intervening bytes are decoded alignment.
+Real instructions, including a shared return after a virtual tail
 jump, remain on the fall-through path; a nearby table must not hide them. A body
 that still crosses its declared PDB length is rejected rather than clamped.
 The metadata identity is retained in generation

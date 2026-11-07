@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 import subprocess
+import struct
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -144,6 +145,27 @@ class QualifiedDiscovery(unittest.TestCase):
         det.engine.jump_tables[0x11008] = 0x11010
         det._build_functions([text])
         self.assertEqual(det.functions[0x11000].end, 0x11018)
+
+    def test_backwards_jump_before_table_cannot_follow_a_pointer_shaped_index(self):
+        code = bytes.fromhex('83f802770eff248520100100b801000000eb00c390909090ebf9')
+        code += b'\x90' * (32 - len(code))
+        code += b''.join(a.to_bytes(4, 'little') for a in (0x1100c, 0x11013, 0x11018))
+        code += bytes.fromhex('00020200020001')
+        declared_length = len(code)
+        # The byte-index word 00 02 02 00 points at unrelated executable code.
+        # A section-wide pointer scan consequently includes it in the table.
+        code += b'\xcc' * (0x20200 - 0x11000 - len(code)) + b'\xc3'
+        blob, document = self.fixture(code, length=declared_length)
+        blob = bytearray(blob)
+        struct.pack_into('<I', blob, 0x308, len(blob) - 0x400)
+        struct.pack_into('<I', blob, 0x10c, 0x1000 + len(blob) - 0x400)
+        blob = bytes(blob)
+        document['xbe_sha256'] = hashlib.sha256(blob).hexdigest()
+        det, text = self.detector(blob, document)
+        det.engine.resync_jump_tables()
+        self.assertIn(0x20200, det.engine.jump_table_entries(0x11020))
+        det._build_functions([text])
+        self.assertEqual(det.functions[0x11000].end, 0x1101a)
 
     def test_cli_applies_metadata_and_separates_its_cache_from_unaided(self):
         framework = Path(__file__).resolve().parents[1]

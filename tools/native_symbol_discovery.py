@@ -97,9 +97,16 @@ def install(module, qualified):
         # the trailing switch tables. Skipping that RET walks index bytes as
         # code, even past an exact PDB length. Keep real interleaved tables,
         # but require the bounded alignment which the donor only assumes.
+        dispatches = [i for i in self.engine.get_instructions_in_range(address - 15, address)
+                      if i.end_address == address and i.is_jump and i.jump_table is not None]
+        # A backwards/direct or virtual tail jump can also end immediately
+        # before a table used elsewhere in this body. It does not dispatch
+        # through that table and must still terminate once its targets are
+        # covered. In particular, index bytes may resemble more code pointers.
+        tables = {self.engine._jt_by_disp.get(i.jump_table, i.jump_table) for i in dispatches}
         for table in range(address, address + 16):
             end = self.engine.jump_tables.get(table)
-            if (end is not None and end <= upper and
+            if (table in tables and end is not None and end <= upper and
                     _alignment_padding(self, address, table)):
                 return end
         return None
