@@ -317,6 +317,17 @@ def _switch_pointer_tail(detector, address):
     return False
 
 
+def _original_entry_contexts(detector, sections):
+    entries = {i.jump_target for i in detector.engine.instructions.values()
+               if i.is_branch and i.jump_target is not None}
+    entries.update(i.call_target for i in detector.engine.instructions.values()
+                   if i.is_call and i.call_target is not None)
+    for table in detector.engine.jump_tables:
+        entries.update(detector.engine.jump_table_entries(table))
+    entries.update(_unwind_context_entries(detector, sections))
+    return entries
+
+
 def install(module):
     detector = module.FunctionDetector
     if getattr(detector, '_xboxllr_boundary_extension', False):
@@ -337,11 +348,13 @@ def install(module):
     original_add = detector._add_candidate
 
     def add_candidate(self, address, confidence, method):
-        if method in ('after_switch_table', 'imm_ref_target') and _unaligned_leaf_cleanup(self, address):
+        if method in ('after_switch_table', 'imm_ref_target') and (
+                _unaligned_leaf_cleanup(self, address) or self.engine.entry_pops_unsaved(address)):
             # Call targets and explicit metadata roots can establish another
             # convention. A table-adjacent byte stream or address-like literal
-            # alone cannot establish a non-word-aligned return contract.
-            return
+            # alone cannot establish a saved frame or packed-stack contract.
+            if address not in _original_entry_contexts(self, self.image.get_code_sections()):
+                return
         if method == 'after_switch_table':
             if _switch_pointer_tail(self, address):
                 return
@@ -391,14 +404,7 @@ def install(module):
                     if not self._starts_after_boundary(address) and
                     self.engine.entry_pops_unsaved(address)}
         if unframed:
-            branches = {i.jump_target for i in self.engine.instructions.values()
-                        if i.is_branch and i.jump_target is not None}
-            branches.update(i.call_target for i in self.engine.instructions.values()
-                            if i.is_call and i.call_target is not None)
-            for table in self.engine.jump_tables:
-                branches.update(self.engine.jump_table_entries(table))
-            contexts = _unwind_context_entries(self, sections)
-            for address in unframed - branches - contexts:
+            for address in unframed - _original_entry_contexts(self, sections):
                 del self._alias_entries[address]
         return xpp_registration_entries(self, sections) or bool(
             set(self._alias_entries) - previous_aliases)

@@ -279,6 +279,24 @@ class NativeDiscovery(unittest.TestCase):
         self.assertNotIn(0x10022, det._alias_entries)
         self.assertEqual(det.image.raw_data, original_bytes)
 
+    def test_weak_standalone_guesses_cannot_establish_a_missing_saved_frame(self):
+        for method in ('after_switch_table', 'imm_ref_target'):
+            with self.subTest(method=method):
+                det, _ = self.gap_epilogue()
+                det._add_candidate(0x10022, 1.0, method)
+                self.assertNotIn(0x10022, det._candidates)
+                det._add_candidate(0x10022, 1.0, 'seed')
+                self.assertIn(0x10022, det._candidates)
+
+    def test_weak_context_entries_keep_original_control_and_unwind_contracts(self):
+        for method in ('after_switch_table', 'imm_ref_target'):
+            for factory in (lambda: self.gap_epilogue(prefix=bytes.fromhex('7500')),
+                            self.unwind_epilogue):
+                with self.subTest(method=method, factory=factory):
+                    det, _ = factory()
+                    det._add_candidate(0x10022, 1.0, method)
+                    self.assertIn(0x10022, det._candidates)
+
     def test_original_branch_preserves_a_context_dependent_gap_entry(self):
         det, text = self.gap_epilogue(prefix=bytes.fromhex('7500'))
         self.assertTrue(det._pass_data_ptr_targets([text]))
