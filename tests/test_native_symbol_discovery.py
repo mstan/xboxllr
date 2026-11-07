@@ -120,6 +120,31 @@ class QualifiedDiscovery(unittest.TestCase):
         self.assertEqual(qualified.containing_end(0x11008), 0x11015)
         self.assertIsNone(qualified.containing_end(0x11015))
 
+    def test_virtual_tail_before_shared_return_does_not_skip_to_trailing_table(self):
+        # Two switch cases share a RET beyond a virtual tail dispatch. A table
+        # close to either indirect jump must not hide the intervening code.
+        code = bytes.fromhex('83f801770fff2485181001008b01ff6008909090c2040090')
+        code += (0x1100c).to_bytes(4, 'little') + (0x11014).to_bytes(4, 'little')
+        code += b'\xb8\x01'  # Index bytes can decode beyond the PDB extent.
+        blob, document = self.fixture(code)
+        det, text = self.detector(blob, document)
+        det.engine.instructions[0x11005].jump_table = 0x11018
+        det.engine.jump_tables[0x11018] = 0x11020
+        det._build_functions([text])
+        self.assertEqual(det.functions[0x11000].end, 0x11017)
+        self.assertEqual(det.engine.instructions[0x11014].mnemonic, 'ret')
+
+    def test_interleaved_table_alignment_preserves_cases_after_the_table(self):
+        code = bytes.fromhex('ff24850810010090')
+        code += (0x11010).to_bytes(4, 'little') * 2
+        code += bytes.fromhex('b801000000c20400')
+        blob, document = self.fixture(code)
+        det, text = self.detector(blob, document)
+        det.engine.instructions[0x11000].jump_table = 0x11008
+        det.engine.jump_tables[0x11008] = 0x11010
+        det._build_functions([text])
+        self.assertEqual(det.functions[0x11000].end, 0x11018)
+
     def test_cli_applies_metadata_and_separates_its_cache_from_unaided(self):
         framework = Path(__file__).resolve().parents[1]
         donor = Path(os.environ.get('XLLE_CPU_DONOR', framework.parent/'refs/xboxrecomp-phobos665-review-20261006'))
