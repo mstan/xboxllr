@@ -245,13 +245,34 @@ def install(module):
     detector._find_function_end = function_end
 
     def data_tables(self, sections):
+        previous_aliases = set(self._alias_entries)
         image = self.image
         self.image = _TableDataView(self)
         try:
-            original_added = original_tables(self, sections)
+            original_tables(self, sections)
         finally:
             self.image = image
-        return xpp_registration_entries(self, sections) or original_added
+        # A numeric pair can land on a short returning epilogue before its
+        # enclosing assembly body is discovered. The donor's short gap probe
+        # checks reachability of a return, but not the required saved frame.
+        # Preserve existing/context aliases and actual branch continuations.
+        new_aliases = set(self._alias_entries) - previous_aliases
+        if new_aliases:
+            branches = {i.jump_target for i in self.engine.instructions.values()
+                        if i.is_branch and i.jump_target is not None}
+            for table in self.engine.jump_tables:
+                branches.update(self.engine.jump_table_entries(table))
+            starts = sorted(self.functions)
+            for address in new_aliases:
+                index = bisect.bisect_right(starts, address) - 1
+                interior = (index >= 0 and starts[index] < address <
+                            self.functions[starts[index]].end)
+                if (not interior and address not in branches and
+                        not self._starts_after_boundary(address) and
+                        self.engine.entry_pops_unsaved(address)):
+                    del self._alias_entries[address]
+        return xpp_registration_entries(self, sections) or bool(
+            set(self._alias_entries) - previous_aliases)
 
     detector._pass_data_ptr_targets = data_tables
     detector._xboxllr_boundary_extension = True

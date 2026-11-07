@@ -173,6 +173,40 @@ class NativeDiscovery(unittest.TestCase):
         det, text = self.detector(body=bytes.fromhex('5ec3'))
         self.assertFalse(det._pass_data_ptr_targets([text]))
 
+    def gap_epilogue(self, prefix=bytes.fromhex('31c0')):
+        det, text = self.detector(address=0x10022, prefix=prefix,
+                                  body=bytes.fromhex('8bc15ec3'))
+        storage = det.image.sections[1]
+        det.image.raw_data += (0x10010).to_bytes(4, 'little')
+        storage.raw_size += 4
+        storage.virtual_size += 4
+        det.functions[0x10010] = SimpleNamespace(start=0x10010, end=0x10011)
+        return det, text
+
+    def test_numeric_table_pair_cannot_establish_a_missing_saved_frame(self):
+        det, text = self.gap_epilogue()
+        original_bytes = det.image.raw_data
+        self.assertFalse(det._pass_data_ptr_targets([text]))
+        self.assertNotIn(0x10022, det._alias_entries)
+        self.assertEqual(det.image.raw_data, original_bytes)
+
+    def test_original_branch_preserves_a_context_dependent_gap_entry(self):
+        det, text = self.gap_epilogue(prefix=bytes.fromhex('7500'))
+        self.assertTrue(det._pass_data_ptr_targets([text]))
+        self.assertEqual(det._alias_entries[0x10022], 0x10026)
+
+    def test_enclosing_body_preserves_an_address_taken_shared_epilogue(self):
+        det, text = self.gap_epilogue()
+        det.functions[0x10010].end = 0x10026
+        self.assertTrue(det._pass_data_ptr_targets([text]))
+        self.assertEqual(det._alias_entries[0x10022], 0x10026)
+
+    def test_data_pointer_pass_preserves_previously_qualified_aliases(self):
+        det, text = self.gap_epilogue()
+        det._alias_entries[0x10022] = 0x10026
+        self.assertFalse(det._pass_data_ptr_targets([text]))
+        self.assertEqual(det._alias_entries[0x10022], 0x10026)
+
     def test_lone_pointer_cannot_split_an_existing_body(self):
         det, text = self.detector()
         det.functions[0x10010] = SimpleNamespace(start=0x10010, end=0x10023)
