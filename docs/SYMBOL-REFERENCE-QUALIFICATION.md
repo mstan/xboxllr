@@ -54,6 +54,18 @@ through the enclosing frame. These are compiler-local cleanup labels, not
 ordinary new-function gains or unique functions across titles. Their exact
 identities and source evidence remain private; the broader gap audit is open.
 
+A separately qualified private MAP seed set uses the existing explicit seed
+interface for Getting Up's 22 remaining ordinary entries. All are retained;
+two derived shared jump entries and three changed ranges have original-byte
+proof, with no unexplained call-graph changes. All 24 bodies lower completely.
+A representative recovered callback passes 20 original-x86/shared-helper
+executions, including argument values, both global stores and native stack/
+saved-register checks. Its unchanged original instructions have no PC-relative
+operands and execute at a host-selected address. The remaining 8,229 MAP labels
+are exactly 8,228 proved unwind actions and one registered exception-context
+handler. This closes this image's supplied-entry gap classification; the wider
+corpus and archived-game gameplay remain unqualified.
+
 | Independent reference | Named entries | Baseline matched | Corrected matched |
 | --- | ---: | ---: | ---: |
 | Sphinx and the Cursed Mummy | 7,689 | 7,668 | 7,671 |
