@@ -38,6 +38,22 @@ constructed input/state cases and 2,467,200 output/state bytes, including stack
 and preserved-register checks. This is body correctness evidence for that input;
 the final corpus, gameplay and runtime-performance gates remain separate.
 
+Unaided discovery also reuses the PDB path's trailing-switch-table check, with
+an additional decoded terminal/alignment requirement. All switch cases must
+precede the table; a direct or unresolved computed continuation prevents the
+cut. Interleaved tables retain their later code. On Getting Up this corrects
+73 extents, recovers one independently labelled callback and removes one false
+alias inside a bounded byte-index array. Call-graph changes are confined to the
+corrected, added and removed bodies. The 15 executed Bink kernel sources remain
+identical; the new callback lowers without unsupported operations, with its
+gameplay/runtime check still separate.
+
+A bounded audit of the retained MAP references also ties 43,413 historical
+per-build missing labels to validated C++ unwind records and explicit accesses
+through the enclosing frame. These are compiler-local cleanup labels, not
+ordinary new-function gains or unique functions across titles. Their exact
+identities and source evidence remain private; the broader gap audit is open.
+
 | Independent reference | Named entries | Baseline matched | Corrected matched |
 | --- | ---: | ---: | ---: |
 | Sphinx and the Cursed Mummy | 7,689 | 7,668 | 7,671 |
@@ -130,7 +146,7 @@ The correction takes effect when a title is regenerated.
 
 ## Regression checks
 
-`tests/test_native_discovery.py` contains 27 authored positive and rejection
+`tests/test_native_discovery.py` contains 32 authored positive and rejection
 cases and is registered as `native_discovery` in CTest. Set `XLLE_CPU_DONOR` to
 the clean donor revision recorded in `tools/native_pilot.py`, then run:
 

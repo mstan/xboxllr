@@ -72,6 +72,44 @@ def _alignment_padding(detector, start, end, *, zero=False):
     return True
 
 
+def _terminal_boundary(detector, address, *, zero=False):
+    section = detector.image.get_section_at_va(address)
+    return any(
+        insn is not None and insn.end_address <= address and
+        (insn.is_ret or (insn.is_jump and not insn.is_cond_jump)) and
+        detector.image.get_section_at_va(insn.address) is section and
+        _alignment_padding(detector, insn.end_address, address, zero=zero)
+        for insn in (detector.engine.instructions.get(previous)
+                     for previous in range(address - 30, address)))
+
+
+def code_upper_bound(detector, start, declared_end):
+    """Exclude a trailing switch table, preserving interleaved continuations.
+
+    This is also the exact-PDB path's bound check. Unaided discovery additionally
+    requires a decoded terminal/alignment boundary at the returned table.
+    """
+    instructions = detector.engine.get_instructions_in_range(start, declared_end)
+    for instruction in instructions:
+        table = instruction.jump_table
+        if table is None or not instruction.address < table < declared_end:
+            continue
+        table_end = detector.engine.jump_tables.get(table)
+        targets = detector.engine.jump_table_entries(table)
+        if (table_end is None or table_end > declared_end or not targets or
+                any(not start <= target < table for target in targets)):
+            continue
+        prefix = [i for i in instructions if i.address < table]
+        if any(i.is_branch and i.jump_target is not None and
+               table <= i.jump_target < declared_end for i in prefix):
+            continue
+        if any(i.is_jump and i.jump_target is None and i.jump_table is None
+               for i in prefix):
+            continue
+        return table
+    return declared_end
+
+
 def aligned_boundary_entry(detector, address):
     if address % 16 or address not in detector.engine.instructions:
         return False
@@ -85,13 +123,7 @@ def aligned_boundary_entry(detector, address):
             not section.name.startswith('BINKDATA'))
     boundary = bink and address == section.virtual_addr
     if not boundary:
-        boundary = any(
-            insn is not None and insn.end_address <= address and
-            (insn.is_ret or (insn.is_jump and not insn.is_cond_jump)) and
-            detector.image.get_section_at_va(insn.address) is section and
-            _alignment_padding(detector, insn.end_address, address, zero=bink)
-            for insn in (detector.engine.instructions.get(previous)
-                         for previous in range(address - 30, address)))
+        boundary = _terminal_boundary(detector, address, zero=bink)
     if not boundary or detector.engine.entry_pops_unsaved(address):
         return False
     first = detector.engine.instructions[address]
@@ -196,11 +228,21 @@ def install(module):
     config._DATA_SECTION_NAMES = config._DATA_SECTION_NAMES | {'BINKDATA'}
     original = detector._is_padded_entry
     original_tables = detector._pass_data_ptr_targets
+    original_end = detector._find_function_end
 
     def aligned_entry(self, address):
         return original(self, address) or aligned_boundary_entry(self, address)
 
     detector._is_padded_entry = aligned_entry
+
+    def function_end(self, start, next_func, sec_end):
+        end = original_end(self, start, next_func, sec_end)
+        upper = code_upper_bound(self, start, end)
+        if upper < end and _terminal_boundary(self, upper):
+            return original_end(self, start, upper, upper)
+        return end
+
+    detector._find_function_end = function_end
 
     def data_tables(self, sections):
         image = self.image

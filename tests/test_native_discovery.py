@@ -204,6 +204,46 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(len({unaided, first, changed}), 3)
         self.assertEqual(first, configured('a'*64))
 
+    def switch_detector(self, body, table, case):
+        det,text=self.detector(body=body,pointer=False)
+        jump=next(i for i in det.engine.get_instructions_in_range(0x10020,0x10020+len(body))
+                  if i.mnemonic=='jmp')
+        jump.jump_table=table
+        det.engine.jump_tables[table]=table+4
+        det.engine.decode_at(case)
+        det._candidates={}
+        return det,text
+
+    def test_unaided_extent_stops_before_a_proven_trailing_switch_table(self):
+        body=bytes.fromhex('ff248530000100b801000000c3cccccc')
+        body+=(0x10027).to_bytes(4,'little')+b'\xb8\x01'
+        det,text=self.switch_detector(body,0x10030,0x10027)
+        self.assertEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x1002d)
+
+    def test_unaided_extent_keeps_switch_cases_after_an_interleaved_table(self):
+        body=bytes.fromhex('ff24852800010090')+(0x1002c).to_bytes(4,'little')+bytes.fromhex('b801000000c3')
+        det,text=self.switch_detector(body,0x10028,0x1002c)
+        self.assertEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x10032)
+
+    def test_unaided_extent_keeps_direct_continuation_after_a_switch_table(self):
+        body=bytes.fromhex('7512ff248530000100c3cccccccccccc')
+        body+=(0x10029).to_bytes(4,'little')+bytes.fromhex('b802000000c3')
+        det,text=self.switch_detector(body,0x10030,0x10029)
+        det.engine.decode_at(0x10034)
+        self.assertEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x1003a)
+
+    def test_unaided_extent_does_not_assume_an_unknown_call_is_noreturn(self):
+        body=bytes.fromhex('ff248530000100c3e800000000cccccc')
+        body+=(0x10027).to_bytes(4,'little')+b'\xb8\x01'
+        det,text=self.switch_detector(body,0x10030,0x10027)
+        self.assertGreaterEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x10034)
+
+    def test_unaided_extent_preserves_an_unresolved_computed_continuation(self):
+        body=bytes.fromhex('ff248530000100ffe0c3cccccccccccc')
+        body+=(0x10027).to_bytes(4,'little')+b'\xb8\x01'
+        det,text=self.switch_detector(body,0x10030,0x10027)
+        self.assertGreaterEqual(det._find_function_end(0x10020,None,text.virtual_addr+text.virtual_size),0x10034)
+
     def xpp(self, *, body=b'\x31\xc0\xc3', prefix=b'\xc3', mate=True, name='XPP'):
         det, text = self.detector(address=0x10051, body=body, prefix=prefix, pointer=False)
         text.name = name

@@ -12,6 +12,7 @@ import re
 
 from aot_inventory import parse_xbe
 from native_guest_symbols import LIMIT, Symbols
+from native_discovery import code_upper_bound
 
 
 class QualifiedFunctions:
@@ -79,37 +80,6 @@ def bind(detector, qualified):
         if detector.engine.get_instruction(start) is None:
             raise ValueError(f'PDB entry does not decode: {start:#x}')
         detector._add_candidate(start, 1.0, 'matching_pdb')
-
-
-def code_upper_bound(detector, start, declared_end):
-    """Exclude a proven trailing switch table and its index-remapping data.
-
-    MSVC can put a nonreturning error call immediately before the table. The
-    donor's sequential walker skips the pointer table, then decodes the compact
-    byte-index map after it. Neither table supplies additional executable code.
-    A table with cases/branches beyond it remains an interleaved table instead.
-    """
-    instructions = detector.engine.get_instructions_in_range(start, declared_end)
-    for instruction in instructions:
-        table = instruction.jump_table
-        if table is None or not instruction.address < table < declared_end:
-            continue
-        table_end = detector.engine.jump_tables.get(table)
-        targets = detector.engine.jump_table_entries(table)
-        if (table_end is None or table_end > declared_end or not targets or
-                any(not start <= target < table for target in targets)):
-            continue
-        prefix = [i for i in instructions if i.address < table]
-        if any(i.is_branch and i.jump_target is not None and
-               table <= i.jump_target < declared_end for i in prefix):
-            continue
-        # Every indirect jump in the code prefix must have a known table;
-        # an unresolved computed continuation could reach code after this one.
-        if any(i.is_jump and i.jump_target is None and i.jump_table is None
-               for i in prefix):
-            continue
-        return table
-    return declared_end
 
 
 def install(module, qualified):
