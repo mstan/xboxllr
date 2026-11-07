@@ -40,8 +40,10 @@ static void test_graphics_aliases(void)
     CHECK(!pilot_gfx_targets(0,UINT32_MAX) && !pilot_gfx_feedback_mask());
     CHECK(pilot_gfx_texture_clear(target_native,0xff983412)==0);alias_test_draw(0xff983412);
     uint32_t mutable_header=header;
-    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&mutable_header)==0); /* binding retains view */
+    CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&mutable_header)==2);
+    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&mutable_header)==1);
     bind[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetTexture,bind);
+    test_graphics_discard_caller_texture(graphics_texture_slot(header));
     CHECK(MEM32(header+4)==MEM32(target+4) && vm_find(header,20));
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&target)==0);
     /* Device teardown owns only the native view, never the caller's header. */

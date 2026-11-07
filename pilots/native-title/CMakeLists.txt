@@ -1164,7 +1164,8 @@ if(PILOT_D3D_SOURCE)
       pilot_add_test(NAME pilot_graphics_commands_guards COMMAND "${CMAKE_COMMAND}"
         "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DORIGINAL_RETIREMENT=$<BOOL:${pilot_original_retirement}>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_commands_failures.cmake")
-      set_tests_properties(pilot_graphics_commands_guards PROPERTIES TIMEOUT 30)
+      set_tests_properties(pilot_graphics_commands_guards PROPERTIES TIMEOUT 30
+        SKIP_REGULAR_EXPRESSION "SKIP: graphics command guards require unavailable profile boundaries")
     endif()
     pilot_add_test(NAME pilot_graphics_abi COMMAND pilot_contract_test graphics)
     pilot_add_test(NAME pilot_graphics_deferred_relevance COMMAND pilot_contract_test graphics-deferred-relevance)

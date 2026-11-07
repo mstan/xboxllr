@@ -40,8 +40,7 @@ static uint32_t test_graphics_borrowed_textures(const char *failure)
         CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==1);
         CHECK((MEM32(header)&0xffff)==1 && physical_find(data,1)->borrowers==1);
         binding[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetTexture,binding);
-        AcquireSRWLockExclusive(&graphics_lock);graphics_textures[slot].refs=0;
-        graphics_texture_collect(slot);ReleaseSRWLockExclusive(&graphics_lock);
+        test_graphics_discard_caller_texture(slot);
         /* Dispose the host view while retaining the authored caller's real
          * reference. Final XDK allocator release has a separate fixture. */
         CHECK(!graphics_textures[slot].header && !physical_find(data,1)->borrowers);

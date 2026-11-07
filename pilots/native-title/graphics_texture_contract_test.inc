@@ -1,3 +1,17 @@
+/* Dispose only the fixture's host view; its authored header and original
+ * caller reference are not allocations owned by the title's XDK heap. */
+static void test_graphics_discard_caller_texture(unsigned slot)
+{
+    AcquireSRWLockExclusive(&graphics_lock);
+    struct GraphicsTextureObject *owner=&graphics_textures[slot];
+    CHECK(owner->guest_owned && owner->refs==1 && !owner->parent && !owner->bindings && !owner->waiters && !owner->retire_original);
+    uint32_t header=owner->header,saved[5];memcpy(saved,memory+header,sizeof(saved));
+    CHECK((saved[0]&0xffff)==1);
+    owner->refs=0;graphics_texture_collect(slot);
+    ReleaseSRWLockExclusive(&graphics_lock);
+    CHECK(!graphics_textures[slot].header && !memcmp(saved,memory+header,sizeof(saved)));
+}
+
 /* Independent recursive Morton fixture: visit the high coordinate halves,
  * then compare the resulting real GPU texture with authored linear pixels. */
 static void texture_test_swizzle(unsigned char *destination,const unsigned char *source,

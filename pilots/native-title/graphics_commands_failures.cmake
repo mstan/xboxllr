@@ -5,6 +5,11 @@ endif()
 foreach(kind IN LISTS guard_cases)
   execute_process(COMMAND "${PROGRAM}" "graphics-commands-${kind}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 12)
+  if("${result}" STREQUAL "77" AND "${output}${error}" MATCHES
+      "SKIP: graphics command resource fixture requires an unavailable graphics boundary")
+    message("SKIP: graphics command guards require unavailable profile boundaries: ${output}${error}")
+    return()
+  endif()
   if(NOT "${result}" STREQUAL "2")
     message(FATAL_ERROR "inline ${kind} guard returned ${result}: ${output}${error}")
   endif()

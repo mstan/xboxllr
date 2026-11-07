@@ -78,10 +78,11 @@ static void test_graphics_resource_bindings(void)
     header=0x19600;MEM32(header)=1;MEM32(header+4)=0;MEM32(header+8)=0;
     uint32_t registration[]={header,allocation};call_graphics(PILOT_D3D_D3DResource_Register,registration);
     stream[0]=7;stream[1]=header;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
-    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&header)==0 && MEM32(header)==0x80000);
+    CHECK(MEM32(header)==0x80001); /* Retain the fixture's caller reference. */
     CHECK(physical_find(allocation,4096)->borrowers==1);
     stream[1]=0;call_graphics(PILOT_D3D_D3DDevice_SetStreamSource,stream);
-    CHECK(graphics_vertex_find(header)<0 && MEM32(header)==0);
+    CHECK(MEM32(header)==1 && graphics_vertex_find(header)>=0);
+    test_graphics_discard_caller_vertex(header);
     CHECK(physical_find(allocation,4096)->borrowers==0);physical_free(allocation);
     /* Replacing an internal-only resource must collect the old object after
      * the GPU binding has moved, with no growth over repeated replacements. */
