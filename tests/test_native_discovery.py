@@ -143,6 +143,35 @@ class NativeDiscovery(unittest.TestCase):
                 det._pass_gap_prologues([text])
                 self.assertEqual(det._candidates[entry][1], 'after_switch_table')
 
+    def test_weak_gap_entries_require_word_aligned_straight_line_cleanup(self):
+        for method in ('after_switch_table', 'imm_ref_target'):
+            with self.subTest(method=method):
+                det, _ = self.detector(body=bytes.fromhex('51c21500'), pointer=False)
+                det._add_candidate(0x10020, 1.0, method)
+                self.assertNotIn(0x10020, det._candidates)
+                # A known caller can establish a different guest contract.
+                det._add_candidate(0x10020, 1.0, 'call_target')
+                self.assertIn(0x10020, det._candidates)
+                det, _ = self.detector(body=bytes.fromhex('b82a000000c20400'), pointer=False)
+                det._add_candidate(0x10020, 1.0, method)
+                self.assertIn(0x10020, det._candidates)
+
+    def test_sparse_switch_pointer_tail_is_not_a_following_function(self):
+        table, end, entry = 0x10010, 0x10020, 0x10028
+        prefix = b'\xc3' + b'\xcc'*15 + struct.pack('<4I', *([0x10000]*4)) + b'\0'*8
+        code = prefix + struct.pack('<3I', *([0x10000]*3)) + b'\xcc'*16
+        det, _ = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+        det.engine.jump_tables[table] = end
+        det._add_candidate(entry, 1.0, 'after_switch_table')
+        self.assertNotIn(entry, det._candidates)
+        det._add_candidate(entry, 1.0, 'call_target')
+        self.assertIn(entry, det._candidates)
+        code = prefix + bytes.fromhex('b82a000000c3')
+        det, _ = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+        det.engine.jump_tables[table] = end
+        det._add_candidate(entry, 1.0, 'after_switch_table')
+        self.assertIn(entry, det._candidates)
+
     def test_unaided_unresolved_virtual_continuation_keeps_its_conservative_extent(self):
         code = bytes.fromhex('83f801770fff2485180001008b01ff6008909090c2040090')
         code += struct.pack('<2I', 0x1000c, 0x10014) + b'\xb8\x01'

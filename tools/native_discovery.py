@@ -279,6 +279,44 @@ def _unwind_context_entries(detector, sections):
     return actions
 
 
+def _unaligned_leaf_cleanup(detector, address):
+    """A weak ordinary-entry guess cannot establish a packed-stack ABI."""
+    from capstone import CS_GRP_CALL, CS_GRP_JUMP
+    data = detector.image.read_bytes_at_va(address, 512)
+    for index, instruction in enumerate(detector.engine._cs.disasm(data or b'', address)):
+        if index >= 64:
+            break
+        if instruction.group(CS_GRP_CALL) or instruction.group(CS_GRP_JUMP) or instruction.mnemonic.startswith('loop'):
+            break
+        if instruction.mnemonic == 'ret':
+            return bool(instruction.operands and instruction.operands[0].imm % 4)
+    return False
+
+
+def _switch_pointer_tail(detector, address):
+    """Do not turn a sparse dispatch table's remaining words into code."""
+    for table, end in detector.engine.jump_tables.items():
+        if table <= address < end:
+            return True
+        gap = address - end
+        if not 4 <= gap <= 16 or gap % 4 or (end - table) % 4:
+            continue
+        if detector.image.read_bytes_at_va(end, gap) != bytes(gap):
+            continue
+        original = detector.engine.jump_table_entries(table)
+        raw = detector.image.read_bytes_at_va(address, 12)
+        if len(original) < 2 or raw is None or len(raw) != 12:
+            continue
+        section = detector.image.get_section_at_va(original[0])
+        if section is None or not section.executable:
+            continue
+        if all(target in detector.engine.instructions and
+               detector.image.get_section_at_va(target) is section
+               for target in struct.unpack('<3I', raw)):
+            return True
+    return False
+
+
 def install(module):
     detector = module.FunctionDetector
     if getattr(detector, '_xboxllr_boundary_extension', False):
@@ -299,7 +337,14 @@ def install(module):
     original_add = detector._add_candidate
 
     def add_candidate(self, address, confidence, method):
+        if method in ('after_switch_table', 'imm_ref_target') and _unaligned_leaf_cleanup(self, address):
+            # Call targets and explicit metadata roots can establish another
+            # convention. A table-adjacent byte stream or address-like literal
+            # alone cannot establish a non-word-aligned return contract.
+            return
         if method == 'after_switch_table':
+            if _switch_pointer_tail(self, address):
+                return
             for table, end in self.engine.jump_tables.items():
                 if address != end + 256:
                     continue
