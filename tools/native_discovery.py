@@ -296,6 +296,24 @@ def install(module):
     original_tables = detector._pass_data_ptr_targets
     original_end = detector._find_function_end
     original_table_after = detector._table_after
+    original_add = detector._add_candidate
+
+    def add_candidate(self, address, confidence, method):
+        if method == 'after_switch_table':
+            for table, end in self.engine.jump_tables.items():
+                if address != end + 256:
+                    continue
+                entries = (end - table) // 4
+                indices = self.image.read_bytes_at_va(end, 257)
+                if (entries >= 2 and indices is not None and len(indices) == 257 and
+                        max(indices) < entries):
+                    # Exhausting the donor's scan budget does not establish
+                    # that the byte-index table ended. Other proven roots
+                    # remain eligible through their original admission path.
+                    return
+        original_add(self, address, confidence, method)
+
+    detector._add_candidate = add_candidate
 
     def aligned_entry(self, address):
         return original(self, address) or aligned_boundary_entry(self, address)

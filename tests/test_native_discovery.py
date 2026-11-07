@@ -112,6 +112,37 @@ class NativeDiscovery(unittest.TestCase):
         self.assertFalse(det._pass_data_ptr_targets([text]))
         self.assertNotIn(0x10020, det._alias_entries)
 
+    def test_switch_index_scan_limit_does_not_become_a_function_boundary(self):
+        table = 0x10010
+        count = 200
+        table_end = table + count*4
+        false_entry = table_end + 256
+        code = b'\xc3' + b'\xcc'*15 + struct.pack('<I', 0x10000)*count
+        # All these bytes are valid table indices, including the apparent
+        # XOR/RET body after the donor's 256-byte scan limit.
+        code += b'\0'*256 + bytes.fromhex('31c0c3') + b'\0'*32
+        det, text = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+        det.functions[0x10000] = SimpleNamespace(start=0x10000, end=0x10001)
+        det.engine.jump_tables[table] = table_end
+        det._pass_gap_prologues([text])
+        self.assertNotIn(false_entry, det._candidates)
+        # The weak table heuristic must not override independent input roots.
+        det._add_candidate(false_entry, 1.0, 'seed')
+        self.assertEqual(det._candidates[false_entry], (1.0, 'seed'))
+
+    def test_short_switch_index_table_keeps_the_following_real_body(self):
+        table = 0x10010
+        for length in (5, 256):
+            with self.subTest(index_bytes=length):
+                code = b'\xc3' + b'\xcc'*15 + struct.pack('<4I', *([0x10000]*4))
+                code += bytes(i % 4 for i in range(length)) + bytes.fromhex('b82a000000c3')
+                entry = table + 16 + length
+                det, text = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+                det.functions[0x10000] = SimpleNamespace(start=0x10000, end=0x10001)
+                det.engine.jump_tables[table] = table + 16
+                det._pass_gap_prologues([text])
+                self.assertEqual(det._candidates[entry][1], 'after_switch_table')
+
     def test_unaided_unresolved_virtual_continuation_keeps_its_conservative_extent(self):
         code = bytes.fromhex('83f801770fff2485180001008b01ff6008909090c2040090')
         code += struct.pack('<2I', 0x1000c, 0x10014) + b'\xb8\x01'
