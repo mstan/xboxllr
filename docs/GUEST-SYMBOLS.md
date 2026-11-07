@@ -268,6 +268,9 @@ their parent. Branch and switch-table handling still determines executable body
 ends; a declared extent can also contain trailing data. Independently callable
 aliases remain separate entries. Entries manufactured by decoding proven trailing
 switch/index data are removed before following their apparent branches.
+The walker keeps hard PDB limits separate from tentative entry boundaries.
+Gap-entry lookahead stays inside the containing body, preventing recursive probes
+from repeatedly entering the same bounded function.
 The supplied-PDB body walker skips a nearby embedded table only when the jump
 addresses that table and the intervening bytes are decoded alignment.
 Real instructions, including a shared return after a virtual tail

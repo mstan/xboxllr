@@ -218,13 +218,18 @@ def install(module, qualified):
                 # Reuse switch-table/branch-aware body formation with the PDB
                 # upper bound. Other candidate entries no longer cut this body.
                 upper = code_upper_bound(self, start, declared_end)
-                end = original_end(self, start, upper, upper)
+                # This is a hard image/PDB bound, not a candidate entry. The
+                # donor probes beyond gap-prologue candidates recursively;
+                # passing the bound as one can reenter this same bounded body.
+                end = original_end(self, start, None, upper)
                 if not start < end <= declared_end:
                     raise ValueError(f'decoded body crosses PDB boundary: {start:#x}')
                 return end
             owner_end = ranges.containing_end(start)
             if owner_end is not None:
                 sec_end = min(sec_end, owner_end) if sec_end else owner_end
+                if next_func is not None and next_func >= sec_end:
+                    next_func = None
         return original_end(self, start, next_func, sec_end)
 
     def prune_data(self):

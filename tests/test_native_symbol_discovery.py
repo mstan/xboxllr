@@ -62,6 +62,35 @@ class QualifiedDiscovery(unittest.TestCase):
         det._build_functions([text])
         self.assertEqual(det.functions[0x11000].end, 0x11006)
 
+    def test_pdb_hard_bound_at_a_gap_entry_does_not_reenter_the_same_probe(self):
+        first = bytes.fromhex('b801000000c3')
+        second = bytes.fromhex('558becb8020000005dc3')
+        blob, document = self.fixture(first + second, length=len(first))
+        det, text = self.detector(blob, document)
+        det._add_candidate(0x11006, .9, 'gap_prologue')
+        det._build_functions([text])
+        self.assertEqual(det.functions[0x11000].end, 0x11006)
+        self.assertEqual(det.functions[0x11006].end, 0x11010)
+        self.assertNotIn(0x11006, det._absorbed)
+
+    def test_interior_hard_bound_does_not_probe_unrelated_later_gap_entries(self):
+        first = bytes.fromhex('85c07406b802000000c3b801000000c3')
+        second = bytes.fromhex('558bec5dc3')
+        blob, document = self.fixture(first + second*1005, length=len(first))
+        blob = bytearray(blob)
+        struct.pack_into('<I', blob, 0x308, len(blob)-0x400)
+        struct.pack_into('<I', blob, 0x10c, 0x1000+len(blob)-0x400)
+        blob = bytes(blob)
+        document['xbe_sha256'] = hashlib.sha256(blob).hexdigest()
+        det, text = self.detector(blob, document)
+        for index in range(1005):
+            det._add_candidate(0x11010 + index*len(second), .9, 'gap_prologue')
+        candidates = dict(det._candidates)
+        self.assertEqual(det._find_function_end(0x1100a, 0x11010,
+                                               text.virtual_addr+text.virtual_size), 0x11010)
+        self.assertEqual(det._candidates, candidates)
+        self.assertFalse(det._absorbed)
+
     def test_alias_stays_callable_without_borrowing_next_body(self):
         blob, document = self.fixture(bytes.fromhex('85c07406b802000000c3b801000000c3'))
         det, text = self.detector(blob, document)
