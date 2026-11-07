@@ -1085,6 +1085,10 @@ if(PILOT_D3D_SOURCE)
     set_tests_properties(pilot_graphics_visual_mods PROPERTIES TIMEOUT 90)
     pilot_add_test(NAME pilot_graphics_visual_depth_guard COMMAND "${CMAKE_COMMAND}"
       "-DBINARY=$<TARGET_FILE:pilot_graphics_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_visual_expect_stop.cmake")
+    # These checks exercise the original scaled-resource policy. Native render
+    # planes preserve canonical guest grids and have separate coherence checks.
+    set_tests_properties(pilot_graphics_visual_mods pilot_graphics_visual_depth_guard
+      PROPERTIES ENVIRONMENT "XLLE_PILOT_NATIVE_RENDER_PLANES=0")
   endif()
   add_executable(pilot_shader_test graphics_shader_test.c)
   target_link_libraries(pilot_shader_test PRIVATE pilot_d3d_backend)

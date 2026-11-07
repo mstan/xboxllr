@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 static unsigned char memory[65536],before[65536];
 static uint32_t g_esp,g_eax;
@@ -56,6 +57,10 @@ int main(int argc,char **argv)
         MEM32(keyboard+4)=1;expected_guard=1;invoke(PILOT_INPUT_XInitDevices,0,0,0,0);return 1;
     }
     CHECK(!invoke(PILOT_INPUT_XInitDevices,0,0,0,0));
+    CHECK(!invoke(PILOT_INPUT_XGetDevices,PILOT_INPUT_g_DeviceType_Gamepad,0,0,0) && !host_calls);
+    test_now+=4999999;
+    CHECK(!invoke(PILOT_INPUT_XGetDevices,PILOT_INPUT_g_DeviceType_Gamepad,0,0,0) && !host_calls);
+    ++test_now;
     CHECK(invoke(PILOT_INPUT_XGetDevices,PILOT_INPUT_g_DeviceType_Gamepad,0,0,0)==1);
     if(argc>1) {
         if(!strcmp(argv[1],"unknown")){expected_guard=1;invoke(PILOT_INPUT_XGetDevices,0x1080,0,0,0);}
