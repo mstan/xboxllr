@@ -156,6 +156,29 @@ class NativeDiscovery(unittest.TestCase):
                 det._add_candidate(0x10020, 1.0, method)
                 self.assertIn(0x10020, det._candidates)
 
+    def test_text_literals_do_not_establish_weak_code_entries(self):
+        for method in ('cc_boundary', 'after_switch_table', 'imm_ref_target'):
+            for literal in (b'Plain fixture string\0', b'XUnit payload data\0'):
+                with self.subTest(method=method, literal=literal):
+                    det, _ = self.detector(body=literal, pointer=False)
+                    det._add_candidate(0x10020, 1.0, method)
+                    self.assertNotIn(0x10020, det._candidates)
+                    det._add_candidate(0x10020, 1.0, 'seed')
+                    self.assertIn(0x10020, det._candidates)
+
+    def test_text_like_instructions_keep_original_call_contracts(self):
+        # Eight printable PUSH/POP bytes followed by ADD AL,AL and RET are
+        # actual authored code. Its original CALL establishes the entry.
+        body = b'PXQYRXW_' + bytes.fromhex('00c0c3')
+        for method in ('cc_boundary', 'after_switch_table', 'imm_ref_target'):
+            with self.subTest(method=method):
+                det, _ = self.detector(prefix=bytes.fromhex('e800000000'), body=body, pointer=False)
+                det._add_candidate(0x10020, 1.0, method)
+                self.assertIn(0x10020, det._candidates)
+                det, _ = self.detector(body=b'PXQYRXW_'+bytes.fromhex('01c0c3'), pointer=False)
+                det._add_candidate(0x10020, 1.0, method)
+                self.assertIn(0x10020, det._candidates)
+
     def test_sparse_switch_pointer_tail_is_not_a_following_function(self):
         table, end, entry = 0x10010, 0x10020, 0x10028
         prefix = b'\xc3' + b'\xcc'*15 + struct.pack('<4I', *([0x10000]*4)) + b'\0'*8

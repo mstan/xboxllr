@@ -293,6 +293,17 @@ def _unaligned_leaf_cleanup(detector, address):
     return False
 
 
+def _text_literal_prefix(detector, address):
+    """Recognize a bounded ASCIIZ prefix before admitting a weak code guess."""
+    data = detector.image.read_bytes_at_va(address, 256)
+    if not data or b'\0' not in data:
+        return False
+    text = data.split(b'\0', 1)[0]
+    return (len(text) >= 8 and
+            all(32 <= value <= 126 or value in (9, 10, 13) for value in text) and
+            sum(65 <= value <= 90 or 97 <= value <= 122 for value in text) >= 6)
+
+
 def _switch_pointer_tail(detector, address):
     """Do not turn a sparse dispatch table's remaining words into code."""
     for table, end in detector.engine.jump_tables.items():
@@ -348,6 +359,12 @@ def install(module):
     original_add = detector._add_candidate
 
     def add_candidate(self, address, confidence, method):
+        if method in ('cc_boundary', 'after_switch_table', 'imm_ref_target') and _text_literal_prefix(self, address):
+            # Strings in executable SDK contributions can decode as PUSH/POP
+            # and branches. A cleanup boundary or literal address does not
+            # establish an entry there; original control/metadata still can.
+            if address not in _original_entry_contexts(self, self.image.get_code_sections()):
+                return
         if method in ('after_switch_table', 'imm_ref_target') and (
                 _unaligned_leaf_cleanup(self, address) or self.engine.entry_pops_unsaved(address)):
             # Call targets and explicit metadata roots can establish another
