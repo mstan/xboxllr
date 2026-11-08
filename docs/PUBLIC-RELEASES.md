@@ -1,10 +1,11 @@
 # Beta releases
 
 XboxLLR is beta. Blinx's playable public beta is tested through World 2;
-end-to-end completion is not guaranteed. JSRF also runs on the same engine;
-its beta is private pending owner approval for publication, and has not been
-exhaustively playtested or tested end to end. Game packages have separate title
-releases. XboxLLR releases may contain the Dashboard ZIP, the build-tool ZIP or
+end-to-end completion is not guaranteed. JSRF's public beta runs on the same
+engine and has not been exhaustively playtested or tested end to end. Game
+packages have separate public GitHub title releases. Use SemVer tags such as
+`v0.5.0` and matching asset version labels for BlinxRecomp and JSRFRecomp;
+keep the beta and playtesting notices. XboxLLR releases may contain the Dashboard ZIP, the build-tool ZIP or
 both; retain the existing Dashboard download when only the toolkit changes.
 
 Commit clean source first. Use separate output directories outside checkouts,
@@ -92,9 +93,10 @@ Extract a disposable copy; verify the bundled interpreter, EXE commands and
 normal first-run/profile/game flow without changing native saves. Unattended
 games must be hidden and muted. Never run the pristine staging tree.
 
-Create a GitHub draft prerelease at the exact committed source, upload only the
+Create a GitHub draft release at the exact committed source, upload only the
 asset files, compare the returned GitHub asset SHA-256 digests with SHA256SUMS.txt,
-then publish. Use one XboxLLR tag `beta-<version>` for both components,
-and Blinx's separate `alpha-<version>`. Keep alpha limitations
+then publish after the required human regression check. Use one XboxLLR tag
+`beta-<version>` for both components, and each game's separate `v<version>` tag.
+Keep beta limitations
 and user-supplied-input instructions in the release body. Verify unauthenticated
 public access after publication. Existing private-preview history is historical.
