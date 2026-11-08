@@ -1,7 +1,6 @@
 # XboxLLR documentation
 
-XboxLLR is beta. The same engine powers Blinx and JSRF; JSRF's preview remains
-private while its public beta is prepared. See the [main README](../README.md)
+XboxLLR is beta. The same engine powers Blinx and JSRF. See the [main README](../README.md)
 for current downloads and testing limits.
 
 | Guide | Purpose |
@@ -11,11 +10,14 @@ for current downloads and testing limits.
 | [Setup](SETUP.md) | User-owned content, local consoles, saves and Dashboard 5960 |
 | [Build tool](BUILD-TOOL.md) | xboxllr.exe and developer prerequisites |
 | [Development](DEVELOPMENT.md) | Source checkout, dependencies and builds |
+| [Native Linux release guide](https://github.com/mstan/xboxllr/blob/375d6d1be6938ebcfce24a2d8509d0d88b29353f/docs/NATIVE-LINUX.md) | Pinned Linux integration, dependencies and AppImage packaging |
 | [Architecture](ARCHITECTURE.md) | Native CPU pipeline and low-level console contracts |
 | [Native title driver](NATIVE-TITLE-DRIVER.md) | Preparation/binding/build interface |
 | [Title revisions](NATIVE-TITLE-REVISIONS.md) | Exact-image admission and per-revision data |
 | [Public releases](PUBLIC-RELEASES.md) | One release command, component archives and verification |
 | [Diagnostics](TESTER-DIAGNOSTICS.md) | Reports and private input replay |
+| [Private guest symbols](GUEST-SYMBOLS.md) | Build-bound function names, type layouts and static globals |
+| [Xbox symbol corpus](XBOX-SYMBOL-CORPUS.md) | Archive dispositions and discovery qualification |
 | [Disc import](DISC-IMPORT.md) | ISO/XISO import and reusable content caches |
 | [Startup animation](NATIVE-BOOT-INTRO.md) | Optional native startup and required private input |
 | [RAM cache](RAM-UTILITY-CACHE.md) | Disposable utility storage and memory cost |

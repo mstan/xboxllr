@@ -1,0 +1,149 @@
+{
+  "schema": "xboxllr.symbol-reference-qualification.v1",
+  "baseline_framework": "0d6e627c2563d40c848938acec4cf42ef7540822",
+  "donor_revision": "63f18f0334fbd8c00313c4bb565accf00627a4fd",
+  "discovery_extension_sha256": "89e1853038b5c64be712c41f550c4f7bec39bf89b221f6697d0a218e1e27d433",
+  "symbols_used_as_seeds": false,
+  "source_url": "https://debugging.games/Xbox",
+  "inputs": [
+    {
+      "title": "Sphinx and the Cursed Mummy",
+      "xbe_sha256": "71c820f972cf0182a1632a272b849464eaad7440e0e3782837e0e651933c705f",
+      "map_sha256": "9ae6c19898c9db983f1483c2b54c2239159d101cb9b7626a59760bfc86bd058b",
+      "reference_entries": 7689,
+      "baseline": {
+        "discovered_entries": 7827,
+        "matched_reference_entries": 7668,
+        "starts_without_map_function_label": 159
+      },
+      "candidate": {
+        "discovered_entries": 7830,
+        "matched_reference_entries": 7671,
+        "starts_without_map_function_label": 159
+      },
+      "lost_named_entries": [],
+      "lost_discovered_entries": [],
+      "changed_existing_extents": [],
+      "new_named_entries": [
+        {
+          "address": "0x18020",
+          "aliases": [
+            "?CreateObject@XProjectile@@SAPAV1@XZ"
+          ]
+        },
+        {
+          "address": "0xc7220",
+          "aliases": [
+            "?CreateObject@XItemHandler_Enemy@@SAPAV1@XZ"
+          ]
+        },
+        {
+          "address": "0x136f60",
+          "aliases": [
+            "?Active_DoUpdate@XTrigger_CaptureRelease@@QAEIXZ"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Halo Combat Evolved",
+      "xbe_sha256": "4d62cff2c1d7c52b36271599660105fb20abae1c154818ab683b30c5b768be62",
+      "map_sha256": "40ac937631c1024bee6087331d2c46c96f564e91052ea866f8352372f6374948",
+      "reference_entries": 10781,
+      "baseline": {
+        "discovered_entries": 9398,
+        "matched_reference_entries": 8166,
+        "starts_without_map_function_label": 1232
+      },
+      "candidate": {
+        "discovered_entries": 9401,
+        "matched_reference_entries": 8169,
+        "starts_without_map_function_label": 1232
+      },
+      "lost_named_entries": [],
+      "lost_discovered_entries": [],
+      "changed_existing_extents": [],
+      "new_named_entries": [
+        {
+          "address": "0x20cc0",
+          "aliases": [
+            "@pre_evaluator_guard@16"
+          ]
+        },
+        {
+          "address": "0x512d0",
+          "aliases": [
+            "@put2bitcmaptile@28"
+          ]
+        },
+        {
+          "address": "0x1660b0",
+          "aliases": [
+            "@sound_scenery_delete@4"
+          ]
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "framework_authored_tests": 13,
+    "extent_regression_tests": 18,
+    "donor_unittest_cases": 68,
+    "donor_standalone_checks": 49,
+    "intentional_updated_donor_expectation": "test_imm_ref_padded.test_a_target_after_code_is_not now accepts the aligned referenced entry after a decoded return; fallthrough and non-start tail-jump rejections retained",
+    "generation_time_regression_tests": 2
+  },
+  "limitations": [
+    "Function entry labels do not establish function extents or full precision",
+    "No runtime performance claim",
+    "PDB ingestion and live symbol naming remain separate work",
+    "Only two independent executable/MAP pairs qualified in this bounded pass"
+  ],
+  "rejected_experiment": {
+    "description": "Aligned reference after a return accepted any terminator, without checking whether a known entry truncated the new body",
+    "halo_unlabelled_starts_added": 2,
+    "reason": "Two new unlabelled aliases ended before their actual shared body; reject broader rule",
+    "final_rule": "Complete body without crossing an existing entry; tail jumps must name an existing function start"
+  },
+  "sphinx_remaining": {
+    "named_entries_unmatched": 18,
+    "groups": [
+      {
+        "count": 9,
+        "reason": "CRT/internal entries without observed direct/immediate/static-pointer references in this input; names alone must not seed discovery"
+      },
+      {
+        "count": 2,
+        "reason": "Unaligned lone CRT initializer pointers need a stronger registration/table contract"
+      },
+      {
+        "count": 7,
+        "reason": "USB callbacks in embedded XPP metadata need a proved metadata layout, rather than scanning executable sections for pointer-looking words"
+      }
+    ]
+  },
+  "current_title_discovery_checks": [
+    {
+      "id": "blinx",
+      "xbe_sha256": "e6b7cd8a5527dd001e05bb3e881d9b24ffc58824ff67def394215ddbc8009249",
+      "baseline_entries": 8857,
+      "candidate_entries": 8865,
+      "lost_entries": [],
+      "changed_existing_extents": [],
+      "scope": "Static discovery only; no independent symbol reference or runtime performance claim",
+      "added_bodies_checked": 8,
+      "all_added_bodies_decode_through_return_or_direct_tail": true
+    },
+    {
+      "id": "jsrf-rev4",
+      "xbe_sha256": "f4441696fdd007c31a712815cdde967836fbc3ab97fcb2f58e1db56974644219",
+      "baseline_entries": 8847,
+      "candidate_entries": 8875,
+      "lost_entries": [],
+      "changed_existing_extents": [],
+      "scope": "Static discovery only; no independent symbol reference or runtime performance claim",
+      "added_bodies_checked": 28,
+      "all_added_bodies_decode_through_return_or_direct_tail": true
+    }
+  ]
+}

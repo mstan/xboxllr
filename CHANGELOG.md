@@ -2,6 +2,10 @@
 
 ## Beta 2026.11.02.1
 
+- Current Blinx and JSRF releases now include native Linux AppImages alongside
+  their Windows ZIPs. WSL checks cover rendering, input and external settings;
+  brief Blinx and JSRF USA gameplay was observed. JSRF remains private.
+
 - Updated Windows build toolkit and matching framework source.
 - The same XboxLLR engine supports Blinx and Jet Set Radio Future. JSRF's beta
   is currently private while its public release is prepared; it has not been
