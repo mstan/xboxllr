@@ -471,14 +471,42 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(det.functions[0x10010].end, 0x10011)
         self.assertEqual(det.image.raw_data, original_bytes)
 
-    def test_weak_standalone_guesses_cannot_establish_a_missing_saved_frame(self):
+    def test_weak_context_guesses_retain_code_without_establishing_a_frame(self):
         for method in ('after_switch_table', 'imm_ref_target'):
             with self.subTest(method=method):
                 det, _ = self.gap_epilogue()
                 det._add_candidate(0x10022, 1.0, method)
-                self.assertNotIn(0x10022, det._candidates)
+                self.assertIn(0x10022, det._candidates)
+                self.assertNotIn(0x10022, _original_entry_contexts(det, [det.image.sections[0]]))
+                self.assertTrue(det.engine.entry_pops_unsaved(0x10022))
                 det._add_candidate(0x10022, 1.0, 'seed')
                 self.assertIn(0x10022, det._candidates)
+
+    def test_weak_context_retention_keeps_packed_cleanup_policy(self):
+        for method in ('after_switch_table', 'imm_ref_target'):
+            with self.subTest(method=method):
+                det, text = self.detector(body=bytes.fromhex('5ec20200'), pointer=False)
+                self.assertTrue(det.engine.entry_pops_unsaved(0x10020))
+                det._add_candidate(0x10020, .86, method)
+                self.assertNotIn(0x10020, det._candidates)
+
+    def test_runtime_table_targets_keep_caller_prepared_register_state(self):
+        base, table, first, second = 0x10000, 0x22000, 0x10080, 0x10090
+        code = bytearray(b'\xcc' * 0xa0)
+        stores = b''.join(b'\xc7\x05' + struct.pack('<II', table + 4*i, target)
+                          for i, target in enumerate((first, second)))
+        code[:len(stores)] = stores
+        code[len(stores):len(stores)+7] = b'\xff\x24\x85' + struct.pack('<I', table)
+        code[0x80:0x82] = bytes.fromhex('5ec3')
+        code[0x90:0x92] = bytes.fromhex('5fc3')
+        det, text = self.detector(address=base, prefix=b'', body=bytes(code), pointer=False)
+        for target in (first, second):
+            self.assertTrue(det.engine.entry_pops_unsaved(target))
+            self.assertNotIn(target, _original_entry_contexts(det, [text]))
+            det._add_candidate(target, .86, 'imm_ref_target')
+            self.assertEqual(det._candidates[target], (.86, 'imm_ref_target'))
+        # Keeping a proposed context does not register a new ordinary frame.
+        self.assertFalse(det.functions)
 
     def test_weak_context_entries_keep_original_control_and_unwind_contracts(self):
         for method in ('after_switch_table', 'imm_ref_target'):
@@ -609,7 +637,8 @@ class NativeDiscovery(unittest.TestCase):
                 det, text = self.catch_resume_epilogue(**options)
                 self.assertFalse(_unwind_context_entries(det, [text]))
                 det._add_candidate(0x10022, 0.86, 'imm_ref_target')
-                self.assertNotIn(0x10022, det._candidates)
+                self.assertIn(0x10022, det._candidates)
+                self.assertNotIn(0x10022, _original_entry_contexts(det, [text]))
 
     def test_lone_pointer_cannot_split_an_existing_body(self):
         det, text = self.detector()
@@ -837,6 +866,91 @@ class NativeDiscovery(unittest.TestCase):
                 self.assertIs(det.functions[0x1002e], original)
                 self.assertIn(0x1002e, det.functions)
                 self.assertNotIn(0x1002e, det._absorbed)
+
+    def test_callback_repair_restores_an_address_taken_record_removed_by_walker(self):
+        from tools.disasm.engine import Instruction
+        det = self.weak_callback_clamp()
+        det.engine.instructions[0x10010] = Instruction(
+            0x10010, 5, 'mov', 'eax, 0x1002e', '', imm_ref=0x1002e)
+        original = det.functions[0x1002e]
+        candidate = det._candidates[0x1002e]
+        measure = det._find_function_end
+
+        def destructive_walk(*args):
+            end = measure(*args)
+            det.functions.pop(0x1002e, None)
+            det._candidates.pop(0x1002e, None)
+            det._absorbed.add(0x1002e)
+            return end
+
+        with patch.object(det, '_find_function_end', side_effect=destructive_walk):
+            self.assertTrue(_repair_weak_callback_clamps(det))
+        self.assertEqual(det.functions[0x10020].end, 0x1005f)
+        self.assertIs(det.functions[0x1002e], original)
+        self.assertEqual(det._candidates[0x1002e], candidate)
+        self.assertNotIn(0x1002e, det._absorbed)
+        self.assertFalse(original.has_prologue)
+        self.assertEqual(original.detection_method, 'imm_ref_target')
+
+    def test_callback_repair_preserves_secondary_address_taken_context_records(self):
+        from tools.disasm.engine import Instruction
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                det = self.weak_callback_clamp()
+                original = self.module.Function(
+                    0x1005a, 0x1005f, 'secondary context', '.text', .86, 'imm_ref_target')
+                det.functions[0x1005a] = original
+                candidate = (.86, 'imm_ref_target')
+                det._candidates[0x1005a] = candidate
+                det._alias_entries[0x1005a] = 0x1005f
+                det.engine.instructions[0x10010] = Instruction(
+                    0x10010, 5, 'mov', 'eax, 0x1005a', '', imm_ref=0x1005a)
+                measure = det._find_function_end
+
+                def destructive_walk(*args):
+                    end = measure(args[0], 0x10060, args[2])
+                    det.functions.pop(0x1005a, None)
+                    if overwrite:
+                        det.functions[0x1005a] = self.module.Function(
+                            0x1005a, 0x10051, 'overwritten', '.text', .1, 'gap_prologue')
+                    det._candidates.pop(0x1005a, None)
+                    det._absorbed.add(0x1005a)
+                    return end
+
+                with patch.object(det, '_find_function_end', side_effect=destructive_walk):
+                    self.assertTrue(_repair_weak_callback_clamps(det))
+                self.assertEqual(det.functions[0x10020].end, 0x1005f)
+                self.assertNotIn(0x1002e, det.functions)
+                self.assertIs(det.functions[0x1005a], original)
+                self.assertEqual(det._candidates[0x1005a], candidate)
+                self.assertEqual(det._alias_entries[0x1005a], 0x1005f)
+                self.assertNotIn(0x1005a, det._absorbed)
+                self.assertFalse(original.has_prologue)
+                self.assertFalse(original.called_by)
+
+    def test_callback_repair_does_not_restore_a_numeric_data_word_only(self):
+        det = self.weak_callback_clamp()
+        det.functions[0x1005a] = self.module.Function(
+            0x1005a, 0x1005f, 'numeric guess', '.text', .86, 'imm_ref_target')
+        det._candidates[0x1005a] = (.86, 'imm_ref_target')
+        det._alias_entries[0x1005a] = 0x1005f
+        # A data word alone supplies no decoded original address consumer.
+        det.image.raw_data += struct.pack('<I', 0x1005a)
+        measure = det._find_function_end
+
+        def destructive_walk(*args):
+            end = measure(args[0], 0x10060, args[2])
+            det.functions.pop(0x1005a, None)
+            det._candidates.pop(0x1005a, None)
+            det._absorbed.add(0x1005a)
+            return end
+
+        with patch.object(det, '_find_function_end', side_effect=destructive_walk):
+            self.assertTrue(_repair_weak_callback_clamps(det))
+        self.assertEqual(det.functions[0x10020].end, 0x1005f)
+        self.assertNotIn(0x1005a, det.functions)
+        self.assertNotIn(0x1005a, det._candidates)
+        self.assertNotIn(0x1005a, det._alias_entries)
 
     def test_restored_parent_frame_cannot_absorb_callback(self):
         from tools.disasm.engine import Instruction

@@ -481,12 +481,13 @@ def _repair_weak_callback_clamps(detector):
         return False
     registered = _unwind_context_entries(detector, detector.image.get_code_sections())
     weak_starts = {weak.start for _, weak, _, _ in candidates}
+    existing_starts = set(detector.functions)
     incoming = {}
     independent = set()
     for instruction in detector.engine.instructions.values():
-        if instruction.imm_ref in weak_starts:
+        if instruction.imm_ref in existing_starts:
             independent.add(instruction.imm_ref)
-        if instruction.is_call and instruction.call_target in weak_starts:
+        if instruction.is_call and instruction.call_target in existing_starts:
             independent.add(instruction.call_target)
         target = (instruction.call_target if instruction.is_call else
                   instruction.jump_target if instruction.is_branch else None)
@@ -519,8 +520,22 @@ def _repair_weak_callback_clamps(detector):
             detector._candidates.pop(weak.start, None)
             detector._alias_entries.pop(weak.start, None)
             detector._absorbed.add(weak.start)
+        # The walker can remove or replace another address-taken context while
+        # extending its owner. Restore those existing records and their weak
+        # candidate identity; an original reference does not establish an ABI.
+        preserved = {start for start in independent
+                     if body.start < start < end and start in previous[0]}
+        for start in preserved:
+            detector.functions[start] = previous[0][start]
+            if start in previous[1]:
+                detector._candidates[start] = previous[1][start]
+            else:
+                detector._candidates.pop(start, None)
+            if start not in previous[2]:
+                detector._absorbed.discard(start)
         for start in removed:
-            detector._alias_entries.pop(start, None)
+            if start not in preserved:
+                detector._alias_entries.pop(start, None)
         changed = True
     if changed:
         for body in detector.functions.values():
@@ -843,11 +858,10 @@ def install(module):
             # establish an entry there; original control/metadata still can.
             if address not in _original_entry_contexts(self, self.image.get_code_sections()):
                 return
-        if method in ('after_switch_table', 'imm_ref_target') and (
-                _unaligned_leaf_cleanup(self, address) or self.engine.entry_pops_unsaved(address)):
-            # Call targets and explicit metadata roots can establish another
-            # convention. A table-adjacent byte stream or address-like literal
-            # alone cannot establish a saved frame or packed-stack contract.
+        if method in ('after_switch_table', 'imm_ref_target') and _unaligned_leaf_cleanup(self, address):
+            # Keep decoded caller-prepared contexts even when their register
+            # saves precede the entry. Packed cleanup still requires an
+            # original control/metadata witness; retention does not prove ABI.
             if address not in _original_entry_contexts(self, self.image.get_code_sections()):
                 return
         if method == 'after_switch_table':
