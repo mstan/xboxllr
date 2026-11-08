@@ -352,6 +352,64 @@ def _text_literal_prefix(detector, address):
             sum(65 <= value <= 90 or 97 <= value <= 122 for value in text) >= 6)
 
 
+def _crossed_weak_callbacks(detector):
+    """Find final callback guesses that cut an established caller's frame.
+
+    A guessed immediate target with no caller/prologue is not an independent
+    bound when it restores an unsaved register and the preceding body's own
+    conditional branch crosses it. Keep real calls, seeds and frame-free
+    callbacks. This runs only after all ordinary discovery passes have finished.
+    """
+    for start, body in sorted(detector.functions.items()):
+        if detector.functions.get(start) is not body:
+            continue
+        if not (body.called_by or body.has_prologue or
+                body.detection_method == 'entry_point' or
+                body.detection_method.startswith('seed')):
+            continue
+        weak = detector.functions.get(body.end)
+        if (weak is None or weak.detection_method != 'imm_ref_target' or
+                weak.called_by or weak.has_prologue):
+            continue
+        section = detector.image.get_section_at_va(start)
+        if section is None:
+            continue
+        following = min((a for a in detector.functions if a > weak.start),
+                        default=section.virtual_addr + section.virtual_size)
+        instructions = detector.engine.get_instructions_in_range(start, body.end)
+        if not any(i.is_cond_jump and i.jump_target is not None and
+                   weak.start <= i.jump_target < following for i in instructions):
+            continue
+        if any(i.is_jump and not i.is_cond_jump and i.jump_target == weak.start
+               for i in instructions):
+            continue
+        if detector.engine.entry_pops_unsaved(weak.start):
+            yield body, weak, following, section
+
+
+def _repair_weak_callback_clamps(detector):
+    """Remeasure only proved final frame contexts with the existing walker."""
+    changed = False
+    for body, weak, following, section in _crossed_weak_callbacks(detector):
+        end = detector._find_function_end(
+            body.start, following, section.virtual_addr + section.virtual_size)
+        if end <= weak.start:
+            continue
+        body.end = end
+        body.num_instructions = len(detector.engine.get_instructions_in_range(body.start, end))
+        detector.functions.pop(weak.start, None)
+        detector._candidates.pop(weak.start, None)
+        detector._alias_entries.pop(weak.start, None)
+        detector._absorbed.add(weak.start)
+        changed = True
+    if changed:
+        for body in detector.functions.values():
+            body.calls_to.clear()
+            body.called_by.clear()
+        detector._build_call_graph()
+    return changed
+
+
 def _switch_pointer_tail(detector, address):
     """Do not turn a sparse dispatch table's remaining words into code."""
     for table, end in detector.engine.jump_tables.items():
@@ -630,6 +688,7 @@ def install(module):
 
     def detect(self, sections=None):
         original_detect(self, sections)
+        _repair_weak_callback_clamps(self)
         # Final-output filtering leaves every earlier discovery/extent decision
         # intact. These unreferenced low-byte views have no call-graph edges.
         for address, body in list(self.functions.items()):

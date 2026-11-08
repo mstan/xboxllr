@@ -9,7 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries, _switch_index_data_window
+from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries, _switch_index_data_window, _repair_weak_callback_clamps
 from native_pilot import DONOR_PIN
 
 
@@ -676,6 +676,64 @@ class NativeDiscovery(unittest.TestCase):
         # Retain a metadata prefix by marking the tail target as an alias.
         det.functions[0x10000].detection_method = 'alias'
         self.assertTrue(xpp_registration_entries(det, [section]))
+
+    def weak_callback_clamp(self, *, method='imm_ref_target', frame_free=False,
+                            crossing=True, tail=False, called=False):
+        code = bytearray(b'\xcc'*0x41)
+        # A saved-register frame has an early return and a later conditional
+        # exit. The weak block between them uses that same original frame.
+        code[:14] = bytes.fromhex('83ec045683f80074275e83c404c3')
+        code[14:29] = bytes.fromhex('b801000000e8280000005e83c404c3')
+        code[0x30:0x3f] = bytes.fromhex('b82a000000e8060000005e83c404c3')
+        code[0x40] = 0xc3
+        if frame_free:
+            code[14:20] = bytes.fromhex('b801000000c3')
+        if not crossing:
+            code[8] = 0
+        if tail:
+            code[9:14] = bytes.fromhex('e900000000')
+        det, _ = self.detector(prefix=b'', body=bytes(code), pointer=False)
+        function = self.module.Function
+        det.functions = {
+            0x10020: function(0x10020, 0x1002e, 'parent', '.text', 1., 'seed'),
+            0x1002e: function(0x1002e, 0x10034 if frame_free else 0x1003d,
+                              'weak', '.text', .8, method),
+            0x10060: function(0x10060, 0x10061, 'callee', '.text', 1., 'seed'),
+        }
+        det._candidates = {a: (f.confidence, f.detection_method)
+                           for a, f in det.functions.items()}
+        det._alias_entries[0x1002e] = (.8, method)
+        det._build_call_graph()
+        if called:
+            det.functions[0x1002e].called_by.append(0x10010)
+        return det
+
+    def test_final_weak_callback_cannot_cut_off_original_frame_exit(self):
+        det = self.weak_callback_clamp()
+        self.assertTrue(_repair_weak_callback_clamps(det))
+        self.assertEqual(det.functions[0x10020].end, 0x1005f)
+        self.assertNotIn(0x1002e, det.functions)
+        self.assertNotIn(0x1002e, det._candidates)
+        self.assertNotIn(0x1002e, det._alias_entries)
+        # The removed view's outgoing CALL now belongs to its retained parent.
+        self.assertEqual(det.functions[0x10020].calls_to, [0x10060])
+        self.assertEqual(det.functions[0x10060].called_by, [0x10020])
+
+    def test_final_callback_repair_preserves_independent_entry_contracts(self):
+        for options in ({'method': 'seed_vtable_thunk'}, {'method': 'call_target'},
+                        {'method': 'prologue'}, {'called': True}, {'frame_free': True}):
+            with self.subTest(options=options):
+                det = self.weak_callback_clamp(**options)
+                self.assertFalse(_repair_weak_callback_clamps(det))
+                self.assertIn(0x1002e, det.functions)
+                self.assertEqual(det.functions[0x10020].end, 0x1002e)
+
+    def test_final_callback_repair_requires_original_crossing_without_direct_tail(self):
+        for options in ({'crossing': False}, {'tail': True}):
+            with self.subTest(options=options):
+                det = self.weak_callback_clamp(**options)
+                self.assertFalse(_repair_weak_callback_clamps(det))
+                self.assertIn(0x1002e, det.functions)
 
 
 if __name__ == '__main__':
