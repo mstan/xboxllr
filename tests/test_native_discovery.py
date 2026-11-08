@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries, _switch_index_data_window, _repair_weak_callback_clamps
+from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries, _original_entry_contexts, _switch_index_data_window, _repair_weak_callback_clamps
 from native_pilot import DONOR_PIN
 
 
@@ -460,11 +460,15 @@ class NativeDiscovery(unittest.TestCase):
         det.functions[0x10010] = SimpleNamespace(start=0x10010, end=0x10011)
         return det, text
 
-    def test_numeric_table_pair_cannot_establish_a_missing_saved_frame(self):
+    def test_data_table_word_keeps_a_weak_context_without_claiming_a_frame(self):
         det, text = self.gap_epilogue()
         original_bytes = det.image.raw_data
-        self.assertFalse(det._pass_data_ptr_targets([text]))
-        self.assertNotIn(0x10022, det._alias_entries)
+        self.assertTrue(det._pass_data_ptr_targets([text]))
+        self.assertEqual(det._alias_entries[0x10022], 0x10026)
+        self.assertNotIn(0x10022, det._candidates)
+        self.assertNotIn(0x10022, _original_entry_contexts(det, [text]))
+        self.assertTrue(det.engine.entry_pops_unsaved(0x10022))
+        self.assertEqual(det.functions[0x10010].end, 0x10011)
         self.assertEqual(det.image.raw_data, original_bytes)
 
     def test_weak_standalone_guesses_cannot_establish_a_missing_saved_frame(self):
@@ -490,11 +494,20 @@ class NativeDiscovery(unittest.TestCase):
         self.assertTrue(det._pass_data_ptr_targets([text]))
         self.assertEqual(det._alias_entries[0x10022], 0x10026)
 
-    def test_numeric_pair_inside_a_known_body_does_not_establish_a_caller_frame(self):
+    def test_weak_context_alias_does_not_split_a_body_or_gain_a_frame(self):
         det, text = self.gap_epilogue()
         det.functions[0x10010].end = 0x10026
-        self.assertFalse(det._pass_data_ptr_targets([text]))
-        self.assertNotIn(0x10022, det._alias_entries)
+        self.assertTrue(det._pass_data_ptr_targets([text]))
+        self.assertEqual(det._alias_entries[0x10022], 0x10026)
+        self.assertNotIn(0x10022, det._candidates)
+        self.assertNotIn(0x10022, _original_entry_contexts(det, [text]))
+        self.assertTrue(det.engine.entry_pops_unsaved(0x10022))
+        det.labels = self.module.LabelManager()
+        det._build_alias_entries()
+        alias = det.functions[0x10022]
+        self.assertEqual(alias.detection_method, 'tail_jump_alias')
+        self.assertFalse(alias.has_prologue)
+        self.assertFalse(alias.called_by)
         self.assertEqual(det.functions[0x10010].end, 0x10026)
 
     def test_original_branch_preserves_an_interior_shared_epilogue(self):
@@ -544,8 +557,11 @@ class NativeDiscovery(unittest.TestCase):
                         dict(count=4097), dict(count=2), dict(jump=False)):
             det, text = self.unwind_epilogue(**options)
             self.assertFalse(_unwind_context_entries(det, [text]))
-            self.assertFalse(det._pass_data_ptr_targets([text]))
-            self.assertNotIn(0x10022, det._alias_entries)
+            self.assertTrue(det._pass_data_ptr_targets([text]))
+            self.assertEqual(det._alias_entries[0x10022], 0x10026)
+            self.assertNotIn(0x10022, det._candidates)
+            self.assertNotIn(0x10022, _original_entry_contexts(det, [text]))
+            self.assertTrue(det.engine.entry_pops_unsaved(0x10022))
 
     def test_data_pointer_pass_preserves_previously_qualified_aliases(self):
         det, text = self.gap_epilogue()
