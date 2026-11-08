@@ -116,6 +116,31 @@ class QualifiedDiscovery(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'crosses PDB boundary'):
             det._build_functions([text])
 
+    def test_crossing_interior_view_is_removed_without_truncating_valid_entries(self):
+        code = bytes.fromhex('85c07406b802000000c3b801000000c3')
+        code += bytes.fromhex('66b801')
+        blob, document = self.fixture(code)
+        det, text = self.detector(blob, document)
+        det._add_candidate(0x1100a, .9, 'call_target')
+        det._add_candidate(0x11010, .85, 'gap_prologue')
+        det._build_functions([text])
+        det._build_alias_entries()
+        self.assertNotIn(0x11010, det._candidates)
+        self.assertNotIn(0x11010, det.functions)
+        self.assertEqual(det.functions[0x11000].end, 0x11010)
+        self.assertEqual(det.functions[0x1100a].end, 0x11010)
+
+    def test_alias_start_inside_an_instruction_cannot_borrow_next_owner_bytes(self):
+        blob, document = self.fixture(bytes.fromhex('33c0c3'))
+        det, text = self.detector(blob, document)
+        det.engine.decode_at(0x11001)
+        det._build_functions([text])
+        det._alias_entries[0x11001] = 0x11010
+        det._build_alias_entries()
+        self.assertNotIn(0x11001, det._alias_entries)
+        self.assertNotIn(0x11001, det.functions)
+        self.assertEqual(det.functions[0x11000].end, 0x11003)
+
     def test_trailing_switch_index_map_is_data_even_if_it_decodes_past_end(self):
         code = bytes.fromhex('ff248510100100b801000000c3cccccc')
         code += (0x11007).to_bytes(4, 'little') + b'\xb8\x01'

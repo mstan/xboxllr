@@ -212,6 +212,30 @@ def install(module, qualified):
                     next_func = None
         return original_end(self, start, next_func, sec_end)
 
+    def prune_crossing_interiors(self):
+        ranges = getattr(self, '_xboxllr_pdb_ranges', None)
+        if ranges is None:
+            return
+        for start, body in list(self.functions.items()):
+            if start in ranges.ends:
+                continue
+            owner_end = ranges.containing_end(start)
+            if owner_end is None:
+                continue
+            # Inspect only final views. Filtering before the detection passes
+            # finish would let transient candidates change unrelated bounds.
+            # Even a clamped alias cannot start with an instruction borrowing
+            # bytes from the next owner. Complete body/ABI qualification is a
+            # separate gate; this does not prove arbitrary interior streams.
+            first = next(self.engine._cs.disasm(
+                self.image.read_bytes_at_va(start, 15) or b'', start, count=1), None)
+            crossing = (body.end > owner_end or
+                        first is not None and first.address + first.size > owner_end)
+            if crossing:
+                self._candidates.pop(start, None)
+                self.functions.pop(start, None)
+                self._alias_entries.pop(start, None)
+
     def prune_data(self):
         ranges = getattr(self, '_xboxllr_pdb_ranges', None)
         if ranges is not None:
@@ -240,6 +264,7 @@ def install(module, qualified):
                 if owner_end is not None:
                     self._alias_entries[start] = min(end, owner_end)
         original_aliases(self)
+        prune_crossing_interiors(self)
 
     def alias_tails(self, sections):
         # Do not follow branches hallucinated inside index bytes into more
