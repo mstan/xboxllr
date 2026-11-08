@@ -9,7 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries
+from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries, _switch_index_data_window
 from native_pilot import DONOR_PIN
 
 
@@ -44,6 +44,52 @@ class NativeDiscovery(unittest.TestCase):
         detector._candidates, detector._alias_entries, detector._absorbed = {}, {}, set()
         detector.functions = {}
         return detector, text
+
+    def sentinel_switch(self, *, scheduled=False, real_code=False):
+        code = bytearray(b'\xcc' * 0x80)
+        prefix = bytes.fromhex('0fb68138000100')
+        if scheduled:
+            prefix += bytes.fromhex('890d00000200')
+        prefix += bytes.fromhex('ff248530000100')
+        code[:len(prefix)] = prefix
+        code[0x20] = code[0x24] = 0xc3
+        code[0x30:0x38] = struct.pack('<II', 0x10020, 0x10024)
+        code[0x38:0x40] = bytes.fromhex('0001020002909090')
+        if real_code:
+            code[0x3a:0x3d] = bytes.fromhex('02c3c3')  # ADD AL,BL; RET.
+        code[0x40:0x46] = bytes.fromhex('b801000000c3')
+        text = self.section_type('.text', 0x10000, len(code), 0, len(code), False, True, '')
+        data = self.section_type('.data', 0x20000, 4, len(code), 4, True, False, '')
+        image = self.image_type('authored switch', bytes(code) + bytes(4),
+                                0x10000, 0x10004, 0x10000, 0, [text, data])
+        engine = self.engine_type(image)
+        engine.linear_sweep(text)
+        det = SimpleNamespace(image=image, engine=engine, functions={
+            0x10000: SimpleNamespace(start=0x10000, end=0x10020, detection_method='entry_point'),
+            0x10040: SimpleNamespace(start=0x10040, end=0x10046, detection_method='call_target')})
+        return det
+
+    def test_sparse_switch_sentinel_is_data_including_a_scheduled_global_store(self):
+        for scheduled in (False, True):
+            with self.subTest(scheduled=scheduled):
+                det = self.sentinel_switch(scheduled=scheduled)
+                proof = _switch_index_data_window(det, 0x1003a)
+                self.assertIsNotNone(proof)
+                self.assertEqual((proof['entries'], proof['index_data_end'], proof['next_entry']),
+                                 (2, 0x1003d, 0x10040))
+                self.assertIsNone(_switch_index_data_window(det, 0x10040))
+
+    def test_returning_code_after_a_switch_is_not_a_sentinel_data_run(self):
+        det = self.sentinel_switch(real_code=True)
+        self.assertIsNone(_switch_index_data_window(det, 0x1003a))
+
+    def test_sparse_index_guard_requires_matching_registers_and_a_strong_next_entry(self):
+        det = self.sentinel_switch()
+        det.image.raw_data = det.image.raw_data[:9] + b'\x8d' + det.image.raw_data[10:]
+        self.assertIsNone(_switch_index_data_window(det, 0x1003a))
+        det = self.sentinel_switch()
+        det.functions[0x10040].detection_method = 'after_switch_table'
+        self.assertIsNone(_switch_index_data_window(det, 0x1003a))
 
     def test_lone_callback_after_return_is_recovered_without_symbols(self):
         det, text = self.detector()

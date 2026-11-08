@@ -376,6 +376,89 @@ def _switch_pointer_tail(detector, address):
     return False
 
 
+def _switch_index_data_window(detector, address):
+    """Prove a bounded byte-index run containing a weak sentinel entry.
+
+    Sparse switches can retain byte indices equal to the pointer-entry count.
+    The donor stops its byte scan on that sentinel value and can call it code.
+    Require the original two-level consumer, local code targets, the complete
+    low-byte run and alignment to an independently retained next entry.
+    """
+    from capstone.x86 import X86_OP_REG, X86_OP_MEM
+    section = detector.image.get_section_at_va(address)
+    if section is None:
+        return None
+    lower = max(section.virtual_addr, address - 512)
+    raw = detector.image.read_bytes_at_va(lower, address - lower) or b''
+    for offset in range(len(raw) - 1):
+        if raw[offset:offset + 2] != b'\x0f\xb6':
+            continue
+        pair = list(detector.engine._cs.disasm(raw[offset:], lower + offset, count=3))
+        if len(pair) < 2 or pair[0].mnemonic != 'movzx':
+            continue
+        load, jump = pair[:2]
+        if jump.mnemonic == 'mov' and len(pair) == 3:
+            # A scheduled absolute global store changes neither index register.
+            ops = jump.operands
+            if (len(ops) != 2 or ops[0].type != X86_OP_MEM or ops[0].size != 4 or
+                    ops[1].type != X86_OP_REG or ops[0].mem.base or
+                    ops[0].mem.index or ops[0].mem.segment or
+                    detector.image.get_section_at_va(ops[0].mem.disp) is section):
+                continue
+            jump = pair[2]
+        if jump.mnemonic != 'jmp':
+            continue
+        if (len(load.operands) != 2 or load.operands[0].type != X86_OP_REG or
+                load.operands[0].size != 4 or load.operands[1].type != X86_OP_MEM or
+                load.operands[1].size != 1 or len(jump.operands) != 1 or
+                jump.operands[0].type != X86_OP_MEM):
+            continue
+        source, table_op = load.operands[1].mem, jump.operands[0].mem
+        if (not source.base or source.index or source.segment or table_op.base or
+                table_op.segment or table_op.index != load.operands[0].reg or
+                table_op.scale != 4):
+            continue
+        table = table_op.disp
+        if not jump.address + jump.size <= table < address:
+            continue
+        owners = [f for f in detector.functions.values()
+                  if f.start <= load.address and jump.address + jump.size <= f.end and
+                  load.address - f.start <= 4096 and f.detection_method != 'after_switch_table']
+        if not any(any(i.address == load.address for i in detector.engine._cs.disasm(
+                detector.image.read_bytes_at_va(f.start, load.address + load.size - f.start) or b'',
+                f.start)) for f in owners):
+            continue
+        targets = []
+        for index in range(17):
+            word = detector.image.read_bytes_at_va(table + 4 * index, 4)
+            target = struct.unpack('<I', word)[0] if word and len(word) == 4 else 0
+            if not load.address - 32 <= target < table or detector.image.get_section_at_va(target) is not section:
+                break
+            targets.append(target)
+        entries = len(targets)
+        end = table + 4 * entries
+        if not 2 <= entries <= 16 or not end - 4 <= source.disp <= end + 3:
+            continue
+        data = detector.image.read_bytes_at_va(end, 257) or b''
+        first = next((i for i, byte in enumerate(data) if byte >= entries), len(data))
+        tail = next((i for i, byte in enumerate(data) if byte > entries), len(data))
+        if (first == len(data) or data[first] != entries or address != end + first or
+                tail >= 256 or tail == len(data) or data[tail] not in (0x90, 0xcc)):
+            continue
+        padding = tail
+        while padding < len(data) and padding - tail < 15 and data[padding] in (0x90, 0xcc):
+            padding += 1
+        next_entry = end + padding
+        following = detector.functions.get(next_entry)
+        if (next_entry % 16 or following is None or
+                following.detection_method == 'after_switch_table'):
+            continue
+        return dict(consumer=load.address, dispatch=jump.address, table=table,
+                    table_end=end, entries=entries, index_base=source.disp,
+                    index_data_start=end, index_data_end=end + tail, next_entry=next_entry)
+    return None
+
+
 def _original_entry_contexts(detector, sections):
     entries = {i.jump_target for i in detector.engine.instructions.values()
                if i.is_branch and i.jump_target is not None}
@@ -543,6 +626,22 @@ def install(module):
     original_table_after = detector._table_after
     original_add = detector._add_candidate
     original_calls = detector._pass_call_targets
+    original_detect = detector.detect_all
+
+    def detect(self, sections=None):
+        original_detect(self, sections)
+        # Final-output filtering leaves every earlier discovery/extent decision
+        # intact. These unreferenced low-byte views have no call-graph edges.
+        for address, body in list(self.functions.items()):
+            if (body.detection_method == 'after_switch_table' and
+                    not body.calls_to and not body.called_by and
+                    _switch_index_data_window(self, address) is not None):
+                del self.functions[address]
+                self._candidates.pop(address, None)
+                self._alias_entries.pop(address, None)
+        return len(self.functions)
+
+    detector.detect_all = detect
 
     def call_targets(self, sections):
         windows=_parameter_data_windows(self)
