@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -71,6 +73,30 @@ class CrashReportTests(unittest.TestCase):
             with zipfile.ZipFile(crash.export_report(self.session)) as archive:
                 self.assertNotIn('inputs.bin', archive.namelist())
                 self.assertIn('input_attachment', json.loads(archive.read('report.json')))
+
+    def test_linux_crash_handoff_creates_shareable_zip(self):
+        session = SimpleNamespace(path=self.session, report=self.report)
+        with patch('native_linux_entry.message') as message:
+            crash.show_linux(session)
+        text = message.call_args.args[1]
+        output = self.session.parent/'crash-reports'/f'{self.session.name}.zip'
+        self.assertTrue(output.is_file())
+        self.assertIn(str(output), text)
+        self.assertIn('unqualified GPU texture download format', text)
+        with zipfile.ZipFile(output) as archive:
+            self.assertIn('diagnostics.log', archive.namelist())
+            for name in archive.namelist():
+                self.assertNotIn(b'authored-secret', archive.read(name))
+
+    def test_linux_export_failure_preserves_original_failure(self):
+        session = SimpleNamespace(path=self.session, report=self.report)
+        with patch.object(crash, 'export_report', side_effect=OSError('disk full')), \
+                patch('native_linux_entry.message') as message:
+            crash.show_linux(session)
+        text = message.call_args.args[1]
+        self.assertIn('unqualified GPU texture download format', text)
+        self.assertIn('Could not prepare the diagnostic ZIP', text)
+        self.assertIn('Do not upload PRIVATE-DO-NOT-SHARE', text)
 
     def test_dialog_and_clipboard_payload_preserve_unicode_and_structure(self):
         payload = crash.dropfiles(Path(self.temp.name)/'日本語 report.zip')
