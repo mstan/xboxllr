@@ -83,6 +83,53 @@ def _terminal_boundary(detector, address, *, zero=False):
                      for previous in range(address - 30, address)))
 
 
+def _terminal_virtual_tail(detector, jump, table, prefix, targets):
+    """Recognize a this-pointer vtable tail immediately before trailing data.
+
+    This is a code/data boundary proof, not a callable-entry or stack-ABI proof.
+    Keep unknown computed continuations conservative. In particular, a virtual
+    jump earlier in a body cannot hide a shared return or cases after the table.
+    """
+    from capstone import CS_OP_MEM, CS_OP_REG
+    if not _alignment_padding(detector, jump.end_address, table):
+        return False
+    for address in range(jump.address - 6, jump.address):
+        if address not in detector.engine.instructions:
+            continue
+        raw = detector.image.read_bytes_at_va(address, jump.end_address-address)
+        suffix = list(detector.engine._cs.disasm(raw or b'', address))
+        if not 2 <= len(suffix) <= 6 or suffix[-1].address != jump.address:
+            continue
+        load, dispatch = suffix[0], suffix[-1]
+        if load.mnemonic != 'mov' or len(load.operands) != 2:
+            continue
+        dst, src = load.operands
+        if (dst.type != CS_OP_REG or dst.size != 4 or
+                load.reg_name(dst.reg) not in ('eax', 'edx') or
+                src.type != CS_OP_MEM or src.size != 4 or
+                load.reg_name(src.mem.base) != 'ecx' or
+                src.mem.index or src.mem.disp or src.mem.segment):
+            continue
+        if any(i.mnemonic != 'pop' or len(i.operands) != 1 or
+               i.operands[0].type != CS_OP_REG or i.operands[0].size != 4 or
+               i.reg_name(i.operands[0].reg) not in ('ebx', 'esi', 'edi', 'ebp')
+               for i in suffix[1:-1]):
+            continue
+        if dispatch.mnemonic != 'jmp' or len(dispatch.operands) != 1:
+            continue
+        slot = dispatch.operands[0]
+        if (slot.type != CS_OP_MEM or slot.size != 4 or
+                slot.mem.base != dst.reg or slot.mem.index or slot.mem.segment or
+                slot.mem.disp < 0 or slot.mem.disp % 4):
+            continue
+        # A branch into the suffix could bypass its vtable load/restoration.
+        incoming = list(targets) + [i.jump_target for i in prefix
+                                   if i.is_branch and i.jump_target is not None]
+        if not any(address < target <= jump.address for target in incoming):
+            return True
+    return False
+
+
 def code_upper_bound(detector, start, declared_end):
     """Exclude a trailing switch table, preserving interleaved continuations.
 
@@ -103,7 +150,8 @@ def code_upper_bound(detector, start, declared_end):
         if any(i.is_branch and i.jump_target is not None and
                table <= i.jump_target < declared_end for i in prefix):
             continue
-        if any(i.is_jump and i.jump_target is None and i.jump_table is None
+        if any(i.is_jump and i.jump_target is None and i.jump_table is None and
+               not _terminal_virtual_tail(detector, i, table, prefix, targets)
                for i in prefix):
             continue
         return table

@@ -282,6 +282,47 @@ class NativeDiscovery(unittest.TestCase):
         self.assertGreaterEqual(det._find_function_end(0x10000, 0x10022, 0x10022), 0x10020)
         self.assertEqual(det.image.raw_data, original)
 
+    def trailing_virtual_switch(self, tail=bytes.fromhex('8b115effa244010000')):
+        # Two bounded cases converge on a virtual tail: mov edx,[ecx],
+        # restore esi, jmp [edx+slot]. The switch table follows alignment.
+        prefix = bytes.fromhex('5683f801770eff2485')
+        cases = bytes.fromhex('b801000000eb0231c0')
+        size = len(prefix) + 4 + len(cases) + len(tail)
+        table = 0x10000 + (size + 15) // 16 * 16
+        code = prefix + struct.pack('<I', table) + cases + tail
+        code += b'\x90' * (table - 0x10000 - len(code))
+        code += struct.pack('<2I', 0x1000d, 0x10014) + b'\xb8\x01'
+        det, _ = self.detector(address=0x10000, prefix=b'', body=code, pointer=False)
+        det.engine.instructions[0x10006].jump_table = table
+        det.engine.jump_tables[table] = table + 8
+        return det, table, 0x10000 + size
+
+    def test_unaided_virtual_tail_excludes_its_trailing_switch_table(self):
+        det, table, end = self.trailing_virtual_switch()
+        original = det.image.raw_data
+        self.assertEqual(det._find_function_end(0x10000, table+10, table+10), end)
+        self.assertEqual(det.image.raw_data, original)
+
+    def test_unproved_tail_shapes_keep_the_conservative_switch_extent(self):
+        for tail in (bytes.fromhex('8b115effa285010000'),  # Unaligned slot.
+                     bytes.fromhex('8b115eff648a04'),      # Indexed transfer.
+                     bytes.fromhex('8b115a52ffa244010000'), # Overwritten vtable.
+                     bytes.fromhex('8b51045effa244010000'), # Object member, not vtable.
+                     bytes.fromhex('8b1149ffa244010000')): # Changed this pointer.
+            with self.subTest(tail=tail.hex()):
+                det, table, _ = self.trailing_virtual_switch(tail)
+                self.assertGreaterEqual(det._find_function_end(0x10000, table+10, table+10), table+8)
+
+    def test_virtual_tail_cannot_hide_a_case_after_the_table(self):
+        det, table, _ = self.trailing_virtual_switch()
+        det.engine.jump_table_entries = lambda address: [0x1000d, table+8]
+        self.assertGreaterEqual(det._find_function_end(0x10000, table+10, table+10), table+8)
+
+    def test_virtual_tail_cannot_bypass_its_vtable_load(self):
+        det, table, _ = self.trailing_virtual_switch()
+        det.engine.instructions[0x10004].jump_target = 0x10018
+        self.assertGreaterEqual(det._find_function_end(0x10000, table+10, table+10), table+8)
+
     def test_unaided_direct_tail_cannot_hide_a_shared_return_before_a_table(self):
         code = bytes.fromhex('83f801770fff248518000100eb06909090909090c2040090')
         code += struct.pack('<2I', 0x1000c, 0x10014) + b'\xb8\x01'
