@@ -456,8 +456,7 @@ def _repair_weak_callback_clamps(detector):
     changed = False
     for body, weak, following, section in candidates:
         if (detector.functions.get(body.start) is not body or
-                detector.functions.get(weak.start) is not weak or
-                weak.start in registered or weak.start in independent):
+                detector.functions.get(weak.start) is not weak or weak.start in registered):
             continue
         previous = (dict(detector.functions), dict(detector._candidates), set(detector._absorbed))
         end = detector._find_function_end(
@@ -473,12 +472,16 @@ def _repair_weak_callback_clamps(detector):
         removed = set(previous[0]) - detector.functions.keys()
         body.end = end
         body.num_instructions = len(detector.engine.get_instructions_in_range(body.start, end))
-        detector.functions.pop(weak.start, None)
-        detector._candidates.pop(weak.start, None)
-        detector._alias_entries.pop(weak.start, None)
+        # An address-taken context can coexist with its enclosing original
+        # body. Its references require retaining that entry, but do not make
+        # the enclosing body's own crossed branches into external calls.
+        if weak.start not in independent:
+            detector.functions.pop(weak.start, None)
+            detector._candidates.pop(weak.start, None)
+            detector._alias_entries.pop(weak.start, None)
+            detector._absorbed.add(weak.start)
         for start in removed:
             detector._alias_entries.pop(start, None)
-        detector._absorbed.add(weak.start)
         changed = True
     if changed:
         for body in detector.functions.values():

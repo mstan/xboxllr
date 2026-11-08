@@ -764,7 +764,7 @@ class NativeDiscovery(unittest.TestCase):
             self.assertFalse(_repair_weak_callback_clamps(det))
         self.assertIn(0x1002e, det.functions)
 
-    def test_internal_call_or_address_taken_entry_preserves_callback(self):
+    def test_internal_call_or_address_taken_context_can_overlap_its_owner(self):
         from tools.disasm.engine import Instruction
         for call in (False, True):
             with self.subTest(call=call):
@@ -773,8 +773,12 @@ class NativeDiscovery(unittest.TestCase):
                     0x10055, 5, 'call' if call else 'mov', '0x1002e', '',
                     is_call=call, call_target=0x1002e if call else None,
                     imm_ref=None if call else 0x1002e)
-                self.assertFalse(_repair_weak_callback_clamps(det))
+                original = det.functions[0x1002e]
+                self.assertTrue(_repair_weak_callback_clamps(det))
+                self.assertEqual(det.functions[0x10020].end, 0x1005f)
+                self.assertIs(det.functions[0x1002e], original)
                 self.assertIn(0x1002e, det.functions)
+                self.assertNotIn(0x1002e, det._absorbed)
 
     def test_restored_parent_frame_cannot_absorb_callback(self):
         from tools.disasm.engine import Instruction
