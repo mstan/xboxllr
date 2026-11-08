@@ -194,11 +194,25 @@ def dialog_template(title):
     return bytes(data)
 
 
+def show_linux(session):
+    from native_linux_entry import message
+    try:
+        output = export_report(session.path)
+        details = ('Shareable diagnostic ZIP:\n' + str(output) +
+                   '\n\nAttach this ZIP to your bug report. It contains selected runtime '
+                   'diagnostics and recorded controller inputs. Console keys, EEPROM '
+                   'and saved games stay private. Do not upload PRIVATE-DO-NOT-SHARE.')
+    except (OSError, ValueError, zipfile.BadZipFile):
+        details = ('Could not prepare the diagnostic ZIP. Check free disk space and '
+                   'write access. Local session: ' + str(session.path) +
+                   '\n\nDo not upload PRIVATE-DO-NOT-SHARE; it contains private console data.')
+    message(session.report.get('title', 'The game') + ' stopped unexpectedly',
+            failure_text(session.report) + '\n\n' + details)
+
+
 def show(session):
     if os.name != 'nt':
-        from native_linux_entry import message
-        message(session.report.get('title', 'The game') + ' stopped unexpectedly',
-                failure_text(session.report) + '\n\nLocal diagnostic report: ' + str(session.path))
+        show_linux(session)
         return
     user = c.WinDLL('user32', use_last_error=True)
     user.SetDlgItemTextW.argtypes = [c.c_void_p, c.c_int, c.c_wchar_p]

@@ -184,6 +184,9 @@ def stage(definition, runtime, cache, launcher, storage, output, revisions=(),
         'Original saves require their original console signing identity. New local saves use a private local identity.\n'
         'Native Linux x86_64, Vulkan 1.3 graphics. No Wine or Proton runtime.\n'
         'The optional Xbox firmware startup animation is unavailable in this Linux build.\n'
+        'Input recording is under Mods > Crash and input logs.\n'
+        'After a crash, the message gives the path to a shareable diagnostic ZIP.\n'
+        'Attach that ZIP to your bug report; do not upload PRIVATE-DO-NOT-SHARE.\n'
         'Matching project and prepared dependency source archives are inside sources/.\n'
         'See notices for project and third-party terms.\n')
     record = dict(schema='xboxllr.native-preview.v1', platform='linux-x86_64', application_id=app_id,
