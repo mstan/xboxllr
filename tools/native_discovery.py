@@ -851,17 +851,9 @@ def install(module):
             original_tables(self, sections)
         finally:
             self.image = image
-        # Pointer-looking coefficients can land inside a known body or in a
-        # gap before that body is discovered. Reaching a return does not prove
-        # the saved frame exists. Keep qualified aliases and original context
-        # consumers; otherwise a data word cannot establish that frame.
-        new_aliases = set(self._alias_entries) - previous_aliases
-        unframed = {address for address in new_aliases
-                    if not self._starts_after_boundary(address) and
-                    self.engine.entry_pops_unsaved(address)}
-        if unframed:
-            for address in unframed - _original_entry_contexts(self, sections):
-                del self._alias_entries[address]
+        # The donor records these as overlapping context aliases after fixing
+        # whole-function bounds. Keep that representation without treating the
+        # data word as an independent saved-frame or ordinary ABI proof.
         return xpp_registration_entries(self, sections) or bool(
             set(self._alias_entries) - previous_aliases)
 
