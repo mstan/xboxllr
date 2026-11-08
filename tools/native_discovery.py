@@ -282,8 +282,45 @@ def _bounded_table_after(self, address, upper):
     return None
 
 
+def _catch_resume_context_entries(detector, sections, states, count, table):
+    """Recognize constant resume addresses returned by original catch handlers.
+
+    The bounded Win32 FuncInfo try map identifies each catch handler. A handler
+    consisting of MOV EAX, address; RET returns a continuation in the original
+    frame, not an ordinary function pointer. Preserve existing candidates for
+    those continuations without seeding arbitrary address-looking constants.
+    """
+    if not 0 < count <= 4096:
+        return set()
+    blocks = detector.image.read_bytes_at_va(table, count * 20)
+    if blocks is None or len(blocks) != count * 20:
+        return set()
+    resumes, total = set(), 0
+    for index in range(count):
+        low, high, catch_high, catches, handlers = struct.unpack_from(
+            '<iiiII', blocks, index * 20)
+        total += catches
+        if not (0 <= low <= high <= catch_high < states and
+                0 < catches <= 4096 and total <= 4096):
+            return set()
+        records = detector.image.read_bytes_at_va(handlers, catches * 16)
+        if records is None or len(records) != catches * 16:
+            return set()
+        for catch in range(catches):
+            _, _, _, handler = struct.unpack_from('<4I', records, catch * 16)
+            if detector.image.get_section_at_va(handler) not in sections:
+                return set()
+            body = detector.image.read_bytes_at_va(handler, 6)
+            if body is None or len(body) != 6 or body[0] != 0xb8 or body[5] != 0xc3:
+                continue
+            resume = struct.unpack_from('<I', body, 1)[0]
+            if detector.image.get_section_at_va(resume) in sections:
+                resumes.add(resume)
+    return resumes
+
+
 def _unwind_context_entries(detector, sections):
-    """Retain frame-dependent actions referenced by bounded MSVC metadata.
+    """Retain frame-dependent actions/resumes referenced by bounded MSVC metadata.
 
     A decoded mov-EAX/near-jump thunk references FuncInfo. Its recognized magic,
     bounded unwind array, decreasing states and code-backed actions establish
@@ -308,7 +345,7 @@ def _unwind_context_entries(detector, sections):
         header = detector.image.read_bytes_at_va(address, 28)
         if header is None or len(header) != 28:
             continue
-        magic, count, table, _, _, _, _ = struct.unpack('<7I', header)
+        magic, count, table, tries, try_table, _, _ = struct.unpack('<7I', header)
         if magic & 0x1fffffff not in (0x19930520, 0x19930521, 0x19930522) or not 0 < count <= 4096:
             continue
         data = detector.image.read_bytes_at_va(table, count * 8)
@@ -324,6 +361,8 @@ def _unwind_context_entries(detector, sections):
                 entries.add(action)
         else:
             actions.update(entries)
+            actions.update(_catch_resume_context_entries(
+                detector, sections, count, tries, try_table))
     return actions
 
 

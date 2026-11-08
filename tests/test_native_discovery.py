@@ -569,6 +569,48 @@ class NativeDiscovery(unittest.TestCase):
         self.assertFalse(det._pass_data_ptr_targets([text]))
         self.assertEqual(det._alias_entries[0x10022], 0x10026)
 
+    def catch_resume_epilogue(self, *, tries=1, low=0, high=0, catch_high=1,
+                              catches=1, handler=0x10010, resume=0x10022,
+                              returns=True):
+        det, text = self.unwind_epilogue(count=2)
+        storage = det.image.sections[1]
+        unwind, try_map, handlers = 0x30024, 0x30034, 0x30048
+        metadata = struct.pack('<7I', 0x19930520, 2, unwind, tries, try_map, 0, 0)
+        metadata += struct.pack('<iIiI', -1, 0, -1, 0)
+        metadata += struct.pack('<iiiII', low, high, catch_high, catches, handlers)
+        metadata += struct.pack('<4I', 0, 0, 0, handler)
+        raw = bytearray(det.image.raw_data[:storage.raw_addr + 8])
+        raw[0x10:0x16] = b'\xb8' + struct.pack('<I', resume) + (b'\xc3' if returns else b'\xcc')
+        det.image.raw_data = bytes(raw) + metadata
+        storage.raw_size = storage.virtual_size = 8 + len(metadata)
+        for address in list(det.engine.instructions):
+            if 0x10010 <= address < 0x10016:
+                del det.engine.instructions[address]
+        det.engine.decode_at(0x10010)
+        det.engine.decode_at(0x10015)
+        return det, text
+
+    def test_original_catch_return_preserves_its_frame_dependent_resume(self):
+        det, text = self.catch_resume_epilogue()
+        original = det.image.raw_data
+        self.assertTrue(det.engine.entry_pops_unsaved(0x10022))
+        self.assertEqual(_unwind_context_entries(det, [text]), {0x10022})
+        self.assertFalse(det._candidates)  # Recognition does not seed functions.
+        det._add_candidate(0x10022, 0.86, 'imm_ref_target')
+        self.assertIn(0x10022, det._candidates)
+        self.assertEqual(det.image.raw_data, original)
+
+    def test_catch_resume_requires_bounded_original_metadata_and_code(self):
+        for options in (dict(tries=0), dict(tries=4097), dict(low=-1),
+                        dict(high=2), dict(catch_high=2), dict(catches=0),
+                        dict(catches=4097), dict(handler=0x30000),
+                        dict(resume=0x30000), dict(returns=False)):
+            with self.subTest(options=options):
+                det, text = self.catch_resume_epilogue(**options)
+                self.assertFalse(_unwind_context_entries(det, [text]))
+                det._add_candidate(0x10022, 0.86, 'imm_ref_target')
+                self.assertNotIn(0x10022, det._candidates)
+
     def test_lone_pointer_cannot_split_an_existing_body(self):
         det, text = self.detector()
         det.functions[0x10010] = SimpleNamespace(start=0x10010, end=0x10023)
