@@ -30,15 +30,17 @@ a supplied code reference, a decoded instruction boundary, a complete body,
 saved-register consistency and no intervening known entry. Bink data sections
 do not receive the assembly-section exception.
 
-A data word cannot establish a callable entry that restores registers it never
-saved, including entries inside known bodies. Previously qualified aliases,
-decoded entry boundaries, original call/branch/jump-table targets, and bounded
-MSVC unwind contexts remain eligible. The unwind check follows an original
-metadata-reference thunk and validates its header, bounded state array and code
-actions; it preserves context entries without supplying new symbol seeds.
-Redundant loop views may disappear while their control flow remains in the
-unchanged parent. Authored fixtures exercise rejection and context preservation;
-original image bytes remain unchanged.
+A data-word guess that restores unsaved registers cannot become a primary
+function-boundary candidate. Donor context aliases remain separate from those
+candidates and may overlap a proper body without splitting its extent. Retaining
+such a view does not establish an ordinary caller contract or a saved frame;
+its original role, generated body and required entry state need qualification.
+Previously qualified aliases, decoded entry boundaries, original control-flow
+targets and bounded MSVC unwind contexts remain eligible. The unwind check follows
+an original metadata-reference thunk and validates its header, bounded state array
+and code actions. Invalid metadata supplies no frame authority. Authored fixtures
+exercise these distinctions without changing original image bytes or adding
+symbol seeds.
 
 On Getting Up, this recovers 15 independently MAP-labelled Bink kernels:
 46,125 entries become 46,140, with no removed starts or changed existing records.
