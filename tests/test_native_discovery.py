@@ -6,6 +6,7 @@ import struct
 import sys
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
@@ -678,7 +679,8 @@ class NativeDiscovery(unittest.TestCase):
         self.assertTrue(xpp_registration_entries(det, [section]))
 
     def weak_callback_clamp(self, *, method='imm_ref_target', frame_free=False,
-                            crossing=True, tail=False, called=False):
+                            crossing=True, tail=False, called=False,
+                            parent_method='seed', allocating_frame=True, stack_reset=False):
         code = bytearray(b'\xcc'*0x41)
         # A saved-register frame has an early return and a later conditional
         # exit. The weak block between them uses that same original frame.
@@ -686,8 +688,12 @@ class NativeDiscovery(unittest.TestCase):
         code[14:29] = bytes.fromhex('b801000000e8280000005e83c404c3')
         code[0x30:0x3f] = bytes.fromhex('b82a000000e8060000005e83c404c3')
         code[0x40] = 0xc3
+        if not allocating_frame:
+            code[:4] = b'\x90'*4
         if frame_free:
             code[14:20] = bytes.fromhex('b801000000c3')
+        if stack_reset:
+            code[14:22] = bytes.fromhex('8b65e85e83c404c3')
         if not crossing:
             code[8] = 0
         if tail:
@@ -695,8 +701,8 @@ class NativeDiscovery(unittest.TestCase):
         det, _ = self.detector(prefix=b'', body=bytes(code), pointer=False)
         function = self.module.Function
         det.functions = {
-            0x10020: function(0x10020, 0x1002e, 'parent', '.text', 1., 'seed'),
-            0x1002e: function(0x1002e, 0x10034 if frame_free else 0x1003d,
+            0x10020: function(0x10020, 0x1002e, 'parent', '.text', 1., parent_method),
+            0x1002e: function(0x1002e, 0x10036 if stack_reset else 0x10034 if frame_free else 0x1003d,
                               'weak', '.text', .8, method),
             0x10060: function(0x10060, 0x10061, 'callee', '.text', 1., 'seed'),
         }
@@ -727,6 +733,67 @@ class NativeDiscovery(unittest.TestCase):
                 self.assertFalse(_repair_weak_callback_clamps(det))
                 self.assertIn(0x1002e, det.functions)
                 self.assertEqual(det.functions[0x10020].end, 0x1002e)
+
+    def test_original_allocating_fpo_frame_establishes_weak_callback_owner(self):
+        det = self.weak_callback_clamp(parent_method='imm_ref_target')
+        self.assertTrue(_repair_weak_callback_clamps(det))
+        self.assertEqual(det.functions[0x10020].end, 0x1005f)
+
+    def test_unreferenced_guess_without_original_frame_cannot_absorb_callback(self):
+        det = self.weak_callback_clamp(parent_method='imm_ref_target', allocating_frame=False)
+        self.assertFalse(_repair_weak_callback_clamps(det))
+        self.assertIn(0x1002e, det.functions)
+
+    def test_original_external_control_consumers_preserve_callback(self):
+        from tools.disasm.engine import Instruction
+        for call in (False, True):
+            with self.subTest(call=call):
+                det = self.weak_callback_clamp()
+                det.engine.instructions[0x10010] = Instruction(
+                    0x10010, 5 if call else 2, 'call' if call else 'jne', '0x1002e', '',
+                    is_call=call, is_cond_jump=not call,
+                    call_target=0x1002e if call else None,
+                    jump_target=None if call else 0x1002e)
+                self.assertFalse(_repair_weak_callback_clamps(det))
+                self.assertIn(0x1002e, det.functions)
+                self.assertEqual(det.functions[0x10020].end, 0x1002e)
+
+    def test_registered_unwind_context_preserves_callback(self):
+        det = self.weak_callback_clamp()
+        with patch('native_discovery._unwind_context_entries', return_value={0x1002e}):
+            self.assertFalse(_repair_weak_callback_clamps(det))
+        self.assertIn(0x1002e, det.functions)
+
+    def test_internal_call_or_address_taken_entry_preserves_callback(self):
+        from tools.disasm.engine import Instruction
+        for call in (False, True):
+            with self.subTest(call=call):
+                det = self.weak_callback_clamp()
+                det.engine.instructions[0x10055] = Instruction(
+                    0x10055, 5, 'call' if call else 'mov', '0x1002e', '',
+                    is_call=call, call_target=0x1002e if call else None,
+                    imm_ref=None if call else 0x1002e)
+                self.assertFalse(_repair_weak_callback_clamps(det))
+                self.assertIn(0x1002e, det.functions)
+
+    def test_restored_parent_frame_cannot_absorb_callback(self):
+        from tools.disasm.engine import Instruction
+        det = self.weak_callback_clamp()
+        det.engine.instructions[0x10024] = Instruction(0x10024, 1, 'pop', 'esi', '')
+        self.assertFalse(_repair_weak_callback_clamps(det))
+        self.assertIn(0x1002e, det.functions)
+
+    def test_stack_reset_context_is_not_absorbed_as_callback_guess(self):
+        det = self.weak_callback_clamp(stack_reset=True)
+        self.assertFalse(_repair_weak_callback_clamps(det))
+        self.assertIn(0x1002e, det.functions)
+
+    def test_missing_original_branch_target_cannot_produce_partial_repair(self):
+        det = self.weak_callback_clamp()
+        det.engine.instructions.pop(0x10050)
+        self.assertFalse(_repair_weak_callback_clamps(det))
+        self.assertEqual(det.functions[0x10020].end, 0x1002e)
+        self.assertIn(0x1002e, det.functions)
 
     def test_final_callback_repair_requires_original_crossing_without_direct_tail(self):
         for options in ({'crossing': False}, {'tail': True}):

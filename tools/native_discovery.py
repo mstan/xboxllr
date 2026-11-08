@@ -352,6 +352,22 @@ def _text_literal_prefix(detector, address):
             sum(65 <= value <= 90 or 97 <= value <= 122 for value in text) >= 6)
 
 
+def _allocating_saved_frame(detector, address):
+    """Recognize the FPO equivalent of an established saved-register frame."""
+    from capstone.x86 import X86_OP_IMM, X86_OP_REG
+    operations = list(detector.engine._cs.disasm(
+        detector.image.read_bytes_at_va(address, 16) or b'', address, count=2))
+    if len(operations) != 2:
+        return False
+    reserve, save = operations
+    return (reserve.mnemonic == 'sub' and len(reserve.operands) == 2 and
+            reserve.operands[0].type == X86_OP_REG and reserve.operands[0].size == 4 and
+            reserve.reg_name(reserve.operands[0].reg) == 'esp' and
+            reserve.operands[1].type == X86_OP_IMM and
+            0 < reserve.operands[1].imm <= 4096 and reserve.operands[1].imm % 4 == 0 and
+            save.mnemonic == 'push' and save.op_str in ('ebx', 'esi', 'edi', 'ebp'))
+
+
 def _crossed_weak_callbacks(detector):
     """Find final callback guesses that cut an established caller's frame.
 
@@ -363,13 +379,23 @@ def _crossed_weak_callbacks(detector):
     for start, body in sorted(detector.functions.items()):
         if detector.functions.get(start) is not body:
             continue
-        if not (body.called_by or body.has_prologue or
-                body.detection_method == 'entry_point' or
-                body.detection_method.startswith('seed')):
-            continue
         weak = detector.functions.get(body.end)
         if (weak is None or weak.detection_method != 'imm_ref_target' or
                 weak.called_by or weak.has_prologue):
+            continue
+        if not (body.called_by or body.has_prologue or
+                body.detection_method == 'entry_point' or
+                body.detection_method.startswith('seed') or
+                _allocating_saved_frame(detector, start)):
+            continue
+        weak_instructions = detector.engine.get_instructions_in_range(weak.start, weak.end)
+        if (not weak_instructions or not weak_instructions[-1].is_ret or
+                weak_instructions[-1].end_address != weak.end):
+            continue
+        # An explicit stack reset may be an independently entered exception
+        # handler. Its transfer contract needs separate original evidence.
+        if any(i.mnemonic == 'leave' or i.mnemonic == 'mov' and
+               i.op_str.split(',')[0].strip() in ('esp', 'sp') for i in weak_instructions):
             continue
         section = detector.image.get_section_at_va(start)
         if section is None:
@@ -383,23 +409,75 @@ def _crossed_weak_callbacks(detector):
         if any(i.is_jump and not i.is_cond_jump and i.jump_target == weak.start
                for i in instructions):
             continue
-        if detector.engine.entry_pops_unsaved(weak.start):
-            yield body, weak, following, section
+        unsaved = set(detector.engine.entry_pops_unsaved(weak.start))
+        if not unsaved:
+            continue
+        # Require a still-live original save before the crossing branch. Saves
+        # after an earlier conditional are not a dominating frame witness.
+        saved = set()
+        branched = False
+        for instruction in instructions:
+            operand = instruction.op_str.split(',')[0].strip()
+            if (instruction.is_call or instruction.is_ret or instruction.mnemonic in
+                    ('pop', 'popal', 'popa', 'pushal', 'pusha', 'leave') or
+                    instruction.is_jump and not instruction.is_cond_jump or
+                    instruction.mnemonic in ('mov', 'add', 'lea', 'xchg') and
+                    operand in ('esp', 'sp')):
+                break
+            if not branched and instruction.mnemonic == 'push':
+                saved.add(operand)
+            if instruction.is_cond_jump:
+                branched = True
+                if (instruction.jump_target is not None and
+                        weak.start <= instruction.jump_target < following and
+                        unsaved <= saved):
+                    yield body, weak, following, section
+                    break
 
 
 def _repair_weak_callback_clamps(detector):
     """Remeasure only proved final frame contexts with the existing walker."""
+    candidates = list(_crossed_weak_callbacks(detector))
+    if not candidates:
+        return False
+    registered = _unwind_context_entries(detector, detector.image.get_code_sections())
+    weak_starts = {weak.start for _, weak, _, _ in candidates}
+    incoming = {}
+    independent = set()
+    for instruction in detector.engine.instructions.values():
+        if instruction.imm_ref in weak_starts:
+            independent.add(instruction.imm_ref)
+        if instruction.is_call and instruction.call_target in weak_starts:
+            independent.add(instruction.call_target)
+        target = (instruction.call_target if instruction.is_call else
+                  instruction.jump_target if instruction.is_branch else None)
+        if target in weak_starts:
+            incoming.setdefault(target, []).append(instruction.address)
     changed = False
-    for body, weak, following, section in _crossed_weak_callbacks(detector):
+    for body, weak, following, section in candidates:
+        if (detector.functions.get(body.start) is not body or
+                detector.functions.get(weak.start) is not weak or
+                weak.start in registered or weak.start in independent):
+            continue
+        previous = (dict(detector.functions), dict(detector._candidates), set(detector._absorbed))
         end = detector._find_function_end(
             body.start, following, section.virtual_addr + section.virtual_size)
-        if end <= weak.start:
+        instructions = detector.engine.get_instructions_in_range(body.start, body.end)
+        if (end <= weak.start or any(not body.start <= source < end
+                                    for source in incoming.get(weak.start, ())) or
+                any(i.is_cond_jump and i.jump_target is not None and
+                    weak.start <= i.jump_target < following and i.jump_target >= end
+                    for i in instructions)):
+            detector.functions, detector._candidates, detector._absorbed = previous
             continue
+        removed = set(previous[0]) - detector.functions.keys()
         body.end = end
         body.num_instructions = len(detector.engine.get_instructions_in_range(body.start, end))
         detector.functions.pop(weak.start, None)
         detector._candidates.pop(weak.start, None)
         detector._alias_entries.pop(weak.start, None)
+        for start in removed:
+            detector._alias_entries.pop(start, None)
         detector._absorbed.add(weak.start)
         changed = True
     if changed:
