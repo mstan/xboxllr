@@ -31,8 +31,8 @@ fetch() {
 }
 fetch 'https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage' \
     df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5 "$tools/linuxdeploy.AppImage"
-fetch 'https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage' \
-    62aebc77c2149e96b593b94da9bbd1881e0984a56399ff6d7a03b7ddd7c9ce68 "$tools/appimagetool.AppImage"
+fetch 'https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage' \
+    ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0 "$tools/appimagetool.AppImage"
 fetch 'https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz' \
     ce4f6d0a6cfdb3bed6e44c2f9affd85943c76a42e25ad3a259002f31d6fb8a20 "$tools/python.tar.gz"
 chmod +x "$tools/linuxdeploy.AppImage" "$tools/appimagetool.AppImage"
