@@ -495,7 +495,8 @@ def _fallthrough_flag_contexts(detector):
                 not suffix or not suffix[-1].is_ret or suffix[-1].end_address != weak.end):
             continue
         first = suffix[0]
-        if not (first.mnemonic.startswith(('set', 'cmov')) or first.is_cond_jump):
+        if first.address != weak.start or not (
+                first.mnemonic.startswith(('set', 'cmov')) or first.is_cond_jump):
             continue
         producer = None
         for instruction in reversed(prefix[-8:]):
@@ -515,10 +516,41 @@ def _fallthrough_flag_contexts(detector):
         unsaved = set(detector.engine.entry_pops_unsaved(weak.start))
         if not unsaved or not unsaved <= saved:
             continue
+        # An earlier return can restore this frame on a different path. Only
+        # inspect nodes on actual entry-to-cut paths; a terminal epilogue on
+        # another path does not consume the final path's saved registers.
+        by_address = {i.address: i for i in prefix}
+        successors, predecessors = {}, {}
+        for instruction in prefix:
+            following = set()
+            if not instruction.is_ret:
+                if not instruction.is_jump or instruction.is_cond_jump:
+                    following.add(instruction.end_address)
+                if instruction.is_branch and instruction.jump_target is not None:
+                    following.add(instruction.jump_target)
+            following &= by_address.keys() | {weak.start}
+            successors[instruction.address] = following
+            for target in following:
+                predecessors.setdefault(target, set()).add(instruction.address)
+        reachable, pending = set(), [start]
+        while pending:
+            address = pending.pop()
+            if address not in reachable:
+                reachable.add(address)
+                pending.extend(successors.get(address, ()))
+        ancestors, pending = set(), [weak.start]
+        while pending:
+            address = pending.pop()
+            if address not in ancestors:
+                ancestors.add(address)
+                pending.extend(predecessors.get(address, ()))
+        if weak.start not in reachable:
+            continue
+        live_prefix = [i for i in prefix if i.address in reachable & ancestors]
         if any(i.mnemonic == 'leave' or
                i.mnemonic == 'pop' and i.op_str.strip() in unsaved or
                i.mnemonic in ('mov', 'lea', 'xchg') and
-               i.op_str.split(',')[0].strip() in ('esp', 'sp') for i in prefix):
+               i.op_str.split(',')[0].strip() in ('esp', 'sp') for i in live_prefix):
             continue
         section = detector.image.get_section_at_va(start)
         if section is None:
@@ -984,18 +1016,22 @@ def install(module):
     def detect(self, sections=None):
         original_detect(self, sections)
         _repair_weak_callback_clamps(self)
-        _repair_weak_callback_clamps(self, flag_contexts=True)
-        numeric_entries = _indexed_numeric_byte_entries(self)
         # Final-output filtering leaves every earlier discovery/extent decision
         # intact. These unreferenced low-byte views have no call-graph edges.
         for address, body in list(self.functions.items()):
             if (body.detection_method == 'after_switch_table' and
                     not body.calls_to and not body.called_by and
-                    (_switch_index_data_window(self, address) is not None or
-                     address in numeric_entries)):
+                    _switch_index_data_window(self, address) is not None):
                 del self.functions[address]
                 self._candidates.pop(address, None)
                 self._alias_entries.pop(address, None)
+        # Begin these independent final corrections from the exact completed
+        # preceding-policy database, including its existing DATA exclusions.
+        _repair_weak_callback_clamps(self, flag_contexts=True)
+        for address in _indexed_numeric_byte_entries(self):
+            del self.functions[address]
+            self._candidates.pop(address, None)
+            self._alias_entries.pop(address, None)
         return len(self.functions)
 
     detector.detect_all = detect

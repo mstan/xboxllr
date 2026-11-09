@@ -875,22 +875,28 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(det.functions[0x10020].calls_to, [0x10060])
         self.assertEqual(det.functions[0x10060].called_by, [0x10020])
 
-    def flag_context_clamp(self, *, producer=True, early_restore=False):
+    def flag_context_clamp(self, *, producer=True, early_restore=False,
+                           early_return=False, parent_method='seed'):
         prefix = bytes.fromhex('83ec08535685db5e')
         if not producer:
             prefix = prefix[:5] + bytes.fromhex('9090') + prefix[7:]
         if early_restore:
             prefix = prefix[:4] + b'\x5b' + prefix[5:]
+        if early_return:
+            # One branch returns after its own complete epilogue; the other
+            # reaches the final flag consumer with both initial saves live.
+            prefix = bytes.fromhex('83ec08535685c9740b85db5e0f95c05b83c408c385db5e')
         suffix = bytes.fromhex('0f95c05b83c408c3')
         det, _ = self.detector(prefix=b'', body=prefix + suffix, pointer=False)
         function = self.module.Function
+        entry = 0x10020 + len(prefix)
         det.functions = {
-            0x10020: function(0x10020, 0x10028, 'parent', '.text', 1., 'seed'),
-            0x10028: function(0x10028, 0x10030, 'context', '.text', .88, 'tail_jump_alias'),
+            0x10020: function(0x10020, entry, 'parent', '.text', 1., parent_method),
+            entry: function(entry, entry + len(suffix), 'context', '.text', .88, 'tail_jump_alias'),
         }
         det._candidates = {a: (f.confidence, f.detection_method)
                            for a, f in det.functions.items()}
-        det._alias_entries[0x10028] = (.88, 'tail_jump_alias')
+        det._alias_entries[entry] = (.88, 'tail_jump_alias')
         return det
 
     def test_flag_context_retention_keeps_original_owner_and_alias(self):
@@ -909,6 +915,11 @@ class NativeDiscovery(unittest.TestCase):
                 det = self.flag_context_clamp(**options)
                 self.assertFalse(_repair_weak_callback_clamps(det, flag_contexts=True))
                 self.assertEqual(det.functions[0x10020].end, 0x10028)
+        det = self.flag_context_clamp()
+        first = det.engine.instructions.pop(0x10028)
+        first.address += 1
+        det.engine.instructions[first.address] = first
+        self.assertFalse(_repair_weak_callback_clamps(det, flag_contexts=True))
 
     def test_flag_context_recovery_does_not_absorb_independent_or_registered_entries(self):
         for field, value in [('has_prologue', True), ('called_by', [0x10010]),
@@ -919,6 +930,16 @@ class NativeDiscovery(unittest.TestCase):
         det = self.flag_context_clamp()
         with patch('native_discovery._unwind_context_entries', return_value={0x10028}):
             self.assertFalse(_repair_weak_callback_clamps(det, flag_contexts=True))
+
+    def test_fpo_weak_parent_keeps_flags_on_path_after_a_separate_early_return(self):
+        det = self.flag_context_clamp(early_return=True, parent_method='imm_ref_target')
+        entry = det.functions[0x10020].end
+        alias = det.functions[entry]
+        self.assertFalse(det.functions[0x10020].has_prologue)
+        self.assertFalse(det.functions[0x10020].called_by)
+        self.assertTrue(_repair_weak_callback_clamps(det, flag_contexts=True))
+        self.assertEqual(det.functions[0x10020].end, alias.end)
+        self.assertIs(det.functions[entry], alias)
 
     def test_final_callback_repair_preserves_independent_entry_contracts(self):
         for options in ({'method': 'seed_vtable_thunk'}, {'method': 'call_target'},
