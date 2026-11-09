@@ -62,6 +62,37 @@ class NativeTitleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'within the title root'):
             n.title_mod_inputs(self.source,self.data)
 
+    def test_dashboard_uses_the_exact_shipped_visual_registry(self):
+        source, data = n.definition(n.ROOT / 'titles/dashboard/title.toml')
+        selected = n.title_mod_inputs(source, data)
+        registry = (n.ROOT / 'pilots/native-title/visual_registry.c').resolve()
+        self.assertEqual(selected, {data['mods']['registry']: dict(
+            path=str(registry), sha256=n.digest(registry))})
+
+    def test_shared_visual_registry_changes_invalidate_title_identity(self):
+        framework = self.root / 'framework'
+        registry = framework / 'pilots/native-title/visual_registry.c'
+        registry.parent.mkdir(parents=True)
+        registry.write_text('/* authored shared registry */')
+        self.data['mods'] = dict(registry=os.path.relpath(registry, self.source.parent))
+        with patch.object(n, 'ROOT', framework):
+            original = n.identity(self.source, self.data, self.output)
+            registry.write_text('/* changed shared registry */')
+            self.assertNotEqual(original, n.identity(self.source, self.data, self.output))
+
+    def test_shared_registry_exception_does_not_admit_other_framework_inputs(self):
+        registry = n.ROOT / 'pilots/native-title/visual_registry.c'
+        other = n.ROOT / 'pilots/native-title/visual_mod_plan.h'
+        shared = str(registry)
+        outside = str(other)
+        local = self.source.parent / 'visuals.c'
+        local.write_text('/* authored local registry */')
+        for mods in (dict(registry=outside),
+                     dict(registry=shared, inputs=[outside]),
+                     dict(registry=local.name, inputs=[shared])):
+            with self.subTest(mods=mods), self.assertRaisesRegex(ValueError, 'within the title root'):
+                n.title_mod_inputs(self.source, dict(self.data, mods=mods))
+
     def test_unqualified_mod_and_interactive_automation_fail_before_spawn(self):
         with patch.object(n.subprocess,'Popen') as spawn:
             with self.assertRaisesRegex(ValueError,'owner-facing'):

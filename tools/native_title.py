@@ -124,10 +124,14 @@ def title_mod_inputs(source, data):
     inputs = [registry, *mods.get('inputs', [])]
     if any(not isinstance(p, str) or not p for p in inputs):
         raise ValueError('invalid title registry input')
+    shared_registry = (ROOT / 'pilots/native-title/visual_registry.c').resolve()
     result = {}
     for item in inputs:
         path = (root / item).resolve()
-        if not path.is_relative_to(root) or not path.is_file():
+        # Dashboard uses the shipped data-only registry. This exact file is
+        # still hashed below; other inputs must remain within the title root.
+        trusted_registry = item == registry and path == shared_registry
+        if not (path.is_relative_to(root) or trusted_registry) or not path.is_file():
             raise ValueError('title registry inputs must be files within the title root')
         result[item] = dict(path=str(path), sha256=digest(path))
     return result
