@@ -282,20 +282,21 @@ def _bounded_table_after(self, address, upper):
     return None
 
 
-def _catch_resume_context_entries(detector, sections, states, count, table):
-    """Recognize constant resume addresses returned by original catch handlers.
+def _catch_context_entries(detector, sections, states, count, table):
+    """Recognize registered catch entries and their constant frame resumes.
 
     The bounded Win32 FuncInfo try map identifies each catch handler. A handler
-    consisting of MOV EAX, address; RET returns a continuation in the original
-    frame, not an ordinary function pointer. Preserve existing candidates for
-    those continuations without seeding arbitrary address-looking constants.
+    may rethrow or stop instead of returning a continuation. Its registered
+    entry still needs to remain available. MOV EAX, address; RET additionally
+    identifies a continuation in the original frame. Preserve these contexts
+    without seeding arbitrary address-looking constants.
     """
     if not 0 < count <= 4096:
         return set()
     blocks = detector.image.read_bytes_at_va(table, count * 20)
     if blocks is None or len(blocks) != count * 20:
         return set()
-    resumes, total = set(), 0
+    entries, total = set(), 0
     for index in range(count):
         low, high, catch_high, catches, handlers = struct.unpack_from(
             '<iiiII', blocks, index * 20)
@@ -310,13 +311,17 @@ def _catch_resume_context_entries(detector, sections, states, count, table):
             _, _, _, handler = struct.unpack_from('<4I', records, catch * 16)
             if detector.image.get_section_at_va(handler) not in sections:
                 return set()
+            first = detector.image.read_bytes_at_va(handler, 1)
+            if first is None or len(first) != 1:
+                return set()
+            entries.add(handler)
             body = detector.image.read_bytes_at_va(handler, 6)
             if body is None or len(body) != 6 or body[0] != 0xb8 or body[5] != 0xc3:
                 continue
             resume = struct.unpack_from('<I', body, 1)[0]
             if detector.image.get_section_at_va(resume) in sections:
-                resumes.add(resume)
-    return resumes
+                entries.add(resume)
+    return entries
 
 
 def _unwind_context_entries(detector, sections):
@@ -361,7 +366,7 @@ def _unwind_context_entries(detector, sections):
                 entries.add(action)
         else:
             actions.update(entries)
-            actions.update(_catch_resume_context_entries(
+            actions.update(_catch_context_entries(
                 detector, sections, count, tries, try_table))
     return actions
 

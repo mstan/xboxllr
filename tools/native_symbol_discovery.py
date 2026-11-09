@@ -12,7 +12,7 @@ import re
 
 from aot_inventory import parse_xbe
 from native_guest_symbols import LIMIT, Symbols
-from native_discovery import _bounded_table_after, code_upper_bound
+from native_discovery import _bounded_table_after, _unwind_context_entries, code_upper_bound
 
 
 class QualifiedFunctions:
@@ -216,6 +216,7 @@ def install(module, qualified):
         ranges = getattr(self, '_xboxllr_pdb_ranges', None)
         if ranges is None:
             return
+        registered = None
         for start, body in list(self.functions.items()):
             if start in ranges.ends:
                 continue
@@ -232,6 +233,25 @@ def install(module, qualified):
             crossing = (body.end > owner_end or
                         first is not None and first.address + first.size > owner_end)
             if crossing:
+                # Existing aliases are skipped by the donor alias builder, so
+                # clamping _alias_entries alone leaves their old overrun in
+                # functions. A registered frame context has positive entry
+                # authority; remeasure it within the original owning bound.
+                # An instruction borrowing the next owner's bytes still fails.
+                if first is not None and first.address + first.size <= owner_end:
+                    if registered is None:
+                        registered = _unwind_context_entries(
+                            self, self.image.get_code_sections())
+                    if start in registered:
+                        end = self._find_function_end(start, None, owner_end)
+                        instructions = self.engine.get_instructions_in_range(start, end)
+                        if (start < end <= owner_end and instructions and
+                                instructions[-1].end_address == end):
+                            body.end = end
+                            body.num_instructions = len(instructions)
+                            if start in self._alias_entries:
+                                self._alias_entries[start] = end
+                            continue
                 self._candidates.pop(start, None)
                 self.functions.pop(start, None)
                 self._alias_entries.pop(start, None)

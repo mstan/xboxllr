@@ -685,11 +685,17 @@ class NativeDiscovery(unittest.TestCase):
         det, text = self.catch_resume_epilogue()
         original = det.image.raw_data
         self.assertTrue(det.engine.entry_pops_unsaved(0x10022))
-        self.assertEqual(_unwind_context_entries(det, [text]), {0x10022})
+        self.assertEqual(_unwind_context_entries(det, [text]), {0x10010, 0x10022})
         self.assertFalse(det._candidates)  # Recognition does not seed functions.
         det._add_candidate(0x10022, 0.86, 'imm_ref_target')
         self.assertIn(0x10022, det._candidates)
         self.assertEqual(det.image.raw_data, original)
+
+    def test_registered_nonreturning_catch_keeps_its_entry_without_seeding(self):
+        det, text = self.catch_resume_epilogue(returns=False)
+        self.assertEqual(_unwind_context_entries(det, [text]), {0x10010})
+        self.assertIn(0x10010, _original_entry_contexts(det, [text]))
+        self.assertFalse(det._candidates)
 
     def test_catch_resume_requires_bounded_original_metadata_and_code(self):
         for options in (dict(tries=0), dict(tries=4097), dict(low=-1),
@@ -698,7 +704,7 @@ class NativeDiscovery(unittest.TestCase):
                         dict(resume=0x30000), dict(returns=False)):
             with self.subTest(options=options):
                 det, text = self.catch_resume_epilogue(**options)
-                self.assertFalse(_unwind_context_entries(det, [text]))
+                self.assertNotIn(0x10022, _unwind_context_entries(det, [text]))
                 det._add_candidate(0x10022, 0.86, 'imm_ref_target')
                 self.assertIn(0x10022, det._candidates)
                 self.assertNotIn(0x10022, _original_entry_contexts(det, [text]))
