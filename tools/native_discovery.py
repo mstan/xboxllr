@@ -474,9 +474,64 @@ def _crossed_weak_callbacks(detector):
                     break
 
 
-def _repair_weak_callback_clamps(detector):
+def _fallthrough_flag_contexts(detector):
+    """Keep a saved-frame owner's local flags across an internal context.
+
+    Retaining a weak entry must not turn the owner's CMP/TEST and its flag
+    consumer into separate generated functions. The entry remains available
+    as a context view; no standalone incoming-flags ABI is inferred.
+    """
+    for start, body in sorted(detector.functions.items()):
+        weak = detector.functions.get(body.end)
+        if (weak is None or weak.detection_method not in
+                ('tail_jump_alias', 'imm_ref_target', 'after_switch_table') or
+                weak.has_prologue or weak.called_by or
+                not _allocating_saved_frame(detector, start)):
+            continue
+        prefix = detector.engine.get_instructions_in_range(start, body.end)
+        suffix = detector.engine.get_instructions_in_range(weak.start, weak.end)
+        if (not prefix or prefix[-1].end_address != weak.start or
+                prefix[-1].is_call or prefix[-1].is_branch or prefix[-1].is_ret or
+                not suffix or not suffix[-1].is_ret or suffix[-1].end_address != weak.end):
+            continue
+        first = suffix[0]
+        if not (first.mnemonic.startswith(('set', 'cmov')) or first.is_cond_jump):
+            continue
+        producer = None
+        for instruction in reversed(prefix[-8:]):
+            if instruction.mnemonic in ('cmp', 'test'):
+                producer = instruction
+                break
+            if instruction.mnemonic not in ('pop', 'push', 'mov', 'lea', 'nop'):
+                break
+        if producer is None:
+            continue
+        saved = set()
+        for instruction in prefix:
+            if instruction.is_call or instruction.is_branch or instruction.is_ret:
+                break
+            if instruction.mnemonic == 'push':
+                saved.add(instruction.op_str.strip())
+        unsaved = set(detector.engine.entry_pops_unsaved(weak.start))
+        if not unsaved or not unsaved <= saved:
+            continue
+        if any(i.mnemonic == 'leave' or
+               i.mnemonic == 'pop' and i.op_str.strip() in unsaved or
+               i.mnemonic in ('mov', 'lea', 'xchg') and
+               i.op_str.split(',')[0].strip() in ('esp', 'sp') for i in prefix):
+            continue
+        section = detector.image.get_section_at_va(start)
+        if section is None:
+            continue
+        following = min((a for a in detector.functions if a > weak.start),
+                        default=section.virtual_addr + section.virtual_size)
+        yield body, weak, following, section
+
+
+def _repair_weak_callback_clamps(detector, *, flag_contexts=False):
     """Remeasure only proved final frame contexts with the existing walker."""
-    candidates = list(_crossed_weak_callbacks(detector))
+    candidates = list(_fallthrough_flag_contexts(detector) if flag_contexts else
+                      _crossed_weak_callbacks(detector))
     if not candidates:
         return False
     registered = _unwind_context_entries(detector, detector.image.get_code_sections())
@@ -484,6 +539,8 @@ def _repair_weak_callback_clamps(detector):
     existing_starts = set(detector.functions)
     incoming = {}
     independent = set()
+    if flag_contexts:
+        independent.update(weak.start for _, weak, _, _ in candidates)
     for instruction in detector.engine.instructions.values():
         if instruction.imm_ref in existing_starts:
             independent.add(instruction.imm_ref)
@@ -663,6 +720,109 @@ def _original_entry_contexts(detector, sections):
     return entries
 
 
+def _indexed_numeric_byte_entries(detector):
+    """Identify weak table guesses through original bounded numeric readers.
+
+    This is an entry-role check, not a whole-array or index-domain proof.
+    Keep control/metadata roots and every unresolved address-sized word.
+    """
+    from capstone.x86 import X86_OP_REG, X86_OP_MEM, X86_OP_IMM
+    candidates = {a for a, f in detector.functions.items()
+                  if f.detection_method == 'after_switch_table' and
+                  not f.has_prologue and not f.called_by and not f.calls_to}
+    if not candidates:
+        return {}
+    instructions = sorted(detector.engine.instructions.values(), key=lambda i: i.address)
+    protected = _original_entry_contexts(detector, detector.image.get_code_sections())
+    protected.update(i.imm_ref for i in instructions if i.imm_ref in candidates)
+    candidates -= protected
+    numeric, bounded, references = {}, {}, {}
+
+    def owner(address, end):
+        return next((f for f in detector.functions.values()
+                     if f.start <= address and end <= f.end and
+                     address - f.start <= 4096 and
+                     (f.has_prologue or f.called_by or
+                      f.detection_method == 'entry_point' or
+                      f.detection_method.startswith('seed'))), None)
+
+    def decoded(instruction):
+        return next(detector.engine._cs.disasm(bytes.fromhex(instruction.bytes_hex),
+                                              instruction.address, count=1), None)
+
+    for position, instruction in enumerate(instructions):
+        if instruction.mnemonic not in ('mov', 'movzx', 'test', 'cmp') or 'byte ptr [' not in instruction.op_str:
+            continue
+        operation = decoded(instruction)
+        if operation is None or len(operation.operands) != 2:
+            continue
+        left, right = operation.operands
+        memory = right if operation.mnemonic in ('mov', 'movzx') else left
+        if (memory.type != X86_OP_MEM or memory.size != 1 or
+                not memory.mem.base or memory.mem.index or memory.mem.segment or
+                memory.mem.disp not in candidates or operation.disp_size != 4):
+            continue
+        address = memory.mem.disp
+        containing = owner(operation.address, operation.address + operation.size)
+        section = detector.image.get_section_at_va(operation.address)
+        if containing is None or section is None:
+            continue
+        if ((operation.mnemonic in ('mov', 'movzx') and left.type != X86_OP_REG) or
+                (operation.mnemonic in ('test', 'cmp') and right.type != X86_OP_IMM)):
+            continue
+        references.setdefault(address, set()).add(
+            section.raw_addr + operation.address - section.virtual_addr + operation.disp_offset)
+        if operation.mnemonic == 'movzx' and left.size == 4:
+            following = detector.engine.instructions.get(operation.address + operation.size)
+            mask = decoded(following) if following is not None else None
+            if (mask is not None and mask.mnemonic == 'and' and len(mask.operands) == 2 and
+                    mask.operands[0].type == X86_OP_REG and mask.operands[0].reg == left.reg and
+                    mask.operands[1].type == X86_OP_IMM and 0 < mask.operands[1].imm < 256 and
+                    owner(mask.address, mask.address + mask.size) is containing):
+                numeric[address] = operation.address
+        if operation.mnemonic != 'test' or not 0 < right.imm < 256 or position < 2:
+            continue
+        branch = instructions[position - 1]
+        if branch.mnemonic != 'jae' or branch.end_address != operation.address:
+            continue
+        compare_position = position - 2
+        scheduled = decoded(instructions[compare_position])
+        if (scheduled is not None and scheduled.mnemonic == 'mov' and
+                len(scheduled.operands) == 2 and scheduled.operands[0].type == X86_OP_MEM and
+                scheduled.operands[1].type == X86_OP_REG and compare_position > 0):
+            if instructions[compare_position].end_address != branch.address:
+                continue
+            compare_position -= 1
+        compare = decoded(instructions[compare_position])
+        following_address = instructions[compare_position + 1].address
+        if (compare is None or compare.mnemonic != 'cmp' or len(compare.operands) != 2 or
+                compare.address + compare.size != following_address or
+                compare.operands[0].type != X86_OP_REG or compare.operands[0].size != 4 or
+                compare.operands[0].reg != memory.mem.base or
+                compare.operands[1].type != X86_OP_IMM or
+                not 1 < compare.operands[1].imm <= 256 or
+                branch.jump_target is None or branch.jump_target < operation.address + operation.size or
+                owner(compare.address, branch.jump_target) is not containing):
+            continue
+        bounded[address] = dict(compare=compare.address, branch=branch.address,
+                                consumer=operation.address, entries=compare.operands[1].imm)
+    result = {}
+    for address in numeric.keys() & bounded.keys():
+        # A pointer stored anywhere outside these independently decoded numeric
+        # readers can still denote a caller-prepared code context. Retain it.
+        word = struct.pack('<I', address)
+        at = detector.image.raw_data.find(word)
+        unresolved = False
+        while at >= 0:
+            if at not in references[address]:
+                unresolved = True
+                break
+            at = detector.image.raw_data.find(word, at + 1)
+        if not unresolved:
+            result[address] = dict(bounded[address], numeric_mask_consumer=numeric[address])
+    return result
+
+
 def _parameter_data_windows(detector):
     """Prove minimum byte-table spans from a guarded parameter clamp loop.
 
@@ -824,12 +984,15 @@ def install(module):
     def detect(self, sections=None):
         original_detect(self, sections)
         _repair_weak_callback_clamps(self)
+        _repair_weak_callback_clamps(self, flag_contexts=True)
+        numeric_entries = _indexed_numeric_byte_entries(self)
         # Final-output filtering leaves every earlier discovery/extent decision
         # intact. These unreferenced low-byte views have no call-graph edges.
         for address, body in list(self.functions.items()):
             if (body.detection_method == 'after_switch_table' and
                     not body.calls_to and not body.called_by and
-                    _switch_index_data_window(self, address) is not None):
+                    (_switch_index_data_window(self, address) is not None or
+                     address in numeric_entries)):
                 del self.functions[address]
                 self._candidates.pop(address, None)
                 self._alias_entries.pop(address, None)

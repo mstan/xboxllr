@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries, _original_entry_contexts, _switch_index_data_window, _repair_weak_callback_clamps
+from native_discovery import aligned_boundary_entry, install, install_cache_key, xpp_registration_entries, _unwind_context_entries, _original_entry_contexts, _switch_index_data_window, _repair_weak_callback_clamps, _indexed_numeric_byte_entries
 from native_pilot import DONOR_PIN
 
 
@@ -91,6 +91,69 @@ class NativeDiscovery(unittest.TestCase):
         det = self.sentinel_switch()
         det.functions[0x10040].detection_method = 'after_switch_table'
         self.assertIsNone(_switch_index_data_window(det, 0x1003a))
+
+    def numeric_byte_array(self, *, extra_word=False, address_taken=False,
+                           real_call=False, wrong_mask_register=False,
+                           signed_guard=False, scheduled=False):
+        # Authored numeric byte flags, with unrelated locations and values.
+        target = 0x10100
+        prefix = bytes.fromhex('558bec83f808')
+        if scheduled:
+            prefix += bytes.fromhex('8945fc')  # MOV preserves EAX and flags.
+        prefix += bytes.fromhex(('7d' if signed_guard else '73') + '13')
+        prefix += bytes.fromhex('f680000101003c750a0fb68000010100')
+        prefix += bytes.fromhex('83e13c' if wrong_mask_register else '83e03c')
+        prefix += bytes.fromhex('5dc3')
+        code = bytearray(b'\xcc' * 0x180)
+        code[:len(prefix)] = prefix
+        code[0x100:0x108] = bytes([1, 4, 8, 12, 0, 32, 64, 128])
+        if address_taken:
+            code[0x40:0x45] = b'\xb8' + struct.pack('<I', target)
+        if real_call:
+            code[0x40:0x45] = b'\xe8' + struct.pack('<i', target - 0x10045)
+        tail = struct.pack('<I', target) if extra_word else bytes(4)
+        text = self.section_type('.text', 0x10000, len(code), 0, len(code), False, True, '')
+        rdata = self.section_type('.rdata', 0x20000, len(tail), len(code), len(tail), False, False, '')
+        image = self.image_type('authored numeric readers', bytes(code) + tail,
+                                0x10000, 0x10000, 0x10000, 0, [text, rdata])
+        engine = self.engine_type(image)
+        engine.linear_sweep(text)
+        strong = SimpleNamespace(start=0x10000, end=0x10000 + len(prefix),
+                                 detection_method='entry_point', has_prologue=True,
+                                 called_by=[], calls_to=[])
+        weak = SimpleNamespace(start=target, end=target + 32,
+                               detection_method='after_switch_table', has_prologue=False,
+                               called_by=[], calls_to=[])
+        return SimpleNamespace(image=image, engine=engine,
+                               functions={strong.start: strong, target: weak})
+
+    def test_bounded_numeric_byte_readers_exclude_only_weak_data_guesses(self):
+        for scheduled in (False, True):
+            with self.subTest(scheduled=scheduled):
+                det = self.numeric_byte_array(scheduled=scheduled)
+                proof = _indexed_numeric_byte_entries(det)
+                self.assertEqual(set(proof), {0x10100})
+                self.assertEqual(proof[0x10100]['entries'], 8)
+                self.assertNotEqual(proof[0x10100]['consumer'],
+                                    proof[0x10100]['numeric_mask_consumer'])
+
+    def test_numeric_data_filter_preserves_entry_and_unresolved_pointer_authority(self):
+        for options in ({'extra_word': True}, {'address_taken': True}, {'real_call': True}):
+            with self.subTest(options=options):
+                self.assertEqual(_indexed_numeric_byte_entries(self.numeric_byte_array(**options)), {})
+        det = self.numeric_byte_array()
+        with patch('native_discovery._unwind_context_entries', return_value={0x10100}):
+            self.assertEqual(_indexed_numeric_byte_entries(det), {})
+        for field, value in [('has_prologue', True), ('called_by', [0x10040]),
+                             ('calls_to', [0x10040]), ('detection_method', 'seed')]:
+            det = self.numeric_byte_array()
+            setattr(det.functions[0x10100], field, value)
+            self.assertEqual(_indexed_numeric_byte_entries(det), {})
+
+    def test_numeric_data_filter_requires_unsigned_bound_and_matching_numeric_result(self):
+        for options in ({'wrong_mask_register': True}, {'signed_guard': True}):
+            with self.subTest(options=options):
+                self.assertEqual(_indexed_numeric_byte_entries(self.numeric_byte_array(**options)), {})
 
     def test_lone_callback_after_return_is_recovered_without_symbols(self):
         det, text = self.detector()
@@ -811,6 +874,51 @@ class NativeDiscovery(unittest.TestCase):
         # The removed view's outgoing CALL now belongs to its retained parent.
         self.assertEqual(det.functions[0x10020].calls_to, [0x10060])
         self.assertEqual(det.functions[0x10060].called_by, [0x10020])
+
+    def flag_context_clamp(self, *, producer=True, early_restore=False):
+        prefix = bytes.fromhex('83ec08535685db5e')
+        if not producer:
+            prefix = prefix[:5] + bytes.fromhex('9090') + prefix[7:]
+        if early_restore:
+            prefix = prefix[:4] + b'\x5b' + prefix[5:]
+        suffix = bytes.fromhex('0f95c05b83c408c3')
+        det, _ = self.detector(prefix=b'', body=prefix + suffix, pointer=False)
+        function = self.module.Function
+        det.functions = {
+            0x10020: function(0x10020, 0x10028, 'parent', '.text', 1., 'seed'),
+            0x10028: function(0x10028, 0x10030, 'context', '.text', .88, 'tail_jump_alias'),
+        }
+        det._candidates = {a: (f.confidence, f.detection_method)
+                           for a, f in det.functions.items()}
+        det._alias_entries[0x10028] = (.88, 'tail_jump_alias')
+        return det
+
+    def test_flag_context_retention_keeps_original_owner_and_alias(self):
+        det = self.flag_context_clamp()
+        alias = det.functions[0x10028]
+        self.assertTrue(_repair_weak_callback_clamps(det, flag_contexts=True))
+        self.assertEqual(det.functions[0x10020].end, 0x10030)
+        self.assertIs(det.functions[0x10028], alias)
+        self.assertEqual(det._candidates[0x10028], (.88, 'tail_jump_alias'))
+        self.assertIn(0x10028, det._alias_entries)
+        self.assertFalse(_repair_weak_callback_clamps(det, flag_contexts=True))
+
+    def test_flag_context_recovery_requires_produced_flags_and_live_saved_frame(self):
+        for options in ({'producer': False}, {'early_restore': True}):
+            with self.subTest(options=options):
+                det = self.flag_context_clamp(**options)
+                self.assertFalse(_repair_weak_callback_clamps(det, flag_contexts=True))
+                self.assertEqual(det.functions[0x10020].end, 0x10028)
+
+    def test_flag_context_recovery_does_not_absorb_independent_or_registered_entries(self):
+        for field, value in [('has_prologue', True), ('called_by', [0x10010]),
+                             ('detection_method', 'seed')]:
+            det = self.flag_context_clamp()
+            setattr(det.functions[0x10028], field, value)
+            self.assertFalse(_repair_weak_callback_clamps(det, flag_contexts=True))
+        det = self.flag_context_clamp()
+        with patch('native_discovery._unwind_context_entries', return_value={0x10028}):
+            self.assertFalse(_repair_weak_callback_clamps(det, flag_contexts=True))
 
     def test_final_callback_repair_preserves_independent_entry_contracts(self):
         for options in ({'method': 'seed_vtable_thunk'}, {'method': 'call_target'},
