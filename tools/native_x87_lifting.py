@@ -99,8 +99,11 @@ def main():
     donor=Path(sys.argv[1]).resolve();report=Path(sys.argv[2]).resolve()
     sys.path.insert(0,str(donor))
     from tools.recomp import lifter
+    from tools.recomp import translator
+    from native_image_reads import install_lifting
     if not Path(lifter.__file__).resolve().is_relative_to(donor):
         raise ValueError('CPU generator module resolved outside selected donor')
+    install_lifting(translator)
     install(lifter);sys.argv=['tools.recomp',*sys.argv[3:]]
     try:runpy.run_module('tools.recomp',run_name='__main__')
     finally:

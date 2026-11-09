@@ -1,3 +1,19 @@
+/* These authored headers and shared/interior backing ranges belong to the
+ * fixture, not the title's original allocator. Retain its caller reference
+ * while disposing only the host GPU view. Final original allocator routing
+ * has its own graphics_original_retirement_contract_test.inc coverage. */
+static void test_graphics_discard_caller_vertex(uint32_t header)
+{
+    AcquireSRWLockExclusive(&graphics_lock);
+    struct GraphicsVertexObject *owner=graphics_vertex(header);
+    CHECK(owner->external && owner->refs==1 && !owner->bindings && !owner->waiters && !owner->retire_original);
+    uint32_t saved[3];memcpy(saved,memory+header,sizeof(saved));
+    CHECK((saved[0]&0xffff)==1);
+    owner->refs=0;graphics_vertex_collect(owner);
+    ReleaseSRWLockExclusive(&graphics_lock);
+    CHECK(graphics_vertex_find(header)<0 && !memcmp(saved,memory+header,sizeof(saved)));
+}
+
 static void test_graphics_vertex_header_storage(void)
 {
     uint64_t resident=vm_committed(0,0x100000000ull);
@@ -82,9 +98,9 @@ static void test_graphics_vertices(void)
     }
     CHECK(call_graphics(PILOT_D3D_D3DResource_AddRef,&headers[0])==2 && MEM32(headers[0])==2);
     CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&headers[0])==1);
-    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&headers[0])==0);
+    test_graphics_discard_caller_vertex(headers[0]);
     CHECK(MEM32(allocation+4096)==0xa5b6c7d8 && MEM32(headers[0]+4)==(allocation&0x0fffffffu));
-    CHECK(call_graphics(PILOT_D3D_D3DResource_Release,&headers[1])==0);
+    test_graphics_discard_caller_vertex(headers[1]);
     CHECK(physical_find(allocation,8192) && !physical_find(allocation,8192)->borrowers);
     physical_free(allocation);CHECK(vm_committed(0,0x100000000ull)==resident);
     fprintf(stderr,"PASS: vertex ABI, real CPU/GPU bytes, persistent pointer updates, references and allocation-failure cleanup\n");

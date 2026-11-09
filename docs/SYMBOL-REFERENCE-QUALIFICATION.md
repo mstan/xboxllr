@@ -23,6 +23,67 @@ also requires a decoded terminal boundary, no overlapping instruction stream,
 no unsaved register restoration, and a complete body which does not cross an
 existing entry. A tail jump must name an existing function start.
 
+A further correction recognizes decoded multi-byte alignment after a terminal,
+bounded to 15 bytes. Bink assembly code sections may also use unreachable zero
+alignment or start a kernel at the section boundary. These cases still require
+a supplied code reference, a decoded instruction boundary, a complete body,
+saved-register consistency and no intervening known entry. Bink data sections
+do not receive the assembly-section exception.
+
+A data-word guess that restores unsaved registers cannot become a primary
+function-boundary candidate. Donor context aliases remain separate from those
+candidates and may overlap a proper body without splitting its extent. Retaining
+such a view does not establish an ordinary caller contract or a saved frame;
+its original role, generated body and required entry state need qualification.
+Previously qualified aliases, decoded entry boundaries, original control-flow
+targets and bounded MSVC unwind contexts remain eligible. The unwind check follows
+an original metadata-reference thunk and validates its header, bounded state array
+and code actions. Invalid metadata supplies no frame authority. Authored fixtures
+exercise these distinctions without changing original image bytes or adding
+symbol seeds.
+
+On Getting Up, this recovers 15 independently MAP-labelled Bink kernels:
+46,125 entries become 46,140, with no removed starts or changed existing records.
+All 15 complete bodies return with the original four-byte argument cleanup.
+Their generated shared-helper C matches actual original x86 execution for 300
+constructed input/state cases and 2,467,200 output/state bytes, including stack
+and preserved-register checks. This is body correctness evidence for that input;
+the final corpus, gameplay and runtime-performance gates remain separate.
+
+Unaided discovery also reuses the PDB path's trailing-switch-table check, with
+an additional decoded terminal/alignment requirement. All switch cases must
+precede the table; a direct or unresolved computed continuation prevents the
+cut. Interleaved tables retain their later code. On Getting Up this corrects
+73 extents, recovers one independently labelled callback and removes one false
+alias inside a bounded byte-index array. Call-graph changes are confined to the
+corrected, added and removed bodies. The 15 executed Bink kernel sources remain
+identical; the new callback lowers without unsupported operations, with its
+gameplay/runtime check still separate.
+
+Direct control flow into a shared return also keeps that return before a nearby
+table, including interior views whose dispatch belongs to the enclosing body.
+Actual table dispatches still skip decoded alignment into interleaved tables.
+Unaided unresolved computed transfers retain conservative extents. The supplied
+PDB path uses the same bounded table helper under its certified body limit.
+
+A bounded audit of the retained MAP references also ties 43,413 historical
+per-build missing labels to validated C++ unwind records and explicit accesses
+through the enclosing frame. These are compiler-local cleanup labels, not
+ordinary new-function gains or unique functions across titles. Their exact
+identities and source evidence remain private; the broader gap audit is open.
+
+A separately qualified private MAP seed set uses the existing explicit seed
+interface for Getting Up's 22 remaining ordinary entries. All are retained;
+two derived shared jump entries and three changed ranges have original-byte
+proof, with no unexplained call-graph changes. All 24 bodies lower completely.
+A representative recovered callback passes 20 original-x86/shared-helper
+executions, including argument values, both global stores and native stack/
+saved-register checks. Its unchanged original instructions have no PC-relative
+operands and execute at a host-selected address. The remaining 8,229 MAP labels
+are exactly 8,228 proved unwind actions and one registered exception-context
+handler. This closes this image's supplied-entry gap classification; the wider
+corpus and archived-game gameplay remain unqualified.
+
 | Independent reference | Named entries | Baseline matched | Corrected matched |
 | --- | ---: | ---: | ---: |
 | Sphinx and the Cursed Mummy | 7,689 | 7,668 | 7,671 |
@@ -81,6 +142,17 @@ Source identities and counts are in
 The full archive survey separately screens the XPP rule across the corpus;
 that screen is distinct from these full-pipeline comparisons.
 
+The 82 proposals without exact symbol references have since passed a separate
+static callability check across their 20 affected images. Original initializer
+loops directly call 20 proposed entries; original class lookup, device-field
+assignment and add/remove dispatch support the other 62. Independent matched
+PDB declarations corroborate the callback ABI, and all 82 proposed bodies decode
+through a `RET 4` matching the caller's four-byte argument. Checked libraries and
+wide zero-padded pointer lists are included. The admission function is unchanged
+from the merged base. This establishes callable entries; it does not transfer
+target names/types or establish execution, performance or final-bundle corpus
+qualification. The aggregate result is retained in the same qualification file.
+
 ## Rejected broad rule and remaining inputs
 
 An initial rule accepted any complete-looking terminator after an aligned,
@@ -104,7 +176,7 @@ The correction takes effect when a title is regenerated.
 
 ## Regression checks
 
-`tests/test_native_discovery.py` contains 19 authored positive and rejection
+`tests/test_native_discovery.py` contains 32 authored positive and rejection
 cases and is registered as `native_discovery` in CTest. Set `XLLE_CPU_DONOR` to
 the clean donor revision recorded in `tools/native_pilot.py`, then run:
 

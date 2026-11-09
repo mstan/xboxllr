@@ -3,6 +3,7 @@
 // No DIA dependency is needed by portable JSON lookup or normal title builds.
 #include <cstdio>
 #include <dia2.h>
+#include <cvconst.h>
 #include <map>
 #include <set>
 #include <string>
@@ -12,6 +13,34 @@
 static std::set<DWORD> seen;
 static std::map<DWORD, unsigned> counts;
 static std::vector<DWORD> type_refs;
+static std::set<DWORD> visited_scopes;
+static void constant_value(const VARIANT &value) {
+  long long signed_value = 0;
+  unsigned long long unsigned_value = 0;
+  unsigned bits = 0;
+  bool is_signed = false;
+  switch (value.vt) {
+  case VT_I1: signed_value = (signed char)value.cVal; bits = 8; is_signed = true; break;
+  case VT_I2: signed_value = value.iVal; bits = 16; is_signed = true; break;
+  case VT_I4: signed_value = value.lVal; bits = 32; is_signed = true; break;
+  case VT_INT: signed_value = value.intVal; bits = 32; is_signed = true; break;
+  case VT_I8: signed_value = value.llVal; bits = 64; is_signed = true; break;
+  case VT_UI1: unsigned_value = value.bVal; bits = 8; break;
+  case VT_UI2: unsigned_value = value.uiVal; bits = 16; break;
+  case VT_UI4: unsigned_value = value.ulVal; bits = 32; break;
+  case VT_UINT: unsigned_value = value.uintVal; bits = 32; break;
+  case VT_UI8: unsigned_value = value.ullVal; bits = 64; break;
+  default:
+    printf(",\"constant\":{\"kind\":\"unavailable\",\"variant_type\":%u}", value.vt);
+    return;
+  }
+  // Decimal strings retain all 64 bits through JSON consumers with doubles.
+  printf(",\"constant\":{\"kind\":\"integer\",\"bits\":%u,\"signed\":%s,\"value\":\"",
+         bits, is_signed ? "true" : "false");
+  if (is_signed) printf("%lld", signed_value);
+  else printf("%llu", unsigned_value);
+  printf("\"}");
+}
 static void quoted(const wchar_t *value) {
   std::string utf8;
   if (value) {
@@ -47,9 +76,9 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
   symbol->get_addressSection(&section);
   symbol->get_addressOffset(&offset);
   symbol->get_relativeVirtualAddress(&rva);
-  symbol->get_length(&length);
+  HRESULT length_hr = symbol->get_length(&length);
   symbol->get_dataKind(&kind);
-  symbol->get_offset(&field_offset);
+  HRESULT offset_hr = symbol->get_offset(&field_offset);
   symbol->get_locationType(&location);
   IDiaSymbol *type = nullptr;
   if (SUCCEEDED(symbol->get_type(&type)) && type) {
@@ -72,15 +101,102 @@ static void record(IDiaSymbol *symbol, DWORD parent = 0) {
   quoted(name);
   printf(",\"undecorated\":");
   quoted(pretty);
+  if (tag == SymTagUDT) {
+    BOOL packed = FALSE;
+    if (symbol->get_packed(&packed) == S_OK)
+      printf(",\"dia_packed\":%s", packed ? "true" : "false");
+    DWORD unmodified = 0;
+    if (symbol->get_unmodifiedTypeId(&unmodified) == S_OK && unmodified && unmodified != id) {
+      printf(",\"unmodified_type\":%lu", unmodified);
+      type_refs.push_back(unmodified);
+    }
+  }
+  if (location == LocIsBitField) {
+    DWORD position = 0;
+    // S_FALSE is missing metadata, distinct from a real bit position of zero.
+    if (symbol->get_bitPosition(&position) == S_OK)
+      printf(",\"bit_position\":%lu", position);
+    if (length_hr == S_OK)
+      printf(",\"bit_width\":%llu", length);
+    if (offset_hr == S_OK)
+      printf(",\"storage_offset\":%ld", field_offset);
+  }
+  if (location == LocIsConstant) {
+    VARIANT value;
+    VariantInit(&value);
+    if (symbol->get_value(&value) == S_OK)
+      constant_value(value);
+    else
+      printf(",\"constant\":{\"kind\":\"unavailable\"}");
+    VariantClear(&value);
+  }
+  if (tag == SymTagData) {
+    DWORD reg = 0, live_section = 0, live_offset = 0, live_count = 0;
+    ULONGLONG live_length = 0;
+    BOOL optimized = FALSE;
+    if (symbol->get_registerId(&reg) == S_OK)
+      printf(",\"register_id\":%lu", reg);
+    if (offset_hr == S_OK)
+      printf(",\"location_offset\":%ld", field_offset);
+    if (symbol->get_isOptimizedAway(&optimized) == S_OK)
+      printf(",\"optimized_away\":%s", optimized ? "true" : "false");
+    if (symbol->get_isLocationControlFlowDependent(&optimized) == S_OK)
+      printf(",\"control_flow_dependent\":%s", optimized ? "true" : "false");
+    if (symbol->get_countLiveRanges(&live_count) == S_OK)
+      printf(",\"live_range_count\":%lu", live_count);
+    if (symbol->get_liveRangeStartAddressSection(&live_section) == S_OK &&
+        symbol->get_liveRangeStartAddressOffset(&live_offset) == S_OK &&
+        symbol->get_liveRangeLength(&live_length) == S_OK)
+      printf(",\"live_section\":%lu,\"live_offset\":%lu,\"live_length\":%llu",
+             live_section, live_offset, live_length);
+  }
+  if (tag == SymTagFunction) {
+    DWORD reg = 0;
+    BOOL present = FALSE;
+    if (symbol->get_framePointerPresent(&present) == S_OK)
+      printf(",\"frame_pointer_present\":%s", present ? "true" : "false");
+    if (symbol->get_localBasePointerRegisterId(&reg) == S_OK)
+      printf(",\"local_base_register\":%lu", reg);
+    if (symbol->get_paramBasePointerRegisterId(&reg) == S_OK)
+      printf(",\"parameter_base_register\":%lu", reg);
+  }
+  if (tag == SymTagFunction || tag == SymTagData) {
+    DWORD lexical_parent = 0;
+    if (symbol->get_lexicalParentId(&lexical_parent) == S_OK)
+      printf(",\"lexical_parent\":%lu", lexical_parent);
+  }
+  if (tag == SymTagCompilandDetails) {
+    DWORD value = 0;
+    BSTR compiler = nullptr;
+    if (symbol->get_compilerName(&compiler) == S_OK && compiler) {
+      printf(",\"compiler_name\":"); quoted(compiler);
+    }
+    SysFreeString(compiler);
+#define COMPILER_PROPERTY(method, key) \
+    if (symbol->method(&value) == S_OK) printf(",\"" key "\":%lu", value)
+    COMPILER_PROPERTY(get_platform, "platform");
+    COMPILER_PROPERTY(get_language, "language");
+    COMPILER_PROPERTY(get_frontEndMajor, "frontend_major");
+    COMPILER_PROPERTY(get_frontEndMinor, "frontend_minor");
+    COMPILER_PROPERTY(get_frontEndBuild, "frontend_build");
+    COMPILER_PROPERTY(get_frontEndQFE, "frontend_qfe");
+    COMPILER_PROPERTY(get_backEndMajor, "backend_major");
+    COMPILER_PROPERTY(get_backEndMinor, "backend_minor");
+    COMPILER_PROPERTY(get_backEndBuild, "backend_build");
+    COMPILER_PROPERTY(get_backEndQFE, "backend_qfe");
+#undef COMPILER_PROPERTY
+  }
   printf("}\n");
   SysFreeString(name);
   SysFreeString(pretty);
   counts[tag]++;
 }
+static void scope_children(IDiaSymbol *scope, unsigned depth = 0);
 static void children(IDiaSymbol *parent, enum SymTagEnum tag,
                      bool fields = false) {
-  DWORD parent_id = 0;
+  DWORD parent_id = 0, parent_tag = 0;
   parent->get_symIndexId(&parent_id);
+  parent->get_symTag(&parent_tag);
   IDiaEnumSymbols *items = nullptr;
   if (FAILED(parent->findChildren(tag, nullptr, nsNone, &items)) || !items)
     return;
@@ -88,6 +204,16 @@ static void children(IDiaSymbol *parent, enum SymTagEnum tag,
   ULONG got = 0;
   while (items->Next(1, &item, &got) == S_OK && got) {
     record(item, parent_id);
+    if (tag == SymTagFunction && parent_tag == SymTagCompiland) {
+      DWORD function_id = 0;
+      item->get_symIndexId(&function_id);
+      // Global enumeration may already have emitted this function. Its DIA
+      // lexical parent can be global scope, so preserve the actual module edge.
+      printf("{\"tag\":-2,\"kind\":\"compiland_function\",\"id\":%lu,\"parent\":%lu}\n",
+             function_id, parent_id);
+    }
+    if (tag == SymTagFunction)
+      scope_children(item);
     if (fields) {
       children(item, SymTagData);
       children(item, SymTagBaseClass);
@@ -96,6 +222,67 @@ static void children(IDiaSymbol *parent, enum SymTagEnum tag,
     item = nullptr;
   }
   items->Release();
+}
+static void scope_children(IDiaSymbol *scope, unsigned depth) {
+  DWORD id = 0;
+  scope->get_symIndexId(&id);
+  if (!visited_scopes.insert(id).second)
+    return;
+  if (depth >= 128) {
+    fprintf(stderr, "lexical scope nesting exceeds limit\n");
+    exit(4);
+  }
+  children(scope, SymTagData);
+  children(scope, SymTagFuncDebugStart);
+  children(scope, SymTagFuncDebugEnd);
+  IDiaEnumSymbols *blocks = nullptr;
+  if (FAILED(scope->findChildren(SymTagBlock, nullptr, nsNone, &blocks)) || !blocks)
+    return;
+  IDiaSymbol *block = nullptr;
+  ULONG got = 0;
+  while (blocks->Next(1, &block, &got) == S_OK && got) {
+    record(block, id);
+    scope_children(block, depth + 1);
+    block->Release();
+    block = nullptr;
+  }
+  blocks->Release();
+}
+static void frame_records(IDiaSession *session) {
+  IDiaEnumTables *tables = nullptr;
+  if (FAILED(session->getEnumTables(&tables)) || !tables)
+    return;
+  IDiaTable *table = nullptr;
+  ULONG got = 0;
+  while (tables->Next(1, &table, &got) == S_OK && got) {
+    IDiaEnumFrameData *frames = nullptr;
+    if (table->QueryInterface(__uuidof(IDiaEnumFrameData), (void **)&frames) == S_OK) {
+      IDiaFrameData *frame = nullptr;
+      while (frames->Next(1, &frame, &got) == S_OK && got) {
+        DWORD number = 0;
+        printf("{\"tag\":-1,\"kind\":\"frame\"");
+        if (frame->get_addressSection(&number) == S_OK) printf(",\"section\":%lu",number);
+        if (frame->get_addressOffset(&number) == S_OK) printf(",\"offset\":%lu",number);
+        if (frame->get_relativeVirtualAddress(&number) == S_OK) printf(",\"rva\":%lu",number);
+        if (frame->get_lengthBlock(&number) == S_OK) printf(",\"length\":%lu",number);
+        if (frame->get_lengthProlog(&number) == S_OK) printf(",\"prolog_length\":%lu",number);
+        if (frame->get_lengthLocals(&number) == S_OK) printf(",\"locals_length\":%lu",number);
+        if (frame->get_lengthParams(&number) == S_OK) printf(",\"params_length\":%lu",number);
+        if (frame->get_lengthSavedRegisters(&number) == S_OK) printf(",\"saved_registers_length\":%lu",number);
+        if (frame->get_type(&number) == S_OK) printf(",\"frame_type\":%lu",number);
+        BSTR program = nullptr;
+        if (frame->get_program(&program) == S_OK && program) {
+          printf(",\"program\":");quoted(program);
+        }
+        SysFreeString(program);
+        printf("}\n");
+        frame->Release();frame = nullptr;
+      }
+      frames->Release();
+    }
+    table->Release();table = nullptr;
+  }
+  tables->Release();
 }
 int wmain(int argc, wchar_t **argv) {
   if (argc != 3) {
@@ -167,6 +354,8 @@ int wmain(int argc, wchar_t **argv) {
     IDiaSymbol *item = nullptr;
     ULONG got = 0;
     while (compilands->Next(1, &item, &got) == S_OK && got) {
+      record(item);
+      children(item, SymTagCompilandDetails);
       children(item, SymTagFunction);
       children(item, SymTagData);
       item->Release();
@@ -191,6 +380,7 @@ int wmain(int argc, wchar_t **argv) {
       type->Release();
     }
   }
+  frame_records(session);
   fprintf(stderr, "PDB read:");
   for (auto pair : counts)
     fprintf(stderr, " tag%lu=%u", pair.first, pair.second);

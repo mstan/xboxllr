@@ -1,4 +1,4 @@
-"""Control a native title's opt-in localhost TCP input/screenshot endpoint."""
+"""Control a native title's opt-in localhost input, capture and inspection endpoint."""
 import argparse
 import base64
 import json
@@ -65,12 +65,23 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
+    pause=commands.add_parser('pause',help='Pause at a certified guest function entry')
+    pause.add_argument('--address',type=lambda value:int(value,0))
+    commands.add_parser('resume')
+    commands.add_parser('guest_snapshot')
+    read=commands.add_parser('read_guest')
+    read.add_argument('snapshot',type=int)
+    read.add_argument('address',type=lambda value:int(value,0))
+    read.add_argument('bytes',type=int)
     commands.add_parser("clear_input")
     connect=commands.add_parser('connect_input',help='Connect opt-in virtual controllers; bit0 is Player1')
     connect.add_argument('mask',type=lambda value:int(value,0))
     resize = commands.add_parser('resize')
     resize.add_argument('width', type=int)
     resize.add_argument('height', type=int)
+    read = commands.add_parser('read_memory', help='Live read-only guest RAM, up to 4096 bytes')
+    read.add_argument('address', type=lambda value:int(value,0))
+    read.add_argument('bytes', type=int)
     press = commands.add_parser("press")
     press.add_argument("buttons", help="Comma-separated Xbox names, e.g. a,down")
     press.add_argument("--ms", type=int, default=150)
@@ -80,7 +91,11 @@ def main():
     shot = commands.add_parser("screenshot")
     shot.add_argument("path", type=Path)
     args = parser.parse_args()
-    if args.command == "press":
+    if args.command=='pause':
+        result=request(args.port,'pause'+(' '+str(args.address) if args.address is not None else ''))
+    elif args.command=='read_guest':
+        result=request(args.port,f'read_guest {args.snapshot} {args.address} {args.bytes}')
+    elif args.command == "press":
         if not 1 <= args.ms <= 5000:
             parser.error("--ms must be in 1..5000")
         pad = gamepad(args.buttons, args.lx, args.ly, args.rx, args.ry)
@@ -89,6 +104,8 @@ def main():
         result=request(args.port,'connect_input '+str(args.mask))
     elif args.command == 'resize':
         result = request(args.port, f'resize {args.width} {args.height}')
+    elif args.command == 'read_memory':
+        result = request(args.port, f'read_memory {args.address} {args.bytes}')
     else:
         result = request(args.port, args.command)
         if args.command == "screenshot":

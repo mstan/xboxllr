@@ -70,8 +70,9 @@ def main():
         'Python and Capstone are bundled. MSVC, CMake and Git are not.\n'
         'Read docs/BUILD-TOOL.md and docs/DEVELOPMENT.md. Use a recursive Git\n'
         'checkout for reproducible title builds and supply your own original files.\n'
-        'Blinx is the only publicly supported game. This toolkit does not make\n'
-        'unprofiled Xbox games playable. Players should download BlinxRecomp instead.\n'
+        'Blinx and Jet Set Radio Future have separate public beta releases.\n'
+        'This toolkit does not make unprofiled Xbox games playable. Players should\n'
+        'use the BlinxRecomp or JSRFRecomp game packages instead.\n'
         'Python and Capstone retain their included licenses.\n', encoding='utf-8')
     record = dict(schema='xboxllr.toolkit-release.v1', version=args.version,
         framework_revision=git(ROOT, 'rev-parse', 'HEAD').decode().strip(),

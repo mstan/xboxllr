@@ -1,6 +1,12 @@
 /* Shared native presentation: the title owns its HWND before, during and after
  * startup. Only the packaged sibling module is admitted; no foreign windows,
  * global lookup, reparenting, host geometry changes or guest state transfer. */
+#ifdef PILOT_DXVK_NATIVE
+static void pilot_startup_window(void)
+{
+    if(getenv("XLLE_PILOT_BOOT_MODULE"))pilot_d3d_backend_stop("native Linux startup intro module is unavailable");
+}
+#else
 #include "../native-boot/boot_window_api.h"
 static int pilot_startup_window_attempted;
 static void pilot_startup_window(void)
@@ -48,3 +54,4 @@ failed:
     fprintf(stderr,"[STARTUP] Packaged startup module unavailable; continuing in the same title window.\n");
     fflush(stderr);
 }
+#endif

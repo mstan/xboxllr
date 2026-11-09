@@ -65,7 +65,10 @@ static DWORD WINAPI sdl_worker(void *unused)
     }
     SDL_GameController *pad=NULL;uint64_t scan_at=0;int ready=0;
     while(!InterlockedCompareExchange(&s_quit,0,0)) {
-        SDL_PumpEvents();SDL_GameControllerUpdate();
+#ifndef __linux__
+        SDL_PumpEvents();
+#endif
+        SDL_GameControllerUpdate();
         if(pad&&!SDL_GameControllerGetAttached(pad)) {
             SDL_GameControllerClose(pad);pad=NULL;scan_at=0;
             fprintf(stderr,"[INPUT SDL] selected controller disconnected; waiting for guid=%s\n",s_guid);

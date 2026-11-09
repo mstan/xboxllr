@@ -30,6 +30,64 @@ def metadata():
 
 
 class GuestSymbols(unittest.TestCase):
+    def test_packing_false_true_and_missing_are_distinct(self):
+        records=metadata()+[dict(id=40,tag=11,section=0,name='UnsetFlag',length=12,dia_packed=False,unmodified_type=42),
+                            dict(id=41,tag=11,section=0,name='SetFlag',length=12,dia_packed=True),
+                            dict(id=42,tag=11,section=0,name='Unknown',length=12)]
+        _,types=import_dia(image(),records,'0'*64)
+        self.assertIs(types['types']['40']['dia_packed'],False)
+        self.assertEqual(types['types']['40']['unmodified_type'],42)
+        self.assertIs(types['types']['41']['dia_packed'],True)
+        self.assertNotIn('dia_packed',types['types']['42'])
+
+    def test_compiler_context_keeps_actual_compiland_ownership(self):
+        records=metadata()
+        records[1]['lexical_parent']=1
+        records += [dict(id=40,tag=2,section=0,name='authored.obj'),
+                    dict(id=2,parent=40,tag=-2,kind='compiland_function'),
+                    dict(id=41,parent=40,tag=3,section=0,name='',compiler_name='Authored compiler',
+                         frontend_major=12,frontend_minor=1,frontend_build=1234,backend_major=12,platform=3)]
+        symbols,_=import_dia(image(),records,'0'*64)
+        self.assertEqual(symbols['functions'][0]['compiland_ids'],[40])
+        self.assertEqual(symbols['compilers']['40'][0]['frontend_build'],1234)
+        self.assertEqual(symbols['compilands']['40']['name'],'authored.obj')
+        self.assertNotIn('backend_build',symbols['compilers']['40'][0])
+
+    def test_scopes_liveness_frames_and_tls_bind_to_guest_coordinates(self):
+        blob=bytearray(image())
+        struct.pack_into('<I',blob,0x12c,0x101a0)
+        struct.pack_into('<6I',blob,0x1a0,0x11000,0x11002,0,0,4,0)
+        records=metadata()+[
+            dict(id=20,parent=2,tag=6,section=1,offset=0,length=2,name=''),
+            dict(id=21,parent=2,tag=21,section=1,offset=0,length=0,name=''),
+            dict(id=22,parent=2,tag=22,section=1,offset=1,length=0,name=''),
+            dict(id=23,parent=20,tag=7,section=0,offset=0,length=0,name='local',type=4,
+                 location=3,data_kind=1,register_id=22,location_offset=-4,
+                 live_range_count=1,live_section=1,live_offset=0,live_length=1),
+            dict(tag=-1,kind='frame',section=1,offset=0,length=2,program='$T0 $ebp =',frame_type=4)]
+        _,types=import_dia(bytes(blob),records,'0'*64)
+        self.assertEqual(types['scopes']['2']['debug_start'],0x11000)
+        self.assertEqual(types['scopes']['2']['debug_end'],0x11001)
+        self.assertEqual(types['variables']['23']['live_start'],0x11000)
+        self.assertEqual(types['variables']['23']['location_offset'],-4)
+        self.assertNotIn('23',types['types'])
+        self.assertEqual(types['frames'][0]['address'],0x11000)
+        self.assertEqual(types['tls_template'],dict(start=0x11000,size=6,initialized_bytes=2))
+
+    def test_import_preserves_constant_precision_and_zero_bit_position(self):
+        records=metadata()+[
+            dict(id=10,parent=0,tag=16,section=0,name='',type=0,length=8,basic=7),
+            dict(id=11,parent=0,tag=12,section=0,name='AuthoredEnum',type=10,length=8),
+            dict(id=12,parent=11,tag=7,section=0,name='All',type=10,length=0,location=10,
+                 constant=dict(kind='integer',bits=64,signed=False,value='18446744073709551615')),
+            dict(id=13,parent=20,tag=7,section=0,name='Bits',type=10,length=9,location=6,
+                 field_offset=1,storage_offset=1,bit_position=0,bit_width=9)]
+        _,types=import_dia(image(),records,'0'*64)
+        self.assertEqual(types['types']['12']['constant']['value'],'18446744073709551615')
+        self.assertEqual(types['types']['13']['bit_position'],0)
+        self.assertEqual(types['types']['13']['bit_width'],9)
+        self.assertEqual(types['types']['13']['storage_offset'],1)
+
     def map_text(self):
         return ('entry point at 0001:00000000\n'
                 ' 0001:00000000 00001000H .text CODE\n'

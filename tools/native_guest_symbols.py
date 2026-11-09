@@ -51,6 +51,26 @@ def codeview_identities(data):
     return identities
 
 
+def tls_template(data, image):
+    """The XBE TLS template and zero-fill extent, never a host TLS address."""
+    directory = struct.unpack_from('<I',data,0x12c)[0]
+    if not directory:
+        return None
+    def offset(address, size):
+        if image['base']<=address and address+size<=image['base']+struct.unpack_from('<I',data,0x108)[0]:
+            return address-image['base']
+        for section in image['sections']:
+            if section['address']<=address and address+size<=section['address']+section['raw_size']:
+                return section['raw_offset']+address-section['address']
+        raise ValueError('TLS directory/template lacks file-backed bytes')
+    start,end,_,_,zero_fill,_ = struct.unpack_from('<6I',data,offset(directory,24))
+    if end<start or end-start+zero_fill>64*1024*1024 or end+zero_fill>0x100000000:
+        raise ValueError('invalid guest TLS template extent')
+    if end>start:
+        offset(start,end-start)
+    return dict(start=start,size=end-start+zero_fill,initialized_bytes=end-start)
+
+
 def import_dia(data, records, source_sha256):
     image = parse_xbe(data)
     records = iter(records)
@@ -62,18 +82,64 @@ def import_dia(data, records, source_sha256):
     stored = codeview_identities(data)
     if len(stored) != 1 or not stored.intersection(possible):
         raise ValueError('PDB CodeView identity does not match this XBE uniquely')
-    functions, types, objects = {}, {}, []
+    functions, types, objects, scopes, variables, frames = {}, {}, [], {}, {}, []
+    compilands, compilers, function_owners, function_addresses = {}, {}, {}, {}
+    def section_address(section_number, offset, length=0):
+        if type(section_number) is not int or not 1 <= section_number <= len(image['sections']):
+            return None
+        section = image['sections'][section_number-1]
+        if offset < 0 or length < 0 or offset+length > section['size']:
+            return None
+        return section['address']+offset
     rejected = 0
     for record in records:
         tag = record['tag']
+        if record.get('kind') == 'compiland_function':
+            function_owners.setdefault(record['id'],set()).add(record['parent'])
+        if tag == 2:
+            compilands[str(record['id'])] = dict(name=record['name'])
+        if tag == 3:
+            compilers.setdefault(str(record['parent']), []).append({
+                key: record[key] for key in ('compiler_name','platform','language',
+                    'frontend_major','frontend_minor','frontend_build','frontend_qfe',
+                    'backend_major','backend_minor','backend_build','backend_qfe') if key in record})
+        if record.get('kind')=='frame':
+            frame = {key:record[key] for key in ('length','prolog_length','locals_length',
+                     'params_length','saved_registers_length','frame_type','program') if key in record}
+            if 'section' in record and 'offset' in record and 'length' in record:
+                address = section_address(record['section'],record['offset'],record['length'])
+                if address is not None:
+                    frame.update(address=address,end=address+record['length'])
+            frames.append(frame)
+        if tag in (5, 6, 21, 22):
+            scope = {key:record[key] for key in ('id','parent','tag','name','length',
+                     'frame_pointer_present','local_base_register','parameter_base_register') if key in record}
+            address = section_address(record['section'],record['offset'],record['length'])
+            if address is not None:
+                scope.update(address=address,end=address+record['length'])
+            scopes[str(record['id'])] = scope
+        if tag == 7:
+            variable = {key:record[key] for key in ('id','parent','name','type','data_kind','location',
+                        'register_id','location_offset','constant','optimized_away','live_range_count',
+                        'control_flow_dependent') if key in record}
+            if record.get('location') in (1,2):
+                address = section_address(record['section'],record['offset'])
+                if address is not None:
+                    variable['address'] = address
+            if all(key in record for key in ('live_section','live_offset','live_length')):
+                address = section_address(record['live_section'],record['live_offset'],record['live_length'])
+                if address is not None:
+                    variable['live_start'], variable['live_end'] = address,address+record['live_length']
+            variables[str(record['id'])] = variable
         if tag in (5, 27) or (tag == 7 and record['section']):
             index, offset, size = record['section']-1, record['offset'], record['length']
             if not 0 <= index < len(image['sections']):
                 rejected += 1
                 continue
             section = image['sections'][index]
-            limit = section['raw_size'] if tag in (5, 27) else section['size']
-            if offset < 0 or size < 0 or offset + max(1, size) > limit:
+            limit = min(section['size'], section['raw_size']+15) if tag in (5, 27) else section['size']
+            if (offset < 0 or size < 0 or offset + max(1, size) > limit or
+                    (tag in (5, 27) and offset >= section['raw_size'])):
                 rejected += 1
                 continue
             address = section['address'] + offset
@@ -89,19 +155,37 @@ def import_dia(data, records, source_sha256):
                 function['size'] = max(function['size'], size)
                 if name not in function['names']:
                     function['names'].append(name)
+                if tag == 5:
+                    function_addresses[record['id']] = address
+                    if record.get('lexical_parent'):
+                        function_owners.setdefault(record['id'],set()).add(record['lexical_parent'])
             else:
                 if record.get('location') == 1:  # LocIsStatic, including zero-filled BSS.
                     objects.append(dict(address=address, name=name, type=record['type'],
                                         mapped_bytes=section['size']-offset))
-        if tag in (7, 11, 12, 13, 14, 15, 16, 17, 18, 20) and not record['section']:
+        if (tag in (7, 11, 12, 13, 14, 15, 16, 17, 18, 20) and not record['section'] and
+                (tag!=7 or record.get('data_kind') not in (1,2,3,4))):
             types[str(record['id'])] = {key: record[key] for key in
                 ('id', 'parent', 'tag', 'name', 'type', 'length', 'field_offset',
-                 'data_kind', 'location', 'basic', 'count', 'calling') if key in record}
+                 'data_kind', 'location', 'basic', 'count', 'calling', 'dia_packed', 'unmodified_type',
+                 'constant', 'bit_position', 'bit_width', 'storage_offset','location_offset') if key in record}
     common = dict(xbe_sha256=image['sha256'], source_sha256=source_sha256)
+    for function_id,address in function_addresses.items():
+        owners = {owner for owner in function_owners.get(function_id,()) if str(owner) in compilands}
+        if owners:
+            function = functions[address]
+            function['compiland_ids'] = sorted(set(function.get('compiland_ids',())) | owners)
     symbols = dict(schema=SCHEMA, **common, identity='matching-codeview',
                    functions=sorted(functions.values(), key=lambda f: f['address']),
-                   rejected_unbacked_records=rejected)
-    layouts = dict(schema='xboxllr.guest-types.v1', **common, types=types, objects=objects)
+                   rejected_unbacked_records=rejected,
+                   compilands=compilands, compilers=compilers)
+    for marker in scopes.values():
+        if marker['tag'] in (21,22) and 'address' in marker:
+            owner = scopes.get(str(marker.get('parent')))
+            if owner is not None:
+                owner['debug_start' if marker['tag']==21 else 'debug_end'] = marker['address']
+    layouts = dict(schema='xboxllr.guest-types.v1', **common, types=types, objects=objects,
+                   scopes=scopes, variables=variables, frames=frames,tls_template=tls_template(data,image))
     return symbols, layouts
 
 

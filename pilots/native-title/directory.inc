@@ -27,7 +27,7 @@ static uint32_t media_directory(HANDLE file,IO_STATUS_BLOCK *io,const uint32_t a
     }
     union {uint64_t aligned;unsigned char bytes[64+1024*2];} result;
     uint32_t status;BOOLEAN restart=(BOOLEAN)a[9];
-    unsigned length;WCHAR *name=(WCHAR*)(result.bytes+64);
+    unsigned length;uint16_t *name=(uint16_t*)(result.bytes+64);
     for(;;) {
         memset(&result,0,sizeof(result));io->Information=0;
         status=(uint32_t)media_nt_directory(file,NULL,NULL,NULL,io,result.bytes,sizeof(result),1,TRUE,a[8]?&mask:NULL,restart);

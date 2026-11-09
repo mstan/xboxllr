@@ -18,14 +18,16 @@ static int title_stack_copy(uint32_t address,void *data,unsigned bytes,int write
     }
     if(write)memcpy(memory+address,data,bytes);else memcpy(data,memory+address,bytes);return 1;
 }
-void pilot_title_function(unsigned id,recomp_func_t original,unsigned cleanup)
+/* Cdecl inputs have a separate reviewed extent from callee stack cleanup. */
+void pilot_title_function_with_arguments(unsigned id,recomp_func_t original,unsigned cleanup,unsigned argument_bytes)
 {
     uint32_t entry[8];title_gpr_get(entry);
 #ifdef PILOT_TITLE_MODS
     if(title_mod && title_mod->function) {
         struct PilotTitleModCall call={0};call.id=id;call.entry=entry;
         if(!title_stack_copy(entry[4],&call.caller,4,0))stop("invalid title function caller",id);
-        if(cleanup>sizeof(call.arguments) || (cleanup && !title_stack_copy(entry[4]+4,call.arguments,cleanup,0)))
+        if(argument_bytes<cleanup || argument_bytes>sizeof(call.arguments) || argument_bytes%4 ||
+           (argument_bytes && !title_stack_copy(entry[4]+4,call.arguments,argument_bytes,0)))
             stop("invalid title function arguments",id);
         memcpy(call.gpr,entry,sizeof(entry));
         if(title_mod->function(&call)) {
@@ -46,6 +48,8 @@ void pilot_title_function(unsigned id,recomp_func_t original,unsigned cleanup)
     original();
 #endif
 }
+void pilot_title_function(unsigned id,recomp_func_t original,unsigned cleanup)
+{pilot_title_function_with_arguments(id,original,cleanup,cleanup);}
 #ifdef PILOT_TITLE_FUNCTIONS
 extern recomp_func_t pilot_title_original_lookup(unsigned,unsigned*);
 /* Preserve the complete recompiled CPU state, including vector/x87 registers

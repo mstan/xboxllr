@@ -178,7 +178,7 @@ static LONG NTAPI storage_image_directory(HANDLE h,HANDLE event,PVOID apc,PVOID 
         unsigned char metadata[56];storage_image_metadata_bytes(&e.info,metadata);
         memset(output,0,64);memcpy((char*)output+8,metadata,48);memcpy((char*)output+56,&e.info.attributes,4);
         uint32_t name_bytes=n*2;memcpy((char*)output+60,&name_bytes,4);
-        for(unsigned i=0;i<copy;++i)((WCHAR*)((char*)output+64))[i]=(WCHAR)(unsigned char)e.name[i];
+        for(unsigned i=0;i<copy;++i)((uint16_t*)((char*)output+64))[i]=(uint16_t)(unsigned char)e.name[i];
         if(copy<n)status=0x80000005u;io->Status=(LONG)status;io->Information=64+copy*2;
     } else if(status==0x80000006u){io->Status=(LONG)status;io->Information=0;}
     ReleaseSRWLockShared(&storage_image_lock);return (LONG)status;

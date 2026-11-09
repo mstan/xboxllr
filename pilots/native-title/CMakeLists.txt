@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(xlle_native_title_pilot C CXX)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(native_linux.cmake)
+  return()
+endif()
 # Qualified titles may request whole-program optimization without making another
 # host/compiler a build requirement. Keep the normal portable build available;
 # diagnostic/iterative builds retain their existing compilation policy.
@@ -1081,6 +1085,10 @@ if(PILOT_D3D_SOURCE)
     set_tests_properties(pilot_graphics_visual_mods PROPERTIES TIMEOUT 90)
     pilot_add_test(NAME pilot_graphics_visual_depth_guard COMMAND "${CMAKE_COMMAND}"
       "-DBINARY=$<TARGET_FILE:pilot_graphics_test>" -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_visual_expect_stop.cmake")
+    # These checks exercise the original scaled-resource policy. Native render
+    # planes preserve canonical guest grids and have separate coherence checks.
+    set_tests_properties(pilot_graphics_visual_mods pilot_graphics_visual_depth_guard
+      PROPERTIES ENVIRONMENT "XLLE_PILOT_NATIVE_RENDER_PLANES=0")
   endif()
   add_executable(pilot_shader_test graphics_shader_test.c)
   target_link_libraries(pilot_shader_test PRIVATE pilot_d3d_backend)
@@ -1156,7 +1164,8 @@ if(PILOT_D3D_SOURCE)
       pilot_add_test(NAME pilot_graphics_commands_guards COMMAND "${CMAKE_COMMAND}"
         "-DPROGRAM=$<TARGET_FILE:pilot_contract_test>" "-DORIGINAL_RETIREMENT=$<BOOL:${pilot_original_retirement}>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/graphics_commands_failures.cmake")
-      set_tests_properties(pilot_graphics_commands_guards PROPERTIES TIMEOUT 30)
+      set_tests_properties(pilot_graphics_commands_guards PROPERTIES TIMEOUT 30
+        SKIP_REGULAR_EXPRESSION "SKIP: graphics command guards require unavailable profile boundaries")
     endif()
     pilot_add_test(NAME pilot_graphics_abi COMMAND pilot_contract_test graphics)
     pilot_add_test(NAME pilot_graphics_deferred_relevance COMMAND pilot_contract_test graphics-deferred-relevance)
@@ -1431,6 +1440,12 @@ if(TARGET pilot_shader_test)
 endif()
 add_executable(pilot_native_debug_test native_debug_test.cpp)
 target_link_libraries(pilot_native_debug_test PRIVATE pilot_native_debug)
+# Foreign native bindings/mods may own asynchronous guest-memory writers.
+# They need a qualified quiescence provider before exposing coherent snapshots.
+file(GLOB pilot_inspection_bindings "${PILOT_GENERATED}/*binding.c")
+if(pilot_inspection_bindings OR PILOT_TITLE_MOD_SOURCE OR PILOT_SECTION_MOD_SOURCE)
+  set_property(SOURCE runtime.c APPEND PROPERTY COMPILE_DEFINITIONS PILOT_INSPECTION_EXTERNAL_OWNERS)
+endif()
 pilot_add_test(NAME pilot_session_replay_transport COMMAND "${CMAKE_COMMAND}" -E env
   "XBOXLLR_SESSION_REPLAY_TEST_EXE=$<TARGET_FILE:pilot_session_replay_test>"
   "XBOXLLR_SESSION_REPLAY_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/session-replay-tests"

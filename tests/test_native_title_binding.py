@@ -72,5 +72,15 @@ class TitleFunctions(unittest.TestCase):
             row['callers']=invalid
             with self.subTest(callers=invalid),self.assertRaises(ValueError):self.bind()
 
+    def test_cdecl_argument_extent_is_independent_of_cleanup(self):
+        row=self.proof['functions'][0]
+        row['argument_bytes']=16
+        self.bind()
+        wrapper=(self.context.generated/'pilot_title_hook_1_binding.c').read_text()
+        self.assertIn('pilot_title_function_with_arguments(1,pilot_title_original_1,0, 16)',wrapper)
+        for bad in (True,-4,3,68):
+            row['argument_bytes']=bad
+            with self.subTest(argument_bytes=bad),self.assertRaises(ValueError):self.bind()
+
 if __name__ == '__main__':
     unittest.main()

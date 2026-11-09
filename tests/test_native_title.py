@@ -13,6 +13,12 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_explicit_discovery_metadata_is_passed_to_normal_preparation(self):
+        symbols=self.root/'pdb.aot-private.json'
+        command=n.prepare_command(self.source,self.data,
+            dict(cpu_donor=self.root,xbe=self.xbe,xdk_symbols=self.root/'sdk',discovery_symbols=symbols),self.output)
+        self.assertEqual(command[command.index('--discovery-symbols')+1],str(symbols))
+
     def test_adpcm_comparison_input_is_optional_and_clears_cached_selection(self):
         command = n.configure_command(self.data, {}, self.output, self.build, 'cmake', 'Ninja', 4)
         self.assertIn('-DPILOT_ADPCM_SOURCE=', command)
@@ -55,6 +61,42 @@ class NativeTitleTests(unittest.TestCase):
         self.data['mods']['registry']='../authored.xbe'
         with self.assertRaisesRegex(ValueError,'within the title root'):
             n.title_mod_inputs(self.source,self.data)
+
+    def test_dashboard_uses_the_exact_shipped_visual_registry(self):
+        source, data = n.definition(n.ROOT / 'titles/dashboard/title.toml')
+        selected = n.title_mod_inputs(source, data)
+        registry = (n.ROOT / 'pilots/native-title/visual_registry.c').resolve()
+        self.assertEqual(selected, {data['mods']['registry']: dict(
+            path=str(registry), sha256=n.digest(registry))})
+
+    def test_dashboard_declares_the_reviewed_launcher_ui_revision(self):
+        import native_launcher_ui
+        _, data = n.definition(n.ROOT / 'titles/dashboard/title.toml')
+        self.assertEqual(data['launcher']['ui_revision'], native_launcher_ui.REVISION)
+
+    def test_shared_visual_registry_changes_invalidate_title_identity(self):
+        framework = self.root / 'framework'
+        registry = framework / 'pilots/native-title/visual_registry.c'
+        registry.parent.mkdir(parents=True)
+        registry.write_text('/* authored shared registry */')
+        self.data['mods'] = dict(registry=os.path.relpath(registry, self.source.parent))
+        with patch.object(n, 'ROOT', framework):
+            original = n.identity(self.source, self.data, self.output)
+            registry.write_text('/* changed shared registry */')
+            self.assertNotEqual(original, n.identity(self.source, self.data, self.output))
+
+    def test_shared_registry_exception_does_not_admit_other_framework_inputs(self):
+        registry = n.ROOT / 'pilots/native-title/visual_registry.c'
+        other = n.ROOT / 'pilots/native-title/visual_mod_plan.h'
+        shared = str(registry)
+        outside = str(other)
+        local = self.source.parent / 'visuals.c'
+        local.write_text('/* authored local registry */')
+        for mods in (dict(registry=outside),
+                     dict(registry=shared, inputs=[outside]),
+                     dict(registry=local.name, inputs=[shared])):
+            with self.subTest(mods=mods), self.assertRaisesRegex(ValueError, 'within the title root'):
+                n.title_mod_inputs(self.source, dict(self.data, mods=mods))
 
     def test_unqualified_mod_and_interactive_automation_fail_before_spawn(self):
         with patch.object(n.subprocess,'Popen') as spawn:

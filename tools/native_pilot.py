@@ -123,11 +123,24 @@ def prepare(args):
                     "tools", "templates/runtime", "LICENSE", "LICENSE.upstream-MIT",
                     "NOTICE", "LICENSES"], check=True, stdout=subprocess.DEVNULL)
     image = parse_xbe(args.xbe.read_bytes())
+    discovery_symbols = getattr(args, 'discovery_symbols', None)
+    symbol_proof = None
+    if discovery_symbols:
+        from native_symbol_discovery import QualifiedFunctions
+        qualified = QualifiedFunctions.load(discovery_symbols, args.xbe.read_bytes())
+        symbol_proof = dict(path=str(discovery_symbols.resolve()),
+                            sha256=qualified.metadata_sha256,
+                            function_count=len(qualified.starts))
     out = args.output.resolve()
     # Title-derived generated C contains proprietary code; keep it out of Git.
     if "build" not in out.parts:
         raise ValueError("pilot output must be under a private build/ directory")
     seed_roots=validate_seeds(args.seed_functions,image,out/'disasm/functions.json' if args.reuse_discovery else None)
+    if args.reuse_discovery:
+        prior = out/'generation.aot-private.json'
+        previous = json.loads(prior.read_text()) if prior.exists() else {}
+        if previous.get('discovery_symbols') != symbol_proof:
+            raise ValueError('reused discovery has different PDB body metadata')
     out.mkdir(parents=True, exist_ok=True)
     notices=out/'gen'/'third_party'/'phobos-xboxrecomp'
     notices.mkdir(parents=True,exist_ok=True)
@@ -178,8 +191,18 @@ def prepare(args):
             cmd += ["--data-sections", args.data_sections]
         for seed in args.seed_functions:
             cmd += ['--seed-functions',str(seed.resolve())]
+        if discovery_symbols:
+            cmd += ['--discovery-symbols', str(discovery_symbols.resolve())]
         run("discover", cmd)
         validate_seeds(args.seed_functions,image,out/'disasm/functions.json')
+    if discovery_symbols:
+        if hashlib.sha256(discovery_symbols.read_bytes()).hexdigest() != symbol_proof['sha256']:
+            raise ValueError('PDB discovery metadata changed during preparation')
+        discovered = {int(f['start'],16):int(f['end'],16)
+                      for f in json.loads((out/'disasm/functions.json').read_text())}
+        if any(not start < discovered.get(start, start) <= end
+               for start,end in qualified.ends.items()):
+            raise ValueError('discovery omits or crosses a qualified PDB body')
     extents=out/'function-extents.aot-private.json'
     extent_records=[]
     if extents.exists():
@@ -229,6 +252,7 @@ def prepare(args):
     header += ["};"]
     (out / "gen" / "pilot_image.h").write_text("\n".join(header) + "\n")
     manifest = dict(donor=pin, sha256=image["sha256"], entry=image["entry"],
+                    discovery_symbols=symbol_proof,
                     function_extents=extent_records,
                     data_sections=args.data_sections, seeds=[str(p.resolve()) for p in args.seed_functions], seed_roots=seed_roots, **counts,
                     files={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
@@ -306,6 +330,7 @@ if __name__ == "__main__":
     parser.add_argument('--poll-waits', type=Path,
                         help='Reviewed image-bound guest-callback poll contract; native idle is separately selected at build time')
     parser.add_argument("--seed-functions", type=Path, action="append", default=[], help="Measured/recovered indirect roots for this title revision")
+    parser.add_argument("--discovery-symbols", type=Path, help="Explicit matching-CodeView PDB function metadata for body-aware discovery")
     parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
     parser.add_argument("--cache-symbols", type=Path, help="Bind reviewed utility-drive service using this XDK symbol inventory")
     parser.add_argument("--d3d-symbols", type=Path, help="Bind reviewed graphics family using this XDK symbol inventory")

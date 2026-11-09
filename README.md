@@ -42,6 +42,8 @@ Blinx and JSRF offer **Windows x64 ZIPs and native Linux x86_64 AppImages**.
 The current AppImages include the November 2 rendering changes and were checked
 in WSL, including brief gameplay and external settings. Linux targets an
 Ubuntu 24.04/glibc baseline and Vulkan 1.3.
+Native Linux builds use SDL2, DXVK Native/Vulkan and FAudio; see the
+[Linux build and packaging instructions](docs/NATIVE-LINUX.md).
 
 ## Blinx: The Time Sweeper
 

@@ -12,7 +12,7 @@ struct PilotTitleModCall {
     uint32_t id,caller,phase; /* 0: before original; 1: after original */
     const uint32_t *entry; /* EAX ECX EDX EBX ESP EBP ESI EDI at original entry */
     uint32_t gpr[8]; /* actual original result; ESP must retain its ABI return */
-    uint32_t arguments[16]; /* source-proved callee-cleaned arguments */
+    uint32_t arguments[16]; /* source-proved inputs, including reviewed cdecl extents */
     uint64_t scratch; /* trusted callback state carried from entry to exit */
 };
 struct PilotTitleModHost {

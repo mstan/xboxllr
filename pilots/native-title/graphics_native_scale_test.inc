@@ -48,6 +48,13 @@ static int test_native_scale_coherence(void)
         struct {float x,y,z,w;uint32_t color;} back[]={
             {-1.125f,6.375f,.7f,1,0xff2030c0},{61.375f,2.625f,.7f,1,0xffa0d030},{11.625f,61.125f,.7f,1,0xffd03090}};
         CHECK(!pilot_gfx_draw_up(D3DPT_TRIANGLELIST,1,back,sizeof(back[0]),0x44));
+        /* Keep that queued draw alive across two UP-ring discards. Merely
+         * uploading filler must not replace its native or enhanced vertices. */
+        {
+            HRESULT pilot_donor_upload_vertices(const void*,UINT,UINT);
+            const unsigned bytes=4u*1024*1024;void *filler=calloc(1,bytes);CHECK(filler);
+            HRESULT uploaded=pilot_donor_upload_vertices(filler,bytes,16);free(filler);CHECK(!uploaded);
+        }
         pilot_gfx_set_state(D3DRS_STENCILREF,11);
         struct {float x,y,z,w;uint32_t color;} front[]={
             {8.375f,9.125f,.22f,1,0x8040f020},{55.625f,18.375f,.63f,1,0x80f03040},{27.125f,56.625f,.41f,1,0x802040f0}};
@@ -318,13 +325,18 @@ static int test_native_scale_coherence(void)
         for(unsigned version=0;version<3;++version) {
             const float color[]={version==0?1.f:0.f,version==1?1.f:0.f,version==2?1.f:0.f,1};
             pilot_gfx_shader_constants(96,1,color);CHECK(!pilot_gfx_shader_flush());
-            CHECK(!pilot_gfx_draw_vertices(6,version*8,4));
-            CHECK(!pilot_gfx_draw_vertices(6,version*8+4,4));
+            /* Cross several CPU packet boundaries before changing the same
+             * constants again, without a readback/GPU-completion wait. Reused
+             * snapshot buffers must preserve every earlier issued Draw. */
+            for(unsigned repeat=0;repeat<(version==0?257u:1u);++repeat) {
+                CHECK(!pilot_gfx_draw_vertices(6,version*8,4));
+                CHECK(!pilot_gfx_draw_vertices(6,version*8+4,4));
+            }
         }
         /* Exercise replay while the parent query is open, not merely after
          * End has already made exclusion unnecessary. */
         CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
-        CHECK(!pilot_gfx_visibility_end(33));CHECK(!visibility_expect(33,960,NULL));
+        CHECK(!pilot_gfx_visibility_end(33));CHECK(!visibility_expect(33,82880,NULL));
         pilot_gfx_batch_allow(0);
         CHECK(!pilot_gfx_readback(constant_actual,sizeof(constant_actual)));
         if(scale==1)memcpy(constant_reference,constant_actual,sizeof(constant_reference));

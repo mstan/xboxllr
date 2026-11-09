@@ -9,6 +9,11 @@
 static unsigned char memory[65536];
 #define MEM32(a) (*(volatile uint32_t *)(memory+(uint32_t)(a)))
 static uint32_t g_eax,g_edx,g_esp;
+static int g_pilot_session_enabled;
+/* Clock fixture runs without the session coordinator. */
+void pilot_session_actor(uint32_t actor){(void)actor;}
+static void session_worker_begin(uint32_t actor){(void)actor;}
+static void session_worker_end(void){}
 static int manual_clock=1,fail_thread,fail_timer,expected_guard;
 static volatile LONG64 manual_now;
 static int guard_state_valid(void);

@@ -5,6 +5,24 @@
   "synthetic_tests": 19,
   "symbol_seeds": false,
   "scope": "full-pipeline static function discovery; not gameplay or performance",
+  "unreferenced_callback_followup": {
+    "date": "2026-11-06",
+    "previously_unreferenced_images": 25,
+    "affected_images": 20,
+    "proposals": 82,
+    "supported_callback_entries": 82,
+    "rejected": 0,
+    "unresolved": 0,
+    "initializer_consumer_proofs": 20,
+    "lookup_assignment_dispatch_proofs": 62,
+    "fully_decoded_callback_ranges": 82,
+    "caller_stack_argument_bytes": 4,
+    "observed_return_cleanup_bytes": 4,
+    "rule_unchanged_from": "2afc1afeb674bb811fdb9bc37a415251c83c2849",
+    "rule_function_source_sha256": "061c176cb8476137200ccc91145665fd1a6d73d95b610376e6bf82043ae4d94e",
+    "method": "Original initialization and class lookup/assignment/dispatch code, corroborated by independent exact-PDB callback declarations",
+    "scope": "Static original-byte callability and ABI; not runtime execution, target name/type transfer or final-bundle corpus qualification"
+  },
   "cases": [
     {
       "archive": 18,

@@ -162,6 +162,13 @@ def prepare(donor, output, reference):
                     '    sd.border[2]=(border&255)/255.0f;\n'
                     '    sd.border[3]=((border>>24)&255)/255.0f;')
             if path.name=='d3d8_device.c':
+                # UP uploads append known byte ranges. Keep one immutable
+                # backing until DISCARD instead of copying every draw's range.
+                code=once(code,'static UINT up_ring_upload(UpRing *ring, const void *data, UINT size)',
+                    'void *pilot_d3d_up_ring_map(RhiBuffer *,uint32_t,uint32_t,uint32_t);\n'
+                    'static UINT up_ring_upload(UpRing *ring, const void *data, UINT size)')
+                code=once(code,'    mapped = rhi_buffer_map(ring->buffer, map_type);',
+                    '    mapped = pilot_d3d_up_ring_map(ring->buffer,map_type,ring->offset,size);')
                 code=once(code,'        state->tss[s][D3DTSS_TEXCOORDINDEX] = (DWORD)s;',
                     '        state->tss[s][D3DTSS_TEXCOORDINDEX] = (DWORD)s;\n'
                     '        state->tss[s][D3DTSS_RESULTARG] = D3DTA_CURRENT;')

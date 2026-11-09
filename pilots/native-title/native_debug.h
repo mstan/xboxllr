@@ -8,6 +8,10 @@ extern "C" {
  * without an explicit port. Renderer calls remain on the graphics owner. */
 int pilot_debug_start(const char *port);
 int pilot_debug_active(void);
+/* Optional live, read-only observations. The runtime validates guest pages;
+ * these are not atomic execution snapshots and never expose host addresses. */
+typedef int (*PilotDebugReadMemory)(uint32_t address,void *data,uint32_t bytes);
+void pilot_debug_memory_reader(PilotDebugReadMemory reader);
 int pilot_debug_input(uint8_t pad[18]);
 int pilot_debug_input_port(unsigned port,uint8_t pad[18]);
 int pilot_debug_connected(unsigned port);
@@ -15,6 +19,17 @@ int pilot_debug_connected(unsigned port);
  * The TCP thread never touches a native window or the graphics context. */
 int pilot_debug_take_client_size(uint32_t size[2]);
 void pilot_debug_frame(void);
+/* A snapshot is published only by the guest execution owner at an original
+ * function entry. The provider must reject profiles with concurrent writers. */
+typedef struct PilotDebugGuest {
+    uint32_t pc, registers[8], register_mask, xmm[8][4], fs_base, tls_base, thread_slot;
+    const char *xbe_sha256;
+    unsigned coherent, has_tls;
+} PilotDebugGuest;
+typedef int (*PilotDebugRead)(uint32_t address,uint32_t bytes,unsigned char *output);
+void pilot_debug_bind_guest(PilotDebugRead read);
+int pilot_debug_guest_requested(uint32_t pc);
+void pilot_debug_guest_checkpoint(const PilotDebugGuest *guest);
 uint64_t pilot_debug_capture_requested(void);
 void pilot_debug_capture_complete(uint64_t request,const unsigned char *rgba,
                                   unsigned width,unsigned height,int status);

@@ -7,6 +7,7 @@ executable = "XboxDashboard"
 xbe_sha256 = "832862490c762a723856350142f49ded92b7ad966741eeb5b89e683006b16a0d"
 
 [launcher]
+ui_revision = "ccc186e097b362555292b157ffd303abcea26fbf"
 frame_modes = ["interpolated"]
 startup_intro = true
 

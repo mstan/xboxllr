@@ -79,6 +79,8 @@ int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uin
 int32_t pilot_gfx_get_viewport(uint32_t viewport[6])
 {uint32_t value[]={0,0,2,2,0,0x3f800000};memcpy(viewport,value,sizeof(value));return 0;}
 void pilot_gfx_shader_capture_constants(void *data){memset(data,0,3072);}
+static void graphics_render_copy(uint32_t states[166])
+{for(unsigned i=0;i<166;++i)states[i]=MEM32(PILOT_D3D_RENDER_STATES+i*4);}
 #include "graphics_frame_inputs.inc"
 
 static FILE *ledger;
