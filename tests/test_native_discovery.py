@@ -941,6 +941,69 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(det.functions[0x10020].end, alias.end)
         self.assertIs(det.functions[entry], alias)
 
+    def unbound_frame_context_clamp(self, *, known_target=False, frame_free=False,
+                                    table_dispatch=False):
+        # The original conditional and JMP meet at a local label inside the
+        # first inherited-frame view, not a standalone function start.
+        prefix = bytes.fromhex('83ec08565785c9740bb801000000')
+        if table_dispatch:
+            prefix = bytes.fromhex('83ec085657ff248d8000010090eb0085c9740bb801000000')
+        middle = bytes.fromhex('eb046a009090')
+        suffix = bytes.fromhex('b8070000005f5e83c408c3')
+        if frame_free:
+            suffix = bytes.fromhex('b807000000909083c408c3')
+        payload = bytearray(prefix + middle + suffix)
+        if table_dispatch:
+            payload.extend(b'\xcc' * (0x60 - len(payload)))
+            payload.extend(struct.pack('<II', 0x1002c, 0x1002f))
+        det, _ = self.detector(prefix=b'', body=bytes(payload), pointer=False)
+        if table_dispatch:
+            det.engine.jump_tables[0x10080] = 0x10088
+        start = 0x10020
+        weak, target = start + len(prefix), start + len(prefix + middle)
+        secondary = target + 5
+        function = self.module.Function
+        det.functions = {
+            start: function(start, weak, 'parent', '.text', .86, 'imm_ref_target'),
+            weak: function(weak, secondary, 'context', '.text', .86, 'imm_ref_target'),
+            secondary: function(secondary, start + len(prefix + middle + suffix),
+                                'second context', '.text', .88, 'tail_jump_alias'),
+        }
+        if known_target:
+            det.functions[target] = function(target, secondary, 'independent',
+                                              '.text', 1., 'seed')
+        det._candidates = {a: (f.confidence, f.detection_method)
+                           for a, f in det.functions.items()}
+        det._alias_entries[secondary] = (.88, 'tail_jump_alias')
+        return det, weak, target, secondary
+
+    def test_original_unbound_branches_rejoin_owner_without_dropping_contexts(self):
+        det, weak, target, secondary = self.unbound_frame_context_clamp()
+        entries = {a: det.functions[a] for a in (weak, secondary)}
+        self.assertNotIn(target, det.functions)
+        self.assertTrue(_repair_weak_callback_clamps(det, branch_contexts=True))
+        self.assertEqual(det.functions[0x10020].end, det.functions[secondary].end)
+        for address, entry in entries.items():
+            self.assertIs(det.functions[address], entry)
+            self.assertIn(address, det._candidates)
+        self.assertIn(secondary, det._alias_entries)
+
+    def test_owner_overlap_requires_unbound_original_target_and_inherited_frame(self):
+        for options in ({'known_target': True}, {'frame_free': True}):
+            with self.subTest(options=options):
+                det, weak, _, _ = self.unbound_frame_context_clamp(**options)
+                self.assertFalse(_repair_weak_callback_clamps(det, branch_contexts=True))
+                self.assertEqual(det.functions[0x10020].end, weak)
+        det, weak, _, _ = self.unbound_frame_context_clamp()
+        det.functions[weak].called_by.append(0x10010)
+        self.assertFalse(_repair_weak_callback_clamps(det, branch_contexts=True))
+
+    def test_owner_context_reachability_follows_original_jump_table_cases(self):
+        det, weak, _, secondary = self.unbound_frame_context_clamp(table_dispatch=True)
+        self.assertTrue(_repair_weak_callback_clamps(det, branch_contexts=True))
+        self.assertEqual(det.functions[0x10020].end, det.functions[secondary].end)
+        self.assertIn(weak, det.functions)
+
     def test_final_callback_repair_preserves_independent_entry_contracts(self):
         for options in ({'method': 'seed_vtable_thunk'}, {'method': 'call_target'},
                         {'method': 'prologue'}, {'called': True}, {'frame_free': True}):

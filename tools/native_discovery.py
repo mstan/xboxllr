@@ -474,7 +474,7 @@ def _crossed_weak_callbacks(detector):
                     break
 
 
-def _fallthrough_flag_contexts(detector):
+def _fallthrough_flag_contexts(detector, *, branch_targets=False):
     """Keep a saved-frame owner's local flags across an internal context.
 
     Retaining a weak entry must not turn the owner's CMP/TEST and its flag
@@ -492,21 +492,25 @@ def _fallthrough_flag_contexts(detector):
         suffix = detector.engine.get_instructions_in_range(weak.start, weak.end)
         if (not prefix or prefix[-1].end_address != weak.start or
                 prefix[-1].is_call or prefix[-1].is_branch or prefix[-1].is_ret or
-                not suffix or not suffix[-1].is_ret or suffix[-1].end_address != weak.end):
+                not suffix or not branch_targets and
+                (not suffix[-1].is_ret or suffix[-1].end_address != weak.end)):
             continue
         first = suffix[0]
-        if first.address != weak.start or not (
+        if first.address != weak.start:
+            continue
+        if not branch_targets and not (
                 first.mnemonic.startswith(('set', 'cmov')) or first.is_cond_jump):
             continue
-        producer = None
-        for instruction in reversed(prefix[-8:]):
-            if instruction.mnemonic in ('cmp', 'test'):
-                producer = instruction
-                break
-            if instruction.mnemonic not in ('pop', 'push', 'mov', 'lea', 'nop'):
-                break
-        if producer is None:
-            continue
+        if not branch_targets:
+            producer = None
+            for instruction in reversed(prefix[-8:]):
+                if instruction.mnemonic in ('cmp', 'test'):
+                    producer = instruction
+                    break
+                if instruction.mnemonic not in ('pop', 'push', 'mov', 'lea', 'nop'):
+                    break
+            if producer is None:
+                continue
         saved = set()
         for instruction in prefix:
             if instruction.is_call or instruction.is_branch or instruction.is_ret:
@@ -528,6 +532,8 @@ def _fallthrough_flag_contexts(detector):
                     following.add(instruction.end_address)
                 if instruction.is_branch and instruction.jump_target is not None:
                     following.add(instruction.jump_target)
+                if instruction.jump_table is not None:
+                    following.update(detector.engine.jump_table_entries(instruction.jump_table))
             following &= by_address.keys() | {weak.start}
             successors[instruction.address] = following
             for target in following:
@@ -555,14 +561,31 @@ def _fallthrough_flag_contexts(detector):
         section = detector.image.get_section_at_va(start)
         if section is None:
             continue
-        following = min((a for a in detector.functions if a > weak.start),
-                        default=section.virtual_addr + section.virtual_size)
+        if branch_targets:
+            following = min(section.virtual_addr + section.virtual_size, start + 4096)
+            for address, candidate in sorted(detector.functions.items()):
+                if not weak.start < address < following:
+                    continue
+                if (candidate.has_prologue or candidate.called_by or
+                        candidate.detection_method == 'entry_point' or
+                        candidate.detection_method.startswith('seed') or
+                        not detector.engine.entry_pops_unsaved(address)):
+                    following = address
+                    break
+            if not any(i.address in reachable and i.is_branch and
+                       i.jump_target is not None and weak.start <= i.jump_target < following and
+                       i.jump_target not in detector.functions for i in prefix):
+                continue
+        else:
+            following = min((a for a in detector.functions if a > weak.start),
+                            default=section.virtual_addr + section.virtual_size)
         yield body, weak, following, section
 
 
-def _repair_weak_callback_clamps(detector, *, flag_contexts=False):
+def _repair_weak_callback_clamps(detector, *, flag_contexts=False, branch_contexts=False):
     """Remeasure only proved final frame contexts with the existing walker."""
-    candidates = list(_fallthrough_flag_contexts(detector) if flag_contexts else
+    candidates = list(_fallthrough_flag_contexts(detector, branch_targets=branch_contexts)
+                      if flag_contexts or branch_contexts else
                       _crossed_weak_callbacks(detector))
     if not candidates:
         return False
@@ -571,7 +594,7 @@ def _repair_weak_callback_clamps(detector, *, flag_contexts=False):
     existing_starts = set(detector.functions)
     incoming = {}
     independent = set()
-    if flag_contexts:
+    if flag_contexts or branch_contexts:
         independent.update(weak.start for _, weak, _, _ in candidates)
     for instruction in detector.engine.instructions.values():
         if instruction.imm_ref in existing_starts:
@@ -591,7 +614,8 @@ def _repair_weak_callback_clamps(detector, *, flag_contexts=False):
         end = detector._find_function_end(
             body.start, following, section.virtual_addr + section.virtual_size)
         instructions = detector.engine.get_instructions_in_range(body.start, body.end)
-        if (end <= weak.start or any(not body.start <= source < end
+        if (end <= weak.start or branch_contexts and end > following or
+                any(not body.start <= source < end
                                     for source in incoming.get(weak.start, ())) or
                 any(i.is_cond_jump and i.jump_target is not None and
                     weak.start <= i.jump_target < following and i.jump_target >= end
@@ -612,7 +636,7 @@ def _repair_weak_callback_clamps(detector, *, flag_contexts=False):
         # The walker can remove or replace another address-taken context while
         # extending its owner. Restore those existing records and their weak
         # candidate identity; an original reference does not establish an ABI.
-        preserved = {start for start in independent
+        preserved = {start for start in (existing_starts if branch_contexts else independent)
                      if body.start < start < end and start in previous[0]}
         for start in preserved:
             detector.functions[start] = previous[0][start]
@@ -1027,6 +1051,7 @@ def install(module):
                 self._alias_entries.pop(address, None)
         # Begin these independent final corrections from the exact completed
         # preceding-policy database, including its existing DATA exclusions.
+        _repair_weak_callback_clamps(self, branch_contexts=True)
         _repair_weak_callback_clamps(self, flag_contexts=True)
         for address in _indexed_numeric_byte_entries(self):
             del self.functions[address]
