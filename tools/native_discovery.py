@@ -282,7 +282,7 @@ def _bounded_table_after(self, address, upper):
     return None
 
 
-def _catch_context_entries(detector, sections, states, count, table):
+def _catch_context_entries(detector, sections, states, count, table, *, include_resumes=True):
     """Recognize registered catch entries and their constant frame resumes.
 
     The bounded Win32 FuncInfo try map identifies each catch handler. A handler
@@ -315,6 +315,8 @@ def _catch_context_entries(detector, sections, states, count, table):
             if first is None or len(first) != 1:
                 return set()
             entries.add(handler)
+            if not include_resumes:
+                continue
             body = detector.image.read_bytes_at_va(handler, 6)
             if body is None or len(body) != 6 or body[0] != 0xb8 or body[5] != 0xc3:
                 continue
@@ -324,7 +326,7 @@ def _catch_context_entries(detector, sections, states, count, table):
     return entries
 
 
-def _unwind_context_entries(detector, sections):
+def _unwind_context_entries(detector, sections, *, handlers_only=False):
     """Retain frame-dependent actions/resumes referenced by bounded MSVC metadata.
 
     A decoded mov-EAX/near-jump thunk references FuncInfo. Its recognized magic,
@@ -365,9 +367,11 @@ def _unwind_context_entries(detector, sections):
             if action:
                 entries.add(action)
         else:
-            actions.update(entries)
+            if not handlers_only:
+                actions.update(entries)
             actions.update(_catch_context_entries(
-                detector, sections, count, tries, try_table))
+                detector, sections, count, tries, try_table,
+                include_resumes=not handlers_only))
     return actions
 
 

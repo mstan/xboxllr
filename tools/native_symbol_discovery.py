@@ -212,6 +212,20 @@ def install(module, qualified):
                     next_func = None
         return original_end(self, start, next_func, sec_end)
 
+    def bounded_context(self, start, owner_end):
+        first = next(self.engine._cs.disasm(
+            self.image.read_bytes_at_va(start, 15) or b'', start, count=1), None)
+        if first is None or first.address + first.size > owner_end:
+            return None
+        if self.engine.get_instruction(start) is None:
+            self.engine.decode_at(start)
+        end = self._find_function_end(start, None, owner_end)
+        instructions = self.engine.get_instructions_in_range(start, end)
+        if (start < end <= owner_end and instructions and
+                instructions[-1].end_address == end):
+            return end, len(instructions)
+        return None
+
     def prune_crossing_interiors(self):
         ranges = getattr(self, '_xboxllr_pdb_ranges', None)
         if ranges is None:
@@ -243,12 +257,11 @@ def install(module, qualified):
                         registered = _unwind_context_entries(
                             self, self.image.get_code_sections())
                     if start in registered:
-                        end = self._find_function_end(start, None, owner_end)
-                        instructions = self.engine.get_instructions_in_range(start, end)
-                        if (start < end <= owner_end and instructions and
-                                instructions[-1].end_address == end):
+                        bounded = bounded_context(self, start, owner_end)
+                        if bounded is not None:
+                            end, count = bounded
                             body.end = end
-                            body.num_instructions = len(instructions)
+                            body.num_instructions = count
                             if start in self._alias_entries:
                                 self._alias_entries[start] = end
                             continue
@@ -279,6 +292,18 @@ def install(module, qualified):
         prune_data(self)
         ranges = getattr(self, '_xboxllr_pdb_ranges', None)
         if ranges is not None:
+            # Registered catches can have neither a prologue nor a returning
+            # tail, so the heuristic passes may never create a candidate.
+            # Their bounded HandlerType records provide entry authority;
+            # require an enclosing exact PDB extent before admitting an alias.
+            handlers = _unwind_context_entries(
+                self, self.image.get_code_sections(), handlers_only=True)
+            for start in handlers - self.functions.keys():
+                owner_end = ranges.containing_end(start)
+                if owner_end is not None:
+                    bounded = bounded_context(self, start, owner_end)
+                    if bounded is not None:
+                        self._alias_entries[start] = bounded[0]
             for start, end in self._alias_entries.items():
                 owner_end = ranges.containing_end(start)
                 if owner_end is not None:

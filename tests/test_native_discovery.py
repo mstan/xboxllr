@@ -686,6 +686,7 @@ class NativeDiscovery(unittest.TestCase):
         original = det.image.raw_data
         self.assertTrue(det.engine.entry_pops_unsaved(0x10022))
         self.assertEqual(_unwind_context_entries(det, [text]), {0x10010, 0x10022})
+        self.assertEqual(_unwind_context_entries(det, [text], handlers_only=True), {0x10010})
         self.assertFalse(det._candidates)  # Recognition does not seed functions.
         det._add_candidate(0x10022, 0.86, 'imm_ref_target')
         self.assertIn(0x10022, det._candidates)

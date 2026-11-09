@@ -145,6 +145,28 @@ class QualifiedDiscovery(unittest.TestCase):
         self.assertEqual(det._alias_entries[0x11008], 0x1100d)
         self.assertEqual(det.functions[0x11000].end, 0x11003)
 
+    def test_registered_catch_missing_from_candidates_gets_a_bounded_alias(self):
+        code = bytes.fromhex('33c0c3') + b'\x90'*5 + bytes.fromhex('6a006a00cc')
+        blob, document = self.fixture(code)
+        det, text = self.detector(blob, document)
+        det._build_functions([text])
+        self.assertNotIn(0x11008, det.functions)
+        self.assertNotIn(0x11008, det._candidates)
+        self.assertNotIn(0x11008, det._alias_entries)
+        with patch('native_symbol_discovery._unwind_context_entries', return_value={0x11008}):
+            det._build_alias_entries()
+        self.assertEqual(det.functions[0x11008].end, 0x1100d)
+        self.assertEqual(det.functions[0x11000].end, 0x11003)
+
+    def test_missing_registered_catch_still_requires_complete_owned_instructions(self):
+        code = bytes.fromhex('33c0c3') + b'\x90'*5 + bytes.fromhex('66b801')
+        blob, document = self.fixture(code)
+        det, text = self.detector(blob, document)
+        det._build_functions([text])
+        with patch('native_symbol_discovery._unwind_context_entries', return_value={0x11008}):
+            det._build_alias_entries()
+        self.assertNotIn(0x11008, det.functions)
+
     def test_registered_context_cannot_borrow_an_instruction_from_next_owner(self):
         code = bytes.fromhex('33c0c3') + b'\x90'*5 + bytes.fromhex('66b801')
         blob, document = self.fixture(code)
