@@ -69,6 +69,11 @@ class NativeTitleTests(unittest.TestCase):
         self.assertEqual(selected, {data['mods']['registry']: dict(
             path=str(registry), sha256=n.digest(registry))})
 
+    def test_dashboard_declares_the_reviewed_launcher_ui_revision(self):
+        import native_launcher_ui
+        _, data = n.definition(n.ROOT / 'titles/dashboard/title.toml')
+        self.assertEqual(data['launcher']['ui_revision'], native_launcher_ui.REVISION)
+
     def test_shared_visual_registry_changes_invalidate_title_identity(self):
         framework = self.root / 'framework'
         registry = framework / 'pilots/native-title/visual_registry.c'
