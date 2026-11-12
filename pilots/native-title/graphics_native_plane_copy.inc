@@ -17,7 +17,7 @@ static int pilot_native_copy_shapes(ID3D11Texture2D *a,ID3D11Texture2D *b)
 }
 static int pilot_native_copy_completed(ID3D11Resource *destination,ID3D11Resource *source)
 {
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_COPY);
     if(!destination || !source)return 0;
     struct PilotNativePlane *to=pilot_native_plane_find(destination);
     struct PilotNativePlane *from=pilot_native_plane_find(source);
@@ -61,11 +61,11 @@ struct PilotNativeSnapshotOwner {
     struct PilotNativeMap *map;
 };
 void pilot_native_snapshot_barrier(void)
-{pilot_native_epoch_flush();}
+{pilot_native_epoch_flush_reason(COST_EPOCH_COPY);}
 void pilot_native_snapshot_release(void **token)
 {
     if(!token || !*token)return;
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_COPY);
     struct PilotNativeSnapshotOwner *owner=*token;*token=NULL;
     pilot_native_map_release(owner->map);
     pilot_native_plane_release(owner->plane);
@@ -73,7 +73,7 @@ void pilot_native_snapshot_release(void **token)
 }
 void pilot_native_snapshot_copy(RhiImage *destination,RhiImage *source,void **token)
 {
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_COPY);
     if(!token)return;
     if(!pilot_native_enabled()){pilot_native_snapshot_release(token);return;}
     ID3D11Resource *destination_resource=NULL,*source_resource=NULL;

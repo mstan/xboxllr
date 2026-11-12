@@ -30,6 +30,7 @@ static void graphics_completion_wait(uint64_t serial)
 #ifndef PILOT_SCHEDULING_LLE
         HANDLE event=(HANDLE)pilot_gfx_checkpoint_event(serial);
 #endif
+        struct PilotCostSpan cost_wait=pilot_cost_wait_begin();
         ++graphics_clock_waiters;ReleaseSRWLockExclusive(&graphics_lock);
 #ifdef PILOT_SCHEDULING_LLE
         /* Only the native GPU query above retires a fence. The finite
@@ -49,6 +50,7 @@ static void graphics_completion_wait(uint64_t serial)
         scheduler_block_end(blocked);
 #endif
         AcquireSRWLockExclusive(&graphics_lock);--graphics_clock_waiters;
+        pilot_cost_wait_end(COST_COMPLETION,cost_wait);
 #ifdef PILOT_SCHEDULING_LLE
         if(error)stop(error,(uint32_t)serial);
 #else

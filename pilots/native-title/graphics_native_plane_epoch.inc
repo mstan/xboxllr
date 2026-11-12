@@ -35,39 +35,6 @@ static struct {
     unsigned output_count,draws,allocated,buffer_count,bytes,serial,recording,copy_count,failed,packet_bytes,borrowed_vertices,borrowed_constants,borrowed_indices;
 } pilot_native_epoch;
 static unsigned pilot_native_epoch_extents[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT];
-/* Private bounded attribution; CPU cycles exclude time descheduled in driver waits.
- * Counters are nested, not additive. No sampling privilege or timing-window I/O. */
-static struct {
-    uint64_t start,work,prepare,record,flush,external_flush,replay,submit,copy_bytes;
-    unsigned active,inside,draws,packets,samples,random;
-} pilot_native_cpu;
-static uint64_t pilot_native_cpu_clock(void)
-{
-#ifdef _WIN32
-    ULONG64 cycles=0;if(pilot_native_cpu.active)QueryThreadCycleTime(GetCurrentThread(),&cycles);
-    return (uint64_t)cycles;
-#else
-    return 0;
-#endif
-}
-static void pilot_native_cpu_begin(void)
-{
-    const char *value=getenv("XLLE_PILOT_NATIVE_RENDER_DIAGNOSTICS");
-    if(pilot_native_cpu.start || !value || strcmp(value,"1"))return;
-    pilot_native_cpu.active=1;pilot_native_cpu.random=1;pilot_native_cpu.start=pilot_native_cpu_clock();
-}
-static void pilot_native_cpu_report(void)
-{
-    if(!pilot_native_cpu.active)return;
-    uint64_t total=pilot_native_cpu_clock()-pilot_native_cpu.start;
-    pilot_native_cpu.active=0;
-    fprintf(stderr,"[NATIVE CPU CYCLES] total=%llu work=%llu prepare=%llu record=%llu flush=%llu external_flush=%llu replay=%llu submit=%llu copy_bytes=%llu draws=%u packets=%u draw_samples=%u draw_weight=64 nested=1\n",
-        (unsigned long long)total,(unsigned long long)pilot_native_cpu.work,
-        (unsigned long long)pilot_native_cpu.prepare,(unsigned long long)pilot_native_cpu.record,
-        (unsigned long long)pilot_native_cpu.flush,(unsigned long long)pilot_native_cpu.external_flush,
-        (unsigned long long)pilot_native_cpu.replay,(unsigned long long)pilot_native_cpu.submit,
-        (unsigned long long)pilot_native_cpu.copy_bytes,pilot_native_cpu.draws,pilot_native_cpu.packets,pilot_native_cpu.samples);
-}
 static void pilot_native_epoch_vertex_span(unsigned stream,unsigned extent)
 {
     if(stream<D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT)pilot_native_epoch_extents[stream]=extent;
@@ -118,6 +85,7 @@ static int pilot_native_epoch_reserve_group(void)
         if(!pilot_native_epoch_jobs_prepare(group))return 0;
         group->state=1;pilot_native_epoch.recording=i+1;return 1;
     }
+    pilot_cost_add(COST_GROUP_EXHAUSTION,1);
     return 0;
 }
 static void pilot_native_epoch_cancel_empty(void)
@@ -126,13 +94,14 @@ static void pilot_native_epoch_cancel_empty(void)
         pilot_native_epoch.groups[pilot_native_epoch.recording-1].state=0;pilot_native_epoch.recording=0;
     }
 }
-static void pilot_native_epoch_flush(void)
+static void pilot_native_epoch_flush_reason(unsigned reason)
 {
     if(!pilot_native_epoch.draws)return;
-    uint64_t cpu_begin=pilot_native_cpu_clock(),cpu_replay=cpu_begin;
+    uint64_t cost_replay=pilot_cost_packet_begin();
+    pilot_cost_add(COST_PACKETS,1);
+    pilot_cost_epoch(reason);
     struct PilotNativeEpochGroup *group=&pilot_native_epoch.groups[pilot_native_epoch.recording-1];
     int executed=pilot_native_epoch_replay(group);
-    if(cpu_begin)pilot_native_cpu.replay+=pilot_native_cpu_clock()-cpu_replay;
     if(executed) {
         static int reported;
         if(!reported) {
@@ -170,11 +139,7 @@ static void pilot_native_epoch_flush(void)
      * lease, and do not force a driver submission for each tiny CPU packet. */
     pilot_native_epoch_group_release(pilot_native_epoch.recording-1,executed);
     pilot_native_epoch.recording=pilot_native_epoch.output_count=pilot_native_epoch.draws=pilot_native_epoch.bytes=pilot_native_epoch.borrowed_vertices=pilot_native_epoch.borrowed_constants=pilot_native_epoch.borrowed_indices=0;
-    if(cpu_begin) {
-        uint64_t cycles=pilot_native_cpu_clock()-cpu_begin;
-        pilot_native_cpu.flush+=cycles;if(!pilot_native_cpu.inside)pilot_native_cpu.external_flush+=cycles;
-        ++pilot_native_cpu.packets;
-    }
+    pilot_cost_work_end(COST_REPLAY,cost_replay);
 }
 static void pilot_native_epoch_close(void)
 {
@@ -464,6 +429,7 @@ static int pilot_native_epoch_replay(struct PilotNativeEpochGroup *group)
             const struct PilotNativeEpochJob *job=&group->jobs[i];
             if(pilot_native_prepared_jobs_enabled())pilot_native_epoch_state_bind_changes(context,previous,&job->state);
             else pilot_native_epoch_state_bind(context,&job->state);
+            pilot_cost_add(COST_COMPANION_DRAWS,1);
             if(job->indexed)ID3D11DeviceContext_DrawIndexed(context,job->count,job->first,job->base);
             else ID3D11DeviceContext_Draw(context,job->count,job->first);
             previous=&job->state;
@@ -477,7 +443,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
 {
     if(!pilot_native_epoch_enabled())return 0;
     if(pilot_native_epoch.draws>=PILOT_NATIVE_EPOCH_DRAWS) {
-        pilot_native_epoch_flush();return 0; /* Re-admit current immediate fallback after any degradation. */
+        pilot_native_epoch_flush_reason(COST_EPOCH_CAPACITY);return 0; /* Re-admit current immediate fallback after any degradation. */
     }
     if(!pilot_native_epoch_reserve_group())return 0;
     pilot_native_epoch.copy_count=0;
@@ -589,7 +555,7 @@ static int pilot_native_epoch_record(struct PilotNativeDrawState *draw,UINT coun
      * copy command. Admission failure can still roll back without GPU writes. */
     for(unsigned i=0;i<pilot_native_epoch.copy_count;++i) {
         struct PilotNativeEpochCopy *copy=&pilot_native_epoch.copies[i];
-        if(pilot_native_cpu.active)pilot_native_cpu.copy_bytes+=copy->bytes;
+        /* Snapshot copies remain distinct from host upload payload. */
         if(copy->bind==D3D11_BIND_CONSTANT_BUFFER)
             ID3D11DeviceContext_CopyResource(native,(ID3D11Resource*)copy->destination,(ID3D11Resource*)copy->source);
         else {

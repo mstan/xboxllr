@@ -428,7 +428,7 @@ static int32_t audio_download_effects(const uint32_t *a)
     return 0;
 }
 #endif
-void pilot_audio_dispatch(unsigned entry)
+static void pilot_audio_dispatch_measured_impl(unsigned entry)
 {
     if(entry>=PILOT_AUDIO_COUNT)stop("unknown audio entry",entry);
 #ifdef PILOT_SCHEDULING_LLE
@@ -452,7 +452,11 @@ void pilot_audio_dispatch(unsigned entry)
         if(!fast || mode==PILOT_SESSION_REPLAY)AcquireSRWLockExclusive(&audio_lock);
         pilot_session_lock_acquired(3);
         scheduler_block_end(owner_wait);
-    } else AcquireSRWLockExclusive(&audio_lock);
+    } else if(!TryAcquireSRWLockExclusive(&audio_lock)) {
+        struct PilotCostSpan s=pilot_cost_wait_begin();
+        AcquireSRWLockExclusive(&audio_lock);
+        pilot_cost_wait_end(COST_AUDIO_LOCK,s);
+    }
     int configuration=audio_configuration_enabled();
     struct PilotAudioBuffer before_release;unsigned configuration_slot=0;
     if(pilot_verbose){fprintf(stderr,"[AUDIO] %s return=%08x",pilot_audio_calls[entry].name,MEM32(g_esp));
@@ -641,4 +645,11 @@ void pilot_audio_dispatch(unsigned entry)
     --audio_original_dispatch_depth;
 #endif
     g_eax=(uint32_t)result;g_esp+=4+pilot_audio_calls[entry].stack_bytes;
+}
+
+void pilot_audio_dispatch(unsigned entry)
+{
+    uint64_t cost_service=pilot_cost_service_begin(COST_OTHER);
+    pilot_audio_dispatch_measured_impl(entry);
+    pilot_cost_service_end(COST_OTHER,cost_service);
 }

@@ -215,7 +215,7 @@ static uint32_t input_open(const uint32_t args[4],uint32_t *error)
     return free_slot->id;
 }
 
-void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
+static void pilot_input_dispatch_measured_impl(unsigned entry,recomp_func_t set_last_error)
 {
     if (entry>=PILOT_INPUT_COUNT) stop("unknown input boundary",entry);
     uint32_t args[4]={0},result=0,error=0;
@@ -357,4 +357,11 @@ void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
         if (g_esp!=original_stack) stop("input LastError callback ABI mismatch",g_esp);
     }
     g_eax=result; g_esp+=4+stack_bytes;
+}
+
+void pilot_input_dispatch(unsigned entry,recomp_func_t set_last_error)
+{
+    uint64_t sample=pilot_cost_service_begin(COST_OTHER);
+    pilot_input_dispatch_measured_impl(entry,set_last_error);
+    pilot_cost_service_end(COST_OTHER,sample);
 }

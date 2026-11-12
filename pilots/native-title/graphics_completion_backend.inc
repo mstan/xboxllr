@@ -167,7 +167,9 @@ static int pilot_serial_busy(uint64_t serial)
             entry->event=CreateEventW(NULL,TRUE,FALSE,NULL);
             if(!entry->event)pilot_d3d_backend_stop("native GPU event allocation failed");
             started=pilot_gpu_call_begin();
+            struct PilotCostSpan cost_flush=pilot_cost_wait_begin();
             ID3D11DeviceContext3_Flush1(pilot_completion_context,D3D11_CONTEXT_TYPE_ALL,entry->event);
+            pilot_cost_wait_end(COST_FLUSH,cost_flush);
             pilot_gpu_call_end("Flush1",started);
         } else {
             started=pilot_gpu_call_begin();ID3D11DeviceContext_Flush(context);

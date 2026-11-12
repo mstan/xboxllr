@@ -1,6 +1,7 @@
 // Independent native-title adapter over xboxllr's shared TCP transport.
 // PSX workflow reference: press/set_input/clear_input and presented screenshots.
 #include "native_debug.h"
+#include "cost_ring.h"
 #include "obs/debug_server.hpp"
 #include <algorithm>
 #include <array>
@@ -213,6 +214,7 @@ extern "C" int pilot_debug_start(const char *port_text) {
     server->register_command("pause",pause_guest);server->register_command("resume",resume_guest);
     server->register_command("guest_snapshot",guest_snapshot);server->register_command("read_guest",read_guest);
     server->register_command("read_memory",read_memory);
+    server->register_command("cost_ring",pilot_cost_query);
     if(!server->start(static_cast<uint16_t>(port))) {
         std::fprintf(stderr,"[NATIVE TCP] %s\n",server->last_error().c_str());server.reset();return 1;
     }

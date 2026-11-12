@@ -33,6 +33,7 @@ static void graphics_interpolation_service(void)
 }
 static DWORD WINAPI graphics_interpolation_worker(void *parameter)
 {
+    pilot_cost_register(COST_INTERPOLATION);
     unsigned rate=(unsigned)(uintptr_t)parameter;
     HANDLE timer=CreateWaitableTimerExW(NULL,NULL,2,TIMER_ALL_ACCESS);
     if(!timer)timer=CreateWaitableTimerW(NULL,FALSE,NULL);

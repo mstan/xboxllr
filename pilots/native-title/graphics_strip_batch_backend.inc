@@ -84,6 +84,7 @@ static void pilot_strip_batch_drain(void)
 
 void pilot_gfx_batch_flush(void)
 {
+    if(pilot_strip_batch.count)pilot_cost_strip(0);
     pilot_strip_batch.prepared=0;
     pilot_strip_batch_drain();
 }
@@ -113,6 +114,7 @@ static int pilot_strip_batch_room(unsigned first,unsigned count)
     if(count<3 || count>1024 || (uint64_t)first+count>UINT32_MAX)return 0;
     if(pilot_strip_batch.count==PILOT_STRIP_BATCH_DRAWS ||
        pilot_strip_batch.indices+count+(pilot_strip_batch.count!=0)>PILOT_STRIP_BATCH_INDICES) {
+        pilot_cost_strip(1);
         /* The temporary index binding is restored by drain. Capacity does
          * not mutate a prepared shader, raster, resource or state input. */
         if(pilot_gfx_native_operation_owner())pilot_strip_batch_drain();
@@ -135,13 +137,5 @@ static void pilot_strip_batch_close(void)
 }
 static void pilot_strip_batch_profile(void)
 {
-    static int enabled=-1;static unsigned frames;
-    if(enabled<0){const char *value=getenv("XLLE_PILOT_BATCH_PROFILE");enabled=value && !strcmp(value,"1");}
-    if(enabled && ++frames%30==0)
-        fprintf(stderr,"[DRAW BATCH] queued=%llu native=%llu largest=%u vertex_updates=%llu vertex_bytes=%llu prepared_reuses=%llu\n",
-            (unsigned long long)pilot_strip_batch.stats.queued_draws,
-            (unsigned long long)pilot_strip_batch.stats.native_draws,pilot_strip_batch.stats.largest_batch,
-            (unsigned long long)pilot_strip_batch.stats.vertex_updates,
-            (unsigned long long)pilot_strip_batch.stats.vertex_bytes,
-            (unsigned long long)pilot_strip_batch.stats.prepared_reuses);
+    /* Counts are published in cost_ring; no separate opt-in profiler. */
 }

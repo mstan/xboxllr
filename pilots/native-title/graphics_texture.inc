@@ -538,6 +538,7 @@ static void graphics_texture_desc(uint32_t header,unsigned level,uint32_t destin
 }
 static void graphics_texture_lock(uint32_t header,unsigned level,uint32_t destination,uint32_t rectangle,uint32_t flags)
 {
+    if(header==graphics_target || header==graphics_depth)pilot_cost_add(COST_TARGET_LOCK,1);
     struct GraphicsTextureObject *object=&graphics_textures[graphics_texture_slot(header)];
     if(object->guest_owned)stop("caller-owned GPU alias CPU lock outside qualified scope",header);
     if(level>=object->levels || (flags&~0xf0u))stop("unqualified texture lock flags/level",flags);

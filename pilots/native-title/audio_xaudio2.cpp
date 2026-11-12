@@ -28,6 +28,7 @@
 #endif
 #endif
 #include "audio_backend.h"
+#include "cost_ring.h"
 #include "audio_dsp.h"
 #include "audio_capture_windows.hpp"
 #include "session_replay.h"
@@ -250,7 +251,7 @@ static HANDLE wake,feeder;
 static std::atomic<bool> exiting{false};
 static SRWLOCK lock=SRWLOCK_INIT;
 struct EngineEvents final:public IXAudio2EngineCallback {
-    void STDMETHODCALLTYPE OnProcessingPassStart() override {}
+    void STDMETHODCALLTYPE OnProcessingPassStart() override {pilot_cost_register(COST_XAUDIO);}
     void STDMETHODCALLTYPE OnProcessingPassEnd() override {}
     void STDMETHODCALLTYPE OnCriticalError(HRESULT hr) override {fail("native audio device failed",hr);}
 };
@@ -260,7 +261,13 @@ static EngineEvents engine_events;
 struct Guard {
     Guard(){
         int mode=pilot_session_mode();
-        if(!mode){AcquireSRWLockExclusive(&lock);return;}
+        if(!mode){
+            if(!TryAcquireSRWLockExclusive(&lock)) {
+                auto s=pilot_cost_wait_begin();AcquireSRWLockExclusive(&lock);
+                pilot_cost_wait_end(COST_AUDIO_LOCK,s);
+            }
+            return;
+        }
         bool fast=mode==PILOT_SESSION_RECORD && TryAcquireSRWLockExclusive(&lock);
         uint64_t observed=pilot_session_value64(PILOT_SESSION_WAIT,UINT64_C(0x4c4f434b00000002),fast);
         if(observed>1)pilot_session_diverge("invalid audio owner acquisition",2);
@@ -438,6 +445,7 @@ static HRESULT fill(Buffer *b)
 }
 static DWORD WINAPI feed(void*)
 {
+    pilot_cost_register(COST_FEEDER);
     while(!exiting.load()) {
         DWORD wait=WaitForSingleObject(wake,20);
         if(wait!=WAIT_OBJECT_0 && wait!=WAIT_TIMEOUT)fail("audio feeder event",HRESULT_FROM_WIN32(GetLastError()));

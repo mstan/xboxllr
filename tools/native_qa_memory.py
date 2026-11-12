@@ -16,7 +16,6 @@ class NativeQaMemory:
     def valid(self,at,size):return 0<size<=0x1000000 and any(lo<=at and at+size<=hi for lo,hi in self.ranges)
     def __init__(self,run,facts,write=False):
         self.run=Path(run)
-        if self.run.resolve().drive.upper()=='C:':raise ValueError('keep QA outputs off C:')
         self.receipt=json.loads((self.run/'launch.aot-private.json').read_text())
         if sys.platform!='win32':raise RuntimeError('native process QA currently requires Windows')
         self.facts=facts

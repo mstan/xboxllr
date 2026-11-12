@@ -166,7 +166,9 @@ static void scheduler_poll_wait(void)
      * existing equal-priority budget/quantum logic. Check before sleeping to
      * cover publication between the caller's last read and lock acquisition. */
     if(!scheduled[scheduler_slot].request) {
+        struct PilotCostSpan cost_poll=pilot_cost_wait_begin();
         int ok=SleepConditionVariableSRW(&scheduler_changed,&scheduler_lock,INFINITE,0);
+        pilot_cost_wait_end(COST_POLL,cost_poll);
         DWORD error=ok?0:GetLastError();
         ReleaseSRWLockExclusive(&scheduler_lock);
         if(!ok)stop("guest poll scheduler wait failed",error);

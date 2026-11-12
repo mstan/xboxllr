@@ -95,6 +95,7 @@ static void pilot_visibility_internal_end(ID3D11Query *query)
 }
 int32_t pilot_gfx_visibility_begin(void)
 {
+    pilot_cost_add(COST_VISIBILITY,1);
     pilot_gfx_batch_flush();
     if(!pilot_device)return E_FAIL;
     struct PilotVisibilityCounter *c=calloc(1,sizeof(*c));if(!c)return E_OUTOFMEMORY;
@@ -109,7 +110,7 @@ int32_t pilot_gfx_visibility_begin(void)
     }
     /* Keep enhanced work outside both the discarded old counter and the
      * new native query. This is an execution boundary, not a state flush. */
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_VISIBILITY);
     pilot_visibility_unref(pilot_visibility_current);pilot_visibility_current=c;
     ID3D11DeviceContext_Begin(ctx,(ID3D11Asynchronous*)c->query);return S_OK;
 }
@@ -131,7 +132,7 @@ int32_t pilot_gfx_visibility_end(uint32_t index)
     ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous*)r->begin_stamp);
     ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous*)r->end_stamp);
     ID3D11DeviceContext_End(ctx,(ID3D11Asynchronous*)r->clock);
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_VISIBILITY);
     struct PilotVisibilityReport **at=&pilot_visibility_reports;
     while(*at && (*at)->index!=index)at=&(*at)->next;
     if(*at){struct PilotVisibilityReport *old=*at;r->next=old->next;*at=r;pilot_visibility_drop(old);}

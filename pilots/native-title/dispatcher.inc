@@ -151,6 +151,7 @@ static void dispatch_wake_locked(void)
 
 static DWORD WINAPI dispatch_worker(void *unused)
 {
+    pilot_cost_register(COST_DISPATCHER);
     (void)unused;
     pilot_session_actor(66);
     const uint32_t base=0x72000000u,top=base+0x20000u;

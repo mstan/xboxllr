@@ -119,7 +119,7 @@ static int pilot_native_upload_uav_active(void)
 }
 static int pilot_native_refresh_color(struct PilotNativePlane *plane)
 {
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_UPLOAD);
     if(!plane)return 0;
     plane->coherent=plane->valid_aspects=0;
     if(!plane->image || !plane->enhanced || plane->image==plane->enhanced)goto degraded;

@@ -150,6 +150,7 @@ static void graphics_frame_capture_draw(unsigned shader,const uint32_t args[3],u
 #include "graphics_lighting.inc"
 static void graphics_draw_submit_source(const uint32_t args[3],uint32_t up_data,uint32_t up_stride,const void *indices,unsigned index_count,int32_t base,const void *host_vertices)
 {
+    pilot_cost_add(COST_GUEST_DRAWS,1);
 #ifdef PILOT_GRAPHICS_FRAME_AUDIT
     graphics_frame_audit.capture_sequence=0;
 #endif

@@ -69,6 +69,8 @@ static void graphics_gpu_barrier(void)
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
     if(graphics_original_clock_bound){graphics_original_callback_barrier();return;}
 #endif
+    struct PilotCostSpan cost_barrier={0,0,0};int cost_waiting=graphics_gpu_head || graphics_gpu_running;
+    if(cost_waiting)cost_barrier=pilot_cost_wait_begin();
     uint64_t begin=graphics_gpu_profile() && (graphics_gpu_head || graphics_gpu_running)?dispatch_monotonic():0;
     while(graphics_gpu_head || graphics_gpu_running) {
         int blocked=scheduler_block_begin();
@@ -82,6 +84,7 @@ static void graphics_gpu_barrier(void)
             AcquireSRWLockExclusive(&graphics_lock);
         }
     }
+    if(cost_waiting)pilot_cost_wait_end(COST_CALLBACK,cost_barrier);
     if(begin)fprintf(stderr,"[GPU BARRIER PROFILE] thread=%lu wait_ms=%.3f\n",GetCurrentThreadId(),(dispatch_monotonic()-begin)/10000.0);
 }
 static void graphics_gpu_insert(uint32_t type,uint32_t routine,uint32_t context)

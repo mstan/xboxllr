@@ -4,7 +4,8 @@
  * graphics lock serializes every call. Enhanced failure never replaces or
  * reconstructs the canonical source image. */
 /* Root calls these at actual resource/visibility boundaries on every donor. */
-static void pilot_native_epoch_flush(void);
+static void pilot_native_epoch_flush_reason(unsigned reason);
+#define pilot_native_epoch_flush() pilot_native_epoch_flush_reason(COST_EPOCH_OTHER)
 static void pilot_native_epoch_close(void);
 /* Optional per-vertex layout extent proof, consumed by the next raw wrapper.
  * Unknown/instance-rate layouts must leave extent zero (full-buffer copy). */

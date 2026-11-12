@@ -8,6 +8,8 @@ static void audio_listener_commit(void);
 static void audio_i3dl2_commit(void)
 {
     if(!audio_i3dl2.dirty)return;
+    pilot_cost_add(COST_I3DL2_COMMIT,1);
+    struct PilotCostSpan cost_commit=pilot_cost_wait_begin();
     uint32_t effect=audio_effects_location[0],base=0,bytes=4096,tail;
     if(!audio_effects || !pilot_dsp_effect_read(audio_effects,effect,0x21c,&tail,4))
         stop("I3DL2 effect state layout is unqualified",effect);
@@ -23,6 +25,7 @@ static void audio_i3dl2_commit(void)
     int32_t result=pilot_audio_effects_patch(audio_effects,effect,2,patches);
     uint32_t zero=0;if(vm_free(&base,&zero,MEM_RELEASE))stop("native I3DL2 workspace retirement failed",base);
     if(result<0)stop("native I3DL2 coefficient transaction failed",(uint32_t)result);
+    pilot_cost_wait_end(COST_I3DL2,cost_commit);
     memcpy(audio_i3dl2.applied,audio_i3dl2.pending,48);audio_i3dl2.dirty=0;audio_i3dl2.known=1;
     fprintf(stderr,"[AUDIO I3DL2] original-native calculation; effect=%u committed_control=4 coefficient_bytes=264\n",effect);
 }

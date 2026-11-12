@@ -20,6 +20,7 @@
 #include "memory_commit_owner.h"
 #include "event_trace.h"
 #include "native_debug.h"
+#include "cost_ring.h"
 #include "session_replay.h"
 #ifdef PILOT_INPUT_NATIVE
 #include "input_host.h"
@@ -1166,6 +1167,8 @@ static void kernel_dispatch_impl(void)
 #endif
 static void kernel_dispatch(void)
 {
+    pilot_cost_add(COST_KERNEL_CALL,1);
+    if(next_kernel_ordinal==277)pilot_cost_add(COST_CRITICAL_ENTER,1);
     if(g_pilot_session_enabled) {
         uint32_t registers[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp};
         session_service_evidence(next_kernel_ordinal,registers,sizeof(registers));
@@ -1182,7 +1185,12 @@ static void kernel_dispatch(void)
 #endif
     int blocked=scheduler_kernel_blocks(next_kernel_ordinal)?scheduler_block_begin():0;
     unsigned completing_ordinal=next_kernel_ordinal;
+    uint64_t cost_service=pilot_cost_service_begin(COST_OTHER);
+    struct PilotCostSpan cost_sleep={0,0,0};
+    if(completing_ordinal==99)cost_sleep=pilot_cost_wait_begin();
     kernel_dispatch_impl();
+    if(completing_ordinal==99)pilot_cost_wait_end(COST_SLEEP,cost_sleep);
+    pilot_cost_service_end(COST_OTHER,cost_service);
     scheduler_block_end(blocked);
     if(g_pilot_session_enabled) {
         uint32_t returned[]={g_eax,g_ecx,g_edx,g_esp,g_ebx,g_esi,g_edi,g_ebp};

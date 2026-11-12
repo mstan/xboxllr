@@ -6,6 +6,8 @@
 #include <d3d11_3.h>
 #include "d3d8_combiners.h"
 #include "graphics_backend.h"
+#include "cost_ring.h"
+#include "cost_ring_backend.inc"
 #include "graphics_cb_version_bridge.h"
 #include "session_replay.h"
 #include "resource_mirror.h"
@@ -607,7 +609,7 @@ int32_t pilot_gfx_reset(const uint32_t p[17])
     pilot_gfx_batch_flush();
     /* The donor keeps this D3D device. Retain submitted snapshot ownership
      * until its GPU event completes, across the guest target replacement. */
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     pilot_deferred_invalidate();
 #ifdef PILOT_D3D_PHOBOS
     if(!pilot_device)return E_FAIL;
@@ -710,7 +712,7 @@ stage_failed:
 int32_t pilot_gfx_clear(uint32_t flags,uint32_t color,float depth,uint32_t stencil)
 {
     pilot_gfx_batch_flush();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_CLEAR);
     if (!pilot_device) return E_FAIL;
     if(!flags)return S_OK;
     ID3D11RenderTargetView *rtv=NULL;ID3D11DepthStencilView *dsv=NULL;
@@ -806,7 +808,7 @@ int32_t pilot_gfx_present(void)
     if(quit){pilot_session_report_stop("window closed",0);ExitProcess(0);}
     pilot_gfx_batch_flush();
     pilot_strip_batch_profile();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_PRESENT);
     if (!pilot_device) return E_FAIL;
     uint32_t requested_size[2];
     if(pilot_debug_take_client_size(requested_size)) {
@@ -946,7 +948,7 @@ int32_t pilot_gfx_vertex_create(uint32_t bytes,uint32_t *handle)
 void pilot_gfx_vertex_destroy(uint32_t handle)
 {
     pilot_gfx_batch_flush();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     D3D8VertexBuffer *vertex=pilot_vertex(handle);
     for(unsigned i=0;i<16;++i)if(pilot_bound_vertices[i]==handle)pilot_d3d_backend_stop("destroying a bound vertex buffer");
     if(vertex->iface.lpVtbl->Release(&vertex->iface)!=0)
@@ -979,13 +981,13 @@ void pilot_gfx_vertex_upload(uint32_t handle,const void *data,uint32_t bytes)
     /* A prepared whole writer rotates pinned storage before its native
      * upload. Other donors and unsupported owners retain the old barrier. */
     if(!PILOT_NATIVE_BUFFER_FULL_WRITE_OWNED(pilot_donor_vertex(vertex)))
-        pilot_native_epoch_flush();
+        pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     BYTE *destination=NULL;
     pilot_d3d_require(vertex->iface.lpVtbl->Lock(&vertex->iface,0,bytes,&destination,0),__FILE__,__LINE__);
     memcpy(destination,data,bytes);
     pilot_d3d_require(vertex->iface.lpVtbl->Unlock(&vertex->iface),__FILE__,__LINE__);
     pilot_vertices[handle-1].uploaded=1;pilot_vertices[handle-1].refetch=0;
-    PILOT_RESOURCE_COUNT(vertex_full_updates,1);PILOT_RESOURCE_COUNT(vertex_full_bytes,bytes);
+    PILOT_RESOURCE_COUNT(vertex_full_updates,1);PILOT_RESOURCE_COUNT(vertex_full_bytes,bytes);pilot_cost_add(COST_VERTEX_BYTES,bytes);
     pilot_vertices[handle-1].last_use=pilot_mark_work();
 }
 static PilotResourceIdentity pilot_vertex_mirror_identity(uint32_t handle,uint32_t bytes)
@@ -1039,10 +1041,10 @@ void pilot_gfx_vertex_upload_range(uint32_t handle,const void *data,uint32_t off
      * upload and CPU shadow update below remain unchanged. */
     ID3D11Buffer *native=pilot_donor_vertex(vertex);
     ID3D11Buffer *owned=PILOT_NATIVE_BUFFER_BEFORE_RANGE_WRITE(native,d3d8_GetD3D11Context());
-    if(owned)native=owned;else pilot_native_epoch_flush();
+    if(owned)native=owned;else pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     pilot_resource_pages_invalidate(&pilot_vertices[handle-1].mirror,offset,bytes);
     ++pilot_strip_batch.stats.vertex_updates;pilot_strip_batch.stats.vertex_bytes+=bytes;
-    PILOT_RESOURCE_COUNT(vertex_range_updates,1);PILOT_RESOURCE_COUNT(vertex_range_bytes,bytes);
+    PILOT_RESOURCE_COUNT(vertex_range_updates,1);PILOT_RESOURCE_COUNT(vertex_range_bytes,bytes);pilot_cost_add(COST_VERTEX_BYTES,bytes);
     D3D11_BOX box={offset,0,0,offset+bytes,1,1};
     ID3D11DeviceContext_UpdateSubresource(d3d8_GetD3D11Context(),
         (ID3D11Resource*)native,0,&box,source,0,0);
@@ -1241,7 +1243,7 @@ static HRESULT pilot_depth_match_color(uint32_t handle,ID3D11Texture2D *color,un
 int32_t pilot_gfx_targets(uint32_t color,uint32_t depth)
 {
     pilot_gfx_batch_flush();
-    if(color!=pilot_color_target || depth!=pilot_depth_target)pilot_native_epoch_flush();
+    if(color!=pilot_color_target || depth!=pilot_depth_target)pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     if(pilot_initializer.dither && color && !pilot_initializer_format(pilot_texture(color)->d3d8_format))return E_NOTIMPL;
     pilot_sampling_views_dirty=15;
 #ifndef PILOT_D3D_PHOBOS
@@ -1351,7 +1353,7 @@ int32_t pilot_gfx_depth_surface_create(uint32_t width,uint32_t height,uint32_t *
 #include "graphics_depth_grid_backend.inc"
 void pilot_gfx_texture_destroy(uint32_t handle)
 {
-    pilot_gfx_batch_flush();pilot_native_epoch_flush();
+    pilot_gfx_batch_flush();pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     D3D8Texture *texture=pilot_texture(handle);
     if(handle==pilot_color_target || handle==pilot_depth_target)pilot_d3d_backend_stop("destroying a bound target");
     for(unsigned i=0;i<4;++i)if(pilot_bound_textures[i]==handle)pilot_d3d_backend_stop("destroying a sampled texture");
@@ -1422,7 +1424,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         for(UINT row=0;row<rows && !changed;++row)changed=pilot_texture_compare(texture->sys_mem+row*pitch,(const BYTE*)data+row*guest_pitch,pitch)!=0;
         if(!changed)return;
         pilot_gfx_batch_flush();
-        pilot_native_epoch_flush();
+        pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
         /* Xbox Z24S8 stores stencil in the low byte; native D24S8 stores it
          * in the high byte. CPU writes use real staging copies, since D3D11
          * forbids UpdateSubresource on a depth-stencil destination. */
@@ -1444,7 +1446,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
 #ifdef PILOT_D3D_PHOBOS
         pilot_native_written(pilot_donor_texture(texture),0);
 #endif
-        PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);
+        PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);pilot_cost_add(COST_TEXTURE_BYTES,(uint64_t)pitch*rows);
         pilot_textures[handle-1].content_serial=pilot_textures[handle-1].use->serial=
             pilot_textures[handle-1].use->write_serial=pilot_mark_work();return;
     }
@@ -1473,7 +1475,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
         texture->locked=FALSE; return; /* No changed CPU work to upload. */
     }
     pilot_gfx_batch_flush();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     if(pair) {
         /* Both streams retain the same Morton texel order. The existing
          * donor upload unswizzles the expanded four-byte texels once. */
@@ -1500,7 +1502,7 @@ void pilot_gfx_texture_upload(uint32_t handle,uint32_t level,const void *data,ui
     else
 #endif
     pilot_d3d_require(texture->iface.lpVtbl->UnlockRect(&texture->iface,level),__FILE__,__LINE__);
-    PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);
+    PILOT_RESOURCE_COUNT(texture_payload_updates,1);PILOT_RESOURCE_COUNT(texture_payload_bytes,(uint64_t)pitch*rows);pilot_cost_add(COST_TEXTURE_BYTES,(uint64_t)pitch*rows);
     if(!level)pilot_replacement_match(handle,data,bytes);
     pilot_textures[handle-1].uploaded|=1u<<level;
     pilot_textures[handle-1].gpu_written=0;
@@ -1544,7 +1546,7 @@ int32_t pilot_gfx_movie_luma(uint32_t handle,unsigned step,unsigned char *sample
 int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
 {
     pilot_gfx_batch_flush();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     pilot_texture(handle);ID3D11RenderTargetView *rtv=pilot_textures[handle-1].rtv;
     if(!rtv)return E_INVALIDARG;
     float rgba[]={((color>>16)&255)/255.0f,((color>>8)&255)/255.0f,(color&255)/255.0f,(color>>24)/255.0f};
@@ -1560,7 +1562,7 @@ int32_t pilot_gfx_texture_clear(uint32_t handle,uint32_t color)
 void pilot_gfx_texture_download(uint32_t handle,void *data,uint32_t bytes)
 {
     pilot_gfx_batch_flush();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     D3D8Texture *texture=pilot_texture(handle);
     if(texture->levels!=1 || !(texture->d3d8_format==0x11 || texture->d3d8_format==0x12 || texture->d3d8_format==0x1e || texture->d3d8_format==0x2e))
         pilot_d3d_backend_stop("unqualified GPU texture download format");
@@ -1578,7 +1580,7 @@ void pilot_gfx_texture_download(uint32_t handle,void *data,uint32_t bytes)
 }
 int32_t pilot_gfx_texture_clear_depth(uint32_t handle,uint32_t flags,float depth,uint32_t stencil)
 {
-    pilot_gfx_batch_flush();pilot_native_epoch_flush();
+    pilot_gfx_batch_flush();pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     pilot_texture(handle);ID3D11DepthStencilView *dsv=pilot_textures[handle-1].dsv;
     if(!dsv || !(flags&3) || (flags&~3u) || !(depth>=0 && depth<=1) || stencil>255)return E_INVALIDARG;
     ID3D11DeviceContext_ClearDepthStencilView(d3d8_GetD3D11Context(),dsv,flags,depth,(UINT8)stencil);
@@ -1591,7 +1593,7 @@ int32_t pilot_gfx_texture_clear_depth(uint32_t handle,uint32_t flags,float depth
 }
 int32_t pilot_gfx_texture_readback(uint32_t handle,uint32_t level,void *data,uint32_t capacity)
 {
-    pilot_gfx_batch_flush();pilot_native_epoch_flush();
+    pilot_gfx_batch_flush();pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     D3D8Texture *texture=pilot_texture(handle);
     if(level>=texture->levels || !data) return E_INVALIDARG;
     UINT width=texture->width>>level,height=texture->height>>level;
@@ -1948,7 +1950,7 @@ int32_t pilot_gfx_readback(unsigned char *rgba,uint32_t capacity)
 int32_t pilot_gfx_surface_readback(unsigned surface,unsigned char *rgba,uint32_t capacity)
 {
     pilot_gfx_batch_flush();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     if (!pilot_device || !rgba || (surface>=4 || surface==2) || !pilot_surfaces[surface]) return E_INVALIDARG;
     ID3D11Texture2D *back=pilot_surfaces[surface],*staging=NULL;
     ID3D11Texture2D_AddRef(back);
@@ -2015,7 +2017,7 @@ int32_t pilot_gfx_reference_raster(struct PilotRasterObservation *out)
 int32_t pilot_gfx_reference_target_readback(unsigned depth,void *data,uint32_t capacity,uint32_t metadata[3])
 {
     pilot_gfx_batch_flush();
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_OTHER);
     if(!pilot_device || depth>1 || !metadata)return E_INVALIDARG;
     memset(metadata,0,3*sizeof(*metadata));
     ID3D11DeviceContext *context=d3d8_GetD3D11Context();

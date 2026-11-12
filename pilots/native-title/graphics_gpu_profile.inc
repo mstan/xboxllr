@@ -2,7 +2,7 @@
  * D3D11 query API. No output I/O during the requested measurement window:
  * the harness creates the explicit stop file afterwards. Queries never wait
  * or flush. All calls run under the existing logical graphics owner. */
-#ifdef PILOT_GPU_PROFILE
+#if 0 /* Superseded by the counters-only source-swap ring. GPU timestamps unavailable. */
 #include "gpu_profile.h"
 enum { PILOT_GPU_MEASURE_CAPACITY=4096 };
 static struct {

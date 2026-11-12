@@ -327,7 +327,12 @@ static void graphics_dispatch_impl(unsigned entry)
         g_esp+=4+pilot_d3d_calls[entry].stack_bytes;return;
     }
     uint64_t entered=graphics_service_profile_enabled()?dispatch_monotonic():0;
-    AcquireSRWLockExclusive(&graphics_lock);
+    if(g_pilot_session_enabled)AcquireSRWLockExclusive(&graphics_lock);
+    else if(!TryAcquireSRWLockExclusive(&graphics_lock)) {
+        struct PilotCostSpan cost_lock=pilot_cost_wait_begin();
+        AcquireSRWLockExclusive(&graphics_lock);
+        pilot_cost_wait_end(COST_GRAPHICS_LOCK,cost_lock);
+    }
     uint64_t acquired=entered?dispatch_monotonic():0;
     /* The native operation owner flushes at actual input/resource mutations
      * and GPU observations, including inline packets. An ABI transition is
@@ -834,14 +839,14 @@ graphics_dispatch_done:
     g_esp+=4+pilot_d3d_calls[entry].stack_bytes;
 }
 
-void pilot_d3d_dispatch(unsigned entry);
+void pilot_d3d_dispatch_measured_impl(unsigned entry);
 #ifdef PILOT_DISPLAY_QUALIFICATION
 #include "display_qualification.inc"
 #endif
 #ifdef PILOT_SCHEDULING_LLE
 static void graphics_original_dispatch(unsigned entry)
 #else
-void pilot_d3d_dispatch(unsigned entry)
+void pilot_d3d_dispatch_measured_impl(unsigned entry)
 #endif
 {
 #ifdef PILOT_SCHEDULING_LLE
@@ -924,7 +929,7 @@ void pilot_d3d_dispatch(unsigned entry)
     PILOT_THREAD_CHECKPOINT();
 }
 #ifdef PILOT_SCHEDULING_LLE
-void pilot_d3d_dispatch(unsigned entry)
+void pilot_d3d_dispatch_measured_impl(unsigned entry)
 {
     int display_wait=entry==PILOT_D3D_D3DDevice_BlockUntilVerticalBlank;
     if(graphics_original_dispatch_depth ||
@@ -936,3 +941,18 @@ void pilot_d3d_dispatch(unsigned entry)
     graphics_original_dispatch_depth=0;
 }
 #endif
+
+void pilot_d3d_dispatch(unsigned entry)
+{
+    uint64_t cost_service=pilot_cost_service_begin(COST_D3D);
+
+    pilot_d3d_dispatch_measured_impl(entry);
+    pilot_cost_service_end(COST_D3D,cost_service);
+    if(entry==PILOT_D3D_D3DDevice_Swap) {
+        uint64_t faults=0;
+#ifdef PILOT_MEMORY_WRITE_WATCH
+        faults=pilot_write_watch_faults();
+#endif
+        pilot_cost_swap(graphics_swap_submitted,faults);
+    }
+}

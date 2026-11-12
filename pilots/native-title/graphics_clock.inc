@@ -296,6 +296,7 @@ static uint32_t graphics_present(void)
     for(;;) {
         graphics_present_retire(0);
         if(graphics_present_count==2) {
+            struct PilotCostSpan cost_wait=pilot_cost_wait_begin();
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
             ReleaseSRWLockExclusive(&graphics_lock);
             const char *error=wait.event?NULL:component_wait_open(&wait);uint32_t status=0;
@@ -305,10 +306,12 @@ static uint32_t graphics_present(void)
             if(!SleepConditionVariableSRW(&graphics_present_changed,&graphics_lock,1,0) && GetLastError()!=ERROR_TIMEOUT)
                 stop("presentation queue wait failed",GetLastError());
 #endif
+            pilot_cost_wait_end(COST_PRESENT_RETIRE,cost_wait);
             continue;
         }
         if(graphics_parameters[12]==0x80000000u || graphics_clock_now()>=graphics_swap_deadline)break;
         uint64_t deadline=graphics_swap_deadline;
+        struct PilotCostSpan cost_pacing=pilot_cost_wait_begin();
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)
         uint64_t remaining=deadline-graphics_clock_now();
         ReleaseSRWLockExclusive(&graphics_lock);
@@ -318,6 +321,7 @@ static uint32_t graphics_present(void)
 #else
         ReleaseSRWLockExclusive(&graphics_lock);graphics_wait_until(deadline);AcquireSRWLockExclusive(&graphics_lock);
 #endif
+        pilot_cost_wait_end(COST_PACING,cost_pacing);
     }
     --graphics_clock_waiters;
 #if defined(PILOT_SCHEDULING_LLE) && !defined(PILOT_DISPLAY_LLE)

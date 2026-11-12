@@ -8,9 +8,7 @@
 #endif
 static int graphics_service_profile_enabled(void)
 {
-    static PILOT_GRAPHICS_TLS int enabled=-1;
-    if(enabled<0) {const char *value=getenv("XLLE_PILOT_SERVICE_PROFILE");enabled=value && !strcmp(value,"1");}
-    return enabled;
+    return 0; /* Cost attribution lives in the always-on source-swap ring. */
 }
 static PILOT_GRAPHICS_TLS struct {
     uint64_t start,ticks[PILOT_D3D_COUNT];

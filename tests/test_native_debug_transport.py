@@ -28,6 +28,10 @@ def main():
                 if time.monotonic() > deadline or child.poll() is not None:
                     raise
                 time.sleep(.02)
+        costs = request(port, 'cost_ring 0 1')
+        assert costs['capacity'] == 4096 and costs['rows'] == []
+        assert request(port, 'cost_ring 0 1') == costs
+        assert request(port, 'status')['input_sequence'] == 0
         with socket.socket() as duplicate:
             duplicate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -42,7 +46,8 @@ def main():
                 assert json.loads(response.readline())["ok"]
                 assert response.readline() == b"pong\n"
                 assert json.loads(response.readline())["ok"]
-        for command in ("set_input 00 100", "set_input " + "00"*18 + " 5001",
+        for command in ('cost_ring arm', 'cost_ring 0 4097', 'cost_ring 0 1 extra',
+                        "set_input 00 100", "set_input " + "00"*18 + " 5001",
                         "set_input " + "0001" + "00"*16 + " 100", "screenshot extra",
                         'resize 0 720', 'resize 8192 8192', 'resize 1680 -1', 'resize 1680 720 extra',
                         'connect_input 0','connect_input 2','connect_input 16','connect_input -1',

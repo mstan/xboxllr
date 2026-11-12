@@ -530,35 +530,23 @@ static HRESULT pilot_native_draw_begin(struct PilotNativeDrawState *draw)
 static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexed)
 {
     if(!pilot_native_enabled()) {memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));return;}
-    uint64_t cpu_work=0;
-    if(pilot_native_cpu.active) {
-        /* Random 1/64 sampling avoids both per-draw system calls and fixed
-         * alignment with 256-draw packets. Flush attribution stays exact. */
-        unsigned random=pilot_native_cpu.random;
-        random^=random<<13;random^=random>>17;random^=random<<5;
-        pilot_native_cpu.random=random;++pilot_native_cpu.draws;
-        if(!(random&63)){cpu_work=pilot_native_cpu_clock();++pilot_native_cpu.samples;}
-    }
-    pilot_native_cpu.inside=1;
+    uint64_t cost_work=pilot_cost_companion_begin();
     if(!pilot_native_epoch_enabled()) {
         /* Matched opt-out retains the original single-admission immediate
          * path; it must not pay for a failed deferred capture first. */
-        pilot_native_epoch_flush();
+        pilot_native_epoch_flush_reason(COST_EPOCH_ADMISSION);
         struct PilotNativeDrawState direct;
         if(pilot_native_draw_begin(&direct)==S_OK) {
+            pilot_cost_add(COST_COMPANION_DRAWS,1);
             if(indexed)ID3D11DeviceContext_DrawIndexed(direct.context,count,first,base);
             else ID3D11DeviceContext_Draw(direct.context,count,first);
             (void)pilot_native_draw_end(&direct);
         }
         goto finished;
     }
-    uint64_t cpu_prepare=cpu_work?pilot_native_cpu_clock():0;
     struct PilotNativeDrawState draw;HRESULT result=pilot_native_draw_prepare(&draw,0);
-    if(cpu_work)pilot_native_cpu.prepare+=64*(pilot_native_cpu_clock()-cpu_prepare);
     if(result==S_OK) {
-        uint64_t cpu_record=cpu_work?pilot_native_cpu_clock():0;
         int recorded=pilot_native_epoch_record(&draw,count,first,base,indexed);
-        if(cpu_work)pilot_native_cpu.record+=64*(pilot_native_cpu_clock()-cpu_record);
         if(recorded) {
             (void)pilot_native_draw_end(&draw);goto finished;
         }
@@ -567,15 +555,15 @@ static void pilot_native_draw_enhanced(UINT count,UINT first,INT base,int indexe
     /* Earlier HD commands must precede either current immediate fallback or
      * a declined current replay. Re-admit after flushing in case it degraded
      * a queued companion following an optional query/device failure. */
-    pilot_native_epoch_flush();
+    pilot_native_epoch_flush_reason(COST_EPOCH_ADMISSION);
     if(result==S_OK && pilot_native_draw_begin(&draw)==S_OK) {
+        pilot_cost_add(COST_COMPANION_DRAWS,1);
         if(indexed)ID3D11DeviceContext_DrawIndexed(draw.context,count,first,base);
         else ID3D11DeviceContext_Draw(draw.context,count,first);
         (void)pilot_native_draw_end(&draw);
     }
 finished:
-    if(cpu_work)pilot_native_cpu.work+=64*(pilot_native_cpu_clock()-cpu_work);
-    pilot_native_cpu.inside=0;
+    pilot_cost_companion_end(cost_work);
     memset(pilot_native_epoch_extents,0,sizeof(pilot_native_epoch_extents));
 }
 static void pilot_native_draw(UINT count,UINT first)
@@ -593,7 +581,8 @@ static void pilot_native_draw_indexed(UINT count,UINT first,INT base)
 }
 #else
 /* Other supported donors retain the original single native GPU submission. */
-static void pilot_native_epoch_flush(void){}
+static void pilot_native_epoch_flush_reason(unsigned reason){(void)reason;}
+#define pilot_native_epoch_flush() pilot_native_epoch_flush_reason(COST_EPOCH_OTHER)
 static void pilot_native_epoch_close(void){}
 static void pilot_native_epoch_vertex_span(unsigned stream,unsigned extent){(void)stream;(void)extent;}
 struct PilotNativeDrawState {unsigned unused;};
