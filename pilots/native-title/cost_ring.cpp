@@ -42,7 +42,7 @@ uint64_t read_cpu(Thread& t,uint64_t& cycles) {
 }
 const char *roles[]={"title","xaudio2","dispatcher","interpolation","feeder"};
 const char *waits[]={"pacing","poll","guest_sleep","present_retire","completion","flush","map_read","graphics_lock","audio_lock","callback","i3dl2"};
-const char *works[]={"d3d","other","companion","external_packet"};
+const char *works[]={"companion","external_packet"};
 const char *counters[]={"guest_draws","host_draws","companion_draws","packets","group_exhaustion","vertex_upload_bytes","texture_upload_bytes","visibility_queries","readbacks","render_target_locks","critical_section_enters","kernel_calls","i3dl2_commits"};
 const char *epochs[]={"present","clear","target","upload","readback","copy","visibility","capacity","admission","other"};
 template<size_t N> void object(std::ostream& o,const char *key,const char *const (&names)[N],const uint64_t *values) {
@@ -92,7 +92,7 @@ extern "C" void pilot_cost_swap(uint64_t swap,uint64_t faults) {
     std::lock_guard<std::mutex> guard(ring_mutex);
     Row row{};row.sequence=sequence+1;row.swap=swap;row.wall_ns=previous_wall?wall-previous_wall:0;
     row.probe_cycles=pilot_cost_local.probe_cycles;
-    row.flags=(!previous_wall?1u:0u)|(pilot_cost_local.wait_depth?2u:0u)|(pilot_cost_local.service_depth?4u:0u);
+    row.flags=(!previous_wall?1u:0u)|(pilot_cost_local.wait_depth?2u:0u);
     for(unsigned i=0;i<COST_ROLES;++i){auto& t=threads[i];uint64_t cycles=0,cpu=read_cpu(t,cycles);
         row.thread_ids[i]=t.id;
         if(t.baseline && cpu>=t.cpu && cycles>=t.cycles){row.thread_cpu_ns[i]=cpu-t.cpu;row.thread_cycles[i]=cycles-t.cycles;}
@@ -121,12 +121,12 @@ std::string pilot_cost_query(const std::string& args) {
         uint64_t begin=after>=end?end+1:(after+1<first?first:after+1);
         for(uint64_t s=begin;s<=end && count<limit;++s)copy[count++]=ring[(s-1)%capacity];}
     std::ostringstream o;o<<"{\"ok\":true,\"enabled\":true,\"capacity\":4096,\"first\":"<<first<<",\"latest\":"<<end
-        <<",\"dropped\":"<<(after<first-1?first-1-after:0)<<",\"sample_weight\":64,\"flags\":\"1=no prior interval;2=unbalanced wait;4=unbalanced service\",\"work_scope\":\"D3D/other inclusive CPU cycles sampled at 1/64; companion + external_packet are disjoint subsets of D3D; residual includes uninstrumented services; lock waits exclude uncontended acquisitions\",\"unavailable\":[\"driver_thread_cpu\",\"gpu_timestamps\",\"readback_kinds\",\"session_lock_waits\"],\"rows\":[";
+        <<",\"dropped\":"<<(after<first-1?first-1-after:0)<<",\"sample_weight\":64,\"flags\":\"1=no prior interval;2=unbalanced wait\",\"work_scope\":\"companion + external_packet are disjoint CPU estimates sampled at 1/64; broad guest/D3D/other attribution omitted for probe budget; lock waits exclude uncontended acquisitions\",\"unavailable\":[\"driver_thread_cpu\",\"gpu_timestamps\",\"readback_kinds\",\"session_lock_waits\",\"guest_d3d_other_work_split\"],\"rows\":[";
     for(unsigned i=0;i<count;++i){const auto& r=copy[i];if(i)o<<',';
         o<<"{\"sequence\":"<<r.sequence<<",\"swap\":"<<r.swap<<",\"wall_ns\":"<<r.wall_ns<<",\"flags\":"<<r.flags<<",\"probe_cycles\":"<<r.probe_cycles;
         object(o,"thread_cpu_ns",roles,r.thread_cpu_ns);object(o,"thread_cycles",roles,r.thread_cycles);object(o,"thread_ids",roles,r.thread_ids);
         object(o,"wait_ns",waits,r.totals.waits);object(o,"wait_cycles",waits,r.totals.wait_cycles);
-        object(o,"sampled_cycles",works,r.totals.work);object(o,"samples",works,r.totals.samples);
+        object(o,"sampled_cycles",works,r.totals.work+COST_COMPANION);object(o,"samples",works,r.totals.samples+COST_COMPANION);
         object(o,"counters",counters,r.totals.counters);object(o,"epoch_end",epochs,r.totals.epochs);
         o<<",\"write_watch_faults\":"<<r.write_faults<<",\"strip_capacity\":"<<r.totals.strip_capacity<<",\"strip_boundary\":"<<r.totals.strip_boundary<<'}';}
     o<<"]}\n";return o.str();

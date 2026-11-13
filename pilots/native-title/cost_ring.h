@@ -55,9 +55,9 @@ static inline void pilot_cost_work_end(unsigned kind,uint64_t begin)
     if(elapsed>probe)pilot_cost_local.total.work[kind]+=64*(elapsed-probe);
     ++pilot_cost_local.total.samples[kind];}}
 static inline uint64_t pilot_cost_service_begin(unsigned kind)
-{return pilot_cost_local.service_depth++?0:pilot_cost_work_begin(kind);}
+{(void)kind;return 0; /* Broad service sampling exceeds the recorder's CPU budget. */}
 static inline void pilot_cost_service_end(unsigned kind,uint64_t begin)
-{pilot_cost_work_end(kind,begin);--pilot_cost_local.service_depth;}
+{(void)kind;(void)begin;}
 static inline uint64_t pilot_cost_companion_begin(void)
 {++pilot_cost_local.companion_depth;return pilot_cost_work_begin(COST_COMPANION);}
 static inline void pilot_cost_companion_end(uint64_t begin)
