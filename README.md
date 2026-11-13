@@ -28,13 +28,13 @@ the downloads do not run arbitrary Xbox games.
 
 ## Downloads
 
-**[Download XboxLLR build toolkit](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.02.1)** - the updated developer toolkit includes `xboxllr.exe`.
+**[Download XboxLLR build toolkit](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.13.1)** - the updated developer toolkit includes `xboxllr.exe`.
 The Dashboard remains on its separately validated release below.
 
 | Download | Who it is for |
 | --- | --- |
 | **[Xbox Dashboard beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.01.1)** | Player app: download `XboxDashboard-windows-x64-2026.11.01.1.zip`, extract it, then open **Start Game.exe**. Supply your own Dashboard 5960 executable and assets. No compiler required. |
-| **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.02.1)** | Developer package: `xboxllr-build-tool-windows-x64-2026.11.02.1.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
+| **[XboxLLR build tool beta — Windows x64](https://github.com/mstan/xboxllr/releases/tag/beta-2026.11.13.1)** | Developer package: `xboxllr-build-tool-windows-x64-2026.11.13.1.zip` contains `xboxllr.exe`, bundled Python/Capstone, framework source and build drivers. MSVC, CMake and prepared title inputs are still required. [Build-tool guide](docs/BUILD-TOOL.md). |
 | **[Blinx public beta — Windows and Linux](https://github.com/mstan/BlinxRecomp/releases/latest)** | Players: Windows ZIP and native Linux AppImage. No compiler required; supply your own supported NTSC-U game files. |
 | **[JSRF public beta — Windows and Linux](https://github.com/mstan/JSRFRecomp/releases/latest)** | Players: Windows ZIP and native Linux AppImage. No compiler required; supply your own supported NTSC-U game files (USA standalone or certificate revision 4). |
 
