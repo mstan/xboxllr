@@ -49,7 +49,15 @@ static void test_audio_mix(void)
         CHECK(fabs(average[7]-(1000.0/32768)*pow(10.0,-602.0/2000))<0.00002);
         for(unsigned c=0;c<32;++c)if(c!=4 && c!=5 && c!=7)CHECK(fabs(average[c])<0.000001);
         MEM32(desc)=1;MEM32(pairs)=5;MEM32(pairs+4)=(uint32_t)-1204;
-        a[1]=desc;CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetMixBinVolumes_8,a)==0);
+        a[1]=desc;
+        if((unsigned)PILOT_AUDIO_IDirectSoundBuffer_SetMixBinVolumes_8<(unsigned)PILOT_AUDIO_COUNT) {
+            CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetMixBinVolumes_8,a)==0);
+        } else {
+            /* Profiles without the volume-only API replace the complete send
+             * list through their actual guest entry. Keep the other sends. */
+            MEM32(desc)=3;
+            CHECK(audio_test_call(PILOT_AUDIO_IDirectSoundBuffer_SetMixBins,a)==0);
+        }
         audio_test_observe(average,0);
         CHECK(fabs(average[5]-(1000.0/32768)*pow(10.0,-1204.0/2000))<0.00002);
         CHECK(fabs(average[4]+2000.0/32768)<0.00002); // unrelated send survives

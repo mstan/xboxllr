@@ -1,6 +1,7 @@
 /* Real Windows audio device and buffers; no mocked clock/output provider. */
 static uint32_t audio_test_call(unsigned entry,const uint32_t *args)
 {
+    CHECK(entry<(unsigned)PILOT_AUDIO_COUNT);
     unsigned count=pilot_audio_calls[entry].stack_bytes/4;
     g_esp=0x18000;MEM32(g_esp)=0x12340;
     for(unsigned i=0;i<count;++i)MEM32(g_esp+4+i*4)=args[i];
