@@ -114,9 +114,10 @@ static unsigned pilot_native_frame_degraded;
 static int pilot_native_enabled(void)
 {
 #if defined(PILOT_NATIVE_RENDER_PLANES) && PILOT_NATIVE_RENDER_PLANES
-    /* Private same-binary A/B control; elective scale remains owner-selected. */
+    /* HD is the sole colour render above 1x. Keep the native-authority dual
+     * path selectable for exact guest observations and renderer comparisons. */
     static int enabled=-1;
-    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_RENDER_PLANES");enabled=!value || strcmp(value,"0");}
+    if(enabled<0){const char *value=getenv("XLLE_PILOT_NATIVE_RENDER_PLANES");enabled=value && strcmp(value,"0");}
     return enabled && pilot_visual_scaled();
 #else
     return 0;
@@ -278,7 +279,7 @@ void pilot_native_draw_prepared(unsigned count,unsigned first)
     /* This hook is only the closed fixed-FVF UP lowering. Its constructed
      * input layout fits the prepared interleaved vertex stride, even when
      * lowering expands the caller's original vertex. Preserve Draw first. */
-    if(pilot_native_epoch_enabled()) {
+    if(pilot_native_enabled() && pilot_native_epoch_enabled()) {
         ID3D11Buffer *buffer=NULL;UINT stride=0,offset=0;
         ID3D11DeviceContext_IAGetVertexBuffers(d3d8_GetD3D11Context(),0,1,&buffer,&stride,&offset);
         if(buffer && stride)pilot_native_epoch_vertex_span(0,stride);

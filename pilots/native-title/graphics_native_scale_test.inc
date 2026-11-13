@@ -11,15 +11,20 @@ static int native_scale_save(unsigned scale,unsigned kind,const void *bytes,size
 #endif
     CHECK(fwrite(bytes,1,size,file)==size);CHECK(!fclose(file));return 0;
 }
-static int test_native_scale_coherence(void)
+static int test_native_scale_coherence(int primary)
 {
+#ifdef _WIN32
+    CHECK(!_putenv_s("XLLE_PILOT_NATIVE_RENDER_PLANES",primary?"0":"1"));
+#else
+    CHECK(!setenv("XLLE_PILOT_NATIVE_RENDER_PLANES",primary?"0":"1",1));
+#endif
     unsigned char reference[3][64*64*4],actual[3][64*64*4];unsigned differences=0;
     unsigned char retained_alias[64*64*4],retained_check[64*64*4],reset_reference[80*64*4],reset_actual[80*64*4];
     unsigned char query_reference[64*64*4],query_actual[64*64*4];
     unsigned char version_reference[80*64*4],version_actual[80*64*4];
     unsigned char constant_reference[80*64*4],constant_actual[80*64*4];
     const unsigned scales[]={1,2,3,4,8};
-    for(unsigned leg=0;leg<sizeof(scales)/sizeof(*scales);++leg) {
+    for(unsigned leg=0;leg<(primary?4:sizeof(scales)/sizeof(*scales));++leg) {
         unsigned scale=scales[leg];
         struct PilotVisualMods options;pilot_visual_mods_default(&options);options.supersample=scale;
         CHECK(pilot_gfx_visual_mods(&options));
@@ -93,7 +98,7 @@ static int test_native_scale_coherence(void)
         for(unsigned kind=0;kind<3;++kind) {
             CHECK(!native_scale_save(scale,kind,actual[kind],sizeof(actual[kind])));
             for(unsigned i=0;i<sizeof(actual[kind]);++i)if(actual[kind][i]!=reference[kind][i])++mismatch[kind];
-            differences+=mismatch[kind];
+            if(!primary)differences+=mismatch[kind];
         }
         fprintf(stderr,"NATIVE SCALE: axis=%u physical=%ux%u color_bytes=%u depth_bytes=%u alias_bytes=%u\n",scale,physical[0],physical[1],mismatch[0],mismatch[1],mismatch[2]);
         /* Exact child-query subtraction keeps the guest count native while
@@ -106,7 +111,7 @@ static int test_native_scale_coherence(void)
         if(scale==1)memcpy(query_reference,query_actual,sizeof(query_reference));
         unsigned query_mismatch=0;
         for(unsigned i=0;i<sizeof(query_actual);++i)if(query_actual[i]!=query_reference[i])++query_mismatch;
-        differences+=query_mismatch;CHECK(!native_scale_save(scale,5,query_actual,sizeof(query_actual)));
+        if(!primary)differences+=query_mismatch;CHECK(!native_scale_save(scale,5,query_actual,sizeof(query_actual)));
         fprintf(stderr,"QUERY NATIVE SCALE: axis=%u samples=400 depth_stencil_bytes=%u\n",scale,query_mismatch);
         CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
         CHECK(physical[0]==64*scale && physical[1]==64*scale);
@@ -138,6 +143,12 @@ static int test_native_scale_coherence(void)
         CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
         CHECK(physical[0]==64*scale && physical[1]==64*scale);
         fprintf(stderr,"READONLY QUERY SCALE: axis=%u samples=400 physical=%ux%u\n",scale,physical[0],physical[1]);
+        if(primary && scale>1) {
+            CHECK(!pilot_gfx_visibility_begin());
+            CHECK(!visibility_quad(0,0,1.0f/scale,1.0f/scale,.2f));
+            CHECK(!pilot_gfx_visibility_end(34));CHECK(!visibility_expect(34,1,NULL));
+            fprintf(stderr,"HD QUERY SCALE: axis=%u one physical fragment remains visible\n",scale);
+        }
         pilot_gfx_set_state(D3DRS_COLORWRITEENABLE,15);pilot_gfx_set_state(D3DRS_ZWRITEENABLE,1);
         /* The map and canonical image survive destruction of their original
          * handle and a real device Reset while the logical alias remains. */
@@ -210,7 +221,7 @@ static int test_native_scale_coherence(void)
         CHECK(reset_varied>256);
         if(scale==1)memcpy(reset_reference,reset_actual,sizeof(reset_reference));
         for(unsigned i=0;i<sizeof(reset_actual);++i)if(reset_actual[i]!=reset_reference[i])++reset_mismatch;
-        differences+=reset_mismatch;
+        if(!primary)differences+=reset_mismatch;
         CHECK(!native_scale_save(scale,4,reset_actual,sizeof(reset_actual)));
         CHECK(!pilot_gfx_reference_target_readback(0,NULL,0,physical));
         CHECK(physical[0]==80*scale && physical[1]==64*scale); /* No native fallback can pass HD. */
@@ -417,7 +428,8 @@ static int test_native_scale_coherence(void)
         fprintf(stderr,"CONSTANT INDEX VERSIONS SCALE: axis=%u native_bytes=0 red_green_blue=3 samples=960\n",scale);
         pilot_gfx_texture_destroy(alias);pilot_gfx_texture_destroy(depth);pilot_gfx_close();
     }
-    fprintf(stderr,"%s: native fractional-edge/blend/depth/stencil and target-alias byte identity across1/2/3/4/8x, real HD content, exact native queries and retained-alias sampling after80x64 Reset/real Present\n",differences?"FAIL":"PASS");
+    fprintf(stderr,"%s: %s; real HD content, native-grid queries and retained-alias sampling after80x64 Reset/real Present\n",differences?"FAIL":"PASS",
+        primary?"HD-primary across1/2/3/4x, approximate fractional-edge colour/depth readbacks, exact alias identity":"exact native fractional-edge/blend/depth/stencil and target-alias byte identity across1/2/3/4/8x");
     return differences?1:0;
 }
 #endif

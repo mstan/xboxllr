@@ -1650,6 +1650,15 @@ Private evidence: `build/blinx/gpu-callback-original-oracle.aot-private.json`,
 callback and Cxbx's missing-query bypass are not adopted. No donor bodies were
 copied; see attribution. This remains a private donor-linked reference pilot.
 
+### Scaled colour rendering
+
+Above 1x, colour rendering uses the HD allocation directly. CPU readbacks sample
+the logical grid; visibility reports approximate native-grid sample counts using
+the target ratio captured at Begin, rounding positive coverage up. Queries that
+span differently sized targets use the initial target's ratio. At 1x the original
+single-render path remains exact. Set `XLLE_PILOT_NATIVE_RENDER_PLANES=1` to select
+the exact native-authority dual-render reference above 1x.
+
 ## Earlier checkpoint - bounded visibility contract (2026-10-07)
 
 `beads-xbox.1.63`: a small software NV2A reference now informs real native GPU

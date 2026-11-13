@@ -3,6 +3,7 @@
  * production selects one renderer and never executes both. See pilot README. */
 struct PilotVisibilityExclusion {ID3D11Query *query;struct PilotVisibilityExclusion *next;unsigned optional;};
 struct PilotVisibilityCounter { ID3D11Query *query; unsigned refs; int ended,ready; uint32_t value;
+    uint64_t native_area,physical_area;
     struct PilotVisibilityExclusion *excluded;unsigned exclusions,optional_exclusions; };
 struct PilotVisibilityReport {
     uint32_t index;struct PilotVisibilityCounter *counter;
@@ -112,6 +113,24 @@ int32_t pilot_gfx_visibility_begin(void)
      * new native query. This is an execution boundary, not a state flush. */
     pilot_native_epoch_flush_reason(COST_EPOCH_VISIBILITY);
     pilot_visibility_unref(pilot_visibility_current);pilot_visibility_current=c;
+    c->native_area=c->physical_area=1;
+    if(pilot_visual_scaled() && !pilot_native_enabled()) {
+        ID3D11RenderTargetView *view=NULL;
+        ID3D11DeviceContext_OMGetRenderTargets(ctx,1,&view,NULL);
+        if(view) {
+            ID3D11Resource *resource=NULL;D3D11_TEXTURE2D_DESC desc;
+            ID3D11RenderTargetView_GetResource(view,&resource);
+            ID3D11Texture2D_GetDesc((ID3D11Texture2D*)resource,&desc);
+            D3D8Texture *target=pilot_color_target?(D3D8Texture*)pilot_textures[pilot_color_target-1].object:NULL;
+            unsigned axis=pilot_presentation_axis(&pilot_presentation);
+            uint64_t width=target?target->width:pilot_presentation.width*axis;
+            uint64_t height=target?target->height:pilot_presentation.height*axis;
+            if(width && height && desc.Width && desc.Height) {
+                c->native_area=width*height;c->physical_area=(uint64_t)desc.Width*desc.Height;
+            }
+            ID3D11Resource_Release(resource);ID3D11RenderTargetView_Release(view);
+        }
+    }
     ID3D11DeviceContext_Begin(ctx,(ID3D11Asynchronous*)c->query);return S_OK;
 }
 int32_t pilot_gfx_visibility_end(uint32_t index)
@@ -157,7 +176,17 @@ int32_t pilot_gfx_visibility_result(uint32_t index,uint32_t *count,uint64_t *sta
             if(excluded>samples)return E_FAIL;
             samples-=excluded;
         }
-        r->counter->value=(uint32_t)samples;r->counter->ready=1;
+        /* HD-primary counts are approximate native-grid samples. Capture the
+         * target ratio at Begin (also for retained aliases); mixed-target
+         * queries use that grid. Round up so a visible fragment never becomes
+         * an occluded result. 1x and the exact reference keep raw counts. */
+        if(r->counter->native_area!=r->counter->physical_area) {
+            double normalized=(double)samples*r->counter->native_area/r->counter->physical_area;
+            uint32_t value=normalized>=UINT32_MAX?UINT32_MAX:(uint32_t)normalized;
+            if((double)value<normalized && value<UINT32_MAX)++value;
+            r->counter->value=value;
+        } else r->counter->value=(uint32_t)samples;
+        r->counter->ready=1;
         /* Once the exact result is cached, later reports sharing this counter
          * need no child queries. Reclaim optional capacity immediately; native
          * rectangle exclusions keep their original report-owned lifetime. */
