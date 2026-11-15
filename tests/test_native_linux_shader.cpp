@@ -2,6 +2,8 @@
 #include <d3dcompiler.h>
 #include <cassert>
 #include <cstring>
+#include <cstdio>
+#include "../pilots/native-title/graphics_depth_texture_shader.h"
 int main()
 {
     const char source[]="float4 main(float4 position : POSITION) : SV_Position { return position; }";
@@ -17,6 +19,14 @@ int main()
     shader=errors=nullptr;
     hr=D3DCompile(nan_shader,sizeof(nan_shader)-1,"nan-compat",nullptr,nullptr,"main","ps_5_0",0,0,&shader,&errors);
     assert(SUCCEEDED(hr) && shader);shader->Release();if(errors)errors->Release();
+    shader=errors=nullptr;
+    hr=D3DCompile(pilot_depth_texture_source,sizeof(pilot_depth_texture_source)-1,
+        "pilot-depth-argb",nullptr,nullptr,"main","cs_5_0",
+        D3DCOMPILE_ENABLE_STRICTNESS|D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&shader,&errors);
+    if(errors)std::fprintf(stderr,"%.*s\n",int(errors->GetBufferSize()),(char*)errors->GetBufferPointer());
+    assert(SUCCEEDED(hr) && shader && shader->GetBufferSize()>4);
+    assert(!std::memcmp(shader->GetBufferPointer(),"DXBC",4));
+    shader->Release();if(errors)errors->Release();
     const char bad[]="this is not HLSL";shader=errors=nullptr;
     hr=D3DCompile(bad,sizeof(bad)-1,"invalid-hlsl",nullptr,nullptr,"main","ps_4_0",0,0,&shader,&errors);
     assert(FAILED(hr) && !shader && errors && errors->GetBufferSize()>0);errors->Release();
