@@ -113,8 +113,8 @@ def retire_missing_guard(sources, symbol, address, missing_count):
     definition = re.compile(r'^\s*void\s+' + re.escape(symbol) +
                             r'\s*\(\s*void\s*\)\s*\{', re.M)
     canonical = re.compile(r'^void ' + re.escape(symbol) +
-        r'\(void\) \{ RECOMP_UNIMPL\("undiscovered direct target", 0x' +
-        f'{address:08X}' + r'u\); \}(?:\r?\n|$)', re.M)
+        r'\(void\) \{ RECOMP_UNIMPL_FUNCTION\("undiscovered direct target", 0x' +
+        f'{address:08X}' + r'u, 3u\); \}(?:\r?\n|$)', re.M)
     owners = [(path, code) for path, code in sources if definition.search(code)]
     if not owners:
         return {}, missing_count

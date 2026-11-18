@@ -16,17 +16,19 @@ recovered original movie-function extent repair the reached failures. See the
 This establishes entry and movement, not a campaign completion or a new FPS claim.
 
 The owner-facing HLE preview selects native scheduling/services and D3D11 with
-`PILOT_IO_DEVICE=OFF`. Its game code is ahead-of-time compiled; unresolved indirect
-calls stop instead of entering a CPU interpreter. This describes the executable
-route, not qualification of every campaign path. The current GPU-LLE acceptance
+`PILOT_IO_DEVICE=OFF`. Its game code is ahead-of-time compiled and runs natively
+first. Code generation missed (unresolved indirect calls/jumps, undiscovered or
+untranslated functions) falls back to the guest x86 interpreter; see
+[Guest interpreter fallback](#guest-interpreter-fallback). This describes the
+executable route, not qualification of every campaign path. The current GPU-LLE acceptance
 build instead executes original game threads, drivers and kernel through Unicorn,
 alongside its fixed native audio components and maintained software GPU. The9/9
 behavioral qualification goal does not close the separate strict game-and-kernel
 AOT work tracked by `beads-xbox.1.25.5`.
 
 The latest 2026-10-17 campaign binary has 8869 native dispatch entries and links no
-Unicorn engine. Missing direct/indirect targets still stop; there is no guest
-x86 interpreter fallback in this HLE selection. Earlier package/closing-record
+Unicorn engine. At that point missing direct/indirect targets stopped; the guest
+interpreter fallback described below was added on 2026-11-18. Earlier package/closing-record
 phrases saying it retained guest CPU fallback were imprecise. The original
 kernel/game LLE profile, DSP emulation, dynamic native dispatch cost and full
 unreached code coverage are separate questions. Dispatch count is not a measured
@@ -253,6 +255,36 @@ composition, broader raster/combiner states and original enabled-noise scenes
 remain open. Diagnostic probes add no work to shipping draw/cache/upload paths;
 focused builds/GPU checks replace repeated title/audio runs. Overall family
 qualification remains 4/9; see [graphics evidence and next work](GRAPHICS-LLE.md#independent-native-scenes-and-retained-target-sequence-2026-10-09-continuation).
+
+
+## Guest interpreter fallback
+
+Native code always runs first. When generated code reaches code generation
+missed (an unresolved `RECOMP_ICALL`/`RECOMP_ITAIL` target, an undiscovered
+direct target or a function that failed to translate) it calls
+`recomp_bridge_call()`, which runs the original guest function in the vendored
+box64 interpreter core (`src/third_party/box64_interp`, MIT) on the same guest
+register file, then returns to the generated caller. Calls from interpreted
+code into any generated, manual or kernel function leave the interpreter and
+run natively; only the SEH helpers stay interpreted.
+
+- **Default:** bridge. `XLLE_PILOT_INTERPRETER=strict` (or
+  `native_title.py run --interpreter strict`) restores stop-on-miss for
+  qualification runs. The selected mode is part of the session record/replay
+  identity.
+- **Honesty:** every newly interpreted address logs one
+  `[INTERP] first interpreted entry` line and is appended to the heal manifest
+  (`XLLE_PILOT_INTERPRETER_MANIFEST`; release sessions write
+  `data/diagnostics/<session>/interpreter.jsonl` and summarize it in
+  `report.json`). Progress is logged at powers of two with host time, and every
+  stop prints `COVERAGE: FULLY STATIC` or `COVERAGE: NOT FULLY STATIC - ...`.
+- **Healing:** a manifest address is missed code; seed it into function
+  discovery/recovery and regenerate so it runs natively.
+- **Limits:** interpreted code faults stop with `[INTERP FAULT]`; guest MXCSR
+  control writes from interpreted code are fatal; x87 runs in doubles like the
+  generated code. A generation without the SEH helper table stays strict.
+- **QA:** the private paths key `forced_interpretation` generates listed
+  functions as interpreter-only stubs to exercise the bridge.
 
 ## Deferred stream upload experiment (2026-10-08)
 

@@ -72,6 +72,32 @@ class DiagnosticTests(unittest.TestCase):
         self.assertFalse(any(p.name in ('save-keys.bin', 'eeprom.bin') for p in first.path.iterdir()))
         self.assertEqual(self.progress.read_bytes(), b'original progress')
 
+    def test_interpreter_use_is_reported_from_manifest_and_whitelisted_log_lines(self):
+        session, env = self.session()
+        self.assertEqual(env['XLLE_PILOT_INTERPRETER_MANIFEST'], str(session.path / 'interpreter.jsonl'))
+        Path(env['XLLE_PILOT_INTERPRETER_MANIFEST']).write_text(
+            '{"va":"0x000659C0","kind":3,"first_return":"0x00012345","xbe":"x","core":"c"}\n'
+            '{"va":"0x000659C0","kind":3,"first_return":"0x00012399","xbe":"x","core":"c"}\n'
+            '{"va":"0x00070000","kind":1,"first_return":"0x00012345","xbe":"x","core":"c"}\n'
+            '{"va":"G:/Secrets","kind":1}\n{"va":"0x0008')
+        session.log_path.write_text('[INTERP] guest interpreter bridge (box64-x, 3 SEH helpers)\n'
+            '[INTERP] COVERAGE: NOT FULLY STATIC - 2 interpreted entry addresses, 9 entries, 99 instructions, 0 native calls from interpreted code, 0.100 ms interpreting\n'
+            'private-path=G:/Secrets/console\n')
+        session.finish(0)
+        report = json.loads((session.path / 'report.json').read_text())
+        self.assertEqual(report['interpreter']['mode'], 'bridge')
+        self.assertEqual(report['interpreter']['function_count'], 2)
+        self.assertEqual(report['interpreter']['functions'], [dict(va='0x000659C0', kind=3), dict(va='0x00070000', kind=1)])
+        self.assertTrue(report['interpreter']['coverage'].startswith('COVERAGE: NOT FULLY STATIC - 2'))
+        self.assertNotIn('G:/Secrets', (session.path / 'report.json').read_text())
+
+    def test_strict_run_without_manifest_reports_no_interpreted_functions(self):
+        session, _ = self.session()
+        session.log_path.write_text('[INTERP] guest interpreter strict (box64-x, 3 SEH helpers)\n')
+        session.finish(0)
+        report = json.loads((session.path / 'report.json').read_text())
+        self.assertEqual(report['interpreter'], dict(mode='strict', coverage=None, functions=[], function_count=0))
+
     def test_partial_input_and_changed_snapshot_rejected(self):
         session, _ = self.session(enabled=True)
         path = self.inputs(session)

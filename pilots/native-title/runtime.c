@@ -170,6 +170,7 @@ static unsigned critical_count;
 static SRWLOCK critical_lock=SRWLOCK_INIT;
 
 #include "stop_capture.inc"
+static void interp_report(void);
 __declspec(noreturn) static void stop(const char *reason, uint32_t va)
 {
 #ifdef PILOT_AUDIO_DEVICE_LLE
@@ -195,6 +196,7 @@ __declspec(noreturn) static void stop(const char *reason, uint32_t va)
     for (unsigned i = recent_pos - count; i < recent_pos; ++i)
         fprintf(stderr, " %08x", recent[i & 31]);
     fprintf(stderr, "\n");
+    interp_report();
     stop_capture();
     fflush(stderr);
     if(!session_exception_observer)session_terminal(reason,2);
@@ -1211,6 +1213,7 @@ recomp_func_t recomp_lookup_kernel(uint32_t va)
     }
     return NULL;
 }
+#include "interp_bridge.inc"
 
 #ifdef __linux__
 #include "linux/native_fault.inc"
@@ -1480,6 +1483,7 @@ int main(int argc,char **argv)
     if(setenv("DXVK_WSI_DRIVER","SDL2",1))stop("cannot select the SDL2 Vulkan window transport",0);
 #endif
     pilot_session_bind_terminal(session_terminal);
+    interp_bridge_init();
     const char *session_record=getenv("XLLE_PILOT_SESSION_RECORD"),*session_replay=getenv("XLLE_PILOT_SESSION_REPLAY");
     if((session_record && *session_record) || (session_replay && *session_replay)) {
         char executable_path[32768];DWORD length=GetModuleFileNameA(NULL,executable_path,sizeof(executable_path));
@@ -1491,6 +1495,9 @@ int main(int argc,char **argv)
         size_t bytes;
         while((bytes=fread(buffer,1,sizeof(buffer),executable_file))!=0)
             if(BCryptHashData(executable_hash,buffer,(ULONG)bytes,0)<0)stop("session executable hash failed",0);
+        /* The interpreter mode is a simulation choice the executable alone does not fix. */
+        if(BCryptHashData(executable_hash,(PUCHAR)interp_profile(),(ULONG)strlen(interp_profile()),0)<0)
+            stop("session interpreter profile hash failed",0);
         if(ferror(executable_file) || fclose(executable_file) || BCryptFinishHash(executable_hash,hash,32,0)<0)
             stop("session executable hash finalization failed",0);
         BCryptDestroyHash(executable_hash);

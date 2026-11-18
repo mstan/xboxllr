@@ -137,6 +137,11 @@ target_compile_definitions(pilot_input_sdl PRIVATE PILOT_HAVE_SDL2 SDL_MAIN_HAND
 target_link_libraries(pilot_input_sdl PUBLIC pilot_host_posix pilot_native_debug pilot_session_replay SDL2::SDL2)
 file(GLOB generated CONFIGURE_DEPENDS "${PILOT_GENERATED}/*.c")
 add_executable(xlle_native_title runtime.c input_host.c ${generated})
+# Guest interpreter fallback for code generation missed (interp_bridge.inc).
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/X86Interp.cmake")
+target_link_libraries(xlle_native_title PRIVATE xlle_recomp_interp_bridge)
+xlle_add_x86_interp_replay_test()
+xlle_add_recomp_interp_bridge_test()
 set(PILOT_SAVE_KEYS_FILE "${PILOT_GENERATED}/save-keys.aot-private.bin" CACHE FILEPATH
   "Private original-derived title/console signing inputs")
 set(PILOT_CONSOLE_SETTINGS_FILE "${PILOT_GENERATED}/console-settings.aot-private.bin" CACHE FILEPATH

@@ -28,6 +28,15 @@ recomp_func_t recomp_lookup_manual(uint32_t at){return at==0x10010?callee:NULL;}
 recomp_func_t recomp_lookup(uint32_t at){return at==0x10020?callee:NULL;}
 recomp_func_t recomp_lookup_kernel(uint32_t at){return at==0xfe000010?callee:NULL;}
 void recomp_icall_fail_log(uint32_t at){refused=at;longjmp(guard,1);}
+/* The interpreter bridge: 0x10040 behaves as a guest function that returns
+   with RET 8; everything else is declined (strict). */
+static unsigned bridged;
+int recomp_bridge_call(uint32_t at,unsigned kind)
+{
+    if(at!=0x10040)return 0;
+    ++bridged;g_icall_dispatch_form=kind;g_eax=0x2468ace0;g_esp+=4+8;return 1;
+}
+void recomp_unimpl(const char *text,uint32_t at){(void)text;refused=at;longjmp(guard,5);}
 void recomp_icall_not_code_log(uint32_t at,uint32_t stack)
 {refused=at;refused_stack=stack;longjmp(guard,2);}
 void recomp_abi_violation_log(uint32_t at,uint32_t b,uint32_t s,uint32_t d,uint32_t p)
@@ -51,6 +60,14 @@ int main(void)
     reset();RECOMP_ICALL_SAFE(0x10020,0x11010);CHECK(g_esp==0x1100c);
     reset();RECOMP_ICALL_SAFE_AT(0xfe000010,0x11010,0x10050);CHECK(g_esp==0x1100c);
     CHECK(calls==4 && g_icall_count==3);
+
+    /* Bridged targets return through the macro without its refusal cleanup. */
+    reset();RECOMP_ICALL(0x10040);CHECK(g_esp==0x1100c && g_eax==0x2468ace0 && !refused && bridged==1);
+    reset();RECOMP_ICALL_SAFE(0x10040,0x11010);CHECK(g_esp==0x1100c && bridged==2);
+    reset();RECOMP_ITAIL(0x10040);CHECK(g_esp==0x1100c && g_icall_dispatch_form==2 && bridged==3);
+    reset();RECOMP_UNIMPL_FUNCTION("undiscovered direct target",0x10040,3u);CHECK(g_esp==0x1100c && g_icall_dispatch_form==3);
+    reset();if(!setjmp(guard)){RECOMP_UNIMPL_FUNCTION("translation failed",0x10030,4u);CHECK(0);}
+    CHECK(refused==0x10030 && g_esp==0x11000);
 
     reset();if(!setjmp(guard)){RECOMP_ICALL(0x10030);CHECK(0);}
     CHECK(refused==0x10030 && g_icall_saved_esp==0x11000 && g_icall_dispatch_form==1);

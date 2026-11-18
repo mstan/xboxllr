@@ -120,8 +120,8 @@ class ExtentRecovery(unittest.TestCase):
 
 
 class MissingTargetRetirement(unittest.TestCase):
-    first='void sub_00010000(void) { RECOMP_UNIMPL("undiscovered direct target", 0x00010000u); }\n'
-    other='void sub_00020000(void) { RECOMP_UNIMPL("undiscovered direct target", 0x00020000u); }\n'
+    first='void sub_00010000(void) { RECOMP_UNIMPL_FUNCTION("undiscovered direct target", 0x00010000u, 3u); }\n'
+    other='void sub_00020000(void) { RECOMP_UNIMPL_FUNCTION("undiscovered direct target", 0x00020000u, 3u); }\n'
 
     def test_direct_recovery_keeps_only_other_guards_and_updates_inventory(self):
         source='#include "recomp_funcs.h"\n'+self.first+self.other

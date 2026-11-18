@@ -628,6 +628,17 @@ target_include_directories(test_machine_config PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_machine_config PRIVATE xlle_machine)
 add_test(NAME machine_config COMMAND test_machine_config)
 
+# Guest i386 interpreter (native-title call-boundary fallback), qualified
+# instruction-by-instruction against the pinned Unicorn core.
+include(cmake/X86Interp.cmake)
+add_executable(test_x86_interp tests/test_x86_interp.cpp)
+target_include_directories(test_x86_interp PRIVATE ${unicorn_SOURCE_DIR}/include)
+target_link_libraries(test_x86_interp PRIVATE xlle_x86_interp unicorn)
+add_test(NAME x86_interp COMMAND test_x86_interp 200 20261117
+  "--check-digests=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/x86_interp_digests.txt")
+xlle_add_x86_interp_replay_test()
+xlle_add_recomp_interp_bridge_test()
+
 add_executable(test_unicorn_floor tests/test_unicorn_floor.cpp)
 target_include_directories(test_unicorn_floor PRIVATE ${XLLE_INCLUDES})
 target_link_libraries(test_unicorn_floor PRIVATE xlle_cpu)

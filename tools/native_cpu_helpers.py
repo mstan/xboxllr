@@ -71,8 +71,10 @@ def prepared_header():
         while lines[end].rstrip().endswith('\\'):
             end += 1
         body = ''.join(lines[start:end + 1])
+        # A bridged target ran to its return: leave the do/while(0) before
+        # the refusal path's stack cleanup.
         body = replace_once(body, 'recomp_icall_fail_log(_va);',
-                            f'pilot_recomp_indirect_failure(_va, {kind}u);')
+                            f'if (pilot_recomp_indirect_failure(_va, {kind}u)) break;')
         if stack is not None:
             body = replace_once(body, 'recomp_icall_not_code_log(_va);',
                                 f'recomp_icall_not_code_log(_va, {stack});')

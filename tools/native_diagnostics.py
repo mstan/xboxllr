@@ -22,6 +22,8 @@ INPUT_RECORD = struct.Struct('<QQIIII22s10s')
 SNAPSHOT_LIMIT = 128 * 1024 * 1024
 INPUT_LIMIT = 128 * 1024 * 1024
 MAX_FILES = 20000
+INTERPRETER_MANIFEST_LIMIT = 1024 * 1024
+INTERPRETER_LISTED = 256
 LIMITATION = ('Input-boundary replay only: host clocks and thread scheduling are not restored. '
               'Matching inputs do not establish deterministic full-machine replay. '
               'An abrupt exit can lose the writer queue tail (normally up to 100 ms).')
@@ -143,6 +145,38 @@ def input_status(log):
     return status
 
 
+def interpreter_summary(manifest, log):
+    """Public summary of guest-interpreter use: which missed functions ran
+    interpreted (heal manifest) and the whitelisted runtime mode/coverage lines."""
+    summary = dict(mode=None, coverage=None, functions=[], function_count=0)
+    if Path(log).exists():
+        with Path(log).open('r', encoding='utf-8', errors='replace') as source:
+            for line in source:
+                mode = re.match(r'\[INTERP\] guest interpreter (strict|bridge) ', line)
+                if mode:
+                    summary['mode'] = mode[1]
+                coverage = re.fullmatch(r'\[INTERP\] (COVERAGE: [A-Za-z0-9 _(),.:-]{1,240})\s*', line)
+                if coverage:
+                    summary['coverage'] = coverage[1]
+    manifest = Path(manifest)
+    if manifest.exists():
+        if manifest.stat().st_size > INTERPRETER_MANIFEST_LIMIT:
+            raise ValueError('Oversized interpreter manifest')
+        seen = {}
+        for line in manifest.read_text(encoding='utf-8', errors='replace').splitlines():
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue  # an abrupt exit can truncate the final line
+            if not (isinstance(entry, dict) and isinstance(entry.get('va'), str) and re.fullmatch(r'0x[0-9A-F]{8}', entry['va'])
+                    and type(entry.get('kind')) is int):
+                continue
+            seen.setdefault(entry['va'], entry['kind'])
+        summary['function_count'] = len(seen)
+        summary['functions'] = [dict(va=va, kind=kind) for va, kind in list(seen.items())[:INTERPRETER_LISTED]]
+    return summary
+
+
 def private_error(private, label, error):
     try:
         with (private / 'capture-errors.txt').open('a', encoding='utf-8') as output:
@@ -204,6 +238,10 @@ class Session:
                 self.report['initial_snapshot_reason'] = 'hdd-image-not-snapshotted' if hdd else 'snapshot-failed-see-private-log'
                 private_error(self.private, 'initial snapshot', error)
             env['XLLE_PILOT_DIAGNOSTIC_RECORD'] = str(self.private / 'inputs.bin')
+        # Missed code runs in the guest interpreter by default; its heal
+        # manifest (addresses, kinds, XBE/core identity only) is shareable.
+        self.interpreter_manifest = self.path / 'interpreter.jsonl'
+        env['XLLE_PILOT_INTERPRETER_MANIFEST'] = str(self.interpreter_manifest)
         durable_json(self.path / 'report.json', self.report)
         durable_json(self.path.parent / 'last-run.json', dict(session=self.path.name, **self.report))
         (self.path / 'README.txt').write_text(
@@ -219,6 +257,11 @@ class Session:
     def finish(self, code, *, reason='process-exit'):
         self.report.update(state='finished', finished_utc=utc(), exit_code=code, exit_reason=reason,
                            stop=stop_summary(self.log_path) if self.log_path.exists() else None)
+        try:
+            self.report['interpreter'] = interpreter_summary(self.interpreter_manifest, self.log_path)
+        except (OSError, ValueError) as error:
+            self.report['interpreter'] = dict(error='Interpreter manifest unavailable; see private log.')
+            private_error(self.private, 'interpreter manifest', error)
         inputs = self.private / 'inputs.bin'
         status = input_status(self.log_path) if self.log_path.exists() else dict(warning=False, final=None)
         self.report['input_delivery_complete'] = False

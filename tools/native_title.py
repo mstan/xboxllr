@@ -215,6 +215,10 @@ def prepare_command(source, data, paths, output):
         command += ["--seed-functions", str(paths["seed_functions"])]
     if paths.get("discovery_symbols"):
         command += ["--discovery-symbols", str(paths["discovery_symbols"])]
+    if paths.get("forced_interpretation"):
+        # Private QA paths only: functions generated as undiscovered stubs so a
+        # run proves the guest interpreter fallback (or the strict stop).
+        command += ["--force-interpret", str(paths["forced_interpretation"])]
     return command
 
 
@@ -542,7 +546,7 @@ def require_receipt(path, expected):
 
 
 def launch(data, paths, output, build, automated=False, seconds=None, detach=False, source=None, input_replay=None, capture=False, debug_port=None,
-           visual_options=None, launcher=None):
+           visual_options=None, launcher=None, interpreter=None):
     check_image(data["title"], paths)
     if debug_port is not None and (type(debug_port) is not int or not 1 <= debug_port <= 65535):
         raise ValueError("debug port must be in 1..65535")
@@ -622,6 +626,13 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         replay_path = stage / "input-replay.txt"
         replay_path.write_bytes(replay_bytes)
         environment.update(XLLE_PILOT_INPUT="replay", XLLE_PILOT_INPUT_REPLAY=str(replay_path.resolve()))
+    # Native code first; the guest interpreter is the default fallback for
+    # missed code. strict restores stop-on-miss for qualification runs.
+    interpreter = interpreter or "bridge"
+    environment["XLLE_PILOT_INTERPRETER"] = interpreter
+    environment.pop("XLLE_PILOT_INTERPRETER_MANIFEST", None)
+    if interpreter == "bridge":
+        environment["XLLE_PILOT_INTERPRETER_MANIFEST"] = str((run / "interpreter-manifest.jsonl").resolve())
     if capture:
         capture_directory = run / "captures"
         capture_directory.mkdir()
@@ -650,6 +661,7 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
             receipt["debug_endpoint"] = f"127.0.0.1:{debug_port}"
         if capture:
             receipt["captures"] = str(capture_directory)
+        receipt["interpreter"] = interpreter
         (run / "launch.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print(json.dumps(receipt, indent=2), flush=True)
         if detach:
@@ -689,6 +701,8 @@ def main():
     parser.add_argument("--reuse-discovery", action="store_true",
                         help="Prepare using the existing image-bound function discovery; original bodies are regenerated")
     parser.add_argument("--debug-port", type=int, help="Opt-in localhost native input/presented-screenshot server")
+    parser.add_argument("--interpreter", choices=("strict", "bridge"),
+                        help="Guest interpreter fallback for missed code: bridge interprets (default), strict stops; run only")
     ui = parser.add_mutually_exclusive_group()
     ui.add_argument('--launcher', action='store_const', const=True, default=None, dest='launcher')
     ui.add_argument('--no-launcher', action='store_const', const=False, dest='launcher')
@@ -703,8 +717,8 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.jobs <= 32 or (args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds <= 0)):
         parser.error("invalid job count or run duration")
-    if (args.input_replay is not None or args.capture or args.debug_port is not None) and args.action != "run":
-        parser.error("--input-replay, --capture and --debug-port apply only to run")
+    if (args.input_replay is not None or args.capture or args.debug_port is not None or args.interpreter is not None) and args.action != "run":
+        parser.error("--input-replay, --capture, --debug-port and --interpreter apply only to run")
     if args.with_checks and args.action != "build":
         parser.error("--with-checks applies only to build")
     if args.reuse_discovery and args.action != "prepare":
@@ -754,7 +768,7 @@ def main():
                        antialiasing=args.antialiasing, anisotropy=args.anisotropy,
                        frame_mode=args.frame_mode, frame_rate=args.frame_rate)
         result = launch(data, paths, args.generated, args.build_dir, args.automated, args.seconds, args.detach, source, args.input_replay, args.capture, args.debug_port,
-                        options, args.launcher)
+                        options, args.launcher, args.interpreter)
         if result is not None and not result["stopped_at_deadline"]:
             return result["exit_code"]
     else:

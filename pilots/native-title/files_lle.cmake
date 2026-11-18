@@ -79,6 +79,7 @@ if(PILOT_FILES STREQUAL "LLE")
     # same authored fixtures separately with the title's original selection;
     # inherit its other family dependencies once, at generation time.
     add_executable(pilot_callback_kernel_lle_test runtime_contract_test.c)
+    target_link_libraries(pilot_callback_kernel_lle_test PRIVATE xlle_recomp_interp_bridge)
     pilot_add_test(NAME pilot_thread_calendar_cpu_lle COMMAND pilot_callback_kernel_lle_test thread-calendar-cpu-lle)
     set_tests_properties(pilot_thread_calendar_cpu_lle PROPERTIES TIMEOUT 30)
     foreach(ordinary_case heap-compare-cpu unicode-cpu unicode-allocate-guard)

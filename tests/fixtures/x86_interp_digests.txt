@@ -1,0 +1,460 @@
+# xlle_x86_interp output digests: iterations 200 seed 20261117 core box64-27c8275d8295-xlr1
+0 da94a184477a8b50 add
+1 13038aeab6d3ab38 add
+2 e403979c870d9452 add
+3 da8596ee414f2b17 add
+4 3e9942d4f34163b0 add
+5 c60042a009f3b66b add
+6 89b16a1f896f73e8 or
+7 1824e341da8f28e9 or
+8 96765d089125a7c1 or
+9 8b0f34b6173c59da or
+10 17a2c5683e8f2f27 or
+11 5e75261265ab547f or
+12 9a5cbdeec80e5253 adc
+13 1836aac99fed4c93 adc
+14 e62cd8d67b250b93 adc
+15 586e8fbc46dbdba4 adc
+16 372049cfcc2b8a0d adc
+17 63ba7b7e0f096540 adc
+18 f419648543a247e8 sbb
+19 b8c1b3ac771da928 sbb
+20 48e0be4b7b955572 sbb
+21 b994f7be4cc262cb sbb
+22 c97250fb2da27c32 sbb
+23 028a414ba6431448 sbb
+24 fb26fa9b70e193cd and
+25 2bdf064fe7490d10 and
+26 8e4a6f6d87b2052c and
+27 a522ecf7d2645f4b and
+28 73dceb4cf7e59326 and
+29 3d8ce8833e87b5c0 and
+30 3cd7a8f22c89dfc0 sub
+31 6b0f1d4ce3c26042 sub
+32 5c130985bb36165e sub
+33 ed97c19a785f9626 sub
+34 86185e8a11e0c6b6 sub
+35 c990355aa56146dd sub
+36 407165a0169e5bdf xor
+37 3f098f17b75b37ed xor
+38 3d5f104704b050a1 xor
+39 89901751b83a75de xor
+40 71c7cbb25faedf2d xor
+41 34d29c562846e4db xor
+42 091097af561e82d3 cmp
+43 3bb329e2a3f41ddd cmp
+44 d4039a6802d6d4a9 cmp
+45 88125dc2509f8869 cmp
+46 9e80cea7b5fc1b13 cmp
+47 14f7cf11ebe9d1ac cmp
+48 db6070b7c5622e53 grp1 imm32
+49 ed4c64d4f349f86e grp1 imm8
+50 843b4842e55019c2 grp1 r8 imm8
+51 0af82582004ce847 grp1 imm32
+52 c96e3c9a55320adc grp1 imm8
+53 d148b7e902cd2141 grp1 r8 imm8
+54 f0002b7a3921ed23 grp1 imm32
+55 4292b9ee9ba8b42b grp1 imm8
+56 11e38e83faf8871c grp1 r8 imm8
+57 508d799a2afec2e7 grp1 imm32
+58 8472f1c07d4d2dd8 grp1 imm8
+59 237789d0aac2ba9c grp1 r8 imm8
+60 8f0f0c9b08662fe2 grp1 imm32
+61 4f479e56194afddb grp1 imm8
+62 2b1429f6f89c2c5d grp1 r8 imm8
+63 ffcc12412817338a grp1 imm32
+64 fc773862e23278bf grp1 imm8
+65 2034f8728c52bfd5 grp1 r8 imm8
+66 5272c8941448000a grp1 imm32
+67 0ec24c0adbc3df0f grp1 imm8
+68 3fed09f8309460e8 grp1 r8 imm8
+69 f8c56ae905eae190 grp1 imm32
+70 e9e815aca5b30620 grp1 imm8
+71 b7b70590d6902747 grp1 r8 imm8
+72 f31dfd45ccda4dcf test
+73 6c64f4e2bbe8f5dc test m8
+74 fa237b0439bcb86f xchg
+75 6937edcba9401e1e mov
+76 0d0ac45714984493 mov r
+77 469796de00b6de6d mov r8
+78 412c61abaf4ee3db mov m16
+79 426adb75b2314d8a lea
+80 ee99eb0d28d625dc inc
+81 30fee29e121ad775 dec m
+82 ee18d438d3f4f393 not
+83 09461367175664b2 neg
+84 33fd2f90f0259936 mul
+85 22258cb278884533 imul1
+86 c1aee3faccf1c179 imul2
+87 6a42c49c4ae89a55 imul3
+88 1079b2f00f91445a imul3b
+89 72967aaa3e219a51 mul8
+90 ce4946367f876882 shift imm
+91 93ae7382a033575e shift cl
+92 7dfcc45cbc64e16f shift 1
+93 3b463420c11653f5 shift8 cl
+94 2243b3e99ae85ba5 shift imm
+95 11fb53c08e961c67 shift cl
+96 b4c505ed6cd1f082 shift 1
+97 f8231dd0346e239f shift8 cl
+98 f07738ffb4eb3f9e shift imm
+99 056cc86f587f045c shift cl
+100 ae6c846a0780b74e shift 1
+101 4eb6341142126e9c shift8 cl
+102 1e29eb4b40db645a shift imm
+103 60ebebd73698f034 shift cl
+104 9a9a11acc5eeaa71 shift 1
+105 dce5a948e711a7b9 shift8 cl
+106 1d0a9c3dd64d1e30 shift imm
+107 455111ca8c3c1856 shift cl
+108 61568997a04c6261 shift 1
+109 167d30f477823a9b shift8 cl
+110 c956cf0fab039c8d shift imm
+111 126d12771f70e92a shift cl
+112 b9b02ebf97ca856c shift 1
+113 8304ed1fc836dcd9 shift8 cl
+114 be9393adb2d928bb shift imm
+115 b7cdca039085fb10 shift cl
+116 4bd5c1d9e1ebba1d shift 1
+117 b5f39b77d8791f25 shift8 cl
+118 e77dd18e92eed719 shld imm
+119 f0683c9157e8a09b shrd cl
+120 cdcedcd1eaadeafb bt
+121 3becb184bfeda67f bts m
+122 3b4aee428593f73a btr imm
+123 da7ae3341f5ca0be btc imm
+124 7a0396b511c7c439 bsf
+125 9eec84f41dfeaa06 bsr
+126 95f967c1a4cc7191 movzx8
+127 e80a74b12f9c7fd4 movzx16
+128 36d6414edbea64ab movsx8
+129 aaa67f4bdde0b37c movsx16
+130 76f6a3e17687d8de setcc
+131 34bcf26fa5ff761d cmovcc
+132 dd1a36fc1e19449d jcc8
+133 658247a0e8b7fa8e setcc
+134 e0975652bccd16f0 cmovcc
+135 550fa02c29abb21d jcc8
+136 5bf14a6e3030d64d setcc
+137 c43346431c0dccc4 cmovcc
+138 3cd120a63bb0f4b0 jcc8
+139 e648d8a175a07da1 setcc
+140 13634f79fc1fc156 cmovcc
+141 98d51558f70ec006 jcc8
+142 c3486aea2021d54e setcc
+143 d18b301535779750 cmovcc
+144 1250a6e9501de207 jcc8
+145 9b24cd66d835544c setcc
+146 daba02ce18a0929f cmovcc
+147 3e3236134f23e332 jcc8
+148 beb6956581c88449 setcc
+149 b4a5c5deb12823e7 cmovcc
+150 e7722147fe52e226 jcc8
+151 a5daf125ec192a4b setcc
+152 afa9130abf955403 cmovcc
+153 aa900f0881ff59de jcc8
+154 8d0806196b88cfb5 setcc
+155 0ebc98a1de1d0f85 cmovcc
+156 4f287628f3fedc78 jcc8
+157 44ef5675a57ce9a2 setcc
+158 42598174b0774ec5 cmovcc
+159 5c5a22326cbc2113 jcc8
+160 3c19f56f2f4f2c81 setcc
+161 2acdb3a67404578e cmovcc
+162 53409e23938c5a82 jcc8
+163 b76f30c55e27e77c setcc
+164 76d43f0871c12657 cmovcc
+165 93c0719c569fb841 jcc8
+166 ec269a0e5df8ff6e setcc
+167 f9bba475ed01039f cmovcc
+168 4506989295a81aaa jcc8
+169 10066e9e7516aafe setcc
+170 d57987025dc9d51f cmovcc
+171 3ff5fee13abb5933 jcc8
+172 08688aba22a5fdf3 setcc
+173 31303df4e2840c10 cmovcc
+174 000cd90521ee8db0 jcc8
+175 4671118853df8d39 setcc
+176 5d9a0391a2a71abc cmovcc
+177 f329739f70c7d94f jcc8
+178 76b679760d529226 cmpxchg
+179 d64a2c0a493be325 lock cmpxchg
+180 511d9b93c9dc1e2c lock xadd
+181 532d853adf7416a0 lock add
+182 3d344239ab341788 lock dec
+183 65904af2700ecb12 lock cmpxchg8b
+184 9d06c7325da12ab1 bswap
+185 af77f4f76ed11d8f cdq
+186 cea93214e868fcd0 cwde
+187 a85b5c38f5c94f20 lahf
+188 1f7bff2be4b837b9 sahf
+189 732688ab8f00b10f push
+190 007c7ad6b15c76c6 pop
+191 d7f2ccb93a1f907c push m
+192 2896e6d826798ef4 pushad
+193 4e84bafabeef361b popad
+194 03e7a2d2b182b40e pushfd
+195 1430d8243d20a8ea leave
+196 1d507bb9d531b962 call rel
+197 3fdde86ebb389d3a ret
+198 06606800e18a6807 ret imm
+199 3652168c73061b2c jmp rel8
+200 2dfcfd740e1b4633 div
+201 60bda4531712ba48 idiv m
+202 6bf11fdfa2a37903 rep movsb
+203 41ea239f8f14184e rep movsd
+204 e90d8cab23cfb1b7 rep stosd
+205 3c3abc53ba8977a9 repe cmpsb
+206 ae3e9c49aece9fcc repne scasb
+207 a7ebed5c60eb215e lodsd
+208 60c5b24be228e067 movs m16
+209 55605ec39997af80 xlat
+210 5ec17d704c7ffbc6 mov moffs
+211 8979c9752dc0ccd1 mov moffs st
+212 8a97b44856fbc81b fop m32
+213 a8f1c1c7ccbb6d83 fop m64
+214 c9b554460407c75e fop st(i)
+215 f8eed4f306adcf71 fop m32int
+216 4e4b534118a377bb fop m32
+217 45b1830e22c1dbb8 fop m64
+218 fc2e5328813df484 fop st(i)
+219 6bb37aed8eb658dc fop m32int
+220 4aa682f345bcc454 fop m32
+221 6b7e75d54dbcd0ee fop m64
+222 e18f574f18c6f2b2 fop st(i)
+223 0925e6fbae0601be fop m32int
+224 7d4308633b45b58a fop m32
+225 6241464915014814 fop m64
+226 45047afbd5f48f6d fop st(i)
+227 db7a3f6a71ef75f2 fop m32int
+228 1d65994009be0f4a fop m32
+229 f98f65f7a7b93729 fop m64
+230 34828d2b6b887459 fop st(i)
+231 36fecf963ffc6da1 fop m32int
+232 aae4a8f29d4de0b6 fop m32
+233 85071a509d9377d4 fop m64
+234 960b6e2769efb9f9 fop st(i)
+235 f7d62468e9141b70 fop m32int
+236 b719cdece2dcdee7 fop m32
+237 05de934a85830ac6 fop m64
+238 e5963cd95c090fe7 fop st(i)
+239 78347bb45003e24e fop m32int
+240 33fdcd12bc1a3cc6 fop m32
+241 e7106d1025bf6e90 fop m64
+242 7b27ad067ecd3cf3 fop st(i)
+243 fbe73f586f8ec3c4 fop m32int
+244 693d839cb973d789 faddp
+245 63ec8d0f0a4a0acc fmulp
+246 770a6c7b5484827e fsubrp
+247 5e5e3337b7e333fb fdivp
+248 57c7adf055a95200 fld m32
+249 fe9b477dcf53880d fld m64
+250 cb909ca9f0e5642a fst m32
+251 3370499500402172 fstp m64
+252 c8f24bdfc6c30575 fild m32
+253 147ed10f2c674f81 fild m16
+254 602e5b8bdaf5d131 fild m64
+255 0ef371e420896459 fistp m32
+256 41e10a87f5abd418 fist m16
+257 4540bb1db1b464d5 fistp m64
+258 2f90e2f0d8872a08 fld st(i)
+259 2564c200ace83349 fxch
+260 86d5c20ea2ff01df fstp st(i)
+261 5b4f54474c3d8926 fcom st(i)
+262 d4306fe0e1675aa3 fucompp
+263 ee4f49f861d99c0c fcomi
+264 154b5101ccd6dbef fucomip
+265 89c517ba21d627bc fchs
+266 1b33e5a592abea08 fabs
+267 0d2328538a1c85a7 ftst
+268 4f087d62c796c2ae fld1
+269 d34a81e3ff7670e3 fldz
+270 d5ce4da70bf3df4c fsqrt
+271 7d3acd54ad581b9f frndint
+272 eedeea26c0e81658 fscale
+273 4249e6b1fb78fad1 fprem
+274 0e8f7010e5367e2b fprem1
+275 4a1f74d1eef96fbf fnstsw ax
+276 2fbc74e2192287c1 fnstcw
+277 d69a3da5338a78ca fldcw
+278 23841f14083b6c2d mmx op
+279 6c87f4060fc92a63 mmx op m
+280 de6c5bc8b985d7de mmx op
+281 26e7f0c324deb6ad mmx op m
+282 f12c20e62b465f65 mmx op
+283 9d6e2282b71d07ca mmx op m
+284 33b533693835ee57 mmx op
+285 8b64f04c6250a03d mmx op m
+286 77a9a543c4f90fd9 mmx op
+287 632587a67a5f854d mmx op m
+288 6cc34d9f9df4d9fb mmx op
+289 c60644691e6a55bd mmx op m
+290 5b30eae9bbba10bb mmx op
+291 5e6c7cb808aba311 mmx op m
+292 d7ab8da5c9e5b29e mmx op
+293 ece915e88b26d542 mmx op m
+294 e4448ea756bdde54 mmx op
+295 ba613c3108025c8e mmx op m
+296 95e32bc9b0e5a28e mmx op
+297 e0cf19071a72845f mmx op m
+298 c15445a8e95deac2 mmx op
+299 1ae41922a875a5f2 mmx op m
+300 a4b79494d17682be mmx op
+301 e8f6c6eb1e771441 mmx op m
+302 65d5ae67028b35ff mmx op
+303 1e2ef4917d7235f4 mmx op m
+304 045bc365a3b37018 mmx op
+305 9a293e3cf04ada8a mmx op m
+306 def27f684a7f8667 mmx op
+307 38e539346d8a440a mmx op m
+308 d49df0eeaa0682ab mmx op
+309 bf1ca697b9faac11 mmx op m
+310 24161c1e577cdf02 mmx op
+311 2b26ff5177aed1d9 mmx op m
+312 7757c420f8a3ef85 mmx op
+313 c2068fa6ed3b2014 mmx op m
+314 988feab1fceb787a mmx op
+315 bb2e2546cfee688d mmx op m
+316 b8817c69f8a871e1 mmx op
+317 6d20e4f36ed7c04f mmx op m
+318 8dd84afcfb13bad9 mmx op
+319 28415caf4151d6b7 mmx op m
+320 c531b374101aff31 mmx op
+321 2f798f9570c3bea6 mmx op m
+322 b20883550891bc55 mmx op
+323 610d4e8ee34ad6b1 mmx op m
+324 b1d6c6fc3c5bdf41 mmx op
+325 bd27fc660c8924dc mmx op m
+326 b467e75e29dd5dd9 mmx op
+327 05060ffe242a4155 mmx op m
+328 a9188f7c7f1a7068 mmx op
+329 5efd1156297f4163 mmx op m
+330 82dd486c6240076c mmx op
+331 a1d90bbfcac72193 mmx op m
+332 e467a025a395a9e9 mmx op
+333 6aee6d207affda98 mmx op m
+334 a5387b380e2a11c0 mmx op
+335 df0301e4d8d84fd1 mmx op m
+336 9d5721552c463be2 mmx op
+337 777a38bcf78251ba mmx op m
+338 df577050dcffbca0 mmx op
+339 62500551eb81c070 mmx op m
+340 f161aa397108d08c mmx op
+341 b751fe05abd43d39 mmx op m
+342 40e8f692e0efab4e mmx op
+343 02aa2f364f820218 mmx op m
+344 7aa34dbb0d41fe24 mmx op
+345 da0f56bd2971db21 mmx op m
+346 478c00d85f8d4f79 mmx op
+347 2719c79709172ef5 mmx op m
+348 947d6f79e8e17053 mmx op
+349 a461ecb7590cf1cd mmx op m
+350 a06e5e6a049c5ad0 mmx op
+351 18d193b19a1cf073 mmx op m
+352 aaafbfe8da3e6db0 mmx op
+353 87f941cd4afbecdd mmx op m
+354 b9192c2abef903b5 mmx op
+355 d12b411f2dcdf615 mmx op m
+356 62be496d90edc637 mmx op
+357 b6e4d7d2c9ad09db mmx op m
+358 0bcd387d44ce8044 mmx op
+359 a028d4468d44b001 mmx op m
+360 f321fd6678104ab6 mmx op
+361 fcf402d989b4053b mmx op m
+362 16105c87061d38d2 mmx op
+363 9e7ed542d6b1f1ba mmx op m
+364 022ae6b5171ff26a mmx op
+365 dc1285903dac4b79 mmx op m
+366 c53a6a10af0fc91b mmx op
+367 8499d2aa8212c21d mmx op m
+368 8cf3d1326c709fa9 mmx op
+369 e28f80c0d18a4e02 mmx op m
+370 40b2827d8e9bdd2d mmx op
+371 b04243f3a8787b1a mmx op m
+372 716e65f4adb50208 mmx op
+373 942a48a3b3099892 mmx op m
+374 c7d0b6de73b09c4c mmx op
+375 6fad867daef2633a mmx op m
+376 f0504fc237345cda mmx op
+377 70219e1abb474fcf mmx op m
+378 304f9850a12a2365 mmx op
+379 aa8ee91a43a4828b mmx op m
+380 6e50c83524bfb149 mmx op
+381 ddd5d9b9be9d7b60 mmx op m
+382 14650fb0739d0383 maskmovq-skip
+383 a4ca002fa0a360d1 psxw imm
+384 71f22d1f9d790cb7 psxd imm
+385 b34a60d195d9edda psxw imm
+386 8c332b2f35a08633 psxd imm
+387 0c438078fef9ea38 psxw imm
+388 7645a2a61a4f4047 psxd imm
+389 38cb3133d57a6220 psxq imm
+390 a9cf8043eab419b0 psllq imm
+391 8548c2dbc202dfe9 pshufw
+392 d7561b6977a5c22d movq
+393 d067654e0c926438 movq st
+394 028ce3c5b241cd94 movd
+395 2bf345b469675ac3 movd st
+396 58a94aac4571f572 pinsrw
+397 f709e1035615b0c0 pmovmskb
+398 f1e5ece0263f3275 pextrw
+399 cdcfd41fd5f00d2a cvttps2pi
+400 1ac714a800498f0a cvtps2pi
+401 aa3ee8ede6d0f2e2 ps op
+402 d8c0750b2cae2306 ps op m
+403 101e249c8ab7a171 ss op
+404 4026138bc9e1a61d ss op m
+405 7b4d8268e3cf0a59 ps op
+406 50c23c43a92bce2d ps op m
+407 e281698de2e6a66d ss op
+408 189c77ca2f43d787 ss op m
+409 4ba4c7f5110568b2 ps op
+410 ff0442998c995eb7 ps op m
+411 cdc4e22d7a048fdb ss op
+412 76be5347a559d9ff ss op m
+413 89879b1f2c39a0e3 ps op
+414 875e80fac253711e ps op m
+415 3b0c80e525940d84 ss op
+416 6e7e075c0e5ee125 ss op m
+417 ce82b196c0a1d9d7 ps op
+418 745786da61cfd3c0 ps op m
+419 ef859bc8dcb78a27 ss op
+420 e7e32221b6311481 ss op m
+421 81650ba2abc57f75 ps op
+422 d9ebd983237cbf23 ps op m
+423 d68d61cbff605796 ss op
+424 4dfcdbb6b8d8ecf2 ss op m
+425 9f25c81a967737d3 ps op
+426 9960137b2df67490 ps op m
+427 0267e9542be85d5a ss op
+428 e10b33dc06a8b3a1 ss op m
+429 4cee0162827e6ede ps op
+430 1c6f4d190e787afd ps op m
+431 b69dbc5a7a52a253 ps op
+432 3d737105f49c74fb ps op m
+433 e4d37223b7d2bdd6 ps op
+434 caf5b41d3c036d70 ps op m
+435 3b27e7b210984f4b ps op
+436 977d1e9e586c65f5 ps op m
+437 395fd1b7db0b1cf5 ps op
+438 abd61765c89a1b85 ps op m
+439 91ea9f976fef3b32 ps op
+440 265d9d171cb3b68e ps op m
+441 09c5dbf5a54498df movaps
+442 0b676a6e36bc2e23 movaps st
+443 594aecfcb35ee994 movups
+444 a8b350ecc0ef2bc9 movss st
+445 bd7a5442df1c405a movhlps
+446 0deccc5678bc4858 movlps
+447 f2ea607fffad2f64 movhps st
+448 89efecc24415572c shufps
+449 f1cd6e509c27a263 cmpps
+450 f535a55023a2c932 cmpss
+451 a900636e683032bf comiss
+452 26b692d9b99cf003 ucomiss
+453 53a63022745f0267 cvtsi2ss
+454 e90e855ce4107c9a cvttss2si
+455 785674c7e788d0ef cvtss2si
+456 c5327866ab5fdf8a cvtpi2ps
+457 9850edff04d5c186 movmskps
+458 8357902074cb3fc0 stmxcsr
