@@ -76,7 +76,7 @@ void fpu_fbld(x64emu_t* emu, uint8_t* s) {
 // MinGW/wowbox64 builds may lack feraiseexcept; make it a no-op there.
 static inline void box64_feraise(int flags)
 {
-#if defined(_WIN32) || defined(__MINGW32__)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(XLR_INTERP) /* XLR: never touch host FP exception state */
     (void)flags;
 #else
     feraiseexcept(flags);

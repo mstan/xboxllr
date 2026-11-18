@@ -1718,7 +1718,7 @@ x64emurun:
             break;
         case 0xCD:                      /* INT n */
             tmp8u = F8;
-            #ifdef _WIN32
+            #if defined(_WIN32) || defined(XLR_INTERP) /* XLR: one host-independent INT n path (guest fault) */
             #ifndef TEST_INTERPRETER
             EmitInterruption(emu, tmp8u, (void*)R_RIP);
             STEP;

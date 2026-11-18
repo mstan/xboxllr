@@ -49,7 +49,7 @@ typedef struct vex_s {
 
 static inline void box64_feraise_invalid(void)
 {
-#if !defined(_WIN32) && !defined(__MINGW32__)
+#if !defined(_WIN32) && !defined(__MINGW32__) && !defined(XLR_INTERP) /* XLR: never touch host FP exception state */
     feraiseexcept(FE_INVALID);
 #endif
 }
