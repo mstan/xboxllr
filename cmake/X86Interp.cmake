@@ -37,6 +37,10 @@ if(NOT TARGET xlle_x86_interp)
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../include"
     PRIVATE "${_xlr_root}/shim" "${_xlr_up}" "${_xlr_root}")
   target_compile_definitions(xlle_x86_interp PRIVATE XLR_NATIVE_LOCK XLR_INTERP)
+  if(UNIX)
+    # The x87/SSE paths use libm (fmod, nearbyint, fesetround, ilogb, ...).
+    target_link_libraries(xlle_x86_interp PUBLIC m)
+  endif()
   set_target_properties(xlle_x86_interp PROPERTIES
     C_STANDARD 11 C_EXTENSIONS ON POSITION_INDEPENDENT_CODE ON)
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
