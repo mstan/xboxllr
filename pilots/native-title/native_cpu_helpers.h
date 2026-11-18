@@ -2,7 +2,7 @@
  * Appended after the template's types; this file contains no guest code. */
 #ifndef PILOT_NATIVE_CPU_HELPERS_H
 #define PILOT_NATIVE_CPU_HELPERS_H
-#define PILOT_NATIVE_CPU_HELPERS_VERSION 1
+#define PILOT_NATIVE_CPU_HELPERS_VERSION 2
 
 extern RECOMP_TLS uint32_t g_icall_saved_esp, g_icall_dispatch_form;
 void recomp_int3_reached(uint32_t address);
@@ -16,12 +16,32 @@ void recomp_set_foreign_longjmp(recomp_foreign_longjmp_fn callback);
 
 #define MEM64(address) (*(volatile uint64_t *)XBOX_PTR(address))
 
-static inline void pilot_recomp_indirect_failure(uint32_t target, unsigned kind)
+/* Run guest function va in the guest interpreter for this thread; the guest
+ * return address is already pushed, as for a translated callee.  Returns 1
+ * when it ran and returned, 0 when the runtime does not bridge (strict).
+ * kind: 1 indirect call, 2 indirect tail jump, 3 undiscovered direct target,
+ * 4 translation failed. */
+int recomp_bridge_call(uint32_t va, unsigned kind);
+
+/* Unresolved indirect target.  Returns 1 when the interpreter ran it to its
+ * return (the dispatch macro then skips its refusal path); otherwise the
+ * refusal owner stops. */
+static inline int pilot_recomp_indirect_failure(uint32_t target, unsigned kind)
 {
     g_icall_saved_esp = g_esp;
     g_icall_dispatch_form = kind;
+    if (recomp_bridge_call(target, kind))
+        return 1;
     recomp_icall_fail_log(target);
+    return 0;
 }
+
+/* Whole-function stub for an undiscovered direct target (kind 3) or a failed
+ * translation (kind 4): run the original function in the interpreter, else
+ * stop as before. */
+#define RECOMP_UNIMPL_FUNCTION(text, va, kind) do { \
+    if (!recomp_bridge_call((va), (kind))) recomp_unimpl((text), (va)); \
+} while (0)
 
 /* A known RET N must restore SP by exactly the return slot plus N, while the
  * three nonvolatile register cells retain their caller values. Normal builds

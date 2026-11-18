@@ -63,12 +63,12 @@ def harden_generated(directory):
         code = path.read_text(encoding="utf-8")
         code, count = re.subn(
             r'void (\w+)\(void\) \{ recomp_stub_missing\((0x[0-9A-F]+u)\);[^\n]*\}',
-            r'void \1(void) { RECOMP_UNIMPL("undiscovered direct target", \2); }', code)
+            r'void \1(void) { RECOMP_UNIMPL_FUNCTION("undiscovered direct target", \2, 3u); }', code)
         counts["missing_targets"] += count
         code, count = re.subn(
             r'/\* FAILED: (\w+) at (0x[0-9A-F]+) \*/\s*'
             r'void \1\(void\) \{ /\* translation failed \*/ \}',
-            r'void \1(void) { RECOMP_UNIMPL("translation failed", \2u); }', code)
+            r'void \1(void) { RECOMP_UNIMPL_FUNCTION("translation failed", \2u, 4u); }', code)
         counts["failed_translations"] += count
         if "stubs_unresolved" in path.name:
             # Keep only definitions and their include, not the obsolete
@@ -229,6 +229,9 @@ def prepare(args):
     runtime_helpers = install_cpu_helpers(out / 'gen')
     counts = harden_generated(out / "gen")
     counts['runtime_helpers'] = runtime_helpers
+    if getattr(args, 'force_interpret', None):
+        from native_forced_interpretation import load as load_forced, apply as apply_forced
+        counts['forced_interpretation'] = apply_forced(out / 'gen', load_forced(args.force_interpret))
     counts['x87_instruction_lowering']=json.loads(x87_report.read_text())
     if unit_budget is not None:
         counts['unit_budget'] = unit_budget
@@ -250,6 +253,10 @@ def prepare(args):
               'static const struct { unsigned address, ordinal; const char *name; } pilot_imports[] = {']
     header += [f'{{ {i["thunk_addr"]}u, {i["ordinal"]}u, "{i["name"]}" }},' for i in imports]
     header += ["};"]
+    from native_seh_helpers import collect as collect_seh_helpers, c_table as seh_table
+    seh_helpers = collect_seh_helpers(out / "gen")
+    header += seh_table(seh_helpers)
+    counts['seh_helpers'] = [f"0x{va:08X}" for va in seh_helpers]
     (out / "gen" / "pilot_image.h").write_text("\n".join(header) + "\n")
     manifest = dict(donor=pin, sha256=image["sha256"], entry=image["entry"],
                     discovery_symbols=symbol_proof,
@@ -330,6 +337,8 @@ if __name__ == "__main__":
     parser.add_argument('--poll-waits', type=Path,
                         help='Reviewed image-bound guest-callback poll contract; native idle is separately selected at build time')
     parser.add_argument("--seed-functions", type=Path, action="append", default=[], help="Measured/recovered indirect roots for this title revision")
+    parser.add_argument("--force-interpret", type=Path,
+                        help="Qualification only: JSON list of guest functions generated as undiscovered stubs (guest interpreter fallback tests)")
     parser.add_argument("--discovery-symbols", type=Path, help="Explicit matching-CodeView PDB function metadata for body-aware discovery")
     parser.add_argument("--media-symbols", type=Path, help="Bind a reviewed media helper using this XDK symbol inventory")
     parser.add_argument("--cache-symbols", type=Path, help="Bind reviewed utility-drive service using this XDK symbol inventory")
