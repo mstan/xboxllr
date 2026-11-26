@@ -32,6 +32,7 @@ unsigned image_width=0,image_height=0;
 int image_status=0;
 std::vector<unsigned char> image;
 std::atomic<bool> pause_requested{false};
+std::atomic<bool> quit_requested{false};
 std::atomic<uint32_t> pause_pc{0};
 std::condition_variable guest_changed;
 PilotDebugGuest guest_state{};
@@ -211,6 +212,11 @@ extern "C" int pilot_debug_start(const char *port_text) {
     server->register_command("set_input_port",set_input_port);server->register_command("connect_input",connect_input);
     server->register_command("clear_input",clear_input);server->register_command("screenshot",screenshot);
     server->register_command("resize",resize);
+    server->register_command("quit",[](const std::string& args) {
+        if(!args.empty())return failure("quit takes no arguments");
+        quit_requested.store(true);pause_requested.store(false);guest_changed.notify_all();
+        return std::string("{\"ok\":true,\"queued\":true}\n");
+    });
     server->register_command("pause",pause_guest);server->register_command("resume",resume_guest);
     server->register_command("guest_snapshot",guest_snapshot);server->register_command("read_guest",read_guest);
     server->register_command("read_memory",read_memory);
@@ -222,6 +228,7 @@ extern "C" int pilot_debug_start(const char *port_text) {
     return 0;
 }
 extern "C" int pilot_debug_active(void) {return active.load();}
+extern "C" int pilot_debug_quit_requested(void) {return quit_requested.load();}
 extern "C" void pilot_debug_bind_guest(PilotDebugRead read) {
     std::lock_guard<std::mutex> lock(state_mutex);guest_read=read;
 }

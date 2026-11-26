@@ -8,6 +8,8 @@ extern "C" {
  * without an explicit port. Renderer calls remain on the graphics owner. */
 int pilot_debug_start(const char *port);
 int pilot_debug_active(void);
+/* Owner-thread shutdown through the normal present/recording close path. */
+int pilot_debug_quit_requested(void);
 /* Optional live, read-only observations. The runtime validates guest pages;
  * these are not atomic execution snapshots and never expose host addresses. */
 typedef int (*PilotDebugReadMemory)(uint32_t address,void *data,uint32_t bytes);

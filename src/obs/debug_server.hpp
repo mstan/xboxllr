@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <atomic>
+struct DiagServer;
 
 namespace xlle {
 
@@ -44,7 +45,7 @@ private:
     std::map<std::string, Command> commands_;
     std::thread thread_;
     std::atomic<bool> running_{false};
-    long long listen_fd_ = -1;  // SOCKET on Windows; fits in long long
+    DiagServer* server_ = nullptr;
     uint16_t port_ = 0;
     std::string last_error_;
 };

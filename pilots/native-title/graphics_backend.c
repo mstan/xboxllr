@@ -805,6 +805,7 @@ int32_t pilot_gfx_present(void)
         TranslateMessage(&message);DispatchMessageW(&message);
     }
 #endif
+    if(pilot_debug_quit_requested())quit=1;
     pilot_session_value(PILOT_SESSION_WINDOW,1,&quit,sizeof(quit));
     if(quit){pilot_session_report_stop("window closed",0);ExitProcess(0);}
     pilot_gfx_batch_flush();

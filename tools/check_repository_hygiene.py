@@ -19,6 +19,16 @@ PRIVATE_SUFFIXES = frozenset((
     '.pem .key .p12 .pfx .keystore .gpr .blockpack .jsonl .ppm .png .log'
 ).split())
 PRIVATE_ROOTS = {'machine', 'private', 'secrets', 'dumps', 'captures', 'play'}
+# Separately reviewed reusable source dependencies. Both the exact commit and
+# staged/history URL must match; this never admits arbitrary nested content.
+REVIEWED_SUBMODULES = {
+    'external/shared-cores/recomp-diagnostics-core': (
+        'c5c40bad0a0fa37ad876c21f0324eafd8cc1dd5f',
+        'https://github.com/mstan/recomp-diagnostics-core-candidate-20261124.git'),
+    'external/shared-cores/recomp-persistence-core': (
+        '4ae875db5d517d7d7bbdb9806679d98e3cdc44d9',
+        'https://github.com/mstan/recomp-persistence-core-candidate-20261124.git'),
+}
 # Owner-requested README images, visually reviewed with source/rights notices.
 # Exact paths AND SHA256 bytes are required; this is not an image-directory exemption.
 DOCUMENTATION_IMAGES = {
@@ -96,6 +106,18 @@ def git(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args])
 
 
+def reviewed_submodule(root, path, oid, ref=''):
+    expected = REVIEWED_SUBMODULES.get(path)
+    if not expected or oid != expected[0]:
+        return False
+    try:
+        url = git(root, 'config', '--blob', ref + ':.gitmodules', '--get',
+                  'submodule.' + path + '.url').decode().strip()
+    except subprocess.CalledProcessError:
+        return False
+    return url == expected[1]
+
+
 def scan(root, history=False):
     objects = {}
     failures = set()
@@ -107,6 +129,8 @@ def scan(root, history=False):
         path = path_bytes.decode('utf-8', 'replace')
         if private_path(path) and path not in DOCUMENTATION_IMAGES:
             failures.add((path, 'private asset path', 0))
+        if stage == '0' and mode == '160000' and reviewed_submodule(root, path, oid):
+            continue
         if stage != '0' or mode in {'160000', '120000'}:
             failures.add((path, 'unmerged entry, submodule or symlink requires review', 0))
             continue
@@ -128,7 +152,7 @@ def scan(root, history=False):
                     failures.add((label, 'private asset path', 0))
                 if kind == 'blob':
                     objects.setdefault((oid, path if path in DOCUMENTATION_IMAGES else None), (path, label))
-                elif kind == 'commit':
+                elif kind == 'commit' and not reviewed_submodule(root, path, oid, commit):
                     failures.add((label, 'submodule requires separate audit', 0))
     reader = subprocess.Popen(['git', '-C', str(root), 'cat-file', '--batch'],
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE)
