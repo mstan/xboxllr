@@ -96,6 +96,8 @@ if(MSVC)
 endif()
 option(PILOT_COST_RING "Always-on source-swap cost ring (OFF only for overhead qualification)" ON)
 add_library(pilot_native_debug STATIC native_debug.cpp cost_ring.cpp ../../src/obs/debug_server.cpp)
+# Keep the adapter's compiler PDB independent of older monolithic host caches.
+set_target_properties(pilot_native_debug PROPERTIES COMPILE_PDB_NAME pilot_native_debug_host_services)
 target_link_libraries(pilot_native_debug PRIVATE xboxllr_shared_diagnostics)
 add_executable(pilot_shared_diagnostics_test
   ../../external/shared-cores/recomp-diagnostics-core/tests/loopback_test.cpp)
