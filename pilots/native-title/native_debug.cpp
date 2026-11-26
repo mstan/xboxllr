@@ -33,6 +33,10 @@ int image_status=0;
 std::vector<unsigned char> image;
 std::atomic<bool> pause_requested{false};
 std::atomic<bool> quit_requested{false};
+std::atomic<bool> review_requested{false},review_paused{false};
+std::atomic<PilotDebugReviewAudio> review_audio{nullptr};
+std::mutex review_mutex;
+std::condition_variable review_changed;
 std::atomic<uint32_t> pause_pc{0};
 std::condition_variable guest_changed;
 PilotDebugGuest guest_state{};
@@ -74,6 +78,7 @@ std::string guest_snapshot(const std::string& args) {
     out<<"}\n";return out.str();
 }
 std::string pause_guest(const std::string& args) {
+    if(review_requested.load())return failure("resume presentation review before guest inspection");
     uint32_t pc=0;
     if(!args.empty() && !number(args,pc))return failure("pause takes an optional decimal guest entry address");
     std::unique_lock<std::mutex> lock(state_mutex);
@@ -120,6 +125,8 @@ std::string status(const std::string& args) {
         ",\"input_sequence\":"+std::to_string(sequence)+",\"delivered_sequence\":"+std::to_string(delivered)+
         ",\"connected_mask\":"+std::to_string(connected_mask.load())+
         ",\"guest_provider\":"+(guest_read?"true":"false")+",\"guest_paused\":"+(guest_paused?"true":"false")+
+        ",\"review_available\":"+(review_audio.load()?"true":"false")+
+        ",\"review_paused\":"+(review_paused.load()?"true":"false")+
         ",\"input_active\":"+(std::any_of(input_until.begin(),input_until.end(),[](auto t){return Clock::now()<t;})?"true":"false")+"}\n";
 }
 std::string set_port_input(const std::string& args,unsigned port) {
@@ -212,9 +219,20 @@ extern "C" int pilot_debug_start(const char *port_text) {
     server->register_command("set_input_port",set_input_port);server->register_command("connect_input",connect_input);
     server->register_command("clear_input",clear_input);server->register_command("screenshot",screenshot);
     server->register_command("resize",resize);
+    server->register_command("review_pause",[](const std::string& args) {
+        if(!args.empty())return failure("review_pause takes no arguments");
+        if(pause_requested.load())return failure("resume guest inspection before presentation review");
+        if(!review_audio.load())return failure("native review audio barrier unavailable");
+        review_requested.store(true);return std::string("{\"ok\":true,\"queued\":true}\n");
+    });
+    server->register_command("review_resume",[](const std::string& args) {
+        if(!args.empty())return failure("review_resume takes no arguments");
+        review_requested.store(false);review_changed.notify_all();
+        return std::string("{\"ok\":true,\"queued\":true}\n");
+    });
     server->register_command("quit",[](const std::string& args) {
         if(!args.empty())return failure("quit takes no arguments");
-        quit_requested.store(true);pause_requested.store(false);guest_changed.notify_all();
+        quit_requested.store(true);pause_requested.store(false);guest_changed.notify_all();review_changed.notify_all();
         return std::string("{\"ok\":true,\"queued\":true}\n");
     });
     server->register_command("pause",pause_guest);server->register_command("resume",resume_guest);
@@ -229,6 +247,21 @@ extern "C" int pilot_debug_start(const char *port_text) {
 }
 extern "C" int pilot_debug_active(void) {return active.load();}
 extern "C" int pilot_debug_quit_requested(void) {return quit_requested.load();}
+extern "C" void pilot_debug_review_audio(PilotDebugReviewAudio barrier) {review_audio.store(barrier);}
+extern "C" int pilot_debug_review_present(int (*pump)(void)) {
+    if(!review_requested.load())return 0;
+    auto audio=review_audio.load();
+    if(!audio || audio(1)<0)return -1;
+    review_paused.store(true);
+    while(review_requested.load() && !quit_requested.load()) {
+        if(pump && pump()) {quit_requested.store(true);break;}
+        std::unique_lock<std::mutex> lock(review_mutex);
+        review_changed.wait_for(lock,std::chrono::milliseconds(5),[]{return !review_requested.load() || quit_requested.load();});
+    }
+    if(!quit_requested.load() && audio(0)<0)return -1;
+    review_paused.store(false);
+    return quit_requested.load()?1:0;
+}
 extern "C" void pilot_debug_bind_guest(PilotDebugRead read) {
     std::lock_guard<std::mutex> lock(state_mutex);guest_read=read;
 }

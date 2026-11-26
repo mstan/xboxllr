@@ -10,6 +10,12 @@ int pilot_debug_start(const char *port);
 int pilot_debug_active(void);
 /* Owner-thread shutdown through the normal present/recording close path. */
 int pilot_debug_quit_requested(void);
+/* Review-only presentation pause is separate from coherent guest inspection.
+ * The presentation owner keeps pumping events; audio supplies its real engine
+ * barrier. No execution snapshot or serialization is implied. */
+typedef int32_t (*PilotDebugReviewAudio)(int paused);
+void pilot_debug_review_audio(PilotDebugReviewAudio);
+int pilot_debug_review_present(int (*pump)(void));
 /* Optional live, read-only observations. The runtime validates guest pages;
  * these are not atomic execution snapshots and never expose host addresses. */
 typedef int (*PilotDebugReadMemory)(uint32_t address,void *data,uint32_t bytes);

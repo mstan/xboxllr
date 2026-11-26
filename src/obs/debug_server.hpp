@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <deque>
 #include <thread>
 #include <atomic>
 struct DiagServer;
@@ -46,6 +47,8 @@ private:
     std::thread thread_;
     std::atomic<bool> running_{false};
     DiagServer* server_ = nullptr;
+    std::deque<std::string> responses_;
+    size_t response_offset_ = 0, response_bytes_ = 0;
     uint16_t port_ = 0;
     std::string last_error_;
 };

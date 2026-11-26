@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -33,6 +34,15 @@ struct HighDescriptors {
     ~HighDescriptors() {for(int fd:held)close(fd);}
 };
 #endif
+static std::vector<unsigned char> *review_pixels;
+static std::atomic<bool> *review_running;
+static int32_t review_audio(int paused){(void)paused;return 0;}
+static int review_pump(){
+    if(!review_running->load())return 1;
+    auto request=pilot_debug_capture_requested();
+    if(request)pilot_debug_capture_complete(request,review_pixels->data(),640,480,0);
+    return 0;
+}
 int main(int argc,char **argv) {
     if((argc!=2 && argc!=3) || pilot_debug_active() || pilot_debug_capture_requested())return 1;
     bool high_server=argc==3 && std::strcmp(argv[2],"--high-server-fd")==0;
@@ -60,7 +70,9 @@ int main(int argc,char **argv) {
         for(unsigned y=0;y<480;++y)for(unsigned x=0;x<640;++x) {
             auto p=&image[(y*640+x)*4];p[0]=x&255;p[1]=y&255;p[2]=0x65;p[3]=255;
         }
+        review_pixels=&image;review_running=&running;pilot_debug_review_audio(review_audio);
         while(running.load()) {
+            if(pilot_debug_review_present(review_pump)<0)std::abort();
             PilotDebugGuest guest{};guest.pc=0x11000;guest.register_mask=255;
             guest.registers[0]=42;guest.registers[4]=0x20000;guest.coherent=coherent;
             guest.xbe_sha256="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
