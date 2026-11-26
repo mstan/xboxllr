@@ -22,6 +22,9 @@ static HWND make_window(void)
 int main(int argc,char **argv)
 {
     CHECK(argc==2);WCHAR path[4096];CHECK(MultiByteToWideChar(CP_UTF8,0,argv[1],-1,path,4096));
+    /* Windows narrow argv uses the active code page. Construct the Unicode
+     * suffix after conversion so this tests the real UTF-16 window path. */
+    CHECK(wcslen(path)+3<4096);wcscat(path,L".\u96ea");
     CHECK(SetEnvironmentVariableW(L"XLLE_PILOT_WINDOW_STATE",path));
     CHECK(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES);
     HWND window=make_window();CHECK(window && !IsWindowVisible(window));
