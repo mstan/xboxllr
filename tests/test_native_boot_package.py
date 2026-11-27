@@ -142,8 +142,8 @@ class StartupPackageTests(unittest.TestCase):
                 for module in ('__init__.py', 'xdvdfs.py'):
                     self.assertEqual((output/'tools/recomp_image'/module).read_bytes(),
                         (package.ROOT/'external/shared-cores/recomp-image-core/python/recomp_image'/module).read_bytes())
-                self.assertTrue((output/'notices/recomp-image-core/MIT.txt').is_file())
-                subprocess.run([sys.executable, '-I', '-c',
+                self.assertTrue((output/'notices/recomp-image-core/LICENSES/MATTHEW-STANLEY-MIT.txt').is_file())
+                subprocess.run([sys.executable, '-I', '-B', '-c',
                     'import sys;sys.path.insert(0,sys.argv[1]);import native_disc;assert native_disc.Volume.__module__=="recomp_image.xdvdfs"',
                     str(output/'tools')], check=True)
                 self.assertFalse(any(p.suffix in ('.pak', '.bin', '.img') for p in output.rglob('*')))

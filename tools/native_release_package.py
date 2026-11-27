@@ -224,7 +224,8 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     image_notices.mkdir()
     for name in ('PROVENANCE.md', 'LICENSE-SCOPE.md'):
         shutil.copy2(image_core / name, image_notices / name)
-    shutil.copy2(image_core / 'LICENSES/MATTHEW-STANLEY-MIT.txt', image_notices / 'MIT.txt')
+    (image_notices / 'LICENSES').mkdir()
+    shutil.copy2(image_core / 'LICENSES/MATTHEW-STANLEY-MIT.txt', image_notices / 'LICENSES/MATTHEW-STANLEY-MIT.txt')
     for name in ('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md', 'RIGHTS-NOTICE.md', 'CREDITS.md', 'THIRD_PARTY_ATTRIBUTION.md'):
         shutil.copy2(ROOT / name, notices / name)
     if (ROOT / 'LICENSES').is_dir():
