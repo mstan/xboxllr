@@ -23,7 +23,7 @@ PRIVATE_ROOTS = {'machine', 'private', 'secrets', 'dumps', 'captures', 'play'}
 # staged/history URL must match; this never admits arbitrary nested content.
 REVIEWED_SUBMODULES = {
     'external/shared-cores/recomp-image-core': (
-        '27c5834d67b333b65a4bed9d244fde22fa21add8',
+        '43ffef557478a3acc402c2f8a9cc76dbda03dbcd',
         'https://github.com/mstan/recomp-image-core.git'),
     'external/shared-cores/recomp-diagnostics-core': (
         'c5c40bad0a0fa37ad876c21f0324eafd8cc1dd5f',
