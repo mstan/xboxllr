@@ -82,16 +82,21 @@ int main(int argc, char **argv) {
     xboxllr_has_expected_title_id=argc>2;
     xboxllr_xbe_select(argv[1]);const auto &id=xboxllr_xbe_identity;
     std::cout<<id.valid<<"\\n"<<id.title_id<<"\\n"<<id.title_name<<"\\n"<<id.title_label<<"\\n"<<xboxllr_xbe_rejection()<<"\\n";
+    unsigned char *data=nullptr;size_t bytes=0;uint64_t source=0;
+    if(id.valid && xboxllr_read_game_image(argv[1],&data,&bytes,&source)) {
+        std::cout<<bytes<<" "<<source<<"\\n";std::free(data);
+    }
 }''', encoding='utf-8')
             binary = root / ('inspect.exe' if sys.platform == 'win32' else 'inspect')
             source = ROOT / 'pilots/native-launcher'
             subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-I' + str(source),
-                            str(harness), str(source / 'xbe_identity.cpp'), '-o', str(binary)], check=True, timeout=90)
+                            '-I' + str(ROOT / 'external/shared-cores/recomp-image-core/include'),
+                            str(harness), str(source / 'xbe_identity.cpp'), '-o', str(binary)], check=True)
             path = root / 'fixture.xbe'
             for i, data in enumerate(sum(cases(), [])):
                 with self.subTest(case=i):
                     path.write_bytes(data)
-                    lines = subprocess.check_output([str(binary), str(path), '4d530004'], encoding='utf-8', timeout=10).splitlines()
+                    lines = subprocess.check_output([str(binary), str(path), '4d530004'], encoding='utf-8').splitlines()
                     try:
                         expected = parse_identity(data)
                     except ValueError:
@@ -107,10 +112,11 @@ int main(int argc, char **argv) {
                 if base==0x18300000:
                     with path.open('r+b') as file:
                         sparse(file);file.truncate(5*1024**3)
-                lines=subprocess.check_output([str(binary),str(path),'4d530004'],encoding='utf-8',timeout=10).splitlines()
+                lines=subprocess.check_output([str(binary),str(path),'4d530004'],encoding='utf-8').splitlines()
                 self.assertEqual(lines[:3],['1',str(0x4d530004),'Disc title'])
+                self.assertEqual(list(map(int, lines[5].split())), [len(fixture('Disc title')),path.stat().st_size])
             make_disc(path,mutate=lambda f,b:(f.seek(b+40*2048+2),f.write(b'\x01\x00')))
-            self.assertEqual(subprocess.check_output([str(binary),str(path)],encoding='utf-8',timeout=10).splitlines()[0],'0')
+            self.assertEqual(subprocess.check_output([str(binary),str(path)],encoding='utf-8').splitlines()[0],'0')
 
 
 if __name__ == '__main__':

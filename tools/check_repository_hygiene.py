@@ -22,6 +22,9 @@ PRIVATE_ROOTS = {'machine', 'private', 'secrets', 'dumps', 'captures', 'play'}
 # Separately reviewed reusable source dependencies. Both the exact commit and
 # staged/history URL must match; this never admits arbitrary nested content.
 REVIEWED_SUBMODULES = {
+    'external/shared-cores/recomp-image-core': (
+        '43ffef557478a3acc402c2f8a9cc76dbda03dbcd',
+        'https://github.com/mstan/recomp-image-core.git'),
     'external/shared-cores/recomp-diagnostics-core': (
         'c5c40bad0a0fa37ad876c21f0324eafd8cc1dd5f',
         'https://github.com/mstan/recomp-diagnostics-core-candidate-20261124.git'),
