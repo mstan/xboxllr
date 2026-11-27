@@ -4,3 +4,6 @@
 [submodule "external/shared-cores/recomp-persistence-core"]
 	path = external/shared-cores/recomp-persistence-core
 	url = https://github.com/mstan/recomp-persistence-core-candidate-20261124.git
+[submodule "external/shared-cores/recomp-image-core"]
+	path = external/shared-cores/recomp-image-core
+	url = https://github.com/mstan/recomp-image-core.git

@@ -213,8 +213,18 @@ def stage(definition, runtime, launcher, cache, embed, runtime_dirs, output, *, 
     tools.mkdir()
     for module in MODULES:
         shutil.copy2(ROOT / 'tools' / (module + '.py'), tools)
+    image_core = ROOT / 'external/shared-cores/recomp-image-core'
+    image_package = tools / 'recomp_image'
+    image_package.mkdir()
+    for name in ('__init__.py', 'xdvdfs.py'):
+        shutil.copy2(image_core / 'python/recomp_image' / name, image_package / name)
     notices = output / 'notices'
     notices.mkdir()
+    image_notices = notices / 'recomp-image-core'
+    image_notices.mkdir()
+    for name in ('PROVENANCE.md', 'LICENSE-SCOPE.md'):
+        shutil.copy2(image_core / name, image_notices / name)
+    shutil.copy2(image_core / 'LICENSES/MATTHEW-STANLEY-MIT.txt', image_notices / 'MIT.txt')
     for name in ('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md', 'RIGHTS-NOTICE.md', 'CREDITS.md', 'THIRD_PARTY_ATTRIBUTION.md'):
         shutil.copy2(ROOT / name, notices / name)
     if (ROOT / 'LICENSES').is_dir():
