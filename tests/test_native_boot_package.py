@@ -139,9 +139,9 @@ class StartupPackageTests(unittest.TestCase):
                     self.assertEqual((output/'source/native-startup'/source).read_bytes(),
                                      (package.ROOT/source).read_bytes())
                 self.assertTrue((output/'tools/native_boot_launcher.py').is_file())
-                for module in ('__init__.py', 'xdvdfs.py'):
-                    self.assertEqual((output/'tools/recomp_image'/module).read_bytes(),
-                        (package.ROOT/'external/shared-cores/recomp-image-core/python/recomp_image'/module).read_bytes())
+                for provider_file in ('__init__.py', 'xdvdfs.py'):
+                    self.assertEqual((output/'tools/recomp_image'/provider_file).read_bytes(),
+                        (package.ROOT/'external/shared-cores/recomp-image-core/python/recomp_image'/provider_file).read_bytes())
                 self.assertTrue((output/'notices/recomp-image-core/LICENSES/MATTHEW-STANLEY-MIT.txt').is_file())
                 subprocess.run([sys.executable, '-I', '-B', '-c',
                     'import sys;sys.path.insert(0,sys.argv[1]);import native_disc;assert native_disc.Volume.__module__=="recomp_image.xdvdfs"',
