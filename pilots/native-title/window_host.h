@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <wchar.h>
 #include <string.h>
+#include "recomp_persistence/atomic_file.h"
 struct PilotWindowHost {
     HWND window;
     WINDOWPLACEMENT placement;
@@ -28,21 +29,14 @@ static void pilot_window_host_save(struct PilotWindowHost *host)
 {
     if(!host->path[0] || host->changing)return;
     pilot_window_host_capture(host);
-    WCHAR temporary[4160];
-    if(swprintf(temporary,4160,L"%ls.%lu.tmp",host->path,GetCurrentProcessId())<0)return;
     const RECT *r=&host->placement.rcNormalPosition;
     char text[256];int count=snprintf(text,sizeof(text),"xboxllr-window 1\n%ld %ld %ld %ld %d %d\n",
         r->left,r->top,r->right,r->bottom,host->maximized,host->borderless);
     if(count<0 || count>=(int)sizeof(text))return;
-    HANDLE file=CreateFileW(temporary,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
-    if(file==INVALID_HANDLE_VALUE)return;
-    DWORD written=0;BOOL ok=WriteFile(file,text,(DWORD)count,&written,NULL);
-    if(ok)ok=written==(DWORD)count && FlushFileBuffers(file);
-    CloseHandle(file);
-    if(!ok || !MoveFileExW(temporary,host->path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) {
-        DeleteFileW(temporary);
-        fprintf(stderr,"[WINDOW] Could not save presentation settings (%lu)\n",GetLastError());
-    }
+    char path[sizeof(host->path)*2];
+    if(!WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,host->path,-1,path,sizeof(path),NULL,NULL) ||
+       !recomp_atomic_file_store(path,text,(size_t)count))
+        fputs("[WINDOW] Could not save presentation settings\n",stderr);
 }
 static int pilot_window_host_borderless(struct PilotWindowHost *host,int enabled)
 {

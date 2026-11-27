@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(xboxllr CXX C)
+include(cmake/SharedHostCores.cmake)
 
 # The same repository builds native title applications and the full-machine
 # correctness reference. Native titles do not configure the emulated CPU floor.
@@ -131,6 +132,7 @@ include(cmake/ApuRate.cmake)
 
 # --- observability (rings + jsonl are header-only; debug server is the .cpp) ---
 add_library(xlle_obs STATIC src/obs/debug_server.cpp)
+target_link_libraries(xlle_obs PRIVATE xboxllr_shared_diagnostics)
 target_include_directories(xlle_obs PUBLIC ${XLLE_INCLUDES})
 if(WIN32)
   target_link_libraries(xlle_obs PUBLIC ws2_32)

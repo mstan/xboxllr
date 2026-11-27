@@ -29,6 +29,7 @@
 #endif
 #include "audio_backend.h"
 #include "cost_ring.h"
+#include "native_debug.h"
 #include "audio_dsp.h"
 #include "audio_capture_windows.hpp"
 #include "session_replay.h"
@@ -459,6 +460,13 @@ static DWORD WINAPI feed(void*)
     }
     return 0;
 }
+static int32_t review_audio_barrier(int paused)
+{
+    Guard guard;
+    if(!engine)return E_FAIL;
+    if(paused){stop_engine();return S_OK;}
+    return start_engine();
+}
 int32_t pilot_audio_open(void)
 {
     if(engine)return S_OK;
@@ -487,12 +495,13 @@ int32_t pilot_audio_open(void)
     if(SUCCEEDED(hr)){wake=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!wake)hr=HRESULT_FROM_WIN32(GetLastError());}
     if(SUCCEEDED(hr)){exiting=false;feeder=CreateThread(nullptr,0,feed,nullptr,0,nullptr);if(!feeder)hr=HRESULT_FROM_WIN32(GetLastError());}
     if(FAILED(hr))pilot_audio_close();
-    else diagnostic_capture_start();
+    else {diagnostic_capture_start();pilot_debug_review_audio(review_audio_barrier);}
     return hr;
 }
 void pilot_audio_close(void)
 {
     SessionHostWait wait;
+    pilot_debug_review_audio(nullptr);
     diagnostic_capture_close();
     exiting=true;if(wake)SetEvent(wake);
     if(feeder){WaitForSingleObject(feeder,INFINITE);CloseHandle(feeder);feeder=nullptr;}

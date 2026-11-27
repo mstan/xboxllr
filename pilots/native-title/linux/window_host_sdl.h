@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "recomp_persistence/atomic_file.h"
 struct PilotWindowHost {HWND window;char path[PATH_MAX];int borderless,changing,shown;SDL_Rect normal;};
 static void pilot_window_host_save(struct PilotWindowHost *host)
 {
@@ -13,11 +14,11 @@ static void pilot_window_host_save(struct PilotWindowHost *host)
     if(!host->borderless && !(SDL_GetWindowFlags(window)&(SDL_WINDOW_MINIMIZED|SDL_WINDOW_MAXIMIZED))) {
         SDL_GetWindowPosition(window,&host->normal.x,&host->normal.y);SDL_GetWindowSize(window,&host->normal.w,&host->normal.h);
     }
-    char temporary[PATH_MAX+64];snprintf(temporary,sizeof(temporary),"%s.%ld.tmp",host->path,(long)getpid());
-    FILE *file=fopen(temporary,"wx");if(!file)return;
-    int failed=fprintf(file,"xboxllr-window-sdl 1\n%d %d %d %d %d\n",host->normal.x,host->normal.y,host->normal.w,host->normal.h,host->borderless)<0;
-    if(fflush(file) || fsync(fileno(file)))failed=1;if(fclose(file))failed=1;
-    if(failed || rename(temporary,host->path))unlink(temporary);
+    char text[256];
+    int count=snprintf(text,sizeof(text),"xboxllr-window-sdl 1\n%d %d %d %d %d\n",host->normal.x,host->normal.y,host->normal.w,host->normal.h,host->borderless);
+    if(count<0 || (size_t)count>=sizeof(text) ||
+       !recomp_atomic_file_store(host->path,text,(size_t)count))
+        fputs("[WINDOW] Could not save presentation settings\n",stderr);
 }
 static void pilot_window_host_init(struct PilotWindowHost *host,HWND window)
 {

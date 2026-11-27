@@ -14,6 +14,23 @@ spec.loader.exec_module(hygiene)
 
 
 class HygieneTests(unittest.TestCase):
+    def test_source_submodule_requires_exact_reviewed_pin_and_staged_url(self):
+        path, (oid, url) = next(iter(hygiene.REVIEWED_SUBMODULES.items()))
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            hygiene.git(root, 'init', '-q')
+            modules = root / '.gitmodules'
+            modules.write_text(f'[submodule "{path}"]\n\tpath = {path}\n\turl = {url}\n')
+            hygiene.git(root, 'add', '.gitmodules')
+            hygiene.git(root, 'update-index', '--add', '--cacheinfo', f'160000,{oid},{path}')
+            self.assertEqual(hygiene.scan(root), 0)
+            hygiene.git(root, 'update-index', '--cacheinfo', f'160000,{"1"*40},{path}')
+            self.assertEqual(hygiene.scan(root), 1)
+            hygiene.git(root, 'update-index', '--cacheinfo', f'160000,{oid},{path}')
+            modules.write_text(f'[submodule "{path}"]\n\tpath = {path}\n\turl = https://example.invalid/other.git\n')
+            hygiene.git(root, 'add', '.gitmodules')
+            self.assertEqual(hygiene.scan(root), 1)
+
     def test_private_paths_and_source_exceptions(self):
         for name in ['xbox-hdd-stockdash.img', 'renamed.rom', 'backup/eeprom.json',
                      'private/data.txt', 'a/.env.local', 'a/hardware.json', 'disk.vhdx',

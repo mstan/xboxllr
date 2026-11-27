@@ -22,11 +22,24 @@ static HWND make_window(void)
 int main(int argc,char **argv)
 {
     CHECK(argc==2);WCHAR path[4096];CHECK(MultiByteToWideChar(CP_UTF8,0,argv[1],-1,path,4096));
+    /* Windows narrow argv uses the active code page. Construct the Unicode
+     * suffix after conversion so this tests the real UTF-16 window path. */
+    CHECK(wcslen(path)+3<4096);wcscat(path,L".\u96ea");
     CHECK(SetEnvironmentVariableW(L"XLLE_PILOT_WINDOW_STATE",path));
     CHECK(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES);
     HWND window=make_window();CHECK(window && !IsWindowVisible(window));
     WINDOWPLACEMENT before={0};before.length=sizeof(before);CHECK(GetWindowPlacement(window,&before));
     SendMessageW(window,WM_EXITSIZEMOVE,0,0);CHECK(GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES);
+    /* Publication failure must preserve the previous native settings bytes. */
+    char saved[256],retained[256];
+    FILE *saved_file=_wfopen(path,L"rb");CHECK(saved_file);
+    size_t saved_size=fread(saved,1,sizeof(saved),saved_file);CHECK(!ferror(saved_file));fclose(saved_file);
+    HANDLE locked=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+    CHECK(locked!=INVALID_HANDLE_VALUE);
+    host.maximized=1;pilot_window_host_save(&host);host.maximized=0;
+    saved_file=_wfopen(path,L"rb");CHECK(saved_file);
+    size_t retained_size=fread(retained,1,sizeof(retained),saved_file);CHECK(!ferror(saved_file));fclose(saved_file);
+    CHECK(saved_size==retained_size && !memcmp(saved,retained,saved_size));CloseHandle(locked);
     DEVMODEW desktop={0};desktop.dmSize=sizeof(desktop);CHECK(EnumDisplaySettingsW(NULL,ENUM_CURRENT_SETTINGS,&desktop));
     SendMessageW(window,WM_SYSKEYDOWN,VK_RETURN,(LPARAM)1<<29);CHECK(host.borderless);
     CHECK(!(GetWindowLongPtrW(window,GWL_STYLE)&WS_CAPTION));CHECK(!IsWindowVisible(window));

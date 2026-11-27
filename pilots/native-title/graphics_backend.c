@@ -792,6 +792,23 @@ int32_t pilot_gfx_transform(unsigned state,const float matrix[16])
     if(!pilot_device || state>=10 || !matrix)return E_INVALIDARG;
     return pilot_device->lpVtbl->SetTransform(pilot_device,states[state],(const D3DMATRIX*)matrix);
 }
+static int pilot_review_pump(void)
+{
+#ifdef PILOT_DXVK_NATIVE
+    int quit=pilot_window_host_pump(&pilot_window_host);
+#else
+    MSG message;int quit=0;
+    while(PeekMessageW(&message,NULL,0,0,PM_REMOVE)) {
+        if(message.message==WM_QUIT){quit=1;break;}
+        TranslateMessage(&message);DispatchMessageW(&message);
+    }
+#endif
+#ifdef PILOT_D3D_PHOBOS
+    /* Read the existing displayed image without issuing another guest frame. */
+    pilot_visual_real_present=1;pilot_debug_capture_presented();pilot_visual_real_present=0;
+#endif
+    return quit;
+}
 int32_t pilot_gfx_present(void)
 {
     /* This HWND belongs to the rendering thread, not SDL's input/bootstrap
@@ -805,8 +822,9 @@ int32_t pilot_gfx_present(void)
         TranslateMessage(&message);DispatchMessageW(&message);
     }
 #endif
+    if(pilot_debug_quit_requested())quit=1;
     pilot_session_value(PILOT_SESSION_WINDOW,1,&quit,sizeof(quit));
-    if(quit){pilot_session_report_stop("window closed",0);ExitProcess(0);}
+    if(quit){pilot_window_host_save(&pilot_window_host);pilot_session_report_stop("window closed",0);ExitProcess(0);}
     pilot_gfx_batch_flush();
     pilot_strip_batch_profile();
     pilot_native_epoch_flush_reason(COST_EPOCH_PRESENT);
@@ -882,6 +900,9 @@ int32_t pilot_gfx_present(void)
         CloseHandle(pilot_boot_present_event);pilot_boot_present_event=NULL;
     }
     if(SUCCEEDED(result))pilot_debug_frame();
+    int review=pilot_debug_review_present(pilot_review_pump);
+    if(review<0)pilot_d3d_backend_stop("native review audio barrier failed");
+    if(review>0){pilot_window_host_save(&pilot_window_host);pilot_session_report_stop("window closed",0);ExitProcess(0);}
 #ifndef PILOT_D3D_PHOBOS
     uint64_t request=pilot_debug_capture_requested();
     if(request)pilot_debug_capture_complete(request,NULL,0,0,E_NOTIMPL);

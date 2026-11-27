@@ -1,180 +1,68 @@
-// xlle — TCP debug server implementation. Windows (Winsock) + POSIX.
+// Xbox protocol and mailbox ownership over the shared nonblocking transport.
 #include "obs/debug_server.hpp"
-
+#include "diagnostics_server.h"
 #include <sstream>
-#include <vector>
 #include <chrono>
 #include <algorithm>
 
-#if defined(_WIN32)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-using socket_t = SOCKET;
-static const socket_t kInvalid = INVALID_SOCKET;
-static int close_sock(socket_t s) { return closesocket(s); }
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <cerrno>
-using socket_t = int;
-static const socket_t kInvalid = -1;
-static int close_sock(socket_t s) { return ::close(s); }
-#endif
-
 namespace xlle {
-
 namespace {
-#if defined(_WIN32)
-struct WsaInit {
-    WsaInit() {
-        WSADATA d;
-        WSAStartup(MAKEWORD(2, 2), &d);
-    }
-    ~WsaInit() { WSACleanup(); }
-};
-WsaInit g_wsa;  // process-lifetime Winsock init
-#endif
-
 std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n");
     size_t b = s.find_last_not_of(" \t\r\n");
     if (a == std::string::npos) return "";
     return s.substr(a, b - a + 1);
 }
-bool socket_ready(socket_t fd, bool writing, long milliseconds) {
-#if defined(_WIN32)
-    fd_set set; FD_ZERO(&set); FD_SET(fd, &set);
-    timeval timeout{milliseconds / 1000, (milliseconds % 1000) * 1000};
-    return ::select(static_cast<int>(fd) + 1, writing ? nullptr : &set,
-                    writing ? &set : nullptr, nullptr, &timeout) > 0;
-#else
-    // Native title preloads may keep more than FD_SETSIZE files open. POSIX
-    // fd_set indexes by descriptor value; poll has no such 1024-fd ceiling.
-    pollfd event{fd, static_cast<short>(writing ? POLLOUT : POLLIN), 0};
-    return ::poll(&event, 1, static_cast<int>(milliseconds)) > 0 &&
-        (event.revents & (event.events | POLLERR | POLLHUP | POLLNVAL));
-#endif
 }
-bool nonblocking(socket_t fd) {
-#if defined(_WIN32)
-    u_long value = 1; return ioctlsocket(fd, FIONBIO, &value) == 0;
-#else
-    int flags = fcntl(fd, F_GETFL, 0);
-    return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-#endif
-}
-bool would_block() {
-#if defined(_WIN32)
-    return WSAGetLastError() == WSAEWOULDBLOCK;
-#else
-    return errno == EWOULDBLOCK || errno == EAGAIN;
-#endif
-}
-bool send_bounded(socket_t fd, const std::string& response, const std::atomic<bool>& running) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    size_t offset = 0;
-    while (offset < response.size() && running.load()) {
-        if (std::chrono::steady_clock::now() >= deadline) return false;
-        if (!socket_ready(fd, true, 100)) continue;
-        // A bounded chunk avoids a single large blocking send on slow clients.
-        const auto chunk = static_cast<int>(std::min<size_t>(response.size() - offset, 16384));
-#if defined(MSG_NOSIGNAL)
-        int sent = ::send(fd, response.data() + offset, chunk, MSG_NOSIGNAL);
-#else
-        int sent = ::send(fd, response.data() + offset, chunk, 0);
-#endif
-        if (sent < 0 && would_block()) continue;
-        if (sent <= 0) return false;
-        offset += static_cast<size_t>(sent);
-    }
-    return offset == response.size();
-}
-}  // namespace
-
 DebugServer::~DebugServer() { stop(); }
-
 bool DebugServer::start(uint16_t port) {
-    socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == kInvalid) {
-        last_error_ = "socket() failed";
-        return false;
+    if(running_.load()) { last_error_="server already running"; return false; }
+    server_=diag_server_create(port);
+    if(!server_) { last_error_="Could not bind debug loopback port "+std::to_string(port); return false; }
+    if(!diag_server_protocol(server_,4096,64u*1024u*1024u,nullptr,nullptr) ||
+       !diag_server_raw_handler(server_,[](void* user,DiagServer* server,const char* line) {
+           auto* self=static_cast<DebugServer*>(user);
+           auto reply=self->handle(trim(line));
+           constexpr size_t limit=96u*1024u*1024u;
+           if(reply.size()>limit-self->response_bytes_) {diag_server_disconnect(server);return;}
+           if(!reply.empty()) {
+               self->response_bytes_+=reply.size();
+               self->responses_.push_back(std::move(reply));
+           }
+       },this)) {
+        diag_server_destroy(server_);server_=nullptr;last_error_="Could not configure debug transport";return false;
     }
-    int yes = 1;
-#if defined(_WIN32)
-    // Windows SO_REUSEADDR permits another listener to steal this endpoint.
-    // Each title must either own its selected port or report bind failure.
-    setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&yes), sizeof(yes));
-#else
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
-#endif
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // loopback only; this is a debug port
-    addr.sin_port = htons(port);
-    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        last_error_ = "bind() failed on port " + std::to_string(port);
-        close_sock(fd);
-        return false;
-    }
-    if (::listen(fd, 4) != 0 || !nonblocking(fd)) {
-        last_error_ = "listen() failed";
-        close_sock(fd);
-        return false;
-    }
-    listen_fd_ = static_cast<long long>(fd);
-    port_ = port;
+    port_=diag_server_port(server_);
     running_.store(true);
-    thread_ = std::thread(&DebugServer::accept_loop, this);
+    try { thread_=std::thread(&DebugServer::accept_loop,this); }
+    catch(...) { running_.store(false);diag_server_destroy(server_);server_=nullptr;throw; }
     return true;
 }
-
 void DebugServer::stop() {
-    if (!running_.exchange(false)) return;
-    // Both accept and client receives have bounded readiness waits. Join before
-    // closing the listener so no worker can race a recycled socket handle.
-    if (thread_.joinable()) thread_.join();
-    if (listen_fd_ >= 0) {
-        close_sock(static_cast<socket_t>(listen_fd_));
-        listen_fd_ = -1;
-    }
+    if(!running_.exchange(false))return;
+    if(thread_.joinable())thread_.join();
+    diag_server_destroy(server_);server_=nullptr;
+    responses_.clear();response_offset_=response_bytes_=0;
 }
-
 void DebugServer::accept_loop() {
-    while (running_.load()) {
-        if (!socket_ready(static_cast<socket_t>(listen_fd_), false, 100)) continue;
-        socket_t client = ::accept(static_cast<socket_t>(listen_fd_), nullptr, nullptr);
-        if (client == kInvalid) {
-            if (!running_.load()) break;
-            continue;
-        }
-        if (!nonblocking(client)) { close_sock(client); continue; }
-        // One request line at a time; keep the client open for a session.
-        std::string buf;
-        char chunk[1024];
-        while (running_.load()) {
-            if (!socket_ready(client, false, 100)) continue;
-            int n = ::recv(client, chunk, sizeof(chunk), 0);
-            if (n < 0 && would_block()) continue;
-            if (n <= 0) break;
-            buf.append(chunk, n);
-            if (buf.size() > 4096) break;
-            size_t nl;
-            while ((nl = buf.find('\n')) != std::string::npos) {
-                std::string line = buf.substr(0, nl);
-                buf.erase(0, nl + 1);
-                std::string resp = handle(trim(line));
-                if (!resp.empty() && !send_bounded(client, resp, running_)) {
-                    close_sock(client); client = kInvalid; break;
+    // Existing callbacks still execute on this transport thread and use the
+    // established native mailboxes. No guest or renderer ownership changes.
+    while(running_.load()) {
+        diag_server_poll(server_);
+        if(!diag_server_connected(server_)) {
+            responses_.clear();response_offset_=response_bytes_=0;
+        } else if(!diag_server_pending_output(server_) && !responses_.empty()) {
+            auto& reply=responses_.front();
+            const size_t bytes=std::min<size_t>(256u*1024u,reply.size()-response_offset_);
+            if(!diag_server_write(server_,reply.data()+response_offset_,bytes))diag_server_disconnect(server_);
+            else {
+                response_offset_+=bytes;
+                if(response_offset_==reply.size()) {
+                    response_bytes_-=reply.size();responses_.pop_front();response_offset_=0;
                 }
             }
-            if (client == kInvalid) break;
         }
-        if (client != kInvalid) close_sock(client);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 

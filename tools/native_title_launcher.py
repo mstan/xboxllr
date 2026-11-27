@@ -74,7 +74,8 @@ def select(source, data, paths, build, run, *, force=False):
     if not binary(build).is_file():
         raise ValueError('Build the native launcher before requesting it')
     root = Path(source).parent
-    catalog = Catalog(manifests(source, data), paths.get('mod_selection', root / 'local/mod-selection.json'),
+    from native_session_mods import manifests as session_manifests
+    catalog = Catalog([*manifests(source, data), *session_manifests(data)], paths.get('mod_selection', root / 'local/mod-selection.json'),
                       visibility=[ROOT / 'mods/ui-visibility.json', root / 'mods/ui-visibility.json'],
                       frame_modes=data.get('launcher', {}).get('frame_modes', []),
                       defaults=data.get('launcher', {}).get('defaults', {}))
@@ -87,6 +88,9 @@ def select(source, data, paths, build, run, *, force=False):
         return None
     player = catalog.player
     environment = dict(RECOMP_VOLUME=str(catalog.volume))
+    from native_session_mods import enabled as session_enabled
+    if session_enabled(catalog):
+        environment['XLLE_PILOT_DIAGNOSTIC_RECORD'] = str(Path(run) / 'inputs.bin')
     from native_input_mods import environment as input_mod_environment
     environment.update(input_mod_environment(catalog))
     from native_title_switches import environment as title_mod_environment
