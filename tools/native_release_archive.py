@@ -64,6 +64,9 @@ def compose(files, output, *, title, distribution, provenance):
                 target_file = stack.enter_context(target.open('xb'))
                 shutil.copyfileobj(source, target_file)
             hashes[name] = sha(target)
+            expected = provenance.get('files', {}).get(name)
+            if expected is not None and hashes[name] != expected:
+                raise ValueError('Composition input changed: ' + name)
         native = [inside(root, name) for name in files
                   if PurePosixPath(name).suffix.lower() in ('.exe', '.dll')]
         if not native:

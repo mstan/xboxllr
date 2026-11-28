@@ -66,3 +66,9 @@ class CompositionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.build()
         self.assertEqual(self.output.read_bytes(), b'keep existing owner archive')
+
+    def test_admitted_source_hash_cannot_bless_changed_payload(self):
+        with self.assertRaisesRegex(ValueError, 'input changed'):
+            compose(self.files, self.output, title={'name': 'Authored fixture'},
+                distribution='private-owner-preview', provenance={'files': {'Player.exe': '0'*64}})
+        self.assertFalse(self.output.exists())
