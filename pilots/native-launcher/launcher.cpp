@@ -413,6 +413,7 @@ int main(int argc,char **argv) {
         mods.feature_count=feature_count;mods.feature_get=feature_get;mods.feature_option_get=option_get;mods.feature_choice_get=choice_get;
         mods.feature_enable=feature_enable;mods.feature_set_option=set_option;mods.commit=commit;mods.last_error=last_error;
         RecompLauncherCGameInfo game={};launcher_profile_apply("xbox",&game);game.name=c.title.c_str();game.region=c.region.c_str();game.mods=&mods;
+        game.rom_noun="game image";
         game.num_players=1;game.lock_device=0;game.hide_rebind=1;game.host_persists_paths=1;
         if(c.console)game.rom_noun="game files";
         if(c.setup&&!c.console) {
@@ -422,7 +423,7 @@ int main(int argc,char **argv) {
             static const char *patterns[]={"*.bin"};
             game.bios_patterns=patterns;game.num_bios_patterns=1;
             game.bios_filter_desc="Your Xbox kernel dump";
-            game.rom_noun="Xbox executable";
+            game.rom_noun="game image";
         }
         if(std::ifstream("assets/img/boxart.png",std::ios::binary).good())
             game.boxart_path="assets/img/boxart.png";

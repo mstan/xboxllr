@@ -609,7 +609,12 @@ def launch_prepared(data, paths, build, binary, expected, *, automated=False, de
         if selection is None:
             print('Launcher closed; game was not started.', flush=True)
             return
-        paths = dict(paths, xbe=selection['image'])
+        selected_image = selection['image']
+        from native_disc import is_disc, prepare_game
+        if is_disc(selected_image):
+            selected_image = prepare_game(Path(build), data, selected_image)
+            paths = dict(paths, media_root=selected_image.parent)
+        paths = dict(paths, xbe=selected_image)
         check_image(data['title'], paths)
         visual_options, selected_environment = selection['options'], selection['environment']
     mod_plan = None
@@ -751,6 +756,12 @@ def main():
     if args.link_profile:
         data["build"]["PILOT_NATIVE_LINK_PROFILE"] = args.link_profile
     paths = private_paths(args.paths)
+    from native_disc import is_disc, prepare_game
+    if 'xbe' in paths and is_disc(paths['xbe']):
+        from native_disc_progress import Progress
+        paths['xbe'] = prepare_game(args.build_dir, data, paths['xbe'],
+            Progress(data['title']['name'], visible=args.action == 'run' and not args.automated))
+        paths['media_root'] = paths['xbe'].parent
     check_image(data["title"], paths)
     if args.action == 'build-launcher':
         from native_title_launcher import build_launcher

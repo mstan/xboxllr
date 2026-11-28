@@ -11,8 +11,9 @@ from native_disc import ImportCancelled
 
 
 class Progress:
-    def __init__(self, title):
+    def __init__(self, title, *, visible=True):
         self.title = title
+        self.visible = visible
         self.pointer = c.c_void_p()
         self.ole = None
         self.last = 0
@@ -27,7 +28,7 @@ class Progress:
             raise OSError(f'Import progress dialog failed (0x{status & 0xffffffff:08X})')
 
     def __enter__(self):
-        if os.name != 'nt':
+        if not self.visible or os.name != 'nt':
             return self
         self.ole = c.WinDLL('ole32')
         self.ole.CoInitializeEx.argtypes = [c.c_void_p, c.c_uint]

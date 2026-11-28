@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 from pathlib import Path
 import subprocess
@@ -38,7 +39,8 @@ def prepare(source, output, git='git'):
                 path.mkdir(parents=True, exist_ok=True)
             else:
                 if item.filename in ('src/consoles/xbox/xbox_profile.h', 'src/common/backends/imgui/launcher_imgui.cpp',
-                                     'src/common/launcher_platform_sdl2.c', 'src/common/launcher_model.c'):
+                                     'src/common/launcher_platform_sdl2.c', 'src/common/launcher_model.c',
+                                     'src/common/launcher_gl.h', 'src/common/launcher_gl.c'):
                     continue
                 path.parent.mkdir(parents=True, exist_ok=True)
                 data = files.read(item)
@@ -69,14 +71,21 @@ def prepare(source, output, git='git'):
     data = code.encode('utf-8')
     if not profile.exists() or profile.read_bytes() != data:
         profile.write_bytes(data)
+    def write_changed(path, text):
+        data = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', os.linesep).encode('utf-8')
+        if not path.exists() or path.read_bytes() != data:
+            path.write_bytes(data)
+    with zipfile.ZipFile(io.BytesIO(archive)) as files:
+        original_gl_header = files.read('src/common/launcher_gl.h').decode('utf-8')
+        original_gl_source = files.read('src/common/launcher_gl.c').decode('utf-8')
     gl_header = output / 'src/common/launcher_gl.h'
-    gl_header.write_text(gl_header.read_text(encoding='utf-8').replace(
+    write_changed(gl_header, original_gl_header.replace(
         'void launcher_texture_free(LauncherTexture* t);',
         'unsigned char* launcher_image_load_bounded_rgba(const char*,int*,int*);\n'
         'LauncherTexture launcher_texture_rgba(const unsigned char*,int,int);\n'
-        'void launcher_texture_free(LauncherTexture* t);'), encoding='utf-8')
+        'void launcher_texture_free(LauncherTexture* t);'))
     gl_source = output / 'src/common/launcher_gl.c'
-    gl_source.write_text(gl_source.read_text(encoding='utf-8') + r"""
+    write_changed(gl_source, original_gl_source + r"""
 // Authored bounded content-import adapter. Decode before allocating GPU memory.
 #ifdef _WIN32
 #include <windows.h>
@@ -113,7 +122,7 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
     glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
     glBindTexture(GL_TEXTURE_2D,0);t.id=texture;return t;
 }
-""", encoding='utf-8')
+""")
     view = output / 'src/common/backends/imgui/launcher_imgui.cpp'
     with zipfile.ZipFile(io.BytesIO(archive)) as files:
         code = files.read('src/common/backends/imgui/launcher_imgui.cpp').decode('utf-8')
@@ -336,7 +345,7 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
     manifest = dict(version=1, adapter_version=17, revision=REVISION, archive_sha256=hashlib.sha256(archive).hexdigest(),
                     adapter='Xbox native host: mod provider, console storage and shared Player 1 source',
                     controller_photo=dict(url=CONTROLLER_PHOTO_URL, sha256=CONTROLLER_PHOTO_SHA256), files=inventory)
-    (output / 'xboxlle-ui.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    write_changed(output / 'xboxlle-ui.json', json.dumps(manifest, indent=2) + '\n')
     return manifest
 
 

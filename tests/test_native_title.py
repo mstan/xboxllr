@@ -13,6 +13,29 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_picker_iso_uses_shared_import_and_its_media_root(self):
+        import native_title_launcher as launcher
+        import native_disc
+        selected = self.root/'original.iso'
+        selected.write_bytes(b'authored image admission boundary')
+        selection = dict(image=selected, options={}, environment={})
+        child = Mock(pid=123, returncode=0)
+        with patch.object(launcher, 'select', return_value=selection), \
+             patch.object(native_disc, 'prepare_game', return_value=self.xbe) as imported, \
+             patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
+            n.launch(self.data, self.paths, self.output, self.build, source=self.source, launcher=True)
+        imported.assert_called_once_with(self.build, self.data, selected)
+        self.assertEqual(spawn.call_args.args[0][1], str(self.xbe))
+        self.assertEqual(spawn.call_args.args[0][3], str(self.xbe.parent))
+
+    def test_silent_import_progress_creates_no_windows_dialog(self):
+        import native_disc_progress
+        with patch.object(native_disc_progress.c, 'WinDLL', create=True) as windows:
+            with native_disc_progress.Progress('Authored fixture', visible=False) as progress:
+                progress.check()
+                progress.update(1, 1, 'default.xbe')
+        windows.assert_not_called()
+
     def test_explicit_discovery_metadata_is_passed_to_normal_preparation(self):
         symbols=self.root/'pdb.aot-private.json'
         command=n.prepare_command(self.source,self.data,
