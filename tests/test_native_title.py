@@ -1,4 +1,4 @@
-﻿"""Native title driver contracts using authored inputs and mocked subprocesses."""
+"""Native title driver contracts using authored inputs and mocked subprocesses."""
 import json
 import os
 from pathlib import Path
@@ -13,6 +13,29 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_picker_iso_uses_shared_import_and_its_media_root(self):
+        import native_title_launcher as launcher
+        import native_disc
+        selected = self.root/'original.iso'
+        selected.write_bytes(b'authored image admission boundary')
+        selection = dict(image=selected, options={}, environment={})
+        child = Mock(pid=123, returncode=0)
+        with patch.object(launcher, 'select', return_value=selection), \
+             patch.object(native_disc, 'prepare_game', return_value=self.xbe) as imported, \
+             patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
+            n.launch(self.data, self.paths, self.output, self.build, source=self.source, launcher=True)
+        imported.assert_called_once_with(self.build, self.data, selected)
+        self.assertEqual(spawn.call_args.args[0][1], str(self.xbe))
+        self.assertEqual(spawn.call_args.args[0][3], str(self.xbe.parent))
+
+    def test_silent_import_progress_creates_no_windows_dialog(self):
+        import native_disc_progress
+        with patch.object(native_disc_progress.c, 'WinDLL', create=True) as windows:
+            with native_disc_progress.Progress('Authored fixture', visible=False) as progress:
+                progress.check()
+                progress.update(1, 1, 'default.xbe')
+        windows.assert_not_called()
+
     def test_explicit_discovery_metadata_is_passed_to_normal_preparation(self):
         symbols=self.root/'pdb.aot-private.json'
         command=n.prepare_command(self.source,self.data,
@@ -101,7 +124,7 @@ class NativeTitleTests(unittest.TestCase):
     def test_unqualified_mod_and_interactive_automation_fail_before_spawn(self):
         with patch.object(n.subprocess,'Popen') as spawn:
             with self.assertRaisesRegex(ValueError,'owner-facing'):
-                n.launch(self.data,self.paths,self.output,self.build,automated=True,seconds=1,source=self.source,launcher=True)
+                n.launch(self.data,self.paths,self.output,self.build,automated=True,source=self.source,launcher=True)
             with self.assertRaisesRegex(ValueError,'qualified'):
                 n.launch(self.data,self.paths,self.output,self.build,detach=True,source=self.source,
                          visual_options=dict(frame_mode='actual'))
@@ -113,7 +136,7 @@ class NativeTitleTests(unittest.TestCase):
         self.receipt()
         child=Mock(pid=123,returncode=0)
         with patch.dict(os.environ,{'XLLE_PILOT_MOD_PLAN':'untrusted inherited plan'}),patch.object(n.subprocess,'Popen',return_value=child) as spawn:
-            result=n.launch(self.data,self.paths,self.output,self.build,automated=True,seconds=1,source=self.source,
+            result=n.launch(self.data,self.paths,self.output,self.build,automated=True,source=self.source,
                             visual_options=dict(height=1080,antialiasing='fxaa'))
         env=spawn.call_args.kwargs['env']
         plan=Path(env['XLLE_PILOT_MOD_PLAN'])
@@ -410,7 +433,7 @@ XLLE_PILOT_TRACE = "0"
         child = Mock(pid=123, returncode=2)
         arguments = ['native_title.py', 'run', '--title', str(self.source),
                      '--paths', str(pathsfile), '--generated', str(self.output),
-                     '--build-dir', str(self.build), '--automated', '--seconds', '15']
+                     '--build-dir', str(self.build), '--automated']
         with patch.object(sys, 'argv', arguments), patch.object(n.subprocess, 'Popen', return_value=child):
             self.assertEqual(n.main(), 2)
 
@@ -423,7 +446,7 @@ XLLE_PILOT_TRACE = "0"
         pathsfile.write_text(json.dumps({key:str(value) for key,value in self.paths.items()}))
         arguments=['native_title.py','run','--title',str(self.source),'--paths',str(pathsfile),
                    '--generated',str(self.output),'--build-dir',str(self.build),
-                   '--automated','--seconds','1','--supersampling','8','--no-launcher']
+                   '--automated','--supersampling','8','--no-launcher']
         with patch.object(sys,'argv',arguments),patch.object(n.subprocess,'Popen',return_value=Mock(pid=123,returncode=0)) as spawn:
             self.assertEqual(n.main(),0)
         plan=Path(spawn.call_args.kwargs['env']['XLLE_PILOT_MOD_PLAN'])
@@ -634,8 +657,8 @@ XLLE_PILOT_TRACE = "0"
         self.assertEqual(preparation.read_bytes(), old_receipt)
         self.assert_not_configurable_or_launchable()
 
-    def test_deadline_policy_rejects_invalid_and_unowned_runs(self):
-        cases = [dict(seconds=1), dict(automated=True), dict(automated=True, seconds=1, detach=True)]
+    def test_elapsed_cutoffs_and_unowned_automated_runs_are_rejected(self):
+        cases = [dict(seconds=1), dict(automated=True, detach=True)]
         cases += [dict(automated=True, seconds=x) for x in (0, -1, float('nan'), float('inf'))]
         with patch.object(n.subprocess, 'Popen') as spawn:
             for kwargs in cases:
@@ -662,17 +685,16 @@ XLLE_PILOT_TRACE = "0"
             with self.assertRaises(ValueError):
                 n.reject_staging_mutation(staged.parent / 'nested')
 
-    def test_automated_muted_deadline_owned(self):
+    def test_automated_muted_run_waits_for_normal_completion(self):
         child = Mock(pid=123, returncode=0)
-        child.wait.side_effect = [subprocess.TimeoutExpired('fixture', 2), 0]
         with patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
-            n.launch(self.data, self.paths, self.output, self.build, automated=True, seconds=2, source=self.source)
+            n.launch(self.data, self.paths, self.output, self.build, automated=True, source=self.source)
             env = spawn.call_args.kwargs['env']
             self.assertEqual(env['RECOMP_VOLUME'], '0')
             self.assertEqual(env['SDL_AUDIODRIVER'], 'dummy')
             self.assertEqual(env['XLLE_PILOT_VISIBLE'], '0')
-            child.kill.assert_called_once()
-            self.assertEqual(child.wait.call_args_list[0].kwargs, {'timeout': 2})
+            child.kill.assert_not_called()
+            child.wait.assert_called_once_with()
 
     def test_stale_binary_or_evidence_rejected_before_spawn(self):
         with patch.object(n.subprocess, 'Popen') as spawn:
@@ -693,7 +715,7 @@ XLLE_PILOT_TRACE = "0"
         child = Mock(pid=123, returncode=0)
         with patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
             result = n.launch(self.data, self.paths, self.output, self.build, automated=True,
-                              seconds=2, source=self.source, input_replay=source)
+                               source=self.source, input_replay=source)
         env = spawn.call_args.kwargs['env']
         self.assertEqual(env['XLLE_PILOT_INPUT'], 'replay')
         staged = Path(env['XLLE_PILOT_INPUT_REPLAY'])
@@ -713,7 +735,7 @@ XLLE_PILOT_TRACE = "0"
             for replay in (self.root / 'missing.txt', self.root, empty):
                 with self.subTest(replay=replay), self.assertRaisesRegex(ValueError, 'input replay'):
                     n.launch(self.data, self.paths, self.output, self.build, automated=True,
-                             seconds=2, source=self.source, input_replay=replay)
+                              source=self.source, input_replay=replay)
             spawn.assert_not_called()
         self.assertFalse((self.build / 'runs').exists())
 
@@ -721,7 +743,7 @@ XLLE_PILOT_TRACE = "0"
         child = Mock(pid=123, returncode=0)
         with patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
             result = n.launch(self.data, self.paths, self.output, self.build, automated=True,
-                              seconds=2, source=self.source, capture=True)
+                               source=self.source, capture=True)
         env = spawn.call_args.kwargs['env']
         capture = Path(env['XLLE_PILOT_PRESENT_CAPTURE'])
         stage = Path(spawn.call_args.args[0][0]).parent
@@ -735,7 +757,7 @@ XLLE_PILOT_TRACE = "0"
         child = Mock(pid=123, returncode=0)
         with patch.object(n.subprocess, 'Popen', return_value=child) as spawn:
             result = n.launch(self.data, self.paths, self.output, self.build, automated=True,
-                              seconds=2, source=self.source, debug_port=4381)
+                               source=self.source, debug_port=4381)
         env = spawn.call_args.kwargs['env']
         self.assertEqual(env['XLLE_PILOT_DEBUG_PORT'], '4381')
         self.assertEqual(env['XLLE_PILOT_INPUT'], 'tcp')
@@ -746,7 +768,7 @@ XLLE_PILOT_TRACE = "0"
             for port in (0, -1, 65536, '4381', True):
                 with self.subTest(port=port), self.assertRaisesRegex(ValueError, 'debug port'):
                     n.launch(self.data, self.paths, self.output, self.build, automated=True,
-                             seconds=2, source=self.source, debug_port=port)
+                              source=self.source, debug_port=port)
             rejected.assert_not_called()
 
     def test_changed_profile_cannot_be_reblessed_by_configuration(self):
