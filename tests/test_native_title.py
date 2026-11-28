@@ -13,6 +13,19 @@ import native_title as n
 
 
 class NativeTitleTests(unittest.TestCase):
+    def test_launcher_prefills_original_disc_instead_of_import_cache(self):
+        import native_title_launcher as launcher
+        selected = self.root/'original.iso'
+        catalog = Mock(skip_launcher=False)
+        catalog.run.return_value = (1, str(selected))
+        with patch.object(launcher, 'binary', return_value=self.binary), \
+             patch.object(launcher, 'Catalog', return_value=catalog), \
+             patch.object(launcher, 'manifests', return_value=[]):
+            result = launcher.select(self.source, self.data, dict(self.paths, original_image=selected),
+                                     self.build, self.root/'launcher', force=True)
+        self.assertIsNone(result)
+        self.assertEqual(catalog.run.call_args.kwargs['image'], selected)
+
     def test_picker_iso_uses_shared_import_and_its_media_root(self):
         import native_title_launcher as launcher
         import native_disc

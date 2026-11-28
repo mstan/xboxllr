@@ -79,10 +79,11 @@ def select(source, data, paths, build, run, *, force=False):
                       visibility=[ROOT / 'mods/ui-visibility.json', root / 'mods/ui-visibility.json'],
                       frame_modes=data.get('launcher', {}).get('frame_modes', []),
                       defaults=data.get('launcher', {}).get('defaults', {}))
-    result, image = 0, str(paths['xbe'])
+    selected_image = paths.get('original_image', paths['xbe'])
+    result, image = 0, str(selected_image)
     if force or not catalog.skip_launcher:
         result, image = catalog.run(binary(build), run, title=data['title']['name'],
-                                    region=data['title'].get('region', ''), sha=data['title']['xbe_sha256'], image=paths['xbe'],
+                                    region=data['title'].get('region', ''), sha=data['title']['xbe_sha256'], image=selected_image,
                                     game_id=data['title'].get('game_id'))
     if result != 0:
         return None
