@@ -759,6 +759,7 @@ def main():
     from native_disc import is_disc, prepare_game
     if 'xbe' in paths and is_disc(paths['xbe']):
         from native_disc_progress import Progress
+        paths['original_image'] = paths['xbe']
         paths['xbe'] = prepare_game(args.build_dir, data, paths['xbe'],
             Progress(data['title']['name'], visible=args.action == 'run' and not args.automated))
         paths['media_root'] = paths['xbe'].parent
