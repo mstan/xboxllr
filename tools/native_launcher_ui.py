@@ -16,7 +16,7 @@ import subprocess
 import urllib.request
 import zipfile
 
-REVISION = 'ccc186e097b362555292b157ffd303abcea26fbf'
+REVISION = '9d9c41e6b0ff80d5efe3960a1b7c7eaad36eac07'
 CONTROLLER_PHOTO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7f/Xbox-s-controller.jpg/330px-Xbox-s-controller.jpg'
 CONTROLLER_PHOTO_SHA256 = '0af066ce9d07e507be223a9bd9801146b2dc2ef625a7d8032f17b0634d51cb8b'
 
@@ -217,26 +217,6 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
     detail = '            // The list-row checkbox is the single enable/disable control.'
     if code.count(detail) != 1: raise ValueError('Unreviewed management detail boundary')
     code = code.replace(detail, '            if(xboxllr_is_image_tool(feature))draw_xboxllr_image_import(m,th);\n\n' + detail)
-    # Keep the in-app browser's paths UTF-8 on Windows as well as other hosts.
-    code = code.replace('const std::string filename = lower_ascii(path.filename().string());', 'const std::string filename = lower_ascii(path.filename().u8string());')
-    start = code.index('static std::filesystem::path builtin_picker_initial_path(')
-    end = code.index('// Context flag the dashboard composer', start)
-    picker = code[start:end].replace('.string()', '.u8string()')
-    picker = picker.replace('std::filesystem::path hinted(hint);','auto hinted=std::filesystem::u8path(hint);')
-    picker = picker.replace('std::filesystem::path current(m->rom_full);','auto current=std::filesystem::u8path(m->rom_full);')
-    picker = picker.replace('const fs::path directory(g_picker.directory);','const auto directory=fs::u8path(g_picker.directory);')
-    picker = picker.replace('fs::path(g_picker.directory)','fs::u8path(g_picker.directory)').replace('fs::path(g_picker.selected)','fs::u8path(g_picker.selected)')
-    picker = picker.replace('fs::path selected(g_picker.selected);','auto selected=fs::u8path(g_picker.selected);')
-    code = code[:start] + picker + code[end:]
-    old = '    if (ImGui::Button(install_label)) {'
-    if code.count(old) != 2:
-        raise ValueError('Unreviewed bundled-only provider toolbar')
-    code = code.replace(old, '    if (mods->install_archive && ImGui::Button(install_label)) {')
-    code, count = re.subn(
-        r'(    if \(mods->install_archive && ImGui::Button\(install_label\)\) \{.*?\n    \})([^{}]*?)    ImGui::SameLine\(\);',
-        lambda match: match[1] + match[2] + '    if(mods->install_archive)ImGui::SameLine();', code, flags=re.S)
-    if count != 2:
-        raise ValueError('Unreviewed mod toolbar spacing boundary')
     old = '        const bool on = m->s.player_src[p] != 0;\n        const char* st = ui_text(on ? "connected" : "not assigned");'
     new = '''        bool on = m->s.player_src[p] != 0;
         const SystemProfile* input_profile = (const SystemProfile*)m->profile;
@@ -340,11 +320,6 @@ LauncherTexture launcher_texture_rgba(const unsigned char* pixels,int w,int h) {
     data = code.encode('utf-8')
     if not platform.exists() or platform.read_bytes() != data:
         platform.write_bytes(data)
-    debug_source = output / 'src/common/launcher_debug.c'
-    debug_code = debug_source.read_text(encoding='utf-8')
-    boundary = '        else if (strcmp(v, "settings")   == 0) launcher_model_set_view(m, LNG_VIEW_SETTINGS);'
-    if debug_code.count(boundary) != 1: raise ValueError('Unreviewed Mods automation boundary')
-    debug_source.write_text(debug_code.replace(boundary, boundary + '\n        else if (strcmp(v, "mods") == 0) launcher_model_set_view(m, LNG_VIEW_MODS);'), encoding='utf-8', newline='\n')
     photo = output / 'assets/consoles/xbox/img/pad_xbox.jpg'
     if not photo.is_file():
         request = urllib.request.Request(CONTROLLER_PHOTO_URL, headers={'User-Agent': 'xboxlle-launcher-artwork/1.0'})

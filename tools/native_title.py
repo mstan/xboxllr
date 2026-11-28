@@ -215,6 +215,8 @@ def prepare_command(source, data, paths, output):
         command += ["--seed-functions", str(paths["seed_functions"])]
     if paths.get("discovery_symbols"):
         command += ["--discovery-symbols", str(paths["discovery_symbols"])]
+    if generation.get('poll_waits'):
+        command += ['--poll-waits', str((source.parent / generation['poll_waits']).resolve())]
     if paths.get("forced_interpretation"):
         # Private QA paths only: functions generated as undiscovered stubs so a
         # run proves the guest interpreter fallback (or the strict stop).
@@ -222,7 +224,7 @@ def prepare_command(source, data, paths, output):
     return command
 
 
-def configure_command(data, paths, output, build, cmake, generator, jobs, source=None):
+def configure_command(data, paths, output, build, cmake, generator, jobs, source=None, *, cmake_source=None):
     options = dict(data["build"])
     options.setdefault("PILOT_NATIVE_LINK_PROFILE", "FINAL")
     options.setdefault("PILOT_NATIVE_IPO", False)
@@ -239,7 +241,7 @@ def configure_command(data, paths, output, build, cmake, generator, jobs, source
             if not paths[key].exists():
                 raise ValueError(f"missing native dependency {key}")
             options[option] = str(paths[key])
-    command = [str(cmake), "-S", str(ROOT), "-B", str(build), "-G", generator]
+    command = [str(cmake), "-S", str(cmake_source or ROOT), "-B", str(build), "-G", generator]
     if generator.startswith("Visual Studio"):
         command += ["-A", "x64"]
     else:
@@ -550,14 +552,10 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
     check_image(data["title"], paths)
     if debug_port is not None and (type(debug_port) is not int or not 1 <= debug_port <= 65535):
         raise ValueError("debug port must be in 1..65535")
-    if seconds is not None and not automated:
-        raise ValueError("bounded unattended runs require --automated; owner runs have no deadline")
-    if automated and seconds is None:
-        raise ValueError("unattended title runs require a bounded --seconds duration")
-    if seconds is not None and (not math.isfinite(seconds) or seconds <= 0):
-        raise ValueError("run duration must be finite and positive")
+    if seconds is not None:
+        raise ValueError("Elapsed-time cutoffs are unsupported; use finite input or an explicit stop command")
     if detach and automated:
-        raise ValueError("unattended runs retain their bounded process owner")
+        raise ValueError("unattended runs retain their process owner")
     if launcher and (automated or input_replay is not None):
         raise ValueError('Interactive launcher requires an owner-facing run')
     replay_bytes = None
@@ -579,15 +577,35 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
     for key in ("eeprom", "media_root", "state_dir"):
         if key not in paths or not paths[key].exists():
             raise ValueError(f"missing private {key}")
+    return launch_prepared(data, paths, build, binary, expected, automated=automated, detach=detach, source=source, input_replay=input_replay, capture=capture, debug_port=debug_port, visual_options=visual_options, launcher=launcher, interpreter=interpreter)
+
+
+def launch_prepared(data, paths, build, binary, expected, *, automated=False, detach=False, source=None, input_replay=None, capture=False, debug_port=None, visual_options=None, launcher=None, interpreter=None, visual_resolver=None, plan_variable='XLLE_PILOT_MOD_PLAN', launcher_build=None):
+    """Run an admitted title after its consumer has verified generation/build identity."""
+    binary = Path(binary)
+    if source is None or digest(binary) != expected.get("executable_sha256"):
+        raise ValueError("Native launch requires an unchanged admitted binary and title definition")
+    if not re.fullmatch(r'[A-Z][A-Z0-9_]*_MOD_PLAN', plan_variable):
+        raise ValueError('Invalid native mod plan environment key')
+    if automated and detach:
+        raise ValueError("unattended runs retain their process owner")
+    if launcher and (automated or input_replay is not None):
+        raise ValueError("Interactive launcher requires an owner-facing run")
+    replay_bytes = None
+    if input_replay is not None:
+        replay_bytes = Path(input_replay).read_bytes()
+        if not replay_bytes:
+            raise ValueError("input replay must not be empty")
     runs = Path(build) / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-"), dir=runs))
     selected_environment = {}
     from native_title_launcher import binary as launcher_binary, select as select_launcher
+    launcher_build = launcher_build or build
     use_launcher = launcher is True or (launcher is None and not automated and input_replay is None and
-                                       bool(data.get('launcher')) and launcher_binary(build).is_file())
+                                       bool(data.get('launcher')) and launcher_binary(launcher_build).is_file())
     if use_launcher:
-        selection = select_launcher(source, data, paths, build, run, force=launcher is True)
+        selection = select_launcher(source, data, paths, launcher_build, run, force=launcher is True)
         if selection is None:
             print('Launcher closed; game was not started.', flush=True)
             return
@@ -599,7 +617,8 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         visual_options.get('supersample', 1) != 1 or visual_options.get('antialiasing', 'original') != 'original' or
         visual_options.get('anisotropy', 1) != 1 or visual_options.get('frame_mode', 'original') != 'original'):
         from native_visual_mods import resolve
-        mod_plan = resolve(source, data, run / 'mods.plan', **visual_options)
+        mod_plan = (visual_resolver(run / 'mods.plan', **visual_options) if visual_resolver
+                    else resolve(source, data, run / 'mods.plan', **visual_options))
     # Freeze the actual executable and its adjacent transports. Future builds
     # cannot replace a running owner's binary or force their window closed.
     stage = run / "app"
@@ -617,7 +636,7 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
     environment.update({key: str(value) for key, value in data.get("runtime", {}).items()})
     environment.update(selected_environment)
     if mod_plan is not None:
-        environment['XLLE_PILOT_MOD_PLAN'] = str((run / 'mods.plan').resolve())
+        environment[plan_variable] = str((run / 'mods.plan').resolve())
     if debug_port is not None:
         environment["XLLE_PILOT_DEBUG_PORT"] = str(debug_port)
         if automated and replay_bytes is None:
@@ -626,9 +645,8 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         replay_path = stage / "input-replay.txt"
         replay_path.write_bytes(replay_bytes)
         environment.update(XLLE_PILOT_INPUT="replay", XLLE_PILOT_INPUT_REPLAY=str(replay_path.resolve()))
-    # Native code first; the guest interpreter is the default fallback for
-    # missed code. strict restores stop-on-miss for qualification runs.
-    interpreter = interpreter or "bridge"
+    # A native run stops on uncovered code unless fallback was explicitly selected.
+    interpreter = interpreter or "strict"
     environment["XLLE_PILOT_INTERPRETER"] = interpreter
     environment.pop("XLLE_PILOT_INTERPRETER_MANIFEST", None)
     if interpreter == "bridge":
@@ -666,14 +684,8 @@ def launch(data, paths, output, build, automated=False, seconds=None, detach=Fal
         print(json.dumps(receipt, indent=2), flush=True)
         if detach:
             return
-        deadline = False
-        try:
-            child.wait(timeout=seconds)
-        except subprocess.TimeoutExpired:
-            deadline = True
-            child.kill()
-            child.wait()
-        receipt.update(exit_code=child.returncode, stopped_at_deadline=deadline)
+        child.wait()
+        receipt.update(exit_code=child.returncode, stopped_at_deadline=False)
         (run / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
         return receipt
 
@@ -702,7 +714,7 @@ def main():
                         help="Prepare using the existing image-bound function discovery; original bodies are regenerated")
     parser.add_argument("--debug-port", type=int, help="Opt-in localhost native input/presented-screenshot server")
     parser.add_argument("--interpreter", choices=("strict", "bridge"),
-                        help="Guest interpreter fallback for missed code: bridge interprets (default), strict stops; run only")
+                        help="Guest interpreter fallback for missed code: strict stops (default), bridge explicitly interprets; run only")
     ui = parser.add_mutually_exclusive_group()
     ui.add_argument('--launcher', action='store_const', const=True, default=None, dest='launcher')
     ui.add_argument('--no-launcher', action='store_const', const=False, dest='launcher')
