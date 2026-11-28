@@ -46,6 +46,23 @@ class CompositionTests(unittest.TestCase):
             self.build()
         self.assertFalse(self.output.exists())
 
+    def test_frontend_and_nested_runtime_have_separate_loader_namespaces(self):
+        self.files['Runtime.exe'] = pe(['frontend.dll'])
+        self.files['frontend.dll'] = pe()
+        self.build()
+        with zipfile.ZipFile(self.output) as archive:
+            metadata = json.loads(archive.read('release.json'))
+            roots = {x['process_root']: x for x in metadata['windows_dependencies']['processes']}
+            self.assertEqual(set(roots), {'.', 'runtime'})
+            self.assertEqual(archive.read('Runtime.exe'), self.files['Runtime.exe'])
+            self.assertEqual(archive.read('runtime/Runtime.exe'), self.files['runtime/Runtime.exe'])
+
+    def test_frontend_library_cannot_satisfy_missing_child_runtime_dependency(self):
+        self.files['bridge.dll'] = self.files.pop('runtime/bridge.dll')
+        with self.assertRaisesRegex(ValueError, 'dependency closure'):
+            self.build()
+        self.assertFalse(self.output.exists())
+
     def test_nested_used_profile_rejected_even_when_manifested(self):
         self.files['runtime/data/settings.json'] = b'{}'
         with self.assertRaisesRegex(ValueError, 'Private or unsafe'):

@@ -69,15 +69,32 @@ def compose(files, output, *, title, distribution, provenance):
                 raise ValueError('Composition input changed: ' + name)
         native = [inside(root, name) for name in files
                   if PurePosixPath(name).suffix.lower() in ('.exe', '.dll')]
-        if not native:
+        process_roots = {path.parent for path in native if path.suffix.lower() == '.exe'}
+        if not process_roots:
             raise ValueError('Composition needs a native executable')
-        closure = inventory(native)
-        if not closure['complete']:
-            raise ValueError('Composed native dependency closure is incomplete: ' + str(closure['missing']))
+        # A frontend and its separately launched runtime may deliberately have
+        # the same executable name. Windows resolves their imports in separate
+        # process roots; never combine those basenames into one loader table.
+        namespaces = {directory: [] for directory in process_roots}
+        for path in native:
+            candidates = [directory for directory in process_roots if path.is_relative_to(directory)]
+            if not candidates:
+                raise ValueError('Native library is outside every executable root')
+            directory = max(candidates, key=lambda value: len(value.parts))
+            namespaces[directory].append(path)
+        closure = dict(schema='xboxllr.windows-composition.v1', platform='windows-x64', complete=True,
+                       processes=[], files=[])
+        for directory, entries in sorted(namespaces.items()):
+            report = inventory(entries)
+            if not report['complete']:
+                raise ValueError('Composed native dependency closure is incomplete: ' + str(report['missing']))
+            for record in report['files']:
+                record['source'] = Path(record['source']).relative_to(root).as_posix()
+            report['process_root'] = directory.relative_to(root).as_posix()
+            closure['processes'].append(report)
+            closure['files'].extend(report['files'])
         # Staging paths are private; only package-relative source names belong
         # in distributable provenance.
-        for record in closure['files']:
-            record['source'] = Path(record['source']).relative_to(root).as_posix()
         metadata = dict(schema='xboxllr.native-preview.v1', title=title,
             distribution=distribution, composition=provenance,
             windows_dependencies=closure, files=hashes)

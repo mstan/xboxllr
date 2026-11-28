@@ -632,8 +632,13 @@ def launch_prepared(data, paths, build, binary, expected, *, automated=False, de
             shutil.copy2(item, stage / item.name)
     if digest(stage / binary.name) != expected["executable_sha256"]:
         raise ValueError("native executable changed during staging; retry after build completes")
-    environment = {k: v for k, v in os.environ.items() if not k.startswith("XLLE_PILOT_")}
+    mod_prefix = plan_variable.removesuffix('PLAN')
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(("XLLE_PILOT_", mod_prefix))}
     environment.update({key: str(value) for key, value in data.get("runtime", {}).items()})
+    for key, setting in (('save_keys', 'XLLE_PILOT_SAVE_KEYS_FILE'),
+                         ('console_settings', 'XLLE_PILOT_CONSOLE_SETTINGS_FILE')):
+        if key in paths:
+            environment[setting] = str(paths[key])
     environment.update(selected_environment)
     if mod_plan is not None:
         environment[plan_variable] = str((run / 'mods.plan').resolve())
@@ -645,8 +650,9 @@ def launch_prepared(data, paths, build, binary, expected, *, automated=False, de
         replay_path = stage / "input-replay.txt"
         replay_path.write_bytes(replay_bytes)
         environment.update(XLLE_PILOT_INPUT="replay", XLLE_PILOT_INPUT_REPLAY=str(replay_path.resolve()))
-    # A native run stops on uncovered code unless fallback was explicitly selected.
-    interpreter = interpreter or "strict"
+    # Preserve the declared native-first CPU coverage policy. HLE service
+    # selection is independent of this explicit, recorded CPU miss policy.
+    interpreter = interpreter or "bridge"
     environment["XLLE_PILOT_INTERPRETER"] = interpreter
     environment.pop("XLLE_PILOT_INTERPRETER_MANIFEST", None)
     if interpreter == "bridge":
@@ -655,7 +661,7 @@ def launch_prepared(data, paths, build, binary, expected, *, automated=False, de
         capture_directory = run / "captures"
         capture_directory.mkdir()
         environment.update(XLLE_PILOT_PRESENT_CAPTURE=str(capture_directory.resolve()),
-                           XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS="1000")
+                           XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS=environment.get('XLLE_PILOT_PRESENT_CAPTURE_INTERVAL_MS', '1000'))
     environment["XLLE_PILOT_VISIBLE"] = "0" if automated else "1"
     environment["XLLE_PILOT_AUDIO_OUTPUT_MUTE"] = "1" if automated else "0"
     if automated:
@@ -684,7 +690,11 @@ def launch_prepared(data, paths, build, binary, expected, *, automated=False, de
         print(json.dumps(receipt, indent=2), flush=True)
         if detach:
             return
-        child.wait()
+        try:
+            child.wait()
+        except KeyboardInterrupt:
+            child.terminate()
+            child.wait()
         receipt.update(exit_code=child.returncode, stopped_at_deadline=False)
         (run / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
         return receipt
@@ -714,7 +724,7 @@ def main():
                         help="Prepare using the existing image-bound function discovery; original bodies are regenerated")
     parser.add_argument("--debug-port", type=int, help="Opt-in localhost native input/presented-screenshot server")
     parser.add_argument("--interpreter", choices=("strict", "bridge"),
-                        help="Guest interpreter fallback for missed code: strict stops (default), bridge explicitly interprets; run only")
+                        help="Guest interpreter fallback for missed code: bridge interprets (default), strict stops; run only")
     ui = parser.add_mutually_exclusive_group()
     ui.add_argument('--launcher', action='store_const', const=True, default=None, dest='launcher')
     ui.add_argument('--no-launcher', action='store_const', const=False, dest='launcher')
