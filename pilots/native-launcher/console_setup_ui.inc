@@ -23,14 +23,18 @@ static void xboxllr_console_path(LauncherModel *m,const char *label,const char *
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
     if(wide)ImGui::SameLine(start+px(230));
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x-px(148));
+    const auto &style=ImGui::GetStyle();
+    const float browse_width=std::max(px(82),ImGui::CalcTextSize("Browse").x+2*style.FramePadding.x);
+    const float clear_width=std::max(px(46),ImGui::CalcTextSize("Clear").x+2*style.FramePadding.x);
+    const float actions_width=browse_width+clear_width+2*style.ItemSpacing.x;
+    ImGui::SetNextItemWidth(std::max(px(40),ImGui::GetContentRegionAvail().x-actions_width));
     if(ImGui::InputTextWithHint("##path",kind==1?"Automatic - private to this game":"Not provided",target,4096) && target[0] && alternative)
         alternative[0]=0;
     ImGui::SameLine();
-    if(ImGui::Button("Browse",ImVec2(px(82),0)))xboxllr_pick_console_file(m,picker,target,kind,alternative);
+    if(ImGui::Button("Browse",ImVec2(browse_width,0)))xboxllr_pick_console_file(m,picker,target,kind,alternative);
     ImGui::SameLine();
     ImGui::BeginDisabled(!target[0]);
-    if(ImGui::Button("Clear",ImVec2(px(46),0)))target[0]=0;
+    if(ImGui::Button("Clear",ImVec2(clear_width,0)))target[0]=0;
     ImGui::EndDisabled();
     ImGui::PopID();
 }
